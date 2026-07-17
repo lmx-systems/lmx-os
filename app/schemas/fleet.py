@@ -1,0 +1,17 @@
+from pydantic import BaseModel
+
+
+class DriverLocation(BaseModel):
+    driver_id: str
+    lat: float
+    lng: float
+    recorded_at: str  # ISO timestamp, kept as str to avoid tz round-trip cost on hot path
+
+
+class DriverState(BaseModel):
+    driver_id: str
+    hub_id: str
+    status: str  # off_shift | available | en_route | on_break
+    capacity_units: int
+    load_units: float = 0
+    current_route_id: str | None = None

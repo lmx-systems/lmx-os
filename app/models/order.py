@@ -1,0 +1,53 @@
+"""
+An order ingested from a client's POS/DMS. This is the row the Dynamic SLA
+Engine classifies (T1/T2/T3) and the Batch-Hold Queue clusters.
+"""
+import enum
+from datetime import datetime
+
+from sqlalchemy import Enum, ForeignKey, Numeric, String
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db import Base
+from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class SLATier(str, enum.Enum):
+    T1 = "T1"  # urgent / short hold window
+    T2 = "T2"  # standard
+    T3 = "T3"  # flexible / long hold window
+
+
+class OrderStatus(str, enum.Enum):
+    received = "received"
+    classified = "classified"
+    held = "held"          # sitting in the batch-hold queue
+    queued = "queued"       # released from hold, waiting for a route assignment
+    assigned = "assigned"   # attached to a stop on a route
+    delivered = "delivered"
+    cancelled = "cancelled"
+
+
+class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "orders"
+
+    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
+    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    shop_id: Mapped[UUID] = mapped_column(ForeignKey("shop_profiles.id"), nullable=False)
+
+    external_order_ref: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    source_system: Mapped[str] = mapped_column(String(32), nullable=False)  # epicor | mam | asa | flat_file
+
+    # Raw payload as received, kept verbatim for debugging/replay.
+    raw_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    sla_tier: Mapped[SLATier | None] = mapped_column(Enum(SLATier, name="sla_tier"), nullable=True)
+    hold_deadline: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    weight_units: Mapped[float] = mapped_column(Numeric(10, 2), default=1, nullable=False)
+    status: Mapped[OrderStatus] = mapped_column(
+        Enum(OrderStatus, name="order_status"), default=OrderStatus.received, nullable=False
+    )
+
+    requested_at: Mapped[datetime] = mapped_column(nullable=False)
