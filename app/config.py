@@ -34,7 +34,14 @@ class Settings(BaseSettings):
     # Third-party integrations - all optional at this phase. Absence of a
     # key means the corresponding client runs in stub/mock mode so the
     # rest of the system is still runnable and testable end-to-end.
-    google_routes_api_key: str | None = None
+    #
+    # Route Optimization API (unlike the other Maps Platform APIs) is a
+    # Cloud IAM-gated API, not an API-key product: it authenticates via
+    # Application Default Credentials (a service account JSON at
+    # GOOGLE_APPLICATION_CREDENTIALS, workload identity, etc.) scoped to
+    # `cloud-platform`. All this needs from us is which project to bill/
+    # authorize against.
+    google_cloud_project_id: str | None = None
     google_maps_api_key: str | None = None
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None

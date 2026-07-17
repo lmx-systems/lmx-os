@@ -18,6 +18,8 @@ dependencies = [
     "structlog>=24.1.0",
     "geopy>=2.4.1",
     "tenacity>=8.3.0",
+    "google-auth>=2.29.0",
+    "requests>=2.31.0",  # transport dependency for google.auth.transport.requests token refresh
 ]
 
 [project.optional-dependencies]

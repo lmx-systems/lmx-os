@@ -17,7 +17,7 @@ review flagged, built solidly rather than everything built thinly.
 | 2 | Dynamic SLA Engine | Built — T1/T2/T3 classification, hold-deadline calc |
 | 3 | Batch-Hold Queue | Built — 0.8mi clustering default, 4-question decision logic |
 | 4 | Fleet State Manager | Built — Redis-backed driver state/location |
-| 5 | Dispatch Optimizer | Skeleton — real Google Route Optimization call not implemented |
+| 5 | Dispatch Optimizer | Built — real Google Route Optimization call implemented, unverified against a live Google Cloud project |
 | 6 | Annotation and Learning Loop | Not started — schema exists (`stop_flags`, `proposed_rules`, `active_rules`), no nightly job |
 | 7 | OS Shell (dashboards, driver app, shop SMS) | Not started |
 
@@ -39,12 +39,24 @@ procurement or credentials. Each is isolated behind an interface so
 swapping in the real thing is a contained change:
 
 - **Google Route Optimization API** (`app/optimizer/google_routes_client.py`):
-  `GoogleRouteOptimizationClient.optimize()` raises `NotImplementedError` —
-  the request/response mapping to Google's `optimizeTours` schema needs to
-  be built once `GOOGLE_ROUTES_API_KEY` is provisioned. Until then, the
-  service automatically falls back to `StubRouteOptimizationClient`, a
-  deterministic nearest-neighbor assignment. It gets the pipeline running,
-  not the DPH number — don't benchmark against it.
+  `GoogleRouteOptimizationClient.optimize()` now builds a real
+  `optimizeTours` request (shipments/vehicles/loadDemands/loadLimits) and
+  parses the response (`routes[].visits[]`, `skippedShipments[]`), field
+  names checked against Google's published API reference. It authenticates
+  via Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS`
+  service account + `cloud-platform` scope) rather than an API key — this
+  is a Cloud IAM API, not a Maps Platform key product, which the original
+  `GOOGLE_ROUTES_API_KEY` config assumed incorrectly. Set
+  `GOOGLE_CLOUD_PROJECT_ID` to select this client; unset, the service
+  automatically falls back to `StubRouteOptimizationClient`, a
+  deterministic nearest-neighbor assignment used for local dev/tests.
+  **Not yet verified against a live Google Cloud project** — no
+  `cloudoptimization.user`-scoped service account was available while
+  building this, so the request/response shape is unverified against a
+  real `optimizeTours` call. Before Hub 1: provision a service account,
+  confirm a real request round-trips, and sanity-check the per-tier
+  `SLA_TIER_SKIP_PENALTY` values (currently a placeholder ordering, not
+  tuned against real route economics).
 - **Epicor payload shape** (`app/ingestion/adapters/epicor.py`): field names
   (`OrderNum`, `ShipToNum`, etc.) are a placeholder shape, not verified
   against a real Epicor tenant. The peer review calls Epicor client-config
@@ -87,8 +99,12 @@ be checked against it before Hub 1 goes live:
    client and update `EpicorAdapter` before relying on it.
 3. Get the Source of Truth Index docs (or equivalent) checked against
    `app/batch_queue/queue.py` and `app/sla/engine.py` — see above.
-4. Implement `GoogleRouteOptimizationClient.optimize()` for real once API
-   credentials exist; keep the stub for local dev/tests.
+4. Provision a Google Cloud project + service account
+   (`roles/cloudoptimization.user`), set `GOOGLE_APPLICATION_CREDENTIALS`
+   and `GOOGLE_CLOUD_PROJECT_ID`, and run one real `optimizeTours` call to
+   confirm the request/response mapping in
+   `app/optimizer/google_routes_client.py` is correct end-to-end — it's
+   implemented but never exercised against the live API.
 5. Build the nightly pattern-detection job that populates `proposed_rules`
    (component 6) — schema is ready, no job exists yet.
 6. Decide whether the Dispatch Optimizer should be triggered by an event
