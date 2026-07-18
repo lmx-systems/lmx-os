@@ -1,6 +1,41 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens for the orchestrator dashboard's light theme - mirrors the
+ * approved mockup (see demo/ conversation history / docs/ARCHITECTURE.md).
+ * Plain CSS custom properties rather than Tailwind's `@theme` color
+ * mapping so components can reference them 1:1 with the mockup via
+ * arbitrary-value utilities (`bg-[var(--surface)]`) - a direct,
+ * low-risk translation rather than re-deriving a Tailwind color scale.
+ */
+:root {
+  --bg-page: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #eef0f3;
+  --surface-3: #e4e7ec;
+  --border: #e2e5ea;
+  --border-strong: #cfd4dc;
+  --text-primary: #14171c;
+  --text-secondary: #5b6472;
+  --text-muted: #8b93a1;
+  --accent: #0c8599;
+  --accent-dim: #e2f6f9;
+  --green: #1f9254;
+  --green-dim: #e5f6ec;
+  --blue: #2f6fdb;
+  --blue-dim: #e8f0fe;
+  --amber: #a15c07;
+  --amber-dim: #fdf1de;
+  --red: #c62828;
+  --red-dim: #fbe9ea;
+  --gray: #6b7280;
+  --gray-dim: #eef0f2;
+  --radius: 10px;
+  --radius-lg: 14px;
+}
+
 body {
   margin: 0;
-  background-color: #0f172a;
+  background-color: var(--bg-page);
+  color: var(--text-primary);
 }

@@ -43,25 +43,56 @@ piece of work.
 `dashboard/` is a Vite + React + TypeScript + Tailwind single-page app —
 internal-only, for hub staff to see live state and manually trigger the
 optimizer/learning-loop jobs without curling the API. It reads from three
-new endpoints added alongside it: `GET /fleet/{hub_id}/drivers` (full
-roster, not just available drivers — see `FleetStateManager.get_fleet_overview`),
+endpoints: `GET /fleet/{hub_id}/drivers` (full roster, not just available
+drivers — see `FleetStateManager.get_fleet_overview`),
 `GET /batch-queue/{hub_id}/held-orders`, and `GET /orders/{hub_id}/summary`.
 
-**This is the point where the backend's missing authentication stops being
-a theoretical gap and becomes a clickable one.** Every dashboard view and
-both trigger buttons call an API that has no auth of any kind — anyone who
-can reach it can see all fleet/order data and trigger optimizer or
-learning-loop cycles for any hub. CORS (`DASHBOARD_CORS_ORIGINS` in
-`app/config.py`) restricts which *origins* can call the API from a
-browser, which is not the same thing as authenticating *who* is calling it
-— don't mistake the CORS allowlist for access control. Do not point this
-dashboard at a production API, or expose the backend beyond localhost/a
-private network, until real auth exists (see next steps).
+**Redesigned as a KPI-first console** (light theme, approved via an
+interactive mockup before implementation — see chat history, not checked
+in separately). Top to bottom: `TopBar` (hub input, live-updated
+indicator) → `KpiStrip` (fleet availability, orders in flight, orders at
+risk of missing their SLA hold deadline, dispatched count, last dispatch
+cycle) → `OrderPipeline` (funnel view of `OrderStatusSummary.counts`) +
+`HoldQueueTable` (searchable, sortable, SLA-tier-filterable) on the left,
+`FleetRoster` (status-filterable, capacity bars) + `OperationsPanel`
+(confirm-gated trigger buttons + a client-side run-history log) on the
+right. Shared primitives live in `dashboard/src/components/ui/` (`Card`,
+`KpiCard`, `Badge`, `Chip`, `ConfirmModal`, `Toast`) instead of each
+section hand-rolling its own class strings, and design tokens (colors,
+radii) are CSS custom properties in `dashboard/src/index.css`.
+
+Three things the redesign surfaced that are data gaps, not frontend bugs
+— the mockup assumed data the backend doesn't return yet:
+- **No shop name or cluster-mate info on held orders.** `HeldOrderView`
+  only carries `order_id`/lat-lng/tier/timestamps — no shop name (would
+  need a join to `shop_profiles`) and no cluster-mate ids (computed by
+  `run_hold_cycle` but never returned to the caller). The hold queue table
+  shows a truncated order id instead of a shop name until this is added.
+- **No driver display name.** `DriverState` (Redis) has no `name` field —
+  `Driver.name` lives in Postgres only. The fleet roster shows a
+  driver-id-derived avatar instead of a real name.
+- **No server-side "last cycle" telemetry.** Dispatch cycles run
+  automatically off events server-side (`app/optimizer/event_trigger.py`)
+  with no push channel to the dashboard and no endpoint to poll for the
+  most recent cycle's result. The KPI strip's "last dispatch cycle" card
+  only reflects a manual trigger fired from that browser tab this
+  session — it says so explicitly rather than implying it sees automatic
+  cycles it can't.
+
+**Auth reminder still applies to the redesign as much as the old
+version:** `SharedSecretAuthMiddleware` (`app/security.py`) gates every
+endpoint but `/health`/docs behind an `X-API-Key` header when
+`API_SHARED_SECRET` is set — `dashboard/src/lib/api.ts` sends it
+automatically when `VITE_API_SHARED_SECRET` is set at build time. That's
+a shared secret, not per-user auth or access control; CORS
+(`DASHBOARD_CORS_ORIGINS`) restricts which browser *origins* can call in,
+which is a different thing again. Don't expose this beyond
+localhost/a private network on that basis alone.
 
 Other known gaps in the dashboard itself:
 - No "list hubs" endpoint exists yet (the `hubs` table has no read API), so
   hub selection is a plain text field for a hub UUID, not a dropdown —
-  `dashboard/src/components/HubSelector.tsx` documents this inline.
+  `dashboard/src/components/TopBar.tsx` documents this inline.
 - Docker: `dashboard/Dockerfile` builds a static bundle served by nginx.
   Vite bakes `VITE_API_BASE_URL` in at *build* time (the browser calls the
   API directly, not through the dashboard container), so changing the API

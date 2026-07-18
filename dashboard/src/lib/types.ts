@@ -54,3 +54,21 @@ export interface NightlyJobResult {
   hub_id: string
   proposals_created: ProposedRuleSummary[]
 }
+
+// --- UI-local types below - no backend equivalent, not response mirrors ---
+
+// The backend has no "get last cycle" endpoint (dispatch cycles are
+// triggered automatically off events server-side with no push channel to
+// the dashboard - see docs/NEXT_STEPS.md). This only ever reflects a
+// manual trigger fired from THIS browser tab, and resets on reload -
+// it deliberately does not claim to show automatic cycles it can't see.
+export interface LastCycleInfo {
+  at: number
+  result: OptimizationResult
+}
+
+export interface RunLogEntry {
+  at: number
+  kind: 'optimizer' | 'learning_loop'
+  summary: string
+}
