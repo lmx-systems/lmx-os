@@ -57,6 +57,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Starlette's add_middleware() inserts at the front of the middleware list,
+# so the *last*-added middleware ends up outermost (runs first) - CORS
+# must be added after auth, not before, so CORS preflight (OPTIONS) is
+# handled before it ever reaches the auth check and gets rejected for
+# missing a header no browser sends on a preflight request.
+app.add_middleware(SharedSecretAuthMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.dashboard_cors_origin_list,
@@ -64,10 +71,6 @@ app.add_middleware(
     allow_headers=["*"],
     allow_credentials=False,  # no session/cookie auth exists yet - see docs/ARCHITECTURE.md
 )
-
-# Added after CORS so CORS preflight (OPTIONS) is handled first and never
-# has to carry the shared-secret header.
-app.add_middleware(SharedSecretAuthMiddleware)
 
 app.include_router(ops_router)
 app.include_router(ingestion_router)
