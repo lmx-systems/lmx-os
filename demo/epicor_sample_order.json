@@ -1,0 +1,14 @@
+{
+  "OrderNum": "EPI-458213",
+  "ShipToNum": "SHOP-0042",
+  "ShipToLat": 33.7756,
+  "ShipToLng": -84.3963,
+  "OrderDate": "2026-07-18T09:14:00-04:00",
+  "PriorityCode": "RUSH",
+  "ShipVia": "COURIER",
+  "Weight": 4.5,
+  "PartNumbers": ["BRK-2201", "BRK-2202"],
+  "Description": "Front brake pad set + rotor - customer vehicle on the lift, waiting",
+  "CustomerPO": "PO-88213",
+  "RequestedBy": "Mike Torres, Service Advisor"
+}
