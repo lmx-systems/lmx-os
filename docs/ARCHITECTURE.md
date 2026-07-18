@@ -18,7 +18,7 @@ review flagged, built solidly rather than everything built thinly.
 | 3 | Batch-Hold Queue | Built — 0.8mi clustering default, 4-question decision logic |
 | 4 | Fleet State Manager | Built — Redis-backed driver state/location |
 | 5 | Dispatch Optimizer | Built — real Google Route Optimization call implemented, unverified against a live Google Cloud project |
-| 6 | Annotation and Learning Loop | Not started — schema exists (`stop_flags`, `proposed_rules`, `active_rules`), no nightly job |
+| 6 | Annotation and Learning Loop | Built — pattern detection + nightly-job service; flag-type naming convention not yet agreed with driver app team |
 | 7 | OS Shell (dashboards, driver app, shop SMS) | Not started |
 
 ## Data layer
@@ -88,6 +88,17 @@ be checked against it before Hub 1 goes live:
    number and are the first thing to recalibrate against real Hub 1 data.
    Per-shop/per-hub overrides already exist via `active_rules` so this
    doesn't require a code change to retune, just data.
+3. **Learning Loop flag-type naming convention** (`app/learning_loop/detection.py`,
+   `HOLD_TOO_SHORT_FLAG` / `HOLD_TOO_LONG_FLAG`). The nightly job detects
+   repeated driver annotations and proposes shop-specific SLA hold-window
+   adjustments, but the two flag-type strings it looks for are a proposed
+   contract, not one agreed with whoever builds the driver app (component
+   7, OS Shell — not started). Confirm this naming with that team before
+   relying on real data flowing through it. `HOLD_WINDOW_ADJUSTMENT_MINUTES`
+   and `DEFAULT_MIN_OCCURRENCES` are placeholder tuning constants in the
+   same spirit as the SLA hold windows above. Nothing in this loop
+   auto-promotes a proposal to `active_rules` — a human always reviews
+   `proposed_rules` first, by design.
 
 ## Recommended next steps, in order
 
@@ -105,13 +116,18 @@ be checked against it before Hub 1 goes live:
    confirm the request/response mapping in
    `app/optimizer/google_routes_client.py` is correct end-to-end — it's
    implemented but never exercised against the live API.
-5. Build the nightly pattern-detection job that populates `proposed_rules`
-   (component 6) — schema is ready, no job exists yet.
+5. ~~Build the nightly pattern-detection job that populates `proposed_rules`
+   (component 6)~~ — done (`app/learning_loop/`). Still needs: the
+   flag-type naming convention confirmed with the driver-app team, and a
+   real scheduler wired to `/learning-loop/{hub_id}/run-nightly-job`
+   instead of manual triggering.
 6. Decide whether the Dispatch Optimizer should be triggered by an event
    bus (design doc's "every meaningful event") vs. the current
    manually-triggered `/optimizer/{hub_id}/run-cycle` endpoint — this
    needs a real event source (order released from hold, driver status
-   change, stop completed) wired in before Hub 1.
+   change, stop completed) wired in before Hub 1. The same question
+   applies to the Learning Loop's nightly job (item 5) — both currently
+   rely on someone/something calling their endpoint manually.
 
 ## Operational notes
 
