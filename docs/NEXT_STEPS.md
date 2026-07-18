@@ -27,7 +27,7 @@ worth tracking alongside engineering, not separately.
 | # | Item | Why it matters | Status |
 |---|---|---|---|
 | 7 | Hire the senior backend engineer | Peer review names this the critical path — "do not hire down." | Not started |
-| 8 | Sign the first client contract (before or alongside the hire above) | Without it, there's no real data to shadow-test Hub 1 against, and the 2.5 DPH figure stays a model assumption instead of something proven live. | Not started |
+| 8 | Sign the first client contract (before or alongside the hire above) | Without it, there's no real data to shadow-test Hub 1 against, and the 2.5 DPH figure stays a model assumption instead of something proven live. **Not a blocker for the rest of the engineering list** — only item 2 (and possibly item 3, if the Source of Truth Index specifically needs a design partner rather than just Google Drive access) actually depends on a signed client. Everything else above can and should proceed in parallel using placeholder/demo data (see `demo/`). | Not started |
 
 ## How to use this file
 
