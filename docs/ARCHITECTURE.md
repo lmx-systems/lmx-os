@@ -121,13 +121,25 @@ be checked against it before Hub 1 goes live:
    flag-type naming convention confirmed with the driver-app team, and a
    real scheduler wired to `/learning-loop/{hub_id}/run-nightly-job`
    instead of manual triggering.
-6. Decide whether the Dispatch Optimizer should be triggered by an event
-   bus (design doc's "every meaningful event") vs. the current
-   manually-triggered `/optimizer/{hub_id}/run-cycle` endpoint — this
-   needs a real event source (order released from hold, driver status
-   change, stop completed) wired in before Hub 1. The same question
-   applies to the Learning Loop's nightly job (item 5) — both currently
-   rely on someone/something calling their endpoint manually.
+6. ~~Decide whether the Dispatch Optimizer should be triggered by an event
+   bus vs. the manually-triggered endpoint~~ — done. `app/events/bus.py`
+   is a generic, in-process, per-hub-debounced event bus; the Dispatch
+   Optimizer is wired to it in `app/optimizer/event_trigger.py`. Two of
+   the design doc's three trigger events now publish for real: order
+   ingestion (`app/ingestion/router.py`, event `order_held`) and driver
+   status changes (`app/api/routes.py`, event `driver_status_changed`).
+   The third, **stop completed**, has no producer yet — component 7 (the
+   driver app) doesn't exist to call it; `Stop.status`'s `completed` state
+   (`app/models/stop.py`) is where that future endpoint should call
+   `dispatch_event_bus.publish(hub_id, "stop_completed")`. The manual
+   `/optimizer/{hub_id}/run-cycle` endpoint is kept for testing/ops.
+   Still worth a decision before Hub 1: this bus is in-process, so if the
+   app ever runs as more than one instance, each instance only reacts to
+   events it personally receives — fine for a single-instance deployment,
+   a real gap for a horizontally-scaled one. The Learning Loop's nightly
+   job (item 5) is a separate, deliberately-not-event-driven case — it's
+   scheduled, not event-triggered, so it still needs a real scheduler
+   wired to `/learning-loop/{hub_id}/run-nightly-job`.
 
 ## Operational notes
 

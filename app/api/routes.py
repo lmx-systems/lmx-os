@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.fleet_state.manager import FleetStateManager
 from app.learning_loop.service import run_nightly_job
+from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.fleet import DriverLocation, DriverState
 from app.schemas.learning_loop import NightlyJobResult, ProposedRuleSummary
@@ -27,6 +28,10 @@ async def health() -> dict:
 async def upsert_driver_state(hub_id: str, state: DriverState) -> dict:
     manager = FleetStateManager()
     await manager.upsert_driver_state(state)
+    # A status change (available/en_route/off_shift/on_break) changes what
+    # the optimizer can assign - a raw location ping (below) doesn't, so
+    # only this endpoint publishes.
+    await dispatch_event_bus.publish(hub_id, "driver_status_changed")
     return {"ok": True}
 
 
@@ -40,11 +45,11 @@ async def upsert_driver_location(hub_id: str, location: DriverLocation) -> dict:
 @router.post("/optimizer/{hub_id}/run-cycle", response_model=OptimizationResult)
 async def run_optimizer_cycle(hub_id: str) -> OptimizationResult:
     """
-    Manually trigger one Dispatch Optimizer cycle for a hub. In production
-    this is called on every "meaningful event" (new order released from
-    hold, driver goes available, driver completes a stop) rather than
-    polled - this endpoint exists for manual triggering, testing, and as
-    the hook a scheduler/event-bus consumer would call into.
+    Manually trigger one Dispatch Optimizer cycle for a hub. Real cycles
+    are now event-triggered (see app/optimizer/event_trigger.py) off order
+    ingestion and driver status changes rather than polled - this endpoint
+    remains for manual triggering, testing, and ops (e.g. forcing a cycle
+    after an out-of-band fleet-state fix).
     """
     service = DispatchOptimizerService()
     return await service.run_cycle(hub_id)
