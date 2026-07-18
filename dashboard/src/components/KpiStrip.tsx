@@ -1,12 +1,12 @@
 import { KpiCard } from './ui/KpiCard'
-import { minutesUntil } from '../lib/format'
-import type { DriverState, HeldOrderView, LastCycleInfo, OrderStatusSummary } from '../lib/types'
+import { formatIsoRelative, minutesUntil } from '../lib/format'
+import type { DriverState, HeldOrderView, LastCycleSnapshot, OrderStatusSummary } from '../lib/types'
 
 interface KpiStripProps {
   fleet: DriverState[] | null
   held: HeldOrderView[] | null
   summary: OrderStatusSummary | null
-  lastCycle: LastCycleInfo | null
+  lastCycle: LastCycleSnapshot | null
 }
 
 const AT_RISK_MINUTES = 5
@@ -53,7 +53,7 @@ export function KpiStrip({ fleet, held, summary, lastCycle }: KpiStripProps) {
         sub={
           atRisk.length === 0
             ? 'None currently'
-            : atRisk.map((o) => o.order_id.slice(0, 8)).join(', ')
+            : atRisk.map((o) => o.shop_name || o.order_id.slice(0, 8)).join(', ')
         }
       />
       <KpiCard
@@ -63,19 +63,13 @@ export function KpiStrip({ fleet, held, summary, lastCycle }: KpiStripProps) {
       />
       <KpiCard
         label="Last dispatch cycle"
-        value={lastCycle ? relativeTime(lastCycle.at) : 'Not run this session'}
+        value={lastCycle ? formatIsoRelative(lastCycle.at) : 'None yet'}
         sub={
           lastCycle
-            ? `${Math.round(lastCycle.result.duration_seconds * 1000)}ms · ${lastCycle.result.engine} · ${lastCycle.result.assignments.length} assigned`
-            : 'Dispatch also runs automatically on order/driver events'
+            ? `${Math.round(lastCycle.duration_seconds * 1000)}ms · ${lastCycle.engine} · ${lastCycle.assigned_count} assigned`
+            : 'Runs automatically on order/driver events'
         }
       />
     </div>
   )
-}
-
-function relativeTime(at: number): string {
-  const seconds = Math.round((Date.now() - at) / 1000)
-  if (seconds < 60) return `${seconds}s ago`
-  return `${Math.floor(seconds / 60)}m ago`
 }

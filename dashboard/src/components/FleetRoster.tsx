@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Card } from './ui/Card'
 import { Chip } from './ui/Chip'
 import { StatusLabel } from './ui/Badge'
-import { idInitials, truncateId } from '../lib/format'
+import { idInitials, nameInitials, truncateId } from '../lib/format'
 import type { DriverState } from '../lib/types'
 
 interface FleetRosterProps {
@@ -64,11 +64,15 @@ export function FleetRoster({ data, error, loading }: FleetRosterProps) {
                   className="flex items-center gap-2.5 border-t border-[var(--border)] py-2.5 first:border-t-0"
                 >
                   <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[11px] font-semibold text-[var(--text-secondary)]">
-                    {idInitials(driver.driver_id)}
+                    {driver.name ? nameInitials(driver.name) : idInitials(driver.driver_id)}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-mono text-[12px] text-[var(--text-primary)]" title={driver.driver_id}>
-                      {truncateId(driver.driver_id)}
+                    <div className="truncate text-[13px] font-medium text-[var(--text-primary)]" title={driver.driver_id}>
+                      {driver.name ?? (
+                        <span className="font-mono text-[12px] text-[var(--text-secondary)]">
+                          {truncateId(driver.driver_id)}
+                        </span>
+                      )}
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-[var(--text-muted)]">
                       <StatusLabel status={driver.status} />

@@ -26,7 +26,8 @@ from app.db import session_scope
 from app.fleet_state.manager import FleetStateManager
 from app.models.order import Order, OrderStatus
 from app.optimizer.google_routes_client import RouteOptimizationClient, get_route_optimization_client
-from app.schemas.optimizer import DriverCandidate, OptimizationResult, StopCandidate
+from app.optimizer.last_cycle_store import LastCycleStore
+from app.schemas.optimizer import DriverCandidate, LastCycleSnapshot, OptimizationResult, StopCandidate
 
 logger = structlog.get_logger(__name__)
 
@@ -37,10 +38,12 @@ class DispatchOptimizerService:
         fleet_state: FleetStateManager | None = None,
         hold_queue: HoldQueueStore | None = None,
         route_client: RouteOptimizationClient | None = None,
+        last_cycle_store: LastCycleStore | None = None,
     ) -> None:
         self._fleet_state = fleet_state or FleetStateManager()
         self._hold_queue = hold_queue or HoldQueueStore()
         self._route_client = route_client or get_route_optimization_client()
+        self._last_cycle_store = last_cycle_store or LastCycleStore()
 
     async def run_cycle(self, hub_id: str) -> OptimizationResult:
         cycle_start = time.perf_counter()
@@ -135,6 +138,22 @@ class DispatchOptimizerService:
             assigned_count=len(assigned_stop_ids),
             unassigned_count=len(unassigned),
             engine=self._route_client.engine_name,
+        )
+
+        # Every cycle overwrites this hub's snapshot, whether triggered
+        # manually or by the event bus - see LastCycleStore's docstring for
+        # why a dashboard needs this instead of only trusting whichever
+        # caller happened to trigger the cycle.
+        await self._last_cycle_store.set(
+            LastCycleSnapshot(
+                hub_id=hub_id,
+                at=datetime.now(timezone.utc),
+                engine=self._route_client.engine_name,
+                duration_seconds=round(duration, 3),
+                assigned_count=len(assigned_stop_ids),
+                unassigned_count=len(unassigned),
+                over_budget=over_budget,
+            )
         )
 
         return OptimizationResult(

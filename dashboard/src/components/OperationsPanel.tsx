@@ -2,11 +2,14 @@ import { useState, type ReactNode } from 'react'
 import { Card } from './ui/Card'
 import { ConfirmModal } from './ui/ConfirmModal'
 import { api, ApiError } from '../lib/api'
-import type { LastCycleInfo, RunLogEntry } from '../lib/types'
+import type { RunLogEntry } from '../lib/types'
 
 interface OperationsPanelProps {
   hubId: string
-  onLastCycle: (info: LastCycleInfo) => void
+  // The KPI strip's last-cycle card polls GET /optimizer/{hub_id}/last-cycle
+  // on its own timer; this just lets a just-fired manual run show up there
+  // immediately instead of waiting up to POLL_INTERVAL_MS for the next tick.
+  onAfterRun: () => void
   onToast: (message: string) => void
 }
 
@@ -29,7 +32,7 @@ const JOB_COPY: Record<Job, { title: string; description: string; confirmLabel: 
 
 const MAX_LOG_ENTRIES = 8
 
-export function OperationsPanel({ hubId, onLastCycle, onToast }: OperationsPanelProps) {
+export function OperationsPanel({ hubId, onAfterRun, onToast }: OperationsPanelProps) {
   const [openJob, setOpenJob] = useState<Job | null>(null)
   const [busy, setBusy] = useState(false)
   const [log, setLog] = useState<RunLogEntry[]>([])
@@ -41,7 +44,7 @@ export function OperationsPanel({ hubId, onLastCycle, onToast }: OperationsPanel
     try {
       if (openJob === 'optimizer') {
         const result = await api.runOptimizerCycle(hubId)
-        onLastCycle({ at: now, result })
+        onAfterRun()
         const summary = `${result.assignments.length} assigned · ${Math.round(result.duration_seconds * 1000)}ms`
         const entry: RunLogEntry = { at: now, kind: 'optimizer', summary }
         setLog((l) => [entry, ...l].slice(0, MAX_LOG_ENTRIES))

@@ -11,7 +11,7 @@ interface HoldQueueTableProps {
   loading: boolean
 }
 
-type SortKey = 'order_id' | 'sla_tier' | 'held_since' | 'hold_deadline'
+type SortKey = 'shop_name' | 'sla_tier' | 'held_since' | 'hold_deadline'
 
 const TIERS = ['all', 'T1', 'T2', 'T3'] as const
 
@@ -34,11 +34,13 @@ export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
     if (!data) return []
     const q = search.trim().toLowerCase()
     const filtered = data.filter(
-      (o) => (tier === 'all' || o.sla_tier === tier) && (q === '' || o.order_id.toLowerCase().includes(q)),
+      (o) =>
+        (tier === 'all' || o.sla_tier === tier) &&
+        (q === '' || o.order_id.toLowerCase().includes(q) || o.shop_name.toLowerCase().includes(q)),
     )
     return filtered.sort((a, b) => {
       let cmp = 0
-      if (sortKey === 'order_id') cmp = a.order_id.localeCompare(b.order_id)
+      if (sortKey === 'shop_name') cmp = (a.shop_name || a.order_id).localeCompare(b.shop_name || b.order_id)
       else if (sortKey === 'sla_tier') cmp = a.sla_tier.localeCompare(b.sla_tier)
       else if (sortKey === 'held_since') cmp = new Date(a.held_since).getTime() - new Date(b.held_since).getTime()
       else cmp = minutesUntil(a.hold_deadline) - minutesUntil(b.hold_deadline)
@@ -67,7 +69,7 @@ export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search order id…"
+                placeholder="Search shop or order id…"
                 className="w-full bg-transparent text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
               />
             </div>
@@ -87,7 +89,7 @@ export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
               <table className="w-full text-left text-[13px]">
                 <thead>
                   <tr className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                    <SortableHeader label="Order" sortKey="order_id" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                    <SortableHeader label="Shop" sortKey="shop_name" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                     <SortableHeader label="SLA" sortKey="sla_tier" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                     <SortableHeader label="Held" sortKey="held_since" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                     <SortableHeader label="Deadline in" sortKey="hold_deadline" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
@@ -106,8 +108,21 @@ export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
                     const risk = minsLeft <= 5
                     return (
                       <tr key={order.order_id} className={`border-t border-[var(--border)] ${risk ? 'shadow-[inset_3px_0_0_var(--red)]' : ''}`}>
-                        <td className="py-2 pr-3 font-mono text-[11.5px] text-[var(--text-secondary)]" title={order.order_id}>
-                          {truncateId(order.order_id)}
+                        <td className="py-2 pr-3">
+                          <div className="font-medium text-[var(--text-primary)]">
+                            {order.shop_name || <span className="text-[var(--text-muted)]">Unknown shop</span>}
+                            {order.cluster_mate_ids.length > 0 && (
+                              <span
+                                className="ml-1.5 rounded-md bg-[var(--accent-dim)] px-1.5 py-0.5 text-[10.5px] font-medium text-[var(--accent)]"
+                                title={`Within clustering radius of: ${order.cluster_mate_ids.join(', ')}`}
+                              >
+                                +{order.cluster_mate_ids.length} cluster mate{order.cluster_mate_ids.length > 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+                          <div className="font-mono text-[11px] text-[var(--text-muted)]" title={order.order_id}>
+                            {truncateId(order.order_id)}
+                          </div>
                         </td>
                         <td className="py-2 pr-3">
                           <TierBadge tier={order.sla_tier} />

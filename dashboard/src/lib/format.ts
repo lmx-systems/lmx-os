@@ -21,8 +21,22 @@ export function idInitials(id: string): string {
   return id.replace(/-/g, '').slice(0, 2).toUpperCase()
 }
 
+export function nameInitials(name: string): string {
+  const parts = name.trim().split(/\s+/)
+  return parts
+    .slice(0, 2)
+    .map((p) => p[0])
+    .join('')
+    .toUpperCase()
+}
+
 export function formatSecondsAgo(seconds: number): string {
   if (seconds < 60) return `${seconds}s ago`
   const minutes = Math.floor(seconds / 60)
   return `${minutes}m ago`
+}
+
+export function formatIsoRelative(iso: string): string {
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
+  return formatSecondsAgo(seconds)
 }

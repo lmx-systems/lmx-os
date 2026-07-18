@@ -10,17 +10,21 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.batch_queue.clustering import cluster_members
 from app.batch_queue.store import HoldQueueStore
+from app.config import settings
 from app.db import get_db
 from app.fleet_state.manager import FleetStateManager
 from app.learning_loop.service import run_nightly_job
+from app.models.driver import Driver
 from app.models.order import Order
 from app.optimizer.event_trigger import dispatch_event_bus
+from app.optimizer.last_cycle_store import LastCycleStore
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.batch_queue import HeldOrderView
 from app.schemas.fleet import DriverLocation, DriverState
 from app.schemas.learning_loop import NightlyJobResult, ProposedRuleSummary
-from app.schemas.optimizer import OptimizationResult
+from app.schemas.optimizer import LastCycleSnapshot, OptimizationResult
 from app.schemas.order import OrderStatusSummary
 
 router = APIRouter(tags=["ops"])
@@ -50,33 +54,58 @@ async def upsert_driver_location(hub_id: str, location: DriverLocation) -> dict:
 
 
 @router.get("/fleet/{hub_id}/drivers", response_model=list[DriverState])
-async def list_fleet_overview(hub_id: str) -> list[DriverState]:
+async def list_fleet_overview(hub_id: str, session: AsyncSession = Depends(get_db)) -> list[DriverState]:
     """
     Full driver roster for a hub - available, en_route, on_break, and
     off_shift alike. Built for the orchestrator dashboard; the optimizer
     itself only ever reads the narrower available-drivers view
-    (FleetStateManager.get_fleet_snapshot).
+    (FleetStateManager.get_fleet_snapshot), which is why the display name
+    join below lives here and not in FleetStateManager/DriverState's Redis
+    round-trip - the hot path has no reason to pay for it.
     """
     manager = FleetStateManager()
-    return await manager.get_fleet_overview(hub_id)
+    roster = await manager.get_fleet_overview(hub_id)
+    if not roster:
+        return roster
+
+    driver_ids = [uuid.UUID(d.driver_id) for d in roster]
+    result = await session.execute(select(Driver.id, Driver.name).where(Driver.id.in_(driver_ids)))
+    names = {str(driver_id): name for driver_id, name in result.all()}
+
+    for driver in roster:
+        driver.name = names.get(driver.driver_id)
+    return roster
 
 
 @router.get("/batch-queue/{hub_id}/held-orders", response_model=list[HeldOrderView])
 async def list_held_orders(hub_id: str) -> list[HeldOrderView]:
-    """Everything currently sitting in the Batch-Hold Queue for a hub."""
+    """
+    Everything currently sitting in the Batch-Hold Queue for a hub.
+    cluster_mate_ids is computed fresh here from the same clustering logic
+    the Dispatch Optimizer uses (app.batch_queue.clustering.cluster_members)
+    against the rest of this response's rows - it isn't persisted, since
+    it changes as soon as a sibling order is added/removed/released.
+    """
     store = HoldQueueStore()
     held = await store.get_all(hub_id)
-    return [
-        HeldOrderView(
-            order_id=o.order_id,
-            shop_lat=o.shop_lat,
-            shop_lng=o.shop_lng,
-            sla_tier=o.sla_tier,
-            hold_deadline=o.hold_deadline,
-            held_since=o.held_since,
+    radius = settings.batch_hold_cluster_radius_miles
+    views: list[HeldOrderView] = []
+    for order in held:
+        candidates = [(o.order_id, o.shop_lat, o.shop_lng) for o in held if o.order_id != order.order_id]
+        cluster_mate_ids = cluster_members(order.shop_lat, order.shop_lng, candidates, radius)
+        views.append(
+            HeldOrderView(
+                order_id=order.order_id,
+                shop_lat=order.shop_lat,
+                shop_lng=order.shop_lng,
+                sla_tier=order.sla_tier,
+                hold_deadline=order.hold_deadline,
+                held_since=order.held_since,
+                shop_name=order.shop_name,
+                cluster_mate_ids=cluster_mate_ids,
+            )
         )
-        for o in held
-    ]
+    return views
 
 
 @router.get("/orders/{hub_id}/summary", response_model=OrderStatusSummary)
@@ -104,6 +133,18 @@ async def run_optimizer_cycle(hub_id: str) -> OptimizationResult:
     """
     service = DispatchOptimizerService()
     return await service.run_cycle(hub_id)
+
+
+@router.get("/optimizer/{hub_id}/last-cycle", response_model=LastCycleSnapshot | None)
+async def get_last_cycle(hub_id: str) -> LastCycleSnapshot | None:
+    """
+    The most recently completed Dispatch Optimizer cycle for this hub,
+    whether it was triggered manually or automatically off an event - see
+    app/optimizer/last_cycle_store.py. Returns null if no cycle has run
+    for this hub yet (e.g. a brand new hub, or right after a Redis flush).
+    """
+    store = LastCycleStore()
+    return await store.get(hub_id)
 
 
 @router.post("/learning-loop/{hub_id}/run-nightly-job", response_model=NightlyJobResult)

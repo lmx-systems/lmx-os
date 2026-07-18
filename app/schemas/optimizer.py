@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -30,4 +32,23 @@ class OptimizationResult(BaseModel):
     unassigned_stop_ids: list[str]
     engine: str  # "google_route_optimization" | "stub_nearest_neighbor"
     duration_seconds: float
+    over_budget: bool
+
+
+class LastCycleSnapshot(BaseModel):
+    """
+    Redis snapshot of the most recently completed Dispatch Optimizer cycle
+    for a hub - written by every run_cycle() call, whether triggered
+    manually (POST /optimizer/{hub_id}/run-cycle) or automatically off an
+    event (app/optimizer/event_trigger.py). Lets a dashboard show "last
+    cycle" info for cycles nobody in the browser actually clicked a button
+    for - see app/optimizer/last_cycle_store.py.
+    """
+
+    hub_id: str
+    at: datetime
+    engine: str
+    duration_seconds: float
+    assigned_count: int
+    unassigned_count: int
     over_budget: bool

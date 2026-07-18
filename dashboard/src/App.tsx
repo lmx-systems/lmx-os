@@ -9,14 +9,12 @@ import { Toast } from './components/ui/Toast'
 import { usePolling } from './hooks/usePolling'
 import { useToast } from './hooks/useToast'
 import { api } from './lib/api'
-import type { LastCycleInfo } from './lib/types'
 
 const HUB_ID_STORAGE_KEY = 'lmx-os-dashboard.hub-id'
 const POLL_INTERVAL_MS = 5000
 
 function App() {
   const [hubId, setHubId] = useState(() => localStorage.getItem(HUB_ID_STORAGE_KEY) ?? '')
-  const [lastCycle, setLastCycle] = useState<LastCycleInfo | null>(null)
   const { message, showToast } = useToast()
   const enabled = hubId.length > 0
 
@@ -31,6 +29,9 @@ function App() {
   const fleet = usePolling(() => api.fleetOverview(hubId), POLL_INTERVAL_MS, [hubId], enabled)
   const held = usePolling(() => api.heldOrders(hubId), POLL_INTERVAL_MS, [hubId], enabled)
   const summary = usePolling(() => api.orderSummary(hubId), POLL_INTERVAL_MS, [hubId], enabled)
+  // Server-side snapshot (see app/optimizer/last_cycle_store.py) - reflects
+  // automatic event-triggered cycles too, not just ones this tab fired.
+  const lastCycle = usePolling(() => api.lastCycle(hubId), POLL_INTERVAL_MS, [hubId], enabled)
 
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null)
   useEffect(() => {
@@ -38,7 +39,7 @@ function App() {
       setLastUpdatedAt(Date.now())
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fleet.data, held.data, summary.data])
+  }, [fleet.data, held.data, summary.data, lastCycle.data])
 
   return (
     <div className="min-h-screen">
@@ -52,7 +53,7 @@ function App() {
           </p>
         ) : (
           <>
-            <KpiStrip fleet={fleet.data} held={held.data} summary={summary.data} lastCycle={lastCycle} />
+            <KpiStrip fleet={fleet.data} held={held.data} summary={summary.data} lastCycle={lastCycle.data} />
 
             <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr]">
               <div className="flex flex-col gap-4">
@@ -61,7 +62,7 @@ function App() {
               </div>
               <div className="flex flex-col gap-4">
                 <FleetRoster data={fleet.data} error={fleet.error} loading={fleet.loading} />
-                <OperationsPanel hubId={hubId} onLastCycle={setLastCycle} onToast={showToast} />
+                <OperationsPanel hubId={hubId} onAfterRun={lastCycle.refetchNow} onToast={showToast} />
               </div>
             </div>
           </>

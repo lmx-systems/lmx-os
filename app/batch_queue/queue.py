@@ -52,6 +52,10 @@ class HeldOrder:
     sla_tier: str
     hold_deadline: datetime
     held_since: datetime
+    # Display-only - not used by any clustering/release decision below.
+    # Defaults to "" rather than being required so existing callers/tests
+    # that only care about the decision logic don't need updating.
+    shop_name: str = ""
 
 
 @dataclass(frozen=True)

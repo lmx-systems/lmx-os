@@ -1,6 +1,7 @@
 import type {
   DriverState,
   HeldOrderView,
+  LastCycleSnapshot,
   NightlyJobResult,
   OptimizationResult,
   OrderStatusSummary,
@@ -45,6 +46,8 @@ export const api = {
   heldOrders: (hubId: string) => request<HeldOrderView[]>(`/batch-queue/${hubId}/held-orders`),
 
   orderSummary: (hubId: string) => request<OrderStatusSummary>(`/orders/${hubId}/summary`),
+
+  lastCycle: (hubId: string) => request<LastCycleSnapshot | null>(`/optimizer/${hubId}/last-cycle`),
 
   runOptimizerCycle: (hubId: string) =>
     request<OptimizationResult>(`/optimizer/${hubId}/run-cycle`, { method: 'POST' }),

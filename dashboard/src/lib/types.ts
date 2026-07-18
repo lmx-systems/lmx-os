@@ -11,6 +11,10 @@ export interface DriverState {
   capacity_units: number
   load_units: number
   current_route_id: string | null
+  // Populated by GET /fleet/{hub_id}/drivers via a Postgres join - null if
+  // the Redis fleet-state entry has no matching Driver row (shouldn't
+  // happen in practice, but the backend doesn't assume it can't).
+  name: string | null
 }
 
 export interface HeldOrderView {
@@ -20,6 +24,10 @@ export interface HeldOrderView {
   sla_tier: string
   hold_deadline: string
   held_since: string
+  shop_name: string
+  // Computed fresh per request against the other rows in the same
+  // response - see app/api/routes.py's list_held_orders.
+  cluster_mate_ids: string[]
 }
 
 export interface OrderStatusSummary {
@@ -41,6 +49,21 @@ export interface OptimizationResult {
   over_budget: boolean
 }
 
+// The most recently completed Dispatch Optimizer cycle for a hub, however
+// it was triggered (manual or automatic) - GET /optimizer/{hub_id}/last-cycle.
+// Unlike OptimizationResult (only ever returned to whoever called
+// run-cycle), this is queryable by anyone, which is what lets the KPI
+// strip reflect automatic cycles it didn't trigger itself.
+export interface LastCycleSnapshot {
+  hub_id: string
+  at: string
+  engine: string
+  duration_seconds: number
+  assigned_count: number
+  unassigned_count: number
+  over_budget: boolean
+}
+
 export interface ProposedRuleSummary {
   proposed_rule_id: string
   shop_id: string
@@ -56,16 +79,6 @@ export interface NightlyJobResult {
 }
 
 // --- UI-local types below - no backend equivalent, not response mirrors ---
-
-// The backend has no "get last cycle" endpoint (dispatch cycles are
-// triggered automatically off events server-side with no push channel to
-// the dashboard - see docs/NEXT_STEPS.md). This only ever reflects a
-// manual trigger fired from THIS browser tab, and resets on reload -
-// it deliberately does not claim to show automatic cycles it can't see.
-export interface LastCycleInfo {
-  at: number
-  result: OptimizationResult
-}
 
 export interface RunLogEntry {
   at: number

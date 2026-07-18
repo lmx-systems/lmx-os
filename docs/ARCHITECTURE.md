@@ -42,10 +42,11 @@ piece of work.
 
 `dashboard/` is a Vite + React + TypeScript + Tailwind single-page app —
 internal-only, for hub staff to see live state and manually trigger the
-optimizer/learning-loop jobs without curling the API. It reads from three
+optimizer/learning-loop jobs without curling the API. It reads from four
 endpoints: `GET /fleet/{hub_id}/drivers` (full roster, not just available
 drivers — see `FleetStateManager.get_fleet_overview`),
-`GET /batch-queue/{hub_id}/held-orders`, and `GET /orders/{hub_id}/summary`.
+`GET /batch-queue/{hub_id}/held-orders`, `GET /orders/{hub_id}/summary`,
+and `GET /optimizer/{hub_id}/last-cycle`.
 
 **Redesigned as a KPI-first console** (light theme, approved via an
 interactive mockup before implementation — see chat history, not checked
@@ -61,23 +62,32 @@ right. Shared primitives live in `dashboard/src/components/ui/` (`Card`,
 section hand-rolling its own class strings, and design tokens (colors,
 radii) are CSS custom properties in `dashboard/src/index.css`.
 
-Three things the redesign surfaced that are data gaps, not frontend bugs
-— the mockup assumed data the backend doesn't return yet:
-- **No shop name or cluster-mate info on held orders.** `HeldOrderView`
-  only carries `order_id`/lat-lng/tier/timestamps — no shop name (would
-  need a join to `shop_profiles`) and no cluster-mate ids (computed by
-  `run_hold_cycle` but never returned to the caller). The hold queue table
-  shows a truncated order id instead of a shop name until this is added.
-- **No driver display name.** `DriverState` (Redis) has no `name` field —
-  `Driver.name` lives in Postgres only. The fleet roster shows a
-  driver-id-derived avatar instead of a real name.
-- **No server-side "last cycle" telemetry.** Dispatch cycles run
-  automatically off events server-side (`app/optimizer/event_trigger.py`)
-  with no push channel to the dashboard and no endpoint to poll for the
-  most recent cycle's result. The KPI strip's "last dispatch cycle" card
-  only reflects a manual trigger fired from that browser tab this
-  session — it says so explicitly rather than implying it sees automatic
-  cycles it can't.
+The three data gaps the redesign originally surfaced are now closed:
+- **Shop name + cluster-mate ids on held orders.** `HeldOrder`
+  (`app/batch_queue/queue.py`) now carries `shop_name`, set once at
+  ingestion time (`app/ingestion/service.py` already had the `Shop` row in
+  scope) and round-tripped through Redis (`app/batch_queue/store.py`).
+  `cluster_mate_ids` is *not* persisted - `GET /batch-queue/{hub_id}/held-orders`
+  computes it fresh per request from `cluster_members()` against that same
+  response's rows, since it changes the moment a sibling order is
+  added/removed/released and persisting it would just mean it goes stale.
+- **Driver display name.** `DriverState` gained an optional `name` field
+  that Redis never writes - `GET /fleet/{hub_id}/drivers` populates it with
+  one batch Postgres query (`Driver.id IN (...)`) after reading the roster
+  from Redis. Keeps the optimizer's hot-path reads (`get_fleet_snapshot`)
+  untouched; only the dashboard-facing full-roster endpoint pays for the
+  join.
+- **Server-side "last cycle" telemetry.** `app/optimizer/last_cycle_store.py`
+  is a one-key-per-hub Redis snapshot (`LastCycleSnapshot`, 7-day TTL) that
+  `DispatchOptimizerService.run_cycle` overwrites at the end of *every*
+  cycle - manual or event-triggered alike. `GET /optimizer/{hub_id}/last-cycle`
+  reads it back, so the KPI strip now reflects automatic cycles too, not
+  just ones a browser tab happened to trigger.
+
+None of these touch the optimizer's hot Redis read path (still <50ms,
+still the only thing `get_fleet_snapshot`/`get_available_driver_ids`
+touch) - all three enrichments live in the dashboard-facing route
+handlers or are written once at the point an event already happens.
 
 **Auth reminder still applies to the redesign as much as the old
 version:** `SharedSecretAuthMiddleware` (`app/security.py`) gates every

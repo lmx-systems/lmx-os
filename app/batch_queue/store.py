@@ -30,6 +30,7 @@ def _serialize(order: HeldOrder) -> str:
             "sla_tier": order.sla_tier,
             "hold_deadline": order.hold_deadline.isoformat(),
             "held_since": order.held_since.isoformat(),
+            "shop_name": order.shop_name,
         }
     )
 
@@ -43,6 +44,9 @@ def _deserialize(raw: str) -> HeldOrder:
         sla_tier=data["sla_tier"],
         hold_deadline=datetime.fromisoformat(data["hold_deadline"]),
         held_since=datetime.fromisoformat(data["held_since"]),
+        # .get(): rows written before this field existed won't have it -
+        # falls back to "" rather than KeyError-ing on old Redis data.
+        shop_name=data.get("shop_name", ""),
     )
 
 

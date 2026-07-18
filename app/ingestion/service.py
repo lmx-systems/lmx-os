@@ -127,6 +127,7 @@ async def ingest_order(
             sla_tier=classified.sla_tier,
             hold_deadline=classified.hold_deadline,
             held_since=now,
+            shop_name=shop.name,
         ),
     )
 
