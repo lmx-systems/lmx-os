@@ -12,6 +12,10 @@ COPY . .
 # user's browser, not from inside the Docker network.
 ARG VITE_API_BASE_URL=http://localhost:8000
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+# Must match the backend's API_SHARED_SECRET, if set - see the note in
+# dashboard/src/lib/api.ts. Baked in at build time same as the URL above.
+ARG VITE_API_SHARED_SECRET=
+ENV VITE_API_SHARED_SECRET=$VITE_API_SHARED_SECRET
 RUN npm run build
 
 FROM nginx:alpine

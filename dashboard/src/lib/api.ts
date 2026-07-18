@@ -6,11 +6,13 @@ import type {
   OrderStatusSummary,
 } from './types'
 
-// No auth exists on the backend yet (see docs/ARCHITECTURE.md in the repo
-// root) - this client doesn't send any credentials because there aren't
-// any to send. Do not treat the absence of an Authorization header here as
-// an oversight; it's an accurate reflection of the backend's current state.
+// Only a shared-secret stopgap exists on the backend (see
+// docs/ARCHITECTURE.md item 0), not real per-user auth. When
+// VITE_API_SHARED_SECRET isn't set, this sends no credentials at all,
+// same as before this existed - accurate for a backend with
+// API_SHARED_SECRET unset too.
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+const API_SHARED_SECRET = import.meta.env.VITE_API_SHARED_SECRET
 
 export class ApiError extends Error {
   status: number
@@ -24,7 +26,10 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(API_SHARED_SECRET ? { 'X-API-Key': API_SHARED_SECRET } : {}),
+    },
     ...init,
   })
   if (!response.ok) {

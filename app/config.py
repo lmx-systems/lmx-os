@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     # see docs/ARCHITECTURE.md's auth caveat. Comma-separated in the env var.
     dashboard_cors_origins: str = "http://localhost:5173"
 
+    # Interim stopgap for docs/ARCHITECTURE.md's "Recommended next steps"
+    # item 0: every endpoint (bar /health and API docs) requires this value
+    # in an X-API-Key header. Unset (the default) leaves the API open, same
+    # as before this existed - fine for local dev, not for anything
+    # reachable beyond localhost. This is a shared secret, not per-user
+    # auth; a client-facing dashboard or driver app needs the real thing.
+    api_shared_secret: str | None = None
+
     @property
     def dashboard_cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.dashboard_cors_origins.split(",") if origin.strip()]

@@ -23,6 +23,7 @@ from app.ingestion.router import router as ingestion_router
 from app.logging_config import configure_logging, get_logger
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.redis_client import close_pool, get_client
+from app.security import SharedSecretAuthMiddleware
 
 logger = get_logger(__name__)
 
@@ -63,6 +64,10 @@ app.add_middleware(
     allow_headers=["*"],
     allow_credentials=False,  # no session/cookie auth exists yet - see docs/ARCHITECTURE.md
 )
+
+# Added after CORS so CORS preflight (OPTIONS) is handled first and never
+# has to carry the shared-secret header.
+app.add_middleware(SharedSecretAuthMiddleware)
 
 app.include_router(ops_router)
 app.include_router(ingestion_router)

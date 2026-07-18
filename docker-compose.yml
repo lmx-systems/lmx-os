@@ -50,6 +50,8 @@ services:
         # Override if the API is reachable at a different host/port than
         # the default docker-compose port mapping.
         VITE_API_BASE_URL: ${DASHBOARD_API_BASE_URL:-http://localhost:8000}
+        # Must match the app service's API_SHARED_SECRET (from .env), if set.
+        VITE_API_SHARED_SECRET: ${API_SHARED_SECRET:-}
     depends_on:
       - app
     ports:
