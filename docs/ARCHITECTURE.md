@@ -206,6 +206,16 @@ dashboard."** The rest is still roughly priority order.
 
 ## Operational notes
 
+- Starlette's `add_middleware()` inserts at the front of its middleware
+  list, so the *last*-added middleware ends up outermost (runs first) -
+  the opposite of the intuitive reading. `app/main.py` adds
+  `SharedSecretAuthMiddleware` before `CORSMiddleware` for exactly this
+  reason: CORS has to run first so preflight `OPTIONS` requests are
+  handled before they ever reach the auth check (no browser sends
+  `X-API-Key` on a preflight). Getting this order backwards doesn't fail
+  loudly - every preflight 401s with no CORS headers attached, which the
+  browser reports as a generic `Failed to fetch`, not a 401, making it
+  look like a connectivity problem rather than an auth-ordering bug.
 - Every Redis read on the fleet-state/optimizer hot path is wrapped in
   `timed_operation()` (`app/redis_client.py`), which logs a warning above
   50ms — watch for `redis_slow_operation` in logs as an early signal.
