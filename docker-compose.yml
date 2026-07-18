@@ -42,5 +42,18 @@ services:
     ports:
       - "8000:8000"
 
+  dashboard:
+    build:
+      context: ./dashboard
+      args:
+        # Baked in at build time - see the note in dashboard/Dockerfile.
+        # Override if the API is reachable at a different host/port than
+        # the default docker-compose port mapping.
+        VITE_API_BASE_URL: ${DASHBOARD_API_BASE_URL:-http://localhost:8000}
+    depends_on:
+      - app
+    ports:
+      - "5173:80"
+
 volumes:
   lmx_pg_data:

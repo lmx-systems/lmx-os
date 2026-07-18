@@ -4,17 +4,24 @@ and the Learning Loop's nightly job.
 """
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.batch_queue.store import HoldQueueStore
 from app.db import get_db
 from app.fleet_state.manager import FleetStateManager
 from app.learning_loop.service import run_nightly_job
+from app.models.order import Order
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.service import DispatchOptimizerService
+from app.schemas.batch_queue import HeldOrderView
 from app.schemas.fleet import DriverLocation, DriverState
 from app.schemas.learning_loop import NightlyJobResult, ProposedRuleSummary
 from app.schemas.optimizer import OptimizationResult
+from app.schemas.order import OrderStatusSummary
 
 router = APIRouter(tags=["ops"])
 
@@ -40,6 +47,50 @@ async def upsert_driver_location(hub_id: str, location: DriverLocation) -> dict:
     manager = FleetStateManager()
     await manager.update_driver_location(location, hub_id)
     return {"ok": True}
+
+
+@router.get("/fleet/{hub_id}/drivers", response_model=list[DriverState])
+async def list_fleet_overview(hub_id: str) -> list[DriverState]:
+    """
+    Full driver roster for a hub - available, en_route, on_break, and
+    off_shift alike. Built for the orchestrator dashboard; the optimizer
+    itself only ever reads the narrower available-drivers view
+    (FleetStateManager.get_fleet_snapshot).
+    """
+    manager = FleetStateManager()
+    return await manager.get_fleet_overview(hub_id)
+
+
+@router.get("/batch-queue/{hub_id}/held-orders", response_model=list[HeldOrderView])
+async def list_held_orders(hub_id: str) -> list[HeldOrderView]:
+    """Everything currently sitting in the Batch-Hold Queue for a hub."""
+    store = HoldQueueStore()
+    held = await store.get_all(hub_id)
+    return [
+        HeldOrderView(
+            order_id=o.order_id,
+            shop_lat=o.shop_lat,
+            shop_lng=o.shop_lng,
+            sla_tier=o.sla_tier,
+            hold_deadline=o.hold_deadline,
+            held_since=o.held_since,
+        )
+        for o in held
+    ]
+
+
+@router.get("/orders/{hub_id}/summary", response_model=OrderStatusSummary)
+async def get_order_status_summary(
+    hub_id: str, session: AsyncSession = Depends(get_db)
+) -> OrderStatusSummary:
+    """Order counts by status for a hub - dashboard quick-glance widget."""
+    result = await session.execute(
+        select(Order.status, func.count())
+        .where(Order.hub_id == uuid.UUID(hub_id))
+        .group_by(Order.status)
+    )
+    counts = {status.value: count for status, count in result.all()}
+    return OrderStatusSummary(hub_id=hub_id, counts=counts)
 
 
 @router.post("/optimizer/{hub_id}/run-cycle", response_model=OptimizationResult)

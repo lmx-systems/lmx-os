@@ -19,7 +19,7 @@ review flagged, built solidly rather than everything built thinly.
 | 4 | Fleet State Manager | Built — Redis-backed driver state/location |
 | 5 | Dispatch Optimizer | Built — real Google Route Optimization call implemented, unverified against a live Google Cloud project |
 | 6 | Annotation and Learning Loop | Built — pattern detection + nightly-job service; flag-type naming convention not yet agreed with driver app team |
-| 7 | OS Shell (dashboards, driver app, shop SMS) | Not started |
+| 7 | OS Shell (dashboards, driver app, shop SMS) | Started — orchestrator dashboard built (`dashboard/`); client dashboard, driver app, shop SMS not started |
 
 ## Data layer
 
@@ -30,6 +30,37 @@ read in <50ms per the design doc's hard requirement: driver state/location
 (`app/fleet_state/manager.py`) and the batch-hold working set
 (`app/batch_queue/store.py`). Postgres is intentionally never on the
 optimizer's hot read path.
+
+## Orchestrator dashboard (component 7, partial)
+
+`dashboard/` is a Vite + React + TypeScript + Tailwind single-page app —
+internal-only, for hub staff to see live state and manually trigger the
+optimizer/learning-loop jobs without curling the API. It reads from three
+new endpoints added alongside it: `GET /fleet/{hub_id}/drivers` (full
+roster, not just available drivers — see `FleetStateManager.get_fleet_overview`),
+`GET /batch-queue/{hub_id}/held-orders`, and `GET /orders/{hub_id}/summary`.
+
+**This is the point where the backend's missing authentication stops being
+a theoretical gap and becomes a clickable one.** Every dashboard view and
+both trigger buttons call an API that has no auth of any kind — anyone who
+can reach it can see all fleet/order data and trigger optimizer or
+learning-loop cycles for any hub. CORS (`DASHBOARD_CORS_ORIGINS` in
+`app/config.py`) restricts which *origins* can call the API from a
+browser, which is not the same thing as authenticating *who* is calling it
+— don't mistake the CORS allowlist for access control. Do not point this
+dashboard at a production API, or expose the backend beyond localhost/a
+private network, until real auth exists (see next steps).
+
+Other known gaps in the dashboard itself:
+- No "list hubs" endpoint exists yet (the `hubs` table has no read API), so
+  hub selection is a plain text field for a hub UUID, not a dropdown —
+  `dashboard/src/components/HubSelector.tsx` documents this inline.
+- Docker: `dashboard/Dockerfile` builds a static bundle served by nginx.
+  Vite bakes `VITE_API_BASE_URL` in at *build* time (the browser calls the
+  API directly, not through the dashboard container), so changing the API
+  URL means rebuilding the image, not just restarting the container —
+  fine for one internal deployment, worth revisiting if this needs to
+  point at different API URLs per environment without a rebuild.
 
 ## Things that are stubbed, and why
 
@@ -102,6 +133,17 @@ be checked against it before Hub 1 goes live:
 
 ## Recommended next steps, in order
 
+**Re-read this list in light of the dashboard existing now: item 7 (auth)
+has moved from "eventually" to "before anyone but you opens this
+dashboard."** The rest is still roughly priority order.
+
+0. Add real authentication/authorization to the API — every endpoint is
+   currently open to anyone who can reach it, and that stopped being
+   theoretical the moment `dashboard/` gave it a clickable UI. Even a
+   minimal shared-secret header or basic auth is better than nothing for
+   an internal tool; a client-facing dashboard or driver app needs real
+   per-user auth, not a shared secret. Not a big lift compared to what
+   it's protecting.
 1. Stand up Postgres + Redis in a real environment and run the migration;
    the current tests are all offline (fakeredis + pure functions) and
    there's no integration test against a live database yet — that's the

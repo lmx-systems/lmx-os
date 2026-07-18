@@ -35,3 +35,10 @@ class ClassifiedOrder(BaseModel):
     sla_tier: str  # T1 | T2 | T3
     hold_deadline: datetime
     reason: str
+
+
+class OrderStatusSummary(BaseModel):
+    """Order counts by status for a hub - dashboard quick-glance widget."""
+
+    hub_id: str
+    counts: dict[str, int]

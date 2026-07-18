@@ -14,8 +14,10 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router as ops_router
+from app.config import settings
 from app.db import engine
 from app.ingestion.router import router as ingestion_router
 from app.logging_config import configure_logging, get_logger
@@ -52,6 +54,14 @@ app = FastAPI(
     title="LMX OS - Phase 1 Core Backend",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.dashboard_cors_origin_list,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+    allow_credentials=False,  # no session/cookie auth exists yet - see docs/ARCHITECTURE.md
 )
 
 app.include_router(ops_router)

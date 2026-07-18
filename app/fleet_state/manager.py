@@ -12,6 +12,10 @@ Key layout (all scoped per hub so a hub outage/reset can't affect others):
   fleet:{hub_id}:driver:{driver_id}:state     hash  - status, capacity_units, load_units, current_route_id
   fleet:{hub_id}:driver:{driver_id}:location  hash  - lat, lng, recorded_at
   fleet:{hub_id}:available_drivers            set   - driver_ids currently status=available
+  fleet:{hub_id}:all_drivers                  set   - every driver_id ever upserted for this hub,
+                                                       regardless of current status (dashboard/
+                                                       overview use only - the optimizer's hot path
+                                                       only ever reads available_drivers)
 """
 from __future__ import annotations
 
@@ -33,6 +37,10 @@ def _location_key(hub_id: str, driver_id: str) -> str:
 
 def _available_set_key(hub_id: str) -> str:
     return f"fleet:{hub_id}:available_drivers"
+
+
+def _all_drivers_set_key(hub_id: str) -> str:
+    return f"fleet:{hub_id}:all_drivers"
 
 
 class FleetStateManager:
@@ -57,6 +65,7 @@ class FleetStateManager:
                 pipe.sadd(available_key, state.driver_id)
             else:
                 pipe.srem(available_key, state.driver_id)
+            pipe.sadd(_all_drivers_set_key(state.hub_id), state.driver_id)
             await pipe.execute()
 
     async def get_driver_state(self, hub_id: str, driver_id: str) -> DriverState | None:
@@ -107,23 +116,45 @@ class FleetStateManager:
 
     async def get_fleet_snapshot(self, hub_id: str) -> list[DriverState]:
         """
-        Bulk read of every driver's state for a hub in one pipelined round
-        trip, for use by the optimizer at the start of each cycle.
+        Bulk read of every *available* driver's state for a hub in one
+        pipelined round trip - this is what the Dispatch Optimizer calls on
+        its hot path every cycle. For a full roster including off-shift/
+        en-route drivers (dashboards, not the optimizer), use
+        get_fleet_overview instead.
         """
         driver_ids = await self.get_available_driver_ids(hub_id)
+        return await self._bulk_read_states(hub_id, driver_ids)
+
+    async def get_all_driver_ids(self, hub_id: str) -> list[str]:
+        """Every driver ever upserted for this hub, regardless of current status."""
+        async with timed_operation("fleet.get_all_driver_ids"):
+            members = await self._redis.smembers(_all_drivers_set_key(hub_id))
+        return list(members)
+
+    async def get_fleet_overview(self, hub_id: str) -> list[DriverState]:
+        """
+        Full roster for a hub - available, en_route, on_break, and
+        off_shift drivers alike. Not on the optimizer's hot path; this is
+        for the orchestrator dashboard, so a driver going off-shift doesn't
+        just disappear from view.
+        """
+        driver_ids = await self.get_all_driver_ids(hub_id)
+        return await self._bulk_read_states(hub_id, driver_ids)
+
+    async def _bulk_read_states(self, hub_id: str, driver_ids: list[str]) -> list[DriverState]:
         if not driver_ids:
             return []
-        async with timed_operation("fleet.get_fleet_snapshot"):
+        async with timed_operation("fleet.bulk_read_states"):
             pipe = self._redis.pipeline(transaction=False)
             for driver_id in driver_ids:
                 pipe.hgetall(_state_key(hub_id, driver_id))
             results = await pipe.execute()
 
-        snapshot: list[DriverState] = []
+        states: list[DriverState] = []
         for driver_id, data in zip(driver_ids, results, strict=True):
             if not data:
                 continue
-            snapshot.append(
+            states.append(
                 DriverState(
                     driver_id=driver_id,
                     hub_id=hub_id,
@@ -133,4 +164,4 @@ class FleetStateManager:
                     current_route_id=data["current_route_id"] or None,
                 )
             )
-        return snapshot
+        return states

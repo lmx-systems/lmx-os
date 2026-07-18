@@ -77,6 +77,33 @@ async def test_fleet_snapshot_returns_only_available_drivers(fake_redis):
 
 
 @pytest.mark.asyncio
+async def test_fleet_overview_includes_off_shift_drivers(fake_redis):
+    manager = FleetStateManager()
+    await manager.upsert_driver_state(
+        DriverState(driver_id="d1", hub_id="hub-1", status="available", capacity_units=10)
+    )
+    await manager.upsert_driver_state(
+        DriverState(driver_id="d2", hub_id="hub-1", status="off_shift", capacity_units=10)
+    )
+    overview = await manager.get_fleet_overview("hub-1")
+    assert {d.driver_id for d in overview} == {"d1", "d2"}
+
+
+@pytest.mark.asyncio
+async def test_fleet_overview_reflects_latest_status_after_change(fake_redis):
+    manager = FleetStateManager()
+    await manager.upsert_driver_state(
+        DriverState(driver_id="d1", hub_id="hub-1", status="available", capacity_units=10)
+    )
+    await manager.upsert_driver_state(
+        DriverState(driver_id="d1", hub_id="hub-1", status="en_route", capacity_units=10)
+    )
+    overview = await manager.get_fleet_overview("hub-1")
+    assert len(overview) == 1
+    assert overview[0].status == "en_route"
+
+
+@pytest.mark.asyncio
 async def test_hold_queue_store_add_get_remove_roundtrip(fake_redis):
     store = HoldQueueStore()
     now = datetime.now(timezone.utc)

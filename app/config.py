@@ -50,6 +50,16 @@ class Settings(BaseSettings):
     epicor_base_url: str | None = None
     epicor_api_key: str | None = None
 
+    # Origins allowed to call the API cross-origin - the orchestrator
+    # dashboard (dashboard/) in dev, and whatever the dashboard is actually
+    # deployed at in production. NOT a substitute for real authentication -
+    # see docs/ARCHITECTURE.md's auth caveat. Comma-separated in the env var.
+    dashboard_cors_origins: str = "http://localhost:5173"
+
+    @property
+    def dashboard_cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.dashboard_cors_origins.split(",") if origin.strip()]
+
 
 @lru_cache
 def get_settings() -> Settings:
