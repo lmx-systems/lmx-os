@@ -139,13 +139,16 @@ be checked against it before Hub 1 goes live:
 has moved from "eventually" to "before anyone but you opens this
 dashboard."** The rest is still roughly priority order.
 
-0. Add real authentication/authorization to the API — every endpoint is
-   currently open to anyone who can reach it, and that stopped being
-   theoretical the moment `dashboard/` gave it a clickable UI. Even a
-   minimal shared-secret header or basic auth is better than nothing for
-   an internal tool; a client-facing dashboard or driver app needs real
-   per-user auth, not a shared secret. Not a big lift compared to what
-   it's protecting.
+0. Add real authentication/authorization to the API — every endpoint was
+   open to anyone who can reach it, which stopped being theoretical the
+   moment `dashboard/` gave it a clickable UI. ~~Even a minimal
+   shared-secret header or basic auth is better than nothing for an
+   internal tool~~ — **done**: `app/security.py`'s `SharedSecretAuthMiddleware`
+   gates every endpoint except `/health` and the API docs behind an
+   `X-API-Key` header (`API_SHARED_SECRET` env var; unset leaves the API
+   open, same as before this existed). Still just a shared secret, not
+   per-user auth — a client-facing dashboard or driver app needs the real
+   thing before it ships.
 1. ~~Stand up Postgres + Redis in a real environment and run the
    migration~~ — **Done.** `tests/integration/` now covers the migration
    itself, ingestion, `FleetStateManager`, and the full ingest-to-optimizer
