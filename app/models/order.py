@@ -54,6 +54,13 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # real database's type-checking.
     hold_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Written by DispatchOptimizerService.run_cycle the moment this order is
+    # actually assigned to a driver - see app/optimizer/service.py. Lets the
+    # dashboard's Order Status Summary widget (and anything else querying
+    # Order.status) reflect a dispatch that already happened instead of
+    # showing "held" forever once the Redis hold queue has moved on.
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     weight_units: Mapped[float] = mapped_column(Numeric(10, 2), default=1, nullable=False)
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus, name="order_status"), default=OrderStatus.received, nullable=False

@@ -47,17 +47,15 @@ timestamp), so you can repeat the demo without resetting anything.
   matched to the seeded driver on its own within a couple seconds, which
   is the point `send_demo_order.py` waits for and confirms.
 
-## Known limitation, worth knowing before you present this
+## Order status now reflects dispatch too
 
-`Order.status` in Postgres currently only ever reaches `held` — nothing
-yet writes `assigned` back to the database once the optimizer dispatches
-an order (route/stop persistence for component 7 isn't built out yet).
-The **Hold Queue** and **Fleet Overview** dashboard widgets are accurate
-live signals (that's what this demo relies on); the **Order Status
-Summary** widget will keep showing the order under "held" even after it's
-actually been dispatched. Best to avoid that specific widget in a live
-walkthrough, or flag it as "status write-back is next," rather than let it
-look like a bug in the room. Happy to close that gap before a real investor
-session if you want it fixed — it's a contained addition (an `assigned_at`
-write plus a status update in `DispatchOptimizerService.run_cycle`), just
-out of scope for "build a sample payload."
+`DispatchOptimizerService.run_cycle` writes `Order.status = assigned` (plus
+a new `assigned_at` timestamp) back to Postgres the moment it actually
+dispatches an order — see `app/optimizer/service.py`. All three dashboard
+widgets (Hold Queue, Fleet Overview, Order Status Summary) are safe to show
+live now; none of them go stale after a dispatch.
+
+Still not persisted: which route/stop an order landed on, or route
+sequencing/ETAs for a driver's shift — that's `routes`/`stops` persistence,
+tied to the driver app (component 7), and a separate, larger piece of work
+than this status write-back.

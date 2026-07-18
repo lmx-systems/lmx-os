@@ -13,14 +13,18 @@ the DPH advantage in production.
 from __future__ import annotations
 
 import time
+import uuid
 from datetime import datetime, timezone
 
 import structlog
+from sqlalchemy import update
 
 from app.batch_queue.queue import run_hold_cycle
 from app.batch_queue.store import HoldQueueStore
 from app.config import settings
+from app.db import session_scope
 from app.fleet_state.manager import FleetStateManager
+from app.models.order import Order, OrderStatus
 from app.optimizer.google_routes_client import RouteOptimizationClient, get_route_optimization_client
 from app.schemas.optimizer import DriverCandidate, OptimizationResult, StopCandidate
 
@@ -93,6 +97,24 @@ class DispatchOptimizerService:
         assigned_stop_ids = {stop_id for a in assignments for stop_id in a.stop_ids}
         for order_id in assigned_stop_ids:
             await self._hold_queue.remove(hub_id, order_id)
+
+        # Write the dispatch back to Postgres so Order.status doesn't stay
+        # "held" forever once Redis has moved on - see the comment on
+        # Order.assigned_at. stop_id == order_id today (StopCandidate is
+        # always built one order per stop - see the loop above); if
+        # commingled multi-order stops land later, this still works as-is
+        # since assigned_stop_ids would just contain more order ids.
+        # Opens its own session rather than taking one as a constructor arg
+        # because this runs from two contexts: a request-scoped call
+        # (POST /optimizer/{hub_id}/run-cycle) and a background asyncio task
+        # with no request of its own (app/optimizer/event_trigger.py).
+        if assigned_stop_ids:
+            async with session_scope() as session:
+                await session.execute(
+                    update(Order)
+                    .where(Order.id.in_(uuid.UUID(order_id) for order_id in assigned_stop_ids))
+                    .values(status=OrderStatus.assigned, assigned_at=datetime.now(timezone.utc))
+                )
 
         duration = time.perf_counter() - cycle_start
         over_budget = duration > settings.optimizer_cycle_budget_seconds

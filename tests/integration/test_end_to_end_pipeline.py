@@ -20,6 +20,7 @@ from app.ingestion.service import ingest_order
 from app.models.client import Client
 from app.models.driver import Driver
 from app.models.hub import Hub
+from app.models.order import OrderStatus
 from app.models.shop import Shop
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.fleet import DriverLocation, DriverState
@@ -115,3 +116,11 @@ async def test_full_pipeline_ingest_to_optimizer_assignment(db_session, real_red
     # 4. The assigned order should have been removed from the hold queue.
     held_after_cycle = await hold_queue.get_all(str(hub_id))
     assert held_after_cycle == []
+
+    # 5. run_cycle writes the dispatch back to Postgres on its own session
+    # (see app/optimizer/service.py) - db_session won't see it without an
+    # explicit refresh, since that write went through a different
+    # connection/session entirely.
+    await db_session.refresh(order)
+    assert order.status == OrderStatus.assigned
+    assert order.assigned_at is not None
