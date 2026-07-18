@@ -10,6 +10,42 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
 
+    # Real Postgres + Redis for tests/integration/ - GitHub Actions manages
+    # these as containers alongside the job, no docker-compose needed here.
+    # tests/integration/conftest.py auto-skips those tests if it can't
+    # reach a real Postgres/Redis, so this also still works if these
+    # services ever get removed - it'll just silently stop covering that
+    # ground, which is why the "Verify integration tests actually ran"
+    # step below exists.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: lmx
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: lmx_os_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lmx"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://lmx:test@localhost:5432/lmx_os_test
+      REDIS_URL: redis://localhost:6379/15
+
     steps:
       - uses: actions/checkout@v4
 
@@ -28,5 +64,12 @@ jobs:
       - name: Type check (mypy)
         run: mypy app || true  # advisory only until Phase 1 models settle
 
-      - name: Test (pytest, fakeredis - no live services needed)
-        run: pytest tests/ -v --cov=app --cov-report=term-missing
+      - name: Test (unit + integration - real Postgres/Redis service containers above)
+        run: pytest tests/ -v --cov=app --cov-report=term-missing | tee /tmp/pytest-output.txt
+
+      - name: Verify integration tests actually ran (didn't silently skip)
+        run: |
+          if grep -q "SKIPPED.*Skipping integration tests" /tmp/pytest-output.txt; then
+            echo "::error::Integration tests were skipped - the postgres/redis service containers weren't reachable. This should never happen in CI; check the services: block above."
+            exit 1
+          fi

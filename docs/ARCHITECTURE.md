@@ -110,6 +110,8 @@ be checked against it before Hub 1 goes live:
    interpretation (SLA deadline check → cluster-mate check → driver
    availability check → absolute hold cap), documented inline and
    structured so each question is independently testable and swappable.
+   Now also covered end-to-end against real Postgres + Redis — see
+   `tests/integration/test_end_to_end_pipeline.py`.
    Treat it as a solid first draft, not an approved algorithm.
 2. **SLA hold-window minutes** (`app/sla/engine.py`,
    `DEFAULT_HOLD_WINDOW_MINUTES`). Placeholder values (T1=10min, T2=45min,
@@ -144,10 +146,19 @@ dashboard."** The rest is still roughly priority order.
    an internal tool; a client-facing dashboard or driver app needs real
    per-user auth, not a shared secret. Not a big lift compared to what
    it's protecting.
-1. Stand up Postgres + Redis in a real environment and run the migration;
-   the current tests are all offline (fakeredis + pure functions) and
-   there's no integration test against a live database yet — that's the
-   single biggest testing gap in this codebase.
+1. ~~Stand up Postgres + Redis in a real environment and run the
+   migration~~ — **Done.** `tests/integration/` now covers the migration
+   itself, ingestion, `FleetStateManager`, and the full ingest-to-optimizer
+   pipeline against a real Postgres + Redis (auto-skips with a clear
+   message if a real DATABASE_URL/REDIS_URL isn't reachable; CI provides
+   real service containers and fails the build if the suite silently
+   skips — see `.github/workflows/ci.yml`). This work also caught a real
+   bug: `Order.hold_deadline`/`requested_at` and `Stop.eta`/`completed_at`
+   were missing explicit `DateTime(timezone=True)`, which meant every
+   insert against a real Postgres failed with "can't subtract
+   offset-naive and offset-aware datetimes" — invisible to the fakeredis/
+   pure-function suite. Fixed in `app/models/order.py` and
+   `app/models/stop.py`.
 2. Confirm the real Epicor payload shape with the first design-partner
    client and update `EpicorAdapter` before relying on it.
 3. Get the Source of Truth Index docs (or equivalent) checked against

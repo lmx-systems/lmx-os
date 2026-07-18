@@ -5,7 +5,7 @@ Engine classifies (T1/T2/T3) and the Batch-Hold Queue clusters.
 import enum
 from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, Numeric, String
+from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,11 +43,20 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     raw_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     sla_tier: Mapped[SLATier | None] = mapped_column(Enum(SLATier, name="sla_tier"), nullable=True)
-    hold_deadline: Mapped[datetime | None] = mapped_column(nullable=True)
+    # Explicit timezone=True is required here - without it, SQLAlchemy
+    # infers a naive DateTime from the bare `datetime` annotation, which
+    # doesn't match the timezone-aware column the migration actually
+    # creates (see migrations/versions/0001_initial_schema.py) and every
+    # tz-aware datetime this app ever produces (e.g. datetime.now(timezone.utc)
+    # in app/sla/engine.py) fails to insert against a real Postgres.
+    # Caught by tests/integration/test_ingestion_integration.py - fakeredis/
+    # pure-function unit tests can't catch this since they never touch a
+    # real database's type-checking.
+    hold_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     weight_units: Mapped[float] = mapped_column(Numeric(10, 2), default=1, nullable=False)
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus, name="order_status"), default=OrderStatus.received, nullable=False
     )
 
-    requested_at: Mapped[datetime] = mapped_column(nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

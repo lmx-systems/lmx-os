@@ -4,7 +4,7 @@ multiple commingled orders per Section 8's multi-client commingling design).
 """
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,8 +22,11 @@ class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
     # pending | en_route | arrived | completed | failed
 
-    eta: Mapped[datetime | None] = mapped_column(nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # timezone=True required - see the comment on Order.hold_deadline in
+    # app/models/order.py for why (a real bug this exact mismatch caused,
+    # caught by tests/integration/).
+    eta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pod_photo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
