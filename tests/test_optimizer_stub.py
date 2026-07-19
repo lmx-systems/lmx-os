@@ -36,6 +36,20 @@ async def test_stub_prioritizes_t1_over_t2():
 
 
 @pytest.mark.asyncio
+async def test_stub_prioritizes_hot_shot_over_t1():
+    client = StubRouteOptimizationClient()
+    # Single driver with capacity for only one stop.
+    drivers = [DriverCandidate(driver_id="d1", lat=0, lng=0, capacity_remaining_units=1)]
+    stops = [
+        StopCandidate(stop_id="s_t1", order_ids=["o1"], lat=0, lng=0, weight_units=1, sla_tier="T1"),
+        StopCandidate(stop_id="s_hot", order_ids=["o2"], lat=0, lng=0, weight_units=1, sla_tier="HOT_SHOT"),
+    ]
+    assignments, unassigned = await client.optimize(drivers, stops)
+    assert assignments[0].stop_ids == ["s_hot"]
+    assert unassigned == ["s_t1"]
+
+
+@pytest.mark.asyncio
 async def test_stub_leaves_stop_unassigned_when_no_capacity():
     client = StubRouteOptimizationClient()
     drivers = [DriverCandidate(driver_id="d1", lat=0, lng=0, capacity_remaining_units=0)]

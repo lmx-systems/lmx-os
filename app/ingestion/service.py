@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
 from app.ingestion.registry import get_adapter
+from app.models.client_rate import ClientRate
 from app.models.order import Order, OrderStatus
 from app.models.rules import ActiveRule
 from app.models.shop import Shop
@@ -76,6 +77,29 @@ async def _load_sla_overrides(
     return overrides
 
 
+async def _lookup_fee_cents(session: AsyncSession, client_id: str, sla_tier: str) -> int | None:
+    """
+    Phase 8 per-client, per-tier billing rate lookup. Returns None (not 0)
+    when the client has no ClientRate configured for this tier yet -
+    Order.fee_cents' docstring is explicit that null must never look like
+    a free delivery. Logged as a warning rather than raised: a missing
+    rate is an onboarding gap ops needs to fix, not a reason to fail the
+    whole ingestion pipeline for every order from that client.
+    """
+    result = await session.execute(
+        select(ClientRate.rate_per_drop_cents).where(
+            ClientRate.client_id == uuid.UUID(client_id), ClientRate.sla_tier == sla_tier
+        )
+    )
+    fee_cents = result.scalar_one_or_none()
+    if fee_cents is None:
+        logger.warning(
+            "client_rate_missing", client_id=client_id, sla_tier=sla_tier,
+            detail="No ClientRate configured for this client/tier - fee_cents left null.",
+        )
+    return fee_cents
+
+
 async def ingest_order(
     session: AsyncSession,
     hold_queue: HoldQueueStore,
@@ -115,6 +139,7 @@ async def ingest_order(
 
     order.sla_tier = classified.sla_tier
     order.hold_deadline = classified.hold_deadline
+    order.fee_cents = await _lookup_fee_cents(session, client_id, classified.sla_tier)
     order.status = OrderStatus.held
     await session.commit()
 

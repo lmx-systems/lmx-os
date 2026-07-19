@@ -23,6 +23,8 @@ def _build_app() -> Starlette:
         Route("/fleet/{hub_id}/drivers", _ok),
         Route("/driver/me", _ok),
         Route("/drivers-report", _ok),
+        Route("/client/me", _ok),
+        Route("/admin/clients", _ok),
     ]
     test_app = Starlette(routes=routes)
     test_app.add_middleware(SharedSecretAuthMiddleware)
@@ -84,4 +86,25 @@ def test_path_merely_starting_with_the_exempt_word_is_not_exempt():
         mock_settings.api_shared_secret = "topsecret"
         client = TestClient(_build_app())
         response = client.get("/drivers-report")
+    assert response.status_code == 401
+
+
+def test_client_prefix_is_exempt_even_with_secret_configured():
+    # The client portal (Phase 8) has its own real per-client auth (JWT via
+    # app/client_auth/), same reasoning as /driver above.
+    with patch("app.security.settings") as mock_settings:
+        mock_settings.api_shared_secret = "topsecret"
+        client = TestClient(_build_app())
+        response = client.get("/client/me")
+    assert response.status_code == 200
+
+
+def test_admin_prefix_is_not_exempt():
+    # Onboarding a client (Phase 8) is an internal ops action and must
+    # still require the shared secret - unlike /client and /driver, /admin
+    # has no auth scheme of its own.
+    with patch("app.security.settings") as mock_settings:
+        mock_settings.api_shared_secret = "topsecret"
+        client = TestClient(_build_app())
+        response = client.get("/admin/clients")
     assert response.status_code == 401

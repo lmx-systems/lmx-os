@@ -57,5 +57,19 @@ services:
     ports:
       - "5173:80"
 
+  client-portal:
+    build:
+      context: ./client-portal
+      args:
+        # Baked in at build time - see the note in client-portal/Dockerfile.
+        # No VITE_API_SHARED_SECRET here, unlike dashboard - /client/* has
+        # its own real per-client JWT auth (app/client_auth/), not the
+        # internal ops shared-secret stopgap.
+        VITE_API_BASE_URL: ${CLIENT_PORTAL_API_BASE_URL:-http://localhost:8000}
+    depends_on:
+      - app
+    ports:
+      - "5174:80"
+
 volumes:
   lmx_pg_data:

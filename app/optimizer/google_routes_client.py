@@ -54,8 +54,10 @@ SOLVE_TIMEOUT = "3s"
 # partial plan. Skippable shipments instead show up in `skippedShipments`
 # and stay in the hold queue for next cycle (see service.py) - the same
 # "leave it held, don't drop it" behavior the stub client has. Costs are
-# ordered so the solver exhausts T2/T3 headroom before ever skipping a T1.
-SLA_TIER_SKIP_PENALTY = {"T1": 100_000.0, "T2": 10_000.0, "T3": 1_000.0}
+# ordered so the solver exhausts T2/T3 headroom before ever skipping a T1,
+# and HOT_SHOT (Phase 8's premium, never-commingled tier) before ever
+# skipping a T1.
+SLA_TIER_SKIP_PENALTY = {"HOT_SHOT": 1_000_000.0, "T1": 100_000.0, "T2": 10_000.0, "T3": 1_000.0}
 DEFAULT_SKIP_PENALTY = 10_000.0
 
 
@@ -178,10 +180,10 @@ class StubRouteOptimizationClient(RouteOptimizationClient):
         assignments: dict[str, list[str]] = {d.driver_id: [] for d in drivers}
         unassigned: list[str] = []
 
-        # Highest urgency first (T1 before T2 before T3), then nearest
-        # available driver by naive Euclidean distance (fine for a stub;
-        # a real optimizer uses road-network distance).
-        tier_priority = {"T1": 0, "T2": 1, "T3": 2}
+        # Highest urgency first (HOT_SHOT before T1 before T2 before T3),
+        # then nearest available driver by naive Euclidean distance (fine
+        # for a stub; a real optimizer uses road-network distance).
+        tier_priority = {"HOT_SHOT": -1, "T1": 0, "T2": 1, "T3": 2}
         sorted_stops = sorted(stops, key=lambda s: tier_priority.get(s.sla_tier, 1))
 
         for stop in sorted_stops:

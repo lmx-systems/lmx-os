@@ -80,6 +80,36 @@ export interface NightlyJobResult {
   proposals_created: ProposedRuleSummary[]
 }
 
+// Phase 8 minimal client onboarding - mirrors app/schemas/admin.py.
+export interface ShopOnboardingInput {
+  name: string
+  address: string
+  lat: number
+  lng: number
+  external_ref: string
+  phone?: string
+}
+
+export interface RateOnboardingInput {
+  sla_tier: string
+  rate_per_drop_cents: number
+}
+
+export interface ClientOnboardingBody {
+  hub_id: string
+  name: string
+  pos_system: string
+  shops: ShopOnboardingInput[]
+  rates: RateOnboardingInput[]
+  portal_email: string
+  portal_password: string
+}
+
+export interface ClientOnboardingResult {
+  client_id: string
+  shop_ids: string[]
+}
+
 // --- UI-local types below - no backend equivalent, not response mirrors ---
 
 export interface RunLogEntry {

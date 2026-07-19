@@ -13,7 +13,9 @@ interface HoldQueueTableProps {
 
 type SortKey = 'shop_name' | 'sla_tier' | 'held_since' | 'hold_deadline'
 
-const TIERS = ['all', 'T1', 'T2', 'T3'] as const
+// HOT_SHOT (Phase 8) listed first - the highest-urgency tier, and the one
+// hub staff most need to filter to at a glance.
+const TIERS = ['all', 'HOT_SHOT', 'T1', 'T2', 'T3'] as const
 
 export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
   const [search, setSearch] = useState('')
@@ -74,7 +76,12 @@ export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
               />
             </div>
             {TIERS.map((t) => (
-              <Chip key={t} label={t === 'all' ? 'All' : t} active={tier === t} onClick={() => setTier(t)} />
+              <Chip
+                key={t}
+                label={t === 'all' ? 'All' : t === 'HOT_SHOT' ? 'Hot Shot' : t}
+                active={tier === t}
+                onClick={() => setTier(t)}
+              />
             ))}
           </div>
 

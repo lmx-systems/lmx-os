@@ -54,7 +54,7 @@ async def test_upgrade_head_creates_expected_enums(db_engine):
     sla_labels = [label for typname, label in rows if typname == "sla_tier"]
     order_status_labels = [label for typname, label in rows if typname == "order_status"]
 
-    assert sla_labels == ["T1", "T2", "T3"]
+    assert sla_labels == ["T1", "T2", "T3", "HOT_SHOT"]
     assert order_status_labels == [
         "received",
         "classified",

@@ -25,11 +25,12 @@ from app.driver_auth.dependencies import AuthedDriver, get_current_driver
 from app.driver_auth.otp_store import OtpRateLimitExceeded, OtpStore
 from app.driver_auth.tokens import issue_token
 from app.fleet_state.manager import FleetStateManager
+from app.messaging.shop_notifications import notify_shop_en_route, notify_shop_picked_up
 from app.messaging.sms_client import get_sms_client
 from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
 from app.models.message import Message
-from app.models.order import Order, OrderStatus
+from app.models.order import Order, OrderStatus, SLATier
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
@@ -418,10 +419,42 @@ async def accept_offer(
     sequence = 0
 
     # One pickup stop per unique shop, aggregating any commingled orders
-    # from that shop (Section 8 clustering) into a single parcel count.
+    # from that shop (Section 8 clustering) into a single parcel count -
+    # except HOT_SHOT orders (Phase 8), which never share a stop with any
+    # other order, even another HOT_SHOT order from the same shop, per
+    # Sourabh's "direct point-to-point, never commingled" definition. Each
+    # HOT_SHOT order gets its own dedicated pickup Stop with parcel_count=1.
     orders_by_shop: dict[uuid.UUID, list[uuid.UUID]] = {}
+    hot_shot_order_ids: list[uuid.UUID] = []
     for order in orders_by_id.values():
-        orders_by_shop.setdefault(order.shop_id, []).append(order.id)
+        if order.sla_tier == SLATier.HOT_SHOT:
+            hot_shot_order_ids.append(order.id)
+        else:
+            orders_by_shop.setdefault(order.shop_id, []).append(order.id)
+
+    # Tracks whichever pickup stop lands at sequence 0 - that's the driver's
+    # first stop the moment this offer is accepted, so it gets an
+    # immediate "en route" shop SMS below (Phase 8 shop notifications).
+    first_pickup_stop: Stop | None = None
+    first_pickup_is_hot_shot = False
+
+    # HOT_SHOT pickups go first - the premium tier a client is paying extra
+    # for shouldn't sit behind a driver's other pickups on the same route.
+    for oid in hot_shot_order_ids:
+        order = orders_by_id[oid]
+        pickup = Stop(
+            route_id=route.id,
+            shop_id=order.shop_id,
+            sequence=sequence,
+            stop_type="pickup",
+            parcel_count=1,
+        )
+        session.add(pickup)
+        await session.flush()
+        session.add(StopOrder(stop_id=pickup.id, order_id=oid))
+        if first_pickup_stop is None:
+            first_pickup_stop, first_pickup_is_hot_shot = pickup, True
+        sequence += 1
 
     for shop_id, shop_order_ids in orders_by_shop.items():
         pickup = Stop(
@@ -435,12 +468,23 @@ async def accept_offer(
         await session.flush()
         for oid in shop_order_ids:
             session.add(StopOrder(stop_id=pickup.id, order_id=oid))
+        if first_pickup_stop is None:
+            first_pickup_stop, first_pickup_is_hot_shot = pickup, False
         sequence += 1
 
     # One dropoff stop per order, in the sequence the optimizer assigned
     # them - see app/models/order.py's delivery_* fields and the module
-    # docstring on drop-sequencing being unoptimized in v1.
-    for stop_summary in offer.stop_payload:
+    # docstring on drop-sequencing being unoptimized in v1. HOT_SHOT
+    # dropoffs are sorted first, same reasoning as their pickups above -
+    # this still preserves "every pickup stop is sequenced before every
+    # dropoff stop" (see complete_stop's unfinished_pickups check below),
+    # it just prioritizes HOT_SHOT within each of those two blocks.
+    hot_shot_id_set = set(hot_shot_order_ids)
+    sorted_stop_payload = sorted(
+        offer.stop_payload,
+        key=lambda s: 0 if uuid.UUID(s["order_id"]) in hot_shot_id_set else 1,
+    )
+    for stop_summary in sorted_stop_payload:
         order = orders_by_id.get(uuid.UUID(stop_summary["order_id"]))
         if order is None:
             continue
@@ -469,6 +513,24 @@ async def accept_offer(
     await dispatch_event_bus.publish(str(offer.hub_id), "driver_status_changed")
 
     await session.commit()
+
+    # Phase 8 shop SMS: the driver is headed to their first pickup the
+    # moment this offer is accepted - notify that shop now. Best-effort:
+    # a shop with no phone on file (or a send failure) shouldn't block the
+    # accept flow, which has already committed above.
+    if first_pickup_stop is not None and first_pickup_stop.shop_id is not None:
+        shop = await session.get(Shop, first_pickup_stop.shop_id)
+        if shop is not None:
+            await notify_shop_en_route(
+                session,
+                hub_id=offer.hub_id,
+                driver_id=offer.driver_id,
+                stop_id=first_pickup_stop.id,
+                shop=shop,
+                is_hot_shot=first_pickup_is_hot_shot,
+            )
+            await session.commit()
+
     return await _load_route_view(session, route.id)
 
 
@@ -589,6 +651,44 @@ async def _stop_view_after_reload(session: AsyncSession, stop: Stop) -> StopView
     return next(s for s in view.stops if s.stop_id == str(stop.id))
 
 
+async def _pickup_stop_is_hot_shot(session: AsyncSession, stop_id: uuid.UUID) -> bool:
+    """
+    A HOT_SHOT pickup stop always carries exactly one order (accept_offer
+    never lets it commingle - see that function's docstring), so checking
+    that stop's order's tier is enough; a regular pickup stop's order(s)
+    are never HOT_SHOT by the same construction.
+    """
+    order_id_result = await session.execute(
+        select(StopOrder.order_id).where(StopOrder.stop_id == stop_id).limit(1)
+    )
+    order_id = order_id_result.scalar_one_or_none()
+    if order_id is None:
+        return False
+    order = await session.get(Order, order_id)
+    return order is not None and order.sla_tier == SLATier.HOT_SHOT
+
+
+async def _notify_shop_for_pickup_stop(
+    session: AsyncSession, *, hub_id: str, driver_id: str, stop: Stop, event: str
+) -> None:
+    """event is "picked_up" or "en_route" - see app/messaging/shop_notifications.py."""
+    if stop.shop_id is None:
+        return
+    shop = await session.get(Shop, stop.shop_id)
+    if shop is None:
+        return
+    is_hot_shot = await _pickup_stop_is_hot_shot(session, stop.id)
+    notify = notify_shop_picked_up if event == "picked_up" else notify_shop_en_route
+    await notify(
+        session,
+        hub_id=uuid.UUID(hub_id),
+        driver_id=uuid.UUID(driver_id),
+        stop_id=stop.id,
+        shop=shop,
+        is_hot_shot=is_hot_shot,
+    )
+
+
 # Stop.status's terminal states - once here, a stop can't transition again.
 # Guards below exist so a stale/retried/out-of-order client call can't skip a
 # step (complete a dropoff whose pickup was never scanned) or re-run a
@@ -693,6 +793,34 @@ async def complete_stop(
         route.status = "completed"
 
     await session.commit()
+
+    # Phase 8 shop SMS - completing a pickup stop means (1) that shop just
+    # had their order picked up, and (2) whichever pickup stop is next in
+    # sequence on this route (if any, not yet completed) just became the
+    # driver's next stop, i.e. "en route" to that shop now. Best-effort:
+    # runs after the stop-completion commit above, so a shop with no phone
+    # on file or a send failure never blocks completing the stop itself.
+    if stop.stop_type == "pickup":
+        await _notify_shop_for_pickup_stop(
+            session, hub_id=driver.hub_id, driver_id=driver.driver_id, stop=stop, event="picked_up"
+        )
+        next_pickup_result = await session.execute(
+            select(Stop)
+            .where(
+                Stop.route_id == stop.route_id,
+                Stop.stop_type == "pickup",
+                Stop.sequence > stop.sequence,
+                Stop.status != "completed",
+            )
+            .order_by(Stop.sequence)
+            .limit(1)
+        )
+        next_pickup = next_pickup_result.scalar_one_or_none()
+        if next_pickup is not None:
+            await _notify_shop_for_pickup_stop(
+                session, hub_id=driver.hub_id, driver_id=driver.driver_id, stop=next_pickup, event="en_route"
+            )
+        await session.commit()
 
     if route_finished:
         # "Stop completed" is the design doc's third event-trigger source

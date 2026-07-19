@@ -10,6 +10,7 @@ import pytest
 from app.batch_queue.store import HoldQueueStore
 from app.ingestion.service import ShopNotFoundError, ingest_order
 from app.models.client import Client
+from app.models.client_rate import ClientRate
 from app.models.hub import Hub
 from app.models.shop import Shop
 
@@ -100,6 +101,58 @@ async def test_ingest_order_with_rush_flag_classifies_t1(db_session, real_redis_
     )
 
     assert order.sla_tier == "T1"
+
+
+async def test_ingest_order_computes_fee_cents_from_configured_client_rate(db_session, real_redis_client):
+    hub_id, client_id, _shop_id = await _seed_hub_client_shop(db_session, external_ref="SHOP-RATE")
+    db_session.add(ClientRate(client_id=client_id, sla_tier="T2", rate_per_drop_cents=1_800))
+    await db_session.commit()
+    hold_queue = HoldQueueStore()
+
+    payload = {
+        "order_ref": "ORD-INT-RATE-1",
+        "shop_ref": "SHOP-RATE",
+        "shop_lat": 34.06,
+        "shop_lng": -118.24,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    order = await ingest_order(
+        db_session,
+        hold_queue,
+        hub_id=str(hub_id),
+        client_id=str(client_id),
+        source_system="flat_file",
+        payload=payload,
+    )
+
+    assert order.sla_tier == "T2"
+    assert order.fee_cents == 1_800
+
+
+async def test_ingest_order_leaves_fee_cents_null_without_a_configured_rate(db_session, real_redis_client):
+    hub_id, client_id, _shop_id = await _seed_hub_client_shop(db_session, external_ref="SHOP-NO-RATE")
+    hold_queue = HoldQueueStore()
+
+    payload = {
+        "order_ref": "ORD-INT-NO-RATE-1",
+        "shop_ref": "SHOP-NO-RATE",
+        "shop_lat": 34.06,
+        "shop_lng": -118.24,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    order = await ingest_order(
+        db_session,
+        hold_queue,
+        hub_id=str(hub_id),
+        client_id=str(client_id),
+        source_system="flat_file",
+        payload=payload,
+    )
+
+    # Null, not zero - a missing rate must never look like a free delivery.
+    assert order.fee_cents is None
 
 
 async def test_ingest_order_raises_for_unknown_shop(db_session, real_redis_client):

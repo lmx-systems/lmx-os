@@ -1,9 +1,18 @@
 import type { DriverState } from '../../lib/types'
 
+// HOT_SHOT (Phase 8) gets its own distinct, purple "premium" style rather
+// than falling back to T2's amber - it's the highest-urgency tier, not a
+// middling one, and visually confusing it with T2 would undersell what a
+// client is paying extra for.
 const TIER_STYLES: Record<string, string> = {
+  HOT_SHOT: 'bg-[#f1e8fd] text-[#7c3aed]',
   T1: 'bg-[var(--red-dim)] text-[var(--red)]',
   T2: 'bg-[var(--amber-dim)] text-[var(--amber)]',
   T3: 'bg-[var(--surface-2)] text-[var(--gray)]',
+}
+
+const TIER_LABEL: Record<string, string> = {
+  HOT_SHOT: 'Hot Shot',
 }
 
 export function TierBadge({ tier }: { tier: string }) {
@@ -13,7 +22,7 @@ export function TierBadge({ tier }: { tier: string }) {
         TIER_STYLES[tier] ?? TIER_STYLES.T2
       }`}
     >
-      {tier}
+      {TIER_LABEL[tier] ?? tier}
     </span>
   )
 }

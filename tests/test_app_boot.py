@@ -14,5 +14,10 @@ def test_app_imports_and_exposes_expected_routes():
         "/fleet/{hub_id}/drivers/location",
         "/optimizer/{hub_id}/run-cycle",
         "/ingestion/{hub_id}/{client_id}/{source_system}",
+        # Phase 8: client portal + admin onboarding.
+        "/client/auth/login",
+        "/client/me",
+        "/client/orders",
+        "/admin/clients",
     }
     assert expected_paths.issubset(schema["paths"].keys())

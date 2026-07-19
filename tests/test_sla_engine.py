@@ -27,6 +27,19 @@ def make_order(**overrides) -> NormalizedOrder:
     return NormalizedOrder(**defaults)
 
 
+def test_hot_shot_flag_forces_hot_shot_tier():
+    order = make_order(raw_payload={"hot_shot": True})
+    tier, reason = classify_tier(order)
+    assert tier == "HOT_SHOT"
+    assert "hot-shot" in reason
+
+
+def test_hot_shot_flag_takes_priority_over_rush_flag():
+    order = make_order(raw_payload={"hot_shot": True, "rush": True})
+    tier, _ = classify_tier(order)
+    assert tier == "HOT_SHOT"
+
+
 def test_rush_flag_forces_t1():
     order = make_order(raw_payload={"rush": True})
     tier, reason = classify_tier(order)

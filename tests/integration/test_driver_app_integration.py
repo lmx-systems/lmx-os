@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from app.api.driver_routes import (
     accept_offer,
@@ -38,7 +39,9 @@ from app.fleet_state.manager import FleetStateManager
 from app.models.client import Client
 from app.models.driver import Driver
 from app.models.hub import Hub
+from app.models.message import Message
 from app.models.order import Order, OrderStatus
+from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.service import DispatchOptimizerService
@@ -61,7 +64,7 @@ async def _seed(db_session):
         [
             Shop(
                 id=shop_id, client_id=client_id, name="Midtown Auto Parts", address="220 Harbor St",
-                lat=34.051, lng=-118.251, external_ref="SHOP-DRIVER-APP",
+                lat=34.051, lng=-118.251, external_ref="SHOP-DRIVER-APP", phone="+15555550120",
             ),
             Driver(id=driver_id, hub_id=hub_id, name="Jordan P.", phone="+15555550199", vehicle_capacity_units=5),
         ]
@@ -307,3 +310,143 @@ async def test_complete_stop_records_left_at(db_session, real_redis_client):
         driver=authed, session=db_session,
     )
     assert final_view.left_at == "front door"
+
+
+async def test_accept_offer_never_commingles_a_hot_shot_pickup(db_session, real_redis_client):
+    """
+    Phase 8: HOT_SHOT is direct point-to-point and must never share a
+    pickup stop with another order, even one from the same shop in the
+    same offer - unlike T1/T2/T3, which do commingle (see the module
+    docstring's Section 8 clustering reference). Also checks that the
+    HOT_SHOT pickup and dropoff are sequenced ahead of the regular
+    order's, and that "every pickup precedes every dropoff" still holds.
+    """
+    hub_id, client_id, shop_id, driver_id, regular_order = await _seed(db_session)
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+
+    now = datetime.now(timezone.utc)
+    hot_order = Order(
+        hub_id=hub_id, client_id=client_id, shop_id=shop_id,
+        external_order_ref="ORD-DRIVER-APP-HOT-1", source_system="flat_file", raw_payload={},
+        sla_tier="HOT_SHOT", hold_deadline=now + timedelta(minutes=2), weight_units=1,
+        status=OrderStatus.assigned, requested_at=now,
+        delivery_address="9 Speedway Ln", delivery_lat=34.0540, delivery_lng=-118.2540,
+        delivery_contact_name="A. Cruz", delivery_contact_phone="+15555550177",
+    )
+    db_session.add(hot_order)
+    await db_session.commit()
+
+    offer = RouteOffer(
+        hub_id=hub_id,
+        driver_id=driver_id,
+        status="offered",
+        stop_payload=[
+            {
+                "order_id": str(regular_order.id), "lat": 34.051, "lng": -118.251,
+                "sla_tier": "T2", "shop_name": "Midtown Auto Parts",
+            },
+            {
+                "order_id": str(hot_order.id), "lat": 34.051, "lng": -118.251,
+                "sla_tier": "HOT_SHOT", "shop_name": "Midtown Auto Parts",
+            },
+        ],
+        offered_at=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+    db_session.add(offer)
+    await db_session.commit()
+
+    route = await accept_offer(str(offer.id), driver=authed, session=db_session)
+
+    pickups = [s for s in route.stops if s.stop_type == "pickup"]
+    dropoffs = [s for s in route.stops if s.stop_type == "dropoff"]
+
+    # Two separate pickup stops, not one commingled stop for the shop -
+    # each carries exactly one order.
+    assert len(pickups) == 2
+    assert all(p.parcel_count == 1 for p in pickups)
+    pickup_order_ids = {p.order_ids[0] for p in pickups}
+    assert pickup_order_ids == {str(regular_order.id), str(hot_order.id)}
+
+    # HOT_SHOT pickup and dropoff both come first within their block.
+    hot_pickup = next(p for p in pickups if p.order_ids == [str(hot_order.id)])
+    regular_pickup = next(p for p in pickups if p.order_ids == [str(regular_order.id)])
+    assert hot_pickup.sequence < regular_pickup.sequence
+
+    hot_dropoff = next(d for d in dropoffs if d.order_ids == [str(hot_order.id)])
+    regular_dropoff = next(d for d in dropoffs if d.order_ids == [str(regular_order.id)])
+    assert hot_dropoff.sequence < regular_dropoff.sequence
+
+    # The "every pickup before every dropoff" invariant complete_stop's
+    # unfinished_pickups check relies on must still hold.
+    assert max(p.sequence for p in pickups) < min(d.sequence for d in dropoffs)
+
+
+async def _shop_messages(db_session, stop_id):
+    result = await db_session.execute(
+        select(Message).where(Message.channel == "shop", Message.stop_id == uuid.UUID(stop_id))
+        .order_by(Message.created_at)
+    )
+    return list(result.scalars().all())
+
+
+async def test_accepting_an_offer_sends_an_en_route_shop_sms(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    messages = await _shop_messages(db_session, pickup.stop_id)
+    assert len(messages) == 1
+    assert messages[0].direction == "outbound"
+    assert messages[0].counterparty_phone == "+15555550120"
+    assert "Thanks for LMX'ing it!" in messages[0].body
+    assert "Hot Shot" not in messages[0].body  # regular T2 order, not the premium tier
+
+
+async def test_completing_a_pickup_stop_sends_a_picked_up_shop_sms(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
+    await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
+    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+
+    messages = await _shop_messages(db_session, pickup.stop_id)
+    # The "en route" sent at accept, plus "picked up" sent at completion -
+    # no second "en route" since this route only has the one pickup stop.
+    assert len(messages) == 2
+    assert "picked up" in messages[1].body.lower()
+
+
+async def test_hot_shot_pickup_gets_the_premium_shop_sms_copy(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, regular_order = await _seed(db_session)
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+
+    now = datetime.now(timezone.utc)
+    hot_order = Order(
+        hub_id=hub_id, client_id=client_id, shop_id=shop_id,
+        external_order_ref="ORD-DRIVER-APP-HOT-SMS", source_system="flat_file", raw_payload={},
+        sla_tier="HOT_SHOT", hold_deadline=now + timedelta(minutes=2), weight_units=1,
+        status=OrderStatus.assigned, requested_at=now,
+        delivery_address="9 Speedway Ln", delivery_lat=34.0540, delivery_lng=-118.2540,
+        delivery_contact_name="A. Cruz", delivery_contact_phone="+15555550177",
+    )
+    db_session.add(hot_order)
+    await db_session.commit()
+
+    offer = RouteOffer(
+        hub_id=hub_id, driver_id=driver_id, status="offered",
+        stop_payload=[
+            {"order_id": str(hot_order.id), "lat": 34.051, "lng": -118.251, "sla_tier": "HOT_SHOT", "shop_name": "Midtown Auto Parts"},
+        ],
+        offered_at=now, expires_at=now + timedelta(minutes=5),
+    )
+    db_session.add(offer)
+    await db_session.commit()
+
+    route = await accept_offer(str(offer.id), driver=authed, session=db_session)
+    pickup = next(s for s in route.stops if s.stop_type == "pickup")
+
+    messages = await _shop_messages(db_session, pickup.stop_id)
+    assert len(messages) == 1
+    assert "Hot Shot" in messages[0].body
+    assert "Thanks for LMX'ing it!" in messages[0].body

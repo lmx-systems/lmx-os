@@ -5,7 +5,7 @@ Engine classifies (T1/T2/T3) and the Batch-Hold Queue clusters.
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,6 +14,7 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class SLATier(str, enum.Enum):
+    HOT_SHOT = "HOT_SHOT"  # direct point-to-point, never commingled with another order's pickup
     T1 = "T1"  # urgent / short hold window
     T2 = "T2"  # standard
     T3 = "T3"  # flexible / long hold window
@@ -81,3 +82,11 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     delivery_contact_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     delivery_contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     delivery_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # What LMX charges the client for this drop (Phase 8) - set once at
+    # classification time (app/ingestion/service.py) from the client's
+    # ClientRate for this order's tier. Null, not zero, when the client
+    # has no configured rate for this tier yet - a missing price should
+    # never silently look like a free delivery on the client portal or in
+    # payroll math (docs/NEXT_STEPS.md item 14's driver-earnings gap).
+    fee_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -1,4 +1,6 @@
 import type {
+  ClientOnboardingBody,
+  ClientOnboardingResult,
   DriverState,
   HeldOrderView,
   LastCycleSnapshot,
@@ -54,4 +56,14 @@ export const api = {
 
   runLearningLoopJob: (hubId: string) =>
     request<NightlyJobResult>(`/learning-loop/${hubId}/run-nightly-job`, { method: 'POST' }),
+
+  // Phase 8 minimal client onboarding (app/api/admin_routes.py) - internal
+  // ops action, gated by the same API_SHARED_SECRET as every other request
+  // this file makes (unlike client-portal/'s API, which never touches this
+  // shared secret at all - see that app's lib/api.ts).
+  onboardClient: (body: ClientOnboardingBody) =>
+    request<ClientOnboardingResult>('/admin/clients', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 }

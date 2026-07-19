@@ -86,6 +86,20 @@ class Settings(BaseSettings):
     # app/optimizer/service.py / app/models/route_offer.py).
     job_offer_ttl_seconds: int = 120
 
+    # Client portal (Phase 8, see docs/ROADMAP.md) - password-based JWT for
+    # Client.portal_email/portal_password_hash logins (app/client_auth/).
+    # Deliberately a separate secret from driver_jwt_secret: a client token
+    # and a driver token must never be interchangeable even if one secret
+    # were ever compromised, since they authorize very different things
+    # (a client's own order history/billing vs. a driver's active route).
+    client_jwt_secret: str = "dev-only-insecure-secret-change-in-production"
+    client_jwt_expiry_hours: int = 24 * 7  # shorter-lived than a driver's month; re-login weekly
+
+    # Minimal client onboarding (Phase 8): gates POST /admin/clients behind
+    # the existing internal ops shared secret (api_shared_secret above),
+    # not a new auth scheme - this is an internal/admin tool, not a
+    # client-facing or driver-facing surface.
+
     @property
     def dashboard_cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.dashboard_cors_origins.split(",") if origin.strip()]

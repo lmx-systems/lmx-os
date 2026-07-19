@@ -39,6 +39,7 @@ list instead of leaving it scattered across three documents.
 | E7 | Wire a real scheduler for the Learning Loop's nightly job | Still manual-trigger only (`POST /learning-loop/{hub_id}/run-nightly-job`) — needs a cron/scheduled task instead of a person remembering to call it. |
 | E8 | Move the event bus off in-process | `app/events/bus.py` only works within a single running instance — the moment this runs as more than one process/container, event-triggered re-optimization silently stops working for events raised on a different instance than the one handling a given request. |
 | E9 | Validate the 2.5 deliveries-per-hour (DPH) figure | Called out by the peer review as a model assumption, not an established fact — only provable with real driver/order data at Hub 1 (gated on B2). |
+| E10 | Tune HOT_SHOT's skip-penalty/hold-window placeholders | Phase 8 added `HOT_SHOT` ahead of T1 in `SLA_TIER_SKIP_PENALTY` and a 2-minute hold window (`app/sla/engine.py`, `app/optimizer/google_routes_client.py`) — same "reasonable guess, not calibrated" status as E2/E5, now for a fourth, premium-priced tier. |
 
 ### Security & production readiness
 
@@ -51,12 +52,14 @@ list instead of leaving it scattered across three documents.
 | S5 | General API rate limiting | Only driver OTP issuance is rate-limited (`app/driver_auth/otp_store.py`). Every other endpoint has none. |
 | S6 | A real security review | Nobody outside this build has looked at this from a security angle yet — worth doing before real orders/drivers/money flow through it. |
 | S7 | Twilio inbound-webhook signature verification | `POST /webhooks/twilio/inbound-sms` currently trusts whatever posts to it — no `X-Twilio-Signature` check yet (`app/api/webhooks.py`'s own docstring flags this). Must close before a real Twilio number points here. |
+| S8 | Rate-limit `POST /client/auth/login` | Phase 8's client portal login has no attempt limit, unlike driver OTP issuance (`app/driver_auth/otp_store.py`) — same category of gap as S5, but specifically a password-guessing surface now that a password exists in this system for the first time. |
+| S9 | Enforce `CLIENT_JWT_SECRET` ≠ `DRIVER_JWT_SECRET` at startup | Each secret's own startup check (`assert_client_jwt_secret_configured`/`assert_driver_jwt_secret_configured`) only rejects the shared insecure default — nothing stops both from being set to the *same* real value in production, which would make a client token and a driver token cryptographically interchangeable (they'd still fail today only because the two decode functions expect different payload shapes, not because the signature check would catch it). |
 
 ### Orchestrator dashboard (internal, for hub staff)
 
 | # | Item | Why it matters |
 |---|---|---|
-| D1 | Add a "list hubs" endpoint | No read API exists for the `hubs` table, so hub selection is a raw UUID text field, not a dropdown. |
+| D1 | Add a "list hubs" endpoint | No read API exists for the `hubs` table, so hub selection is a raw UUID text field, not a dropdown — including in Phase 8's new "Onboard a new client" form, which inherits the same gap. |
 | D2 | Stop baking the API URL in at Docker build time | Vite bakes `VITE_API_BASE_URL` in at build time — pointing the dashboard at a different API means rebuilding the image, not just restarting the container. |
 
 ### Driver app
@@ -75,10 +78,15 @@ list instead of leaving it scattered across three documents.
 
 ### Whole components not started at all
 
-| # | Item |
-|---|---|
-| C1 | Client-facing dashboard (distinct from the internal orchestrator dashboard hub staff use) |
-| C2 | Shop SMS |
+C1 (client-facing dashboard) and C2 (shop SMS) — the two items that used
+to be listed here — shipped in Phase 8 (see below). What's left in this
+category:
+
+| # | Item | Why it matters |
+|---|---|---|
+| C3 | A real billing/invoicing system | Phase 8 only computes and stores a per-order `fee_cents` (`app/models/order.py`) — there's no statement generation, invoice PDF, or payment collection anywhere. The client portal's billing view is deliberately minimal pending this. |
+| C4 | Multi-user client accounts | Client portal is explicitly one login per client company today (`Client.portal_email`), per Sourabh's call — a real multi-user/role model (e.g. AP vs. ops contacts at the same client) is a later decision, not an oversight. |
+| C5 | Self-service client signup | New clients are onboarded only via the internal `POST /admin/clients` form (dashboard) — there's no client-initiated signup flow, by design (this is a B2B onboarding relationship, not self-serve SaaS), but worth naming explicitly so it isn't assumed to exist. |
 
 ### Testing / process
 
@@ -97,9 +105,11 @@ is the path from there to a real, running Hub 1.
 
 **These phases are not strictly sequential.** Once there's more than one
 engineer (B1), 4/5/6/7 can mostly run in parallel — they touch different
-parts of the system. The one hard gate is Phase 8: nothing in it should
-start seriously before a client is signed (B2), since building a pilot
-plan against a hub that doesn't exist yet is just guessing again.
+parts of the system. Phase 8 (client dashboard, Hot Shot tier, tiered
+billing, shop SMS, minimal client onboarding) has already shipped, ahead
+of the sequencing below — Sourabh's call, since the first client wanted
+these at MVP rather than deferred, and LMX had no committed dates
+constraining the build order.
 
 ### Phase 4 — Make the placeholders real
 **Goal:** every "unverified" or "reconstructed from a summary" caveat in
@@ -148,16 +158,42 @@ and complete a full day's routes without needing you or dev tooling.
   not something to reverse-engineer from code; wire the chosen payroll
   API once the formula's agreed)
 
-### Phase 8 — Remaining OS Shell components
-**Goal:** finish "component 7" from the original design doc.
+### Phase 8 — Client dashboard, Hot Shot tier, tiered billing, shop SMS — ✅ DONE
+**Goal:** make LMX successful with the first client — a full client
+portal (not a placeholder), a premium priority delivery tier, per-tier
+billing, and automatic shop notifications, all as MVP requirements rather
+than deferred to a later phase.
 
-- C1 (client-facing dashboard)
-- C2 (shop SMS)
+Shipped:
+- **HOT_SHOT tier** — a fourth SLA tier, ahead of T1 in urgency, added to
+  the `sla_tier` Postgres enum (migration `0007`). Classified from a
+  payload flag (`app/sla/engine.py`), bypasses the batch-hold queue's
+  cluster-mate wait entirely (`app/batch_queue/queue.py`), is prioritized
+  in both the optimizer stub and the Google Route Optimization skip
+  penalties (`app/optimizer/google_routes_client.py`), and — critically —
+  is never commingled into a shared pickup stop with another order, even
+  from the same shop (`app/api/driver_routes.py`'s `accept_offer`).
+- **Tiered client billing** — a `client_rates` table (per client, per
+  tier, `$/drop`), computed into `Order.fee_cents` at ingestion time
+  (`app/ingestion/service.py`). Null (not zero) when no rate is
+  configured, so a billing gap can never silently look like a free
+  delivery.
+- **Client portal** (`client-portal/`) — a separate Vite/React/TS/
+  Tailwind app from the internal `dashboard/`, with its own real
+  password-based JWT auth (`app/client_auth/`, one login per client
+  company). Shows order history, status, and per-order fee; billing
+  beyond that is intentionally minimal pending C3.
+- **Minimal client onboarding** — `POST /admin/clients`
+  (`app/api/admin_routes.py`) creates a client, its first shop, its
+  per-tier rates, and its portal login in one action; also has a form in
+  the internal dashboard (`OnboardClientForm.tsx`).
+- **Shop SMS** — one-way, automatic notifications to a shop's phone at
+  pickup and at "driver en route," with Hot-Shot-specific copy for both,
+  reusing the existing Message/SmsClient infrastructure
+  (`app/messaging/shop_notifications.py`).
 
-Worth a real conversation before starting: does the first Hub 1 pilot
-actually need these, or can the first client be served with manual
-updates while this gets built in parallel? That's a product call, not an
-engineering one — flagging it rather than assuming.
+**Follow-ups this phase surfaced, not yet done:** E10, S8, S9, C3, C4, C5
+(see Part 1's tables above).
 
 ### Phase 9 — Hub 1 pilot
 **Goal:** prove the model live.

@@ -57,6 +57,16 @@ def test_build_request_penalizes_t1_skips_more_than_t3(client):
     assert penalties["s_t1"] > penalties["s_t3"]
 
 
+def test_build_request_penalizes_hot_shot_skips_more_than_t1(client):
+    stops = [
+        StopCandidate(stop_id="s_t1", order_ids=["o1"], lat=0, lng=0, weight_units=1, sla_tier="T1"),
+        StopCandidate(stop_id="s_hot", order_ids=["o2"], lat=0, lng=0, weight_units=1, sla_tier="HOT_SHOT"),
+    ]
+    body = client._build_request([], stops)
+    penalties = {s["label"]: s["penaltyCost"] for s in body["model"]["shipments"]}
+    assert penalties["s_hot"] > penalties["s_t1"]
+
+
 def test_parse_response_maps_routes_and_skipped_shipments(client):
     payload = {
         "routes": [

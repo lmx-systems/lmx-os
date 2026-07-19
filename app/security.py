@@ -40,7 +40,13 @@ EXEMPT_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json"})
 # /webhooks: Twilio calls these directly (app/api/webhooks.py) and can't
 # carry our X-API-Key - see that module's own docstring for the real gap
 # this leaves (no request-signature verification yet either).
-EXEMPT_PREFIXES = ("/driver", "/webhooks")
+#
+# /client: the client portal (Phase 8) has its own real per-client auth
+# now (JWT via app/client_auth/), same reasoning as /driver above. Note
+# that /admin (app/api/admin_routes.py) is deliberately NOT exempt here -
+# onboarding a client is an internal ops action and should still require
+# the shared secret.
+EXEMPT_PREFIXES = ("/driver", "/webhooks", "/client")
 
 
 def _is_exempt(path: str) -> bool:

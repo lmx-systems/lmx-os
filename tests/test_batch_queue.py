@@ -6,12 +6,12 @@ from app.batch_queue.queue import HeldOrder, evaluate_held_order, run_hold_cycle
 NOW = datetime(2026, 7, 17, 12, 0, tzinfo=timezone.utc)
 
 
-def make_held_order(order_id, lat, lng, held_minutes_ago=0, deadline_minutes_from_now=30):
+def make_held_order(order_id, lat, lng, held_minutes_ago=0, deadline_minutes_from_now=30, sla_tier="T2"):
     return HeldOrder(
         order_id=order_id,
         shop_lat=lat,
         shop_lng=lng,
-        sla_tier="T2",
+        sla_tier=sla_tier,
         hold_deadline=NOW + timedelta(minutes=deadline_minutes_from_now),
         held_since=NOW - timedelta(minutes=held_minutes_ago),
     )
@@ -28,6 +28,15 @@ def test_cluster_members_respects_radius():
     assert "a" in members
     assert "b" in members
     assert "c" not in members
+
+
+def test_question0_hot_shot_always_releases_immediately_even_with_cluster_mate():
+    order = make_held_order("o1", 34.05, -118.25, sla_tier="HOT_SHOT")
+    mate = make_held_order("o2", 34.051, -118.25)  # would otherwise cluster-match
+    decision = evaluate_held_order(order, [mate], available_driver_count=0, now=NOW)
+    assert decision.action == "release"
+    assert decision.reason == "hot_shot_immediate_release"
+    assert decision.cluster_mate_ids == []
 
 
 def test_question1_sla_deadline_always_releases():

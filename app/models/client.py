@@ -21,3 +21,10 @@ class Client(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Phase 1 priority: epicor. Then mam, asa, flat_file.
     pos_system: Mapped[str] = mapped_column(String(32), nullable=False, default="flat_file")
     active: Mapped[bool] = mapped_column(default=True)
+
+    # Client-facing portal login (Phase 8) - one login per client company,
+    # not per-user, per Sourabh's call. Living directly on Client rather
+    # than a separate credentials table since there's exactly one of these
+    # per client today; split out if/when multi-user-per-client happens.
+    portal_email: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    portal_password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)

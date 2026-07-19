@@ -19,7 +19,7 @@ review flagged, built solidly rather than everything built thinly.
 | 4 | Fleet State Manager | Built — Redis-backed driver state/location |
 | 5 | Dispatch Optimizer | Built — real Google Route Optimization call implemented, unverified against a live Google Cloud project |
 | 6 | Annotation and Learning Loop | Built — pattern detection + nightly-job service; flag-type naming convention not yet agreed with driver app team |
-| 7 | OS Shell (dashboards, driver app, shop SMS) | Started — orchestrator dashboard built (`dashboard/`); driver app Phase 1 (core delivery loop), Phase 2 (profile screen), and Phase 3 (earnings estimate, masked SMS messaging) all built, see below; client dashboard and shop SMS not started. Driver app earnings/messaging are display-only/stub-backed until a payroll provider and a real Twilio account are provisioned (`docs/NEXT_STEPS.md` items 15/16) |
+| 7 | OS Shell (dashboards, driver app, shop SMS) | Built — orchestrator dashboard (`dashboard/`); driver app Phases 1–3 (core delivery loop, profile, earnings/messaging); client portal + shop SMS (Phase 8, see below). Driver app earnings/messaging are display-only/stub-backed until a payroll provider and a real Twilio account are provisioned (`docs/NEXT_STEPS.md` items 15/16); shop SMS runs through the same stub until then too |
 
 ## Data layer
 
@@ -267,6 +267,79 @@ What this closed:
   same screen still shows an alert, now naming masked *voice* calling
   specifically as the unbuilt piece, not messaging generally.
   `SupportScreen` is reachable from Profile.
+
+## Client portal, Hot Shot tier, tiered billing, shop SMS (component 7, Phase 8)
+
+Built ahead of Phases 4–7 in `docs/ROADMAP.md`'s sequencing — Sourabh's
+call, since the first client wanted a full client portal, a premium
+priority tier, and shop notifications as MVP requirements, not deferred
+work, and LMX had no committed client dates constraining build order.
+
+- **HOT_SHOT tier**: a fourth `sla_tier` enum value (migration `0007`,
+  `ALTER TYPE ... ADD VALUE` — Postgres has no `DROP VALUE`, so
+  `downgrade()` deliberately doesn't attempt to remove it), ranked above
+  T1. Classified from a payload flag checked before the rush-flag check
+  (`app/sla/engine.py`'s `classify_tier`), given a near-zero (2-minute)
+  hold window, and made to bypass the batch-hold queue's cluster-mate wait
+  entirely (`app/batch_queue/queue.py`'s "question 0" — there's no
+  clustering benefit to holding an order that can never be commingled).
+  Prioritized in both the optimizer stub's sort order and the Google
+  Route Optimization client's skip-penalty ordering
+  (`app/optimizer/google_routes_client.py`). Most load-bearing piece:
+  `app/api/driver_routes.py`'s `accept_offer` gives every HOT_SHOT order
+  its own dedicated pickup `Stop` (never grouped into `orders_by_shop`,
+  even with another HOT_SHOT order from the same shop), and sequences
+  HOT_SHOT pickups/dropoffs first within their respective blocks — while
+  still preserving the existing "every pickup precedes every dropoff"
+  invariant `complete_stop`'s guard logic depends on.
+- **Tiered client billing**: a new `client_rates` table
+  (`app/models/client_rate.py`) — `(client_id, sla_tier, rate_per_drop_cents)`,
+  `sla_tier` deliberately a plain string, not FK'd to the Postgres enum, so
+  a future tier doesn't need an enum migration before a rate can be
+  configured for it. `app/ingestion/service.py` computes `Order.fee_cents`
+  from this table right after SLA classification; left `null` (never `0`)
+  when no rate is configured, logged as a warning, so a billing gap can
+  never silently present as a free delivery.
+- **Client portal auth** (`app/client_auth/`): mirrors
+  `app/driver_auth/`'s shape (stateless JWT, one fail-fast startup check)
+  but is password-based, not OTP-based, and deliberately signed with its
+  own secret (`CLIENT_JWT_SECRET`) rather than reusing
+  `DRIVER_JWT_SECRET` — a client token and a driver token should never be
+  interchangeable. `Client.portal_email`/`portal_password_hash` model one
+  login per client company, not per-user, per Sourabh's call.
+- **`app/api/client_routes.py`**: `/client/auth/login`, `/client/me`,
+  `/client/orders`, `/client/orders/{id}` — exempt from
+  `SharedSecretAuthMiddleware` (own real auth, same reasoning as
+  `/driver`), scoped so a client can only ever see their own orders
+  (404, not 403, for another client's order — same "don't confirm
+  existence to an unauthorized caller" pattern as the driver app's
+  `_get_owned_offer`/`_get_owned_stop`).
+- **`app/api/admin_routes.py`**: `POST /admin/clients` — internal-only
+  (gated by `SharedSecretAuthMiddleware`, *not* exempt, unlike
+  `/client`/`/driver`), creates a `Client`, its shop(s), its `ClientRate`
+  row(s), and its portal login in one action. There's no other admin UI
+  yet for onboarding a client in separate steps.
+- **`client-portal/`**: a new Vite + React + TypeScript + Tailwind app,
+  separate from `dashboard/` since the audience/auth/data scope all
+  differ — mirrors `dashboard/`'s tooling. Login screen, order list, order
+  detail. Wired into `docker-compose.yml` as its own service (port 5174).
+- **Shop SMS** (`app/messaging/shop_notifications.py`): one-way
+  automatic notifications to `Shop.phone`, reusing the existing
+  `Message`/`SmsClient` infrastructure with `channel="shop"` (no schema
+  change needed — `channel` is a plain string column). Two trigger
+  events — "picked up" (a pickup `Stop` is completed) and "en route" (a
+  pickup `Stop` becomes the driver's next stop, either right after
+  `accept_offer` or right after the prior pickup completes) — each with
+  distinct copy when the order is HOT_SHOT, and every message ends with
+  "Thanks for LMX'ing it!" (Sourabh's call, for a bit of brand fun on an
+  otherwise operational notification). Same Twilio stub/real split as
+  driver messaging — no live account means every send today logs instead
+  of actually delivering.
+- **Dashboard additions**: `OnboardClientForm.tsx` (calls
+  `POST /admin/clients`), and a HOT_SHOT entry in both the hold-queue
+  tier filter and the tier badge component (previously any unrecognized
+  tier silently fell back to T2's amber style, which would have been
+  visually wrong for the highest-urgency tier).
 
 ## Things that are stubbed, and why
 

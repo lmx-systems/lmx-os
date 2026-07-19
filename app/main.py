@@ -16,9 +16,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.admin_routes import router as admin_router
+from app.api.client_routes import router as client_router
 from app.api.driver_routes import router as driver_router
 from app.api.routes import router as ops_router
 from app.api.webhooks import router as webhooks_router
+from app.client_auth.tokens import assert_client_jwt_secret_configured
 from app.config import settings
 from app.db import engine
 from app.driver_auth.tokens import assert_driver_jwt_secret_configured
@@ -40,6 +43,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # sessions would be forgeable, rather than surfacing a confusing error
     # (or a silent vulnerability) on the first real request.
     assert_driver_jwt_secret_configured()
+    assert_client_jwt_secret_configured()
     async with engine.connect() as conn:
         await conn.run_sync(lambda _: None)
     redis_client = get_client()
@@ -81,3 +85,5 @@ app.include_router(ops_router)
 app.include_router(ingestion_router)
 app.include_router(driver_router)
 app.include_router(webhooks_router)
+app.include_router(client_router)
+app.include_router(admin_router)

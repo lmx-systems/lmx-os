@@ -16,6 +16,15 @@ Treat the four questions below as an interpretation to validate, not as
 already-approved business logic.
 
 The four per-cycle questions, evaluated in order for every held order:
+  0. Is this order HOT_SHOT? -> if yes, release immediately. Phase 8:
+     HOT_SHOT is direct point-to-point and must never be commingled with
+     another order's pickup (see accept_offer in app/api/driver_routes.py),
+     so there is no clustering benefit to holding it at all - waiting for a
+     cluster-mate that can never be paired with it only adds latency to
+     the tier Sourabh is charging a premium for. This intentionally skips
+     even the "no available drivers" check (question 3): releasing costs
+     nothing beyond moving the order from held to queued, ready to be
+     picked up the moment a driver is free.
   1. Is this order past its SLA hold_deadline? -> if yes, force-release now,
      no matter what clustering looks like. SLA always wins.
   2. Is there at least one other held order within the cluster radius?
@@ -76,6 +85,16 @@ def evaluate_held_order(
     max_absolute_hold_minutes: int = MAX_ABSOLUTE_HOLD_MINUTES,
 ) -> BatchDecision:
     radius = cluster_radius_miles or settings.batch_hold_cluster_radius_miles
+
+    # Question 0: HOT_SHOT never waits to pair with a cluster-mate - see
+    # the module docstring.
+    if order.sla_tier == "HOT_SHOT":
+        return BatchDecision(
+            order_id=order.order_id,
+            action="release",
+            reason="hot_shot_immediate_release",
+            cluster_mate_ids=[],
+        )
 
     # Question 1: SLA deadline always wins.
     if now >= order.hold_deadline:

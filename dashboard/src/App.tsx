@@ -5,6 +5,7 @@ import { OrderPipeline } from './components/OrderPipeline'
 import { HoldQueueTable } from './components/HoldQueueTable'
 import { FleetRoster } from './components/FleetRoster'
 import { OperationsPanel } from './components/OperationsPanel'
+import { OnboardClientForm } from './components/OnboardClientForm'
 import { Toast } from './components/ui/Toast'
 import { usePolling } from './hooks/usePolling'
 import { useToast } from './hooks/useToast'
@@ -81,6 +82,7 @@ function App() {
                   }}
                   onToast={showToast}
                 />
+                <OnboardClientForm hubId={hubId} onToast={showToast} />
               </div>
             </div>
           </>
