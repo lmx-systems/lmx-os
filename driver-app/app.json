@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "LMX Driver",
+    "slug": "lmx-driver-app",
+    "scheme": "lmxdriver",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.lmx.driver"
+    },
+    "android": {
+      "package": "com.lmx.driver"
+    },
+    "extra": {
+      "apiBaseUrl": "http://localhost:8000"
+    }
+  }
+}

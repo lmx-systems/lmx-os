@@ -16,3 +16,11 @@ class Driver(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     vehicle_capacity_units: Mapped[int] = mapped_column(default=1, nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="off_shift", nullable=False)
     # off_shift | available | en_route | on_break
+
+    # Driver app onboarding (screen 1c, "Vehicle & profile setup"). Nullable
+    # because existing/seeded drivers predate this screen; the app should
+    # treat a null vehicle_type as "setup incomplete" and route there.
+    vehicle_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # car | van | bike
+    plate_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    delivery_zone: Mapped[str | None] = mapped_column(String(120), nullable=True)

@@ -64,6 +64,20 @@ class Settings(BaseSettings):
     # auth; a client-facing dashboard or driver app needs the real thing.
     api_shared_secret: str | None = None
 
+    # Driver app (Phase 1, see docs/NEXT_STEPS.md item 12): real per-driver
+    # auth, unlike api_shared_secret above. Signs/verifies the JWT issued on
+    # OTP verification (app/driver_auth/tokens.py). The default is an
+    # obviously-fake dev value, not a generated secret - deliberately loud
+    # (see app/driver_auth/tokens.py's startup check) rather than silently
+    # "secure-looking" in an environment nobody configured it for.
+    driver_jwt_secret: str = "dev-only-insecure-secret-change-in-production"
+    driver_jwt_expiry_hours: int = 24 * 30  # drivers stay logged in ~a month
+
+    # How long a driver has to accept/decline a job offer before it expires
+    # and the order goes back to the hold queue for reassignment (see
+    # app/optimizer/service.py / app/models/route_offer.py).
+    job_offer_ttl_seconds: int = 120
+
     @property
     def dashboard_cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.dashboard_cors_origins.split(",") if origin.strip()]

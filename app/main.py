@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.driver_routes import router as driver_router
 from app.api.routes import router as ops_router
 from app.config import settings
 from app.db import engine
@@ -74,3 +75,4 @@ app.add_middleware(
 
 app.include_router(ops_router)
 app.include_router(ingestion_router)
+app.include_router(driver_router)

@@ -27,6 +27,13 @@ API_KEY_HEADER = "X-API-Key"
 # meant to protect, and gating them just breaks docker healthchecks/tooling.
 EXEMPT_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json"})
 
+# The driver app (app/api/driver_routes.py) has its own real per-driver auth
+# now (JWT via app/driver_auth/) - it shouldn't also need the internal
+# ops-tooling shared secret this middleware exists for. See docs/
+# NEXT_STEPS.md item 12 and this module's own docstring ("a client-facing
+# dashboard or driver app needs the real thing").
+EXEMPT_PREFIXES = ("/driver",)
+
 
 class SharedSecretAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp) -> None:
@@ -40,7 +47,11 @@ class SharedSecretAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        if not settings.api_shared_secret or request.url.path in EXEMPT_PATHS:
+        if (
+            not settings.api_shared_secret
+            or request.url.path in EXEMPT_PATHS
+            or request.url.path.startswith(EXEMPT_PREFIXES)
+        ):
             return await call_next(request)
 
         provided = request.headers.get(API_KEY_HEADER)

@@ -67,3 +67,17 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    # Delivery (customer/drop-off) side of the order - added for the driver
+    # app's active-job flow (screens 1i/1l/1m). Everything ingested before
+    # this existed only ever modeled the pickup side (shop_lat/lng via
+    # HeldOrder/StopCandidate) - no source-system adapter has been updated
+    # to populate these yet, so they're nullable rather than backfilled.
+    # A missing delivery_lat/lng means a Stop can't be generated for this
+    # order when a job offer is accepted (see app/api/driver_routes.py).
+    delivery_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    delivery_lat: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
+    delivery_lng: Mapped[float | None] = mapped_column(Numeric(9, 6), nullable=True)
+    delivery_contact_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    delivery_contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    delivery_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)

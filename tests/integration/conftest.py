@@ -21,6 +21,7 @@ from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+import app.db as db_module
 import app.redis_client as redis_client_module
 from app.config import settings
 from app.db import Base
@@ -137,3 +138,22 @@ async def real_redis_client():
     await client.flushdb()
     await client.aclose()
     await redis_client_module.close_pool()
+
+
+@pytest.fixture(autouse=True)
+async def _reset_global_engine_pool():
+    """
+    app/db.py's module-level `engine` (what session_scope() uses - e.g.
+    DispatchOptimizerService.run_cycle, called by more than one test in
+    tests/integration/test_driver_app_integration.py) is a singleton
+    created once at import time, bound to whichever event loop happened to
+    be running then. pytest-asyncio hands each test function its own event
+    loop, so the second test in a file to touch session_scope() reuses a
+    pooled asyncpg connection from a *different* loop and fails with
+    "attached to a different loop" - the same class of bug real_redis_client
+    above works around for Redis. Disposing the pool before each test forces
+    a fresh connection bound to that test's loop on next use.
+    """
+    await db_module.engine.dispose()
+    yield
+    await db_module.engine.dispose()

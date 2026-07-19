@@ -20,6 +20,7 @@ dependencies = [
     "tenacity>=8.3.0",
     "google-auth>=2.29.0",
     "requests>=2.31.0",  # transport dependency for google.auth.transport.requests token refresh
+    "pyjwt>=2.8.0",  # driver app session tokens - app/driver_auth/tokens.py
 ]
 
 [project.optional-dependencies]

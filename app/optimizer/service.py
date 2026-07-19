@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import structlog
 from sqlalchemy import update
@@ -25,6 +25,7 @@ from app.config import settings
 from app.db import session_scope
 from app.fleet_state.manager import FleetStateManager
 from app.models.order import Order, OrderStatus
+from app.models.route_offer import RouteOffer
 from app.optimizer.google_routes_client import RouteOptimizationClient, get_route_optimization_client
 from app.optimizer.last_cycle_store import LastCycleStore
 from app.schemas.optimizer import DriverCandidate, LastCycleSnapshot, OptimizationResult, StopCandidate
@@ -118,6 +119,46 @@ class DispatchOptimizerService:
                     .where(Order.id.in_(uuid.UUID(order_id) for order_id in assigned_stop_ids))
                     .values(status=OrderStatus.assigned, assigned_at=datetime.now(timezone.utc))
                 )
+
+        # Extend a job offer to each assigned driver rather than handing them
+        # a route directly - see app/models/route_offer.py. Order.status is
+        # already "assigned" above regardless of what the driver does with
+        # the offer; if they decline or let it expire, app/api/driver_routes.py
+        # puts the affected orders back in the hold queue for the next cycle
+        # rather than leaving them stuck showing "assigned" with nobody
+        # actually driving them.
+        if assignments:
+            stops_by_id = {s.stop_id: s for s in stops}
+            shop_name_by_order_id = {o.order_id: o.shop_name for o in released_orders}
+            offer_time = datetime.now(timezone.utc)
+            async with session_scope() as session:
+                for assignment in assignments:
+                    offer_stops = []
+                    for stop_id in assignment.stop_ids:
+                        candidate = stops_by_id.get(stop_id)
+                        if candidate is None:
+                            continue
+                        offer_stops.append(
+                            {
+                                "order_id": stop_id,
+                                "lat": candidate.lat,
+                                "lng": candidate.lng,
+                                "sla_tier": candidate.sla_tier,
+                                "shop_name": shop_name_by_order_id.get(stop_id, ""),
+                            }
+                        )
+                    if not offer_stops:
+                        continue
+                    session.add(
+                        RouteOffer(
+                            hub_id=uuid.UUID(hub_id),
+                            driver_id=uuid.UUID(assignment.driver_id),
+                            status="offered",
+                            stop_payload=offer_stops,
+                            offered_at=offer_time,
+                            expires_at=offer_time + timedelta(seconds=settings.job_offer_ttl_seconds),
+                        )
+                    )
 
         duration = time.perf_counter() - cycle_start
         over_budget = duration > settings.optimizer_cycle_budget_seconds

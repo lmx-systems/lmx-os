@@ -19,7 +19,7 @@ review flagged, built solidly rather than everything built thinly.
 | 4 | Fleet State Manager | Built — Redis-backed driver state/location |
 | 5 | Dispatch Optimizer | Built — real Google Route Optimization call implemented, unverified against a live Google Cloud project |
 | 6 | Annotation and Learning Loop | Built — pattern detection + nightly-job service; flag-type naming convention not yet agreed with driver app team |
-| 7 | OS Shell (dashboards, driver app, shop SMS) | Started — orchestrator dashboard built (`dashboard/`); client dashboard, driver app, shop SMS not started |
+| 7 | OS Shell (dashboards, driver app, shop SMS) | Started — orchestrator dashboard built (`dashboard/`); driver app Phase 1 built (`driver-app/` + `app/api/driver_routes.py` — core delivery loop only, see below); client dashboard, driver app Phase 2/3 (earnings, messaging), shop SMS not started |
 
 ## Data layer
 
@@ -34,9 +34,9 @@ optimizer's hot read path — but it does get one write off that path:
 (`app/db.session_scope`) to write `Order.status = assigned` +
 `assigned_at` back the moment a dispatch happens, so `Order.status`
 doesn't stay stuck on `held` forever once Redis has moved on. Route/stop
-persistence (which route, which sequence, ETAs) still doesn't exist —
-that's tied to the driver app (component 7) and is a separate, larger
-piece of work.
+persistence now exists (see "Driver app" below) — but only from the point
+a driver *accepts* a job offer; `run_cycle` itself still only decides who
+should get an assignment, it doesn't write Route/Stop rows on its own.
 
 ## Orchestrator dashboard (component 7, partial)
 
@@ -109,6 +109,62 @@ Other known gaps in the dashboard itself:
   URL means rebuilding the image, not just restarting the container —
   fine for one internal deployment, worth revisiting if this needs to
   point at different API URLs per environment without a rebuild.
+
+## Driver app (component 7, Phase 1 — core delivery loop)
+
+`driver-app/` is a React Native (Expo) app; `app/api/driver_routes.py` +
+`app/driver_auth/` is its backend. Built against
+`LMX Driver App Wireframes.dc.html` (18 screens, 8 flows) — this pass
+covers screens 1a-1m (onboarding, availability/jobs, active job) only.
+Earnings, messaging/support, and the full profile screen (1n-1r) are
+Phase 2/3, not built. See `driver-app/README.md` for what's stubbed inside
+the app itself (no camera/barcode SDK, no maps SDK, no real telephony).
+
+This closed three real gaps, not just "add some endpoints":
+
+- **Real per-driver auth.** `app/driver_auth/` — phone + OTP (Redis,
+  single-use, attempt-capped) issuing a JWT session
+  (`app/driver_auth/tokens.py`). Entirely separate from
+  `SharedSecretAuthMiddleware`: driver routes are exempt from the shared
+  X-API-Key (`app/security.py`'s `EXEMPT_PREFIXES`) since they have their
+  own real auth now. No Twilio SMS send is wired up — the OTP is returned
+  in the response (`debug_code`) when no SMS provider is configured, the
+  same "unconfigured third-party credential -> stub/dev mode" pattern the
+  Google Routes client already used.
+- **A job-offer/accept model.** Before this, `DispatchOptimizerService`
+  decided an assignment and that was final — no accept/decline concept
+  existed. Now every assignment also creates a `RouteOffer` row
+  (`app/models/route_offer.py`) with a TTL; a driver has to accept it
+  (`POST /driver/offers/{id}/accept`) before a real `Route`/`Stop` gets
+  created. Declining or letting it expire puts the affected orders back in
+  the hold queue (`Order.status` reverts to `queued`) instead of leaving
+  them permanently stuck showing "assigned" with nobody driving them —
+  see `_requeue_orders_from_offer` in `app/api/driver_routes.py`. Known
+  gap: there's no cooldown, so if the same driver is still the only one
+  available, they can be re-offered the identical order almost
+  immediately after declining.
+- **The first Route/Stop endpoints this codebase has ever had.** The
+  `routes`/`stops` tables existed since the initial migration but had zero
+  API surface. Accepting an offer now builds one pickup `Stop` per shop
+  (aggregating commingled orders) plus one dropoff `Stop` per order — the
+  dropoff side (`Order.delivery_address/lat/lng/contact_*`,
+  `app/models/order.py`) never existed before this either; everything
+  upstream (ingestion, SLA, hold queue, optimizer) only ever modeled the
+  pickup/shop side. A new `stop_orders` join table
+  (`app/models/stop.py`) links stops to the orders they cover, since a
+  pickup stop can commingle several orders and StopCandidate already
+  supported that shape.
+
+Known simplifications, called out here rather than left silent:
+drop-sequencing isn't optimized (dropoffs are ordered however the
+optimizer originally assigned the pickups, not re-sequenced for the
+delivery leg); parcel scanning is a running count, not a per-parcel
+ledger; POD (`pod_photo_url`/`pod_signature_url`/`pod_pin`) accepts
+whatever string the client sends — there's no image/signature upload
+pipeline or PIN-issuance system to verify against. "Stop completed" (the
+design doc's third event-trigger source, previously unfired — see
+`app/optimizer/event_trigger.py`) is now published once a route's last
+stop completes.
 
 ## Things that are stubbed, and why
 
