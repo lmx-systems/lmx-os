@@ -6,11 +6,11 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
-import type { MainStackParamList } from '../navigation/types';
+import type { HomeStackParamList } from '../navigation/types';
 import type { JobOffer } from '../api/types';
 import { colors, spacing, typography } from '../theme';
 
-type Props = NativeStackScreenProps<MainStackParamList, 'AvailableJobs'>;
+type Props = NativeStackScreenProps<HomeStackParamList, 'AvailableJobs'>;
 
 // Screen 1f, "Available jobs". v1 has no distance/pay-estimate fields yet
 // (that math isn't in the backend - see docs/NEXT_STEPS.md), so cards show

@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 
 from app.api.driver_routes import (
     accept_offer,
@@ -216,7 +217,93 @@ async def test_declined_offer_requeues_order_for_reassignment(db_session, real_r
     assert [o.order_id for o in held] == [str(order.id)]
 
     await db_session.refresh(order)
-    assert order.status == OrderStatus.queued
+    # "held", not "queued" - it's back in the same Redis hold queue
+    # app/ingestion/service.py uses "held" for (see
+    # _requeue_orders_from_offer's docstring).
+    assert order.status == OrderStatus.held
 
     remaining_offers = await list_my_offers(driver=authed, session=db_session)
     assert remaining_offers == []
+
+
+async def _accept_one_offer(db_session, hub_id, driver_id):
+    """Shared setup for the stop-state-machine tests below: go straight
+    from a fresh seed to an accepted route with one pickup + one dropoff."""
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    await DispatchOptimizerService().run_cycle(str(hub_id))
+    offers = await list_my_offers(driver=authed, session=db_session)
+    route = await accept_offer(offers[0].offer_id, driver=authed, session=db_session)
+    pickup = next(s for s in route.stops if s.stop_type == "pickup")
+    dropoff = next(s for s in route.stops if s.stop_type == "dropoff")
+    return authed, pickup, dropoff
+
+
+async def test_complete_stop_rejects_a_stop_that_never_arrived(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+    assert exc_info.value.status_code == 409
+
+
+async def test_scan_parcels_rejects_before_arrival(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
+    assert exc_info.value.status_code == 409
+
+
+async def test_complete_stop_rejects_pickup_not_fully_scanned(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
+    with pytest.raises(HTTPException) as exc_info:
+        await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+    assert exc_info.value.status_code == 409
+
+
+async def test_complete_stop_rejects_dropoff_before_its_pickup_is_completed(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, _pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await arrive_at_stop(dropoff.stop_id, driver=authed, session=db_session)
+    with pytest.raises(HTTPException) as exc_info:
+        await complete_stop(dropoff.stop_id, CompleteStopBody(method="signature"), driver=authed, session=db_session)
+    assert exc_info.value.status_code == 409
+
+
+async def test_complete_stop_rejects_being_called_twice(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
+    await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
+    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+
+    # A retried/double-tapped complete call must not re-run the completion
+    # side effects (order status flip, route-finished check, event publish)
+    # a second time.
+    with pytest.raises(HTTPException) as exc_info:
+        await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+    assert exc_info.value.status_code == 409
+
+
+async def test_complete_stop_records_left_at(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
+    await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
+    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+
+    await arrive_at_stop(dropoff.stop_id, driver=authed, session=db_session)
+    final_view = await complete_stop(
+        dropoff.stop_id,
+        CompleteStopBody(method="signature", signature_url="https://example.com/sig.png", left_at="front door"),
+        driver=authed, session=db_session,
+    )
+    assert final_view.left_at == "front door"

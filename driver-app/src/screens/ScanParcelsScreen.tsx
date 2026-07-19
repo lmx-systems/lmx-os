@@ -5,18 +5,18 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { api } from '../api/client';
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
-import type { MainStackParamList } from '../navigation/types';
+import type { HomeStackParamList } from '../navigation/types';
 import { colors, spacing, typography } from '../theme';
 
-type Props = NativeStackScreenProps<MainStackParamList, 'ScanParcels'>;
+type Props = NativeStackScreenProps<HomeStackParamList, 'ScanParcels'>;
 
 // Screen 1k, "Scan parcels". No camera/barcode SDK wired up in v1 - "Scan
 // next parcel" is a manual tap standing in for a real scanner (fast-follow:
 // swap this button for an expo-camera barcode scanner without changing the
 // backend contract, which only ever wanted a running count).
 export function ScanParcelsScreen({ route, navigation }: Props) {
-  const { stopId, parcelCount } = route.params;
-  const [scannedCount, setScannedCount] = useState(0);
+  const { stopId, parcelCount, scannedCount: initialScannedCount } = route.params;
+  const [scannedCount, setScannedCount] = useState(initialScannedCount);
   const [busy, setBusy] = useState(false);
 
   async function handleScanNext() {

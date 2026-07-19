@@ -7,10 +7,10 @@ import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TextField } from '../components/TextField';
 import type { PodMethod } from '../api/types';
-import type { MainStackParamList } from '../navigation/types';
+import type { HomeStackParamList } from '../navigation/types';
 import { colors, radius, spacing, typography } from '../theme';
 
-type Props = NativeStackScreenProps<MainStackParamList, 'ProofOfDelivery'>;
+type Props = NativeStackScreenProps<HomeStackParamList, 'ProofOfDelivery'>;
 
 const METHODS: PodMethod[] = ['photo', 'signature', 'pin'];
 
@@ -37,6 +37,7 @@ export function ProofOfDeliveryScreen({ route, navigation }: Props) {
         photo_url: method === 'photo' ? `local-capture://${stopId}.jpg` : undefined,
         signature_url: method === 'signature' ? `local-capture://${stopId}.png` : undefined,
         pin: method === 'pin' ? pin : undefined,
+        left_at: leftAt.trim() || undefined,
       });
       navigation.replace('ActiveRoute');
     } finally {

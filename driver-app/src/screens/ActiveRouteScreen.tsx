@@ -8,10 +8,10 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
 import type { Route, Stop } from '../api/types';
-import type { MainStackParamList } from '../navigation/types';
+import type { HomeStackParamList } from '../navigation/types';
 import { colors, spacing, typography } from '../theme';
 
-type Props = NativeStackScreenProps<MainStackParamList, 'ActiveRoute'>;
+type Props = NativeStackScreenProps<HomeStackParamList, 'ActiveRoute'>;
 
 function stopLabel(stop: Stop): string {
   return stop.stop_type === 'pickup' ? stop.shop_name || 'Pickup' : stop.address || 'Drop-off';

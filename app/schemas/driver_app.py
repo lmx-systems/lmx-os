@@ -3,7 +3,7 @@ Schemas for the driver-facing API (app/api/driver_routes.py) - screens
 1a-1m of LMX Driver App Wireframes.dc.html. See docs/NEXT_STEPS.md item 12
 for the gap analysis this closes.
 """
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel
 
@@ -17,6 +17,12 @@ class DriverProfileView(BaseModel):
     vehicle_type: str | None = None
     plate_number: str | None = None
     delivery_zone: str | None = None
+    payment_bank_last4: str | None = None
+    # Real, computed from completed Route rows (app/api/driver_routes.py) -
+    # not a stand-in. Star rating isn't shown anywhere in this app: there's
+    # no rating-submission system (customers never rate a delivery), so
+    # showing a number would be fabricated, not just an estimate.
+    trip_count: int = 0
 
     @property
     def setup_complete(self) -> bool:
@@ -24,11 +30,33 @@ class DriverProfileView(BaseModel):
 
 
 class DriverProfileUpdate(BaseModel):
-    """Screen 1c, 'Vehicle & profile setup'."""
+    """Screens 1c ('Vehicle & profile setup') and 1r's 'Edit vehicle'."""
 
     vehicle_type: str  # car | van | bike
     plate_number: str
     delivery_zone: str
+
+
+class PaymentMethodUpdate(BaseModel):
+    """Screen 1r's payment method card. Last 4 digits only - see
+    Driver.payment_bank_last4's docstring for why nothing more is collected."""
+
+    bank_last4: str
+
+
+class DriverDocumentView(BaseModel):
+    doc_type: str  # license | insurance
+    expires_at: date
+    file_url: str | None = None
+
+    @property
+    def is_expired(self) -> bool:
+        return self.expires_at < date.today()
+
+
+class DriverDocumentUpdate(BaseModel):
+    expires_at: date
+    file_url: str | None = None
 
 
 class DriverAvailabilityUpdate(BaseModel):
@@ -73,6 +101,7 @@ class StopView(BaseModel):
     order_ids: list[str]
     eta: datetime | None = None
     completed_at: datetime | None = None
+    left_at: str | None = None
 
 
 class RouteView(BaseModel):
@@ -93,3 +122,4 @@ class CompleteStopBody(BaseModel):
     photo_url: str | None = None
     signature_url: str | None = None
     pin: str | None = None
+    left_at: str | None = None

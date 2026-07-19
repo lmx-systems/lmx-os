@@ -54,6 +54,9 @@ class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     pod_photo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     pod_signature_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     pod_pin: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Where the driver says they left it (e.g. "front door") - screen 1m's
+    # "Left at" field. Free text, not validated against anything.
+    pod_left_at: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 class StopOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin):

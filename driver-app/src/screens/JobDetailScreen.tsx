@@ -7,10 +7,10 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
 import type { JobOffer } from '../api/types';
-import type { MainStackParamList } from '../navigation/types';
+import type { HomeStackParamList } from '../navigation/types';
 import { colors, spacing, typography } from '../theme';
 
-type Props = NativeStackScreenProps<MainStackParamList, 'JobDetail'>;
+type Props = NativeStackScreenProps<HomeStackParamList, 'JobDetail'>;
 
 function msRemaining(expiresAt: string): number {
   return new Date(expiresAt).getTime() - Date.now();
@@ -58,9 +58,12 @@ export function JobDetailScreen({ route, navigation }: Props) {
 
   async function handleDecline() {
     setBusy(true);
+    setError(null);
     try {
       await api.declineOffer(offerId);
       navigation.goBack();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'This offer is no longer available.');
     } finally {
       setBusy(false);
     }

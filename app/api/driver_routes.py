@@ -11,7 +11,7 @@ Bearer token - see app/driver_auth/dependencies.py.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select, update
@@ -25,6 +25,7 @@ from app.driver_auth.otp_store import OtpRateLimitExceeded, OtpStore
 from app.driver_auth.tokens import issue_token
 from app.fleet_state.manager import FleetStateManager
 from app.models.driver import Driver
+from app.models.driver_document import DriverDocument
 from app.models.order import Order, OrderStatus
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
@@ -34,10 +35,13 @@ from app.optimizer.event_trigger import dispatch_event_bus
 from app.schemas.driver_app import (
     CompleteStopBody,
     DriverAvailabilityUpdate,
+    DriverDocumentUpdate,
+    DriverDocumentView,
     DriverProfileUpdate,
     DriverProfileView,
     JobOfferView,
     OfferStopSummary,
+    PaymentMethodUpdate,
     RouteView,
     ScanParcelsBody,
     StopView,
@@ -87,7 +91,20 @@ async def verify_otp(body: VerifyOtpBody, session: AsyncSession = Depends(get_db
 # ---------------------------------------------------------------------------
 
 
-def _profile_view(row: Driver) -> DriverProfileView:
+async def _count_completed_trips(session: AsyncSession, driver_id: str) -> int:
+    """Real trip count for the profile screen (1r) - a completed Route, not
+    a stand-in figure. There's no rating-submission system anywhere in this
+    app, so unlike trip count, a star rating has nothing real to compute
+    from and is deliberately not shown."""
+    result = await session.execute(
+        select(func.count())
+        .select_from(Route)
+        .where(Route.driver_id == uuid.UUID(driver_id), Route.status == "completed")
+    )
+    return result.scalar_one()
+
+
+async def _profile_view(session: AsyncSession, row: Driver) -> DriverProfileView:
     return DriverProfileView(
         driver_id=str(row.id),
         hub_id=str(row.hub_id),
@@ -97,6 +114,8 @@ def _profile_view(row: Driver) -> DriverProfileView:
         vehicle_type=row.vehicle_type,
         plate_number=row.plate_number,
         delivery_zone=row.delivery_zone,
+        payment_bank_last4=row.payment_bank_last4,
+        trip_count=await _count_completed_trips(session, str(row.id)),
     )
 
 
@@ -111,7 +130,7 @@ async def _get_driver_row(session: AsyncSession, driver: AuthedDriver) -> Driver
 async def get_my_profile(
     driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
 ) -> DriverProfileView:
-    return _profile_view(await _get_driver_row(session, driver))
+    return await _profile_view(session, await _get_driver_row(session, driver))
 
 
 @router.put("/me", response_model=DriverProfileView)
@@ -125,7 +144,68 @@ async def update_my_profile(
     row.plate_number = body.plate_number
     row.delivery_zone = body.delivery_zone
     await session.commit()
-    return _profile_view(row)
+    return await _profile_view(session, row)
+
+
+@router.put("/me/payment-method", response_model=DriverProfileView)
+async def update_my_payment_method(
+    body: PaymentMethodUpdate,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> DriverProfileView:
+    row = await _get_driver_row(session, driver)
+    row.payment_bank_last4 = body.bank_last4
+    await session.commit()
+    return await _profile_view(session, row)
+
+
+# ---------------------------------------------------------------------------
+# Documents (screen 1r) - see app/models/driver_document.py.
+# ---------------------------------------------------------------------------
+
+
+async def _get_expired_documents(session: AsyncSession, driver_id: str) -> list[DriverDocument]:
+    result = await session.execute(
+        select(DriverDocument).where(
+            DriverDocument.driver_id == uuid.UUID(driver_id), DriverDocument.expires_at < date.today()
+        )
+    )
+    return list(result.scalars().all())
+
+
+@router.get("/me/documents", response_model=list[DriverDocumentView])
+async def list_my_documents(
+    driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
+) -> list[DriverDocumentView]:
+    result = await session.execute(
+        select(DriverDocument).where(DriverDocument.driver_id == uuid.UUID(driver.driver_id))
+    )
+    return [
+        DriverDocumentView(doc_type=doc.doc_type, expires_at=doc.expires_at, file_url=doc.file_url)
+        for doc in result.scalars().all()
+    ]
+
+
+@router.put("/me/documents/{doc_type}", response_model=DriverDocumentView)
+async def update_my_document(
+    doc_type: str,
+    body: DriverDocumentUpdate,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> DriverDocumentView:
+    result = await session.execute(
+        select(DriverDocument).where(
+            DriverDocument.driver_id == uuid.UUID(driver.driver_id), DriverDocument.doc_type == doc_type
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if doc is None:
+        doc = DriverDocument(driver_id=uuid.UUID(driver.driver_id), doc_type=doc_type, expires_at=body.expires_at)
+        session.add(doc)
+    doc.expires_at = body.expires_at
+    doc.file_url = body.file_url
+    await session.commit()
+    return DriverDocumentView(doc_type=doc.doc_type, expires_at=doc.expires_at, file_url=doc.file_url)
 
 
 @router.post("/me/state")
@@ -135,6 +215,17 @@ async def update_my_availability(
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     row = await _get_driver_row(session, driver)
+
+    if body.status == "available":
+        expired = await _get_expired_documents(session, driver.driver_id)
+        if expired:
+            expired_types = ", ".join(doc.doc_type for doc in expired)
+            raise HTTPException(
+                status_code=409,
+                detail=f"Renew your {expired_types} before going online - see wireframe screen 1r's "
+                "document-expiry annotation.",
+            )
+
     manager = FleetStateManager()
     existing = await manager.get_driver_state(driver.hub_id, driver.driver_id)
     await manager.upsert_driver_state(
@@ -165,8 +256,11 @@ async def _requeue_orders_from_offer(
     back to the hold queue (Redis) with their original geography/SLA tier
     so the next Dispatch Optimizer cycle tries again, and Order.status
     reverts from "assigned" (set optimistically the moment the optimizer
-    proposed the offer - see app/optimizer/service.py) back to "queued" so
-    it doesn't lie about a dispatch that never actually happened.
+    proposed the offer - see app/optimizer/service.py) back to "held" -
+    not "queued", which per this enum's own definition means "released
+    from hold, waiting for a route assignment." The order is neither of
+    those right now; it's back in the same Redis hold queue app/ingestion/
+    service.py uses "held" for, so the Postgres status should say so too.
 
     Also puts the driver back in the optimizer's assignable pool - the
     optimizer took them out of it the moment it made the offer (see
@@ -192,7 +286,7 @@ async def _requeue_orders_from_offer(
     order_ids = [uuid.UUID(s["order_id"]) for s in stop_payload]
     if order_ids:
         await session.execute(
-            update(Order).where(Order.id.in_(order_ids)).values(status=OrderStatus.queued)
+            update(Order).where(Order.id.in_(order_ids)).values(status=OrderStatus.held)
         )
     orders_result = await session.execute(select(Order).where(Order.id.in_(order_ids))) if order_ids else None
     orders_by_id = {o.id: o for o in (orders_result.scalars().all() if orders_result else [])}
@@ -220,11 +314,25 @@ async def _requeue_orders_from_offer(
     await dispatch_event_bus.publish(hub_id, "job_offer_lapsed")
 
 
+async def _expire_if_lapsed(session: AsyncSession, offer: RouteOffer) -> bool:
+    """
+    Lazily expires an offer past its TTL, returning True if it was (just)
+    expired. Factored out once - previously duplicated inline in two of
+    three offer-reading endpoints, which is exactly how decline_offer ended
+    up as the one that forgot this check.
+    """
+    if offer.expires_at > datetime.now(timezone.utc):
+        return False
+    offer.status = "expired"
+    offer.responded_at = datetime.now(timezone.utc)
+    await _requeue_orders_from_offer(session, str(offer.hub_id), str(offer.driver_id), offer.stop_payload)
+    return True
+
+
 @router.get("/me/offers", response_model=list[JobOfferView])
 async def list_my_offers(
     driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
 ) -> list[JobOfferView]:
-    now = datetime.now(timezone.utc)
     result = await session.execute(
         select(RouteOffer).where(
             RouteOffer.driver_id == uuid.UUID(driver.driver_id), RouteOffer.status == "offered"
@@ -234,10 +342,7 @@ async def list_my_offers(
 
     live: list[JobOfferView] = []
     for offer in offers:
-        if offer.expires_at <= now:
-            offer.status = "expired"
-            offer.responded_at = now
-            await _requeue_orders_from_offer(session, str(offer.hub_id), str(offer.driver_id), offer.stop_payload)
+        if await _expire_if_lapsed(session, offer):
             continue
         live.append(
             JobOfferView(
@@ -257,9 +362,15 @@ async def decline_offer(
     driver: AuthedDriver = Depends(get_current_driver),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    offer = await _get_owned_offer(session, offer_id, driver)
+    # for_update: locks the row so a concurrent accept/decline on the same
+    # offer can't both read "offered" before either commits (see accept_offer).
+    offer = await _get_owned_offer(session, offer_id, driver, for_update=True)
     if offer.status != "offered":
         raise HTTPException(status_code=409, detail=f"Offer is {offer.status}, not open for a response")
+
+    if await _expire_if_lapsed(session, offer):
+        await session.commit()
+        raise HTTPException(status_code=409, detail="Offer expired")
 
     offer.status = "declined"
     offer.responded_at = datetime.now(timezone.utc)
@@ -274,15 +385,18 @@ async def accept_offer(
     driver: AuthedDriver = Depends(get_current_driver),
     session: AsyncSession = Depends(get_db),
 ) -> RouteView:
-    offer = await _get_owned_offer(session, offer_id, driver)
+    # for_update: without this, two concurrent accept calls for the same
+    # offer (a double-tap, or a client retry after a request that actually
+    # succeeded) can both read status="offered" before either commits,
+    # and both go on to build a Route - two Routes for one offer. Locking
+    # the row here means the second request blocks until the first commits,
+    # then re-reads the now-"accepted" status and 409s below instead.
+    offer = await _get_owned_offer(session, offer_id, driver, for_update=True)
     if offer.status != "offered":
         raise HTTPException(status_code=409, detail=f"Offer is {offer.status}, not open for a response")
 
     now = datetime.now(timezone.utc)
-    if offer.expires_at <= now:
-        offer.status = "expired"
-        offer.responded_at = now
-        await _requeue_orders_from_offer(session, str(offer.hub_id), str(offer.driver_id), offer.stop_payload)
+    if await _expire_if_lapsed(session, offer):
         await session.commit()
         raise HTTPException(status_code=409, detail="Offer expired")
 
@@ -351,8 +465,10 @@ async def accept_offer(
     return await _load_route_view(session, route.id)
 
 
-async def _get_owned_offer(session: AsyncSession, offer_id: str, driver: AuthedDriver) -> RouteOffer:
-    offer = await session.get(RouteOffer, uuid.UUID(offer_id))
+async def _get_owned_offer(
+    session: AsyncSession, offer_id: str, driver: AuthedDriver, *, for_update: bool = False
+) -> RouteOffer:
+    offer = await session.get(RouteOffer, uuid.UUID(offer_id), with_for_update=for_update)
     if offer is None or str(offer.driver_id) != driver.driver_id:
         raise HTTPException(status_code=404, detail="Offer not found")
     return offer
@@ -429,6 +545,7 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     order_ids=[str(o) for o in order_ids],
                     eta=stop.eta,
                     completed_at=stop.completed_at,
+                    left_at=stop.pod_left_at,
                 )
             )
 
@@ -465,11 +582,24 @@ async def _stop_view_after_reload(session: AsyncSession, stop: Stop) -> StopView
     return next(s for s in view.stops if s.stop_id == str(stop.id))
 
 
+# Stop.status's terminal states - once here, a stop can't transition again.
+# Guards below exist so a stale/retried/out-of-order client call can't skip a
+# step (complete a dropoff whose pickup was never scanned) or re-run a
+# terminal transition's side effects a second time.
+_TERMINAL_STOP_STATUSES = {"completed", "failed"}
+
+
+def _assert_stop_not_terminal(stop: Stop, action: str) -> None:
+    if stop.status in _TERMINAL_STOP_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Stop is {stop.status}, cannot {action}")
+
+
 @router.post("/stops/{stop_id}/arrive", response_model=StopView)
 async def arrive_at_stop(
     stop_id: str, driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
 ) -> StopView:
     stop = await _get_owned_stop(session, stop_id, driver)
+    _assert_stop_not_terminal(stop, "mark arrived")
     stop.status = "arrived"
     await session.commit()
     return await _stop_view_after_reload(session, stop)
@@ -483,6 +613,9 @@ async def scan_parcels(
     session: AsyncSession = Depends(get_db),
 ) -> StopView:
     stop = await _get_owned_stop(session, stop_id, driver)
+    _assert_stop_not_terminal(stop, "scan parcels")
+    if stop.status == "pending":
+        raise HTTPException(status_code=409, detail="Arrive at this stop before scanning parcels")
     stop.scanned_count = max(0, min(body.scanned_count, stop.parcel_count))
     await session.commit()
     return await _stop_view_after_reload(session, stop)
@@ -496,6 +629,32 @@ async def complete_stop(
     session: AsyncSession = Depends(get_db),
 ) -> StopView:
     stop = await _get_owned_stop(session, stop_id, driver)
+    _assert_stop_not_terminal(stop, "complete")
+    if stop.status == "pending":
+        raise HTTPException(status_code=409, detail="Arrive at this stop before completing it")
+    if stop.stop_type == "pickup" and stop.scanned_count < stop.parcel_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only {stop.scanned_count}/{stop.parcel_count} parcels scanned",
+        )
+    if stop.stop_type == "dropoff":
+        # Sequence assignment (accept_offer) always numbers every pickup
+        # stop before every dropoff stop on a route, so "any earlier-
+        # sequenced pickup not yet completed" is exactly "this delivery's
+        # pickup hasn't happened yet."
+        unfinished_pickups = await session.execute(
+            select(func.count())
+            .select_from(Stop)
+            .where(
+                Stop.route_id == stop.route_id,
+                Stop.stop_type == "pickup",
+                Stop.sequence < stop.sequence,
+                Stop.status != "completed",
+            )
+        )
+        if unfinished_pickups.scalar_one() > 0:
+            raise HTTPException(status_code=409, detail="Complete this route's pickup stop(s) first")
+
     now = datetime.now(timezone.utc)
     stop.status = "completed"
     stop.completed_at = now
@@ -503,6 +662,7 @@ async def complete_stop(
     stop.pod_photo_url = body.photo_url
     stop.pod_signature_url = body.signature_url
     stop.pod_pin = body.pin
+    stop.pod_left_at = body.left_at
 
     # Only a *dropoff* stop's completion means an order was actually
     # delivered - completing a pickup stop just means the parcels were

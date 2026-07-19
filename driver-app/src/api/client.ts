@@ -2,6 +2,8 @@ import Constants from 'expo-constants';
 
 import type {
   AuthToken,
+  DocType,
+  DriverDocument,
   DriverProfile,
   JobOffer,
   PodMethod,
@@ -79,6 +81,20 @@ export const api = {
   setAvailability: (status: string) =>
     request<{ ok: boolean }>('/driver/me/state', { method: 'POST', body: JSON.stringify({ status }) }),
 
+  updatePaymentMethod: (bankLast4: string) =>
+    request<DriverProfile>('/driver/me/payment-method', {
+      method: 'PUT',
+      body: JSON.stringify({ bank_last4: bankLast4 }),
+    }),
+
+  getMyDocuments: () => request<DriverDocument[]>('/driver/me/documents'),
+
+  updateDocument: (docType: DocType, body: { expires_at: string; file_url?: string }) =>
+    request<DriverDocument>(`/driver/me/documents/${docType}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
   getMyOffers: () => request<JobOffer[]>('/driver/me/offers'),
 
   acceptOffer: (offerId: string) => request<Route>(`/driver/offers/${offerId}/accept`, { method: 'POST' }),
@@ -98,7 +114,7 @@ export const api = {
 
   completeStop: (
     stopId: string,
-    body: { method: PodMethod; photo_url?: string; signature_url?: string; pin?: string },
+    body: { method: PodMethod; photo_url?: string; signature_url?: string; pin?: string; left_at?: string },
   ) =>
     request<Route['stops'][number]>(`/driver/stops/${stopId}/complete`, {
       method: 'POST',
