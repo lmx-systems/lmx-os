@@ -19,7 +19,7 @@ review flagged, built solidly rather than everything built thinly.
 | 4 | Fleet State Manager | Built — Redis-backed driver state/location |
 | 5 | Dispatch Optimizer | Built — real Google Route Optimization call implemented, unverified against a live Google Cloud project |
 | 6 | Annotation and Learning Loop | Built — pattern detection + nightly-job service; flag-type naming convention not yet agreed with driver app team |
-| 7 | OS Shell (dashboards, driver app, shop SMS) | Started — orchestrator dashboard built (`dashboard/`); driver app Phase 1 built (`driver-app/` + `app/api/driver_routes.py` — core delivery loop only, see below); client dashboard, driver app Phase 2/3 (earnings, messaging), shop SMS not started |
+| 7 | OS Shell (dashboards, driver app, shop SMS) | Started — orchestrator dashboard built (`dashboard/`); driver app Phase 1 (`driver-app/` + `app/api/driver_routes.py` — core delivery loop) and Phase 2 (profile screen: vehicle edit, documents, payment method) built, see below; client dashboard, driver app Phase 3 (earnings, messaging), shop SMS not started |
 
 ## Data layer
 
@@ -116,9 +116,10 @@ Other known gaps in the dashboard itself:
 `app/driver_auth/` is its backend. Built against
 `LMX Driver App Wireframes.dc.html` (18 screens, 8 flows) — this pass
 covers screens 1a-1m (onboarding, availability/jobs, active job) only.
-Earnings, messaging/support, and the full profile screen (1n-1r) are
-Phase 2/3, not built. See `driver-app/README.md` for what's stubbed inside
-the app itself (no camera/barcode SDK, no maps SDK, no real telephony).
+Earnings, messaging/support (1n-1q) are Phase 3, not built; the profile
+screen (1r) is covered by Phase 2, below. See `driver-app/README.md` for
+what's stubbed inside the app itself (no camera/barcode SDK, no maps SDK,
+no real telephony).
 
 This closed three real gaps, not just "add some endpoints":
 
@@ -137,8 +138,10 @@ This closed three real gaps, not just "add some endpoints":
   (`app/models/route_offer.py`) with a TTL; a driver has to accept it
   (`POST /driver/offers/{id}/accept`) before a real `Route`/`Stop` gets
   created. Declining or letting it expire puts the affected orders back in
-  the hold queue (`Order.status` reverts to `queued`) instead of leaving
-  them permanently stuck showing "assigned" with nobody driving them —
+  the hold queue (`Order.status` reverts to `held`, not `queued` — it's
+  back in the same Redis hold queue ingestion uses `held` for, not
+  released for a fresh assignment) instead of leaving them permanently
+  stuck showing "assigned" with nobody driving them —
   see `_requeue_orders_from_offer` in `app/api/driver_routes.py`. Known
   gap: there's no cooldown, so if the same driver is still the only one
   available, they can be re-offered the identical order almost
@@ -165,6 +168,40 @@ pipeline or PIN-issuance system to verify against. "Stop completed" (the
 design doc's third event-trigger source, previously unfired — see
 `app/optimizer/event_trigger.py`) is now published once a route's last
 stop completes.
+
+## Driver app (component 7, Phase 2 — profile screen)
+
+Adds screen 1r ("Profile") minus earnings, which Sourabh explicitly chose
+to defer rather than have this pass invent a pay formula — no fare/price
+field exists anywhere in `Order`/`Route`/`Stop`, so "earnings" has no real
+number to compute from yet.
+
+- **Vehicle edit.** Reuses the same `PUT /driver/me` endpoint and
+  `DriverProfileUpdate` schema screen 1c's one-time setup already used —
+  `EditVehicleScreen` just pre-fills it and is reachable any time from
+  Profile instead of only once at onboarding.
+- **Documents.** New `DriverDocument` model (`app/models/driver_document.py`
+  — `doc_type` of `license`/`insurance`, `expires_at`, `file_url`) and
+  `GET`/`PUT /driver/me/documents`. Going online (`POST /driver/me/state`
+  with `status=available`) now 409s if any document is missing or past its
+  `expires_at` — a real gate, not cosmetic. No file upload/OCR in v1;
+  `DocumentsScreen` only captures the expiry date as free text
+  (`YYYY-MM-DD`), which is the one field the gate actually reads.
+  `file_url` exists in the schema for a fast-follow photo-upload flow that
+  shouldn't need any API changes.
+- **Payment method.** `Driver.payment_bank_last4` — last 4 digits only,
+  display metadata. Deliberately not wired to any real payout rail: no
+  account/routing number is ever collected, and building a real payout
+  ledger is separate, larger work (see `docs/NEXT_STEPS.md` item 14).
+- **Trip count.** `DriverProfileView.trip_count` is a real count of
+  completed `Route` rows for that driver, computed at request time —
+  not a placeholder. No star rating anywhere in the app: there's no
+  rating-submission system (customers never rate a delivery), so showing
+  a number there would be fabricated rather than just an estimate.
+- **Navigation restructure.** `driver-app/` moved from a single stack to
+  bottom tabs (Home / Profile), each with its own nested stack, so a
+  driver mid-delivery doesn't lose `ActiveRoute`'s navigation state by
+  tapping over to Profile and back.
 
 ## Things that are stubbed, and why
 
