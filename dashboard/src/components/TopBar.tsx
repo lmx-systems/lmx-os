@@ -40,6 +40,7 @@ export function TopBar({ hubId, onChangeHubId, lastUpdatedAt }: TopBarProps) {
       <input
         id="hub-id"
         type="text"
+        aria-label="Hub ID"
         value={hubId}
         onChange={(e) => onChangeHubId(e.target.value)}
         placeholder="Paste a hub UUID"

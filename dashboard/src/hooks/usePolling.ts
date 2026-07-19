@@ -28,6 +28,18 @@ export function usePolling<T>(
 
   const [refetchToken, setRefetchToken] = useState(0)
 
+  // Deliberately separate from the fetch effect below and keyed only on
+  // `deps` (not `refetchToken`): clears out the previous poll target's data
+  // the moment `deps` changes (e.g. the selected hub_id) so a stale result
+  // never renders as if it belongs to the new target while its first fetch
+  // is still in flight. A manual refetchNow() intentionally does NOT clear
+  // data - that's a refresh of the same target, not a target change.
+  useEffect(() => {
+    setData(null)
+    setError(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps])
+
   useEffect(() => {
     if (!enabled) {
       setLoading(false)

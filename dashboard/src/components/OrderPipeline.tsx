@@ -19,7 +19,7 @@ interface OrderPipelineProps {
 
 export function OrderPipeline({ summary, error, loading }: OrderPipelineProps) {
   const counts = summary?.counts ?? {}
-  const total = counts.received ?? Math.max(1, ...Object.values(counts))
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0)
 
   return (
     <Card title="Order pipeline" meta={loading ? 'refreshing…' : summary ? `${total} orders` : undefined}>

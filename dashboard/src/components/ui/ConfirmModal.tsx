@@ -27,7 +27,7 @@ export function ConfirmModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,23,28,0.45)]"
-      onClick={onCancel}
+      onClick={busy ? undefined : onCancel}
     >
       <div
         className="w-[420px] max-w-[90vw] rounded-[var(--radius-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-5"

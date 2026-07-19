@@ -1,3 +1,7 @@
+// Shared between KpiStrip's "at risk" count and HoldQueueTable's row
+// highlighting - a single definition so the two can't drift apart.
+export const AT_RISK_MINUTES = 5
+
 export function minutesUntil(isoDeadline: string): number {
   return (new Date(isoDeadline).getTime() - Date.now()) / 60_000
 }

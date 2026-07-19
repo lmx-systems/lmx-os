@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Card } from './ui/Card'
 import { Chip } from './ui/Chip'
 import { TierBadge } from './ui/Badge'
-import { formatCountdown, minutesUntil, truncateId } from '../lib/format'
+import { AT_RISK_MINUTES, formatCountdown, minutesUntil, truncateId } from '../lib/format'
 import type { HeldOrderView } from '../lib/types'
 
 interface HoldQueueTableProps {
@@ -105,7 +105,7 @@ export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
                   )}
                   {rows.map((order) => {
                     const minsLeft = minutesUntil(order.hold_deadline)
-                    const risk = minsLeft <= 5
+                    const risk = minsLeft <= AT_RISK_MINUTES
                     return (
                       <tr key={order.order_id} className={`border-t border-[var(--border)] ${risk ? 'shadow-[inset_3px_0_0_var(--red)]' : ''}`}>
                         <td className="py-2 pr-3">

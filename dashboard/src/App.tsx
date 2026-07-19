@@ -53,16 +53,34 @@ function App() {
           </p>
         ) : (
           <>
-            <KpiStrip fleet={fleet.data} held={held.data} summary={summary.data} lastCycle={lastCycle.data} />
+            <KpiStrip
+              fleet={fleet.data}
+              fleetError={fleet.error}
+              held={held.data}
+              heldError={held.error}
+              summary={summary.data}
+              summaryError={summary.error}
+              lastCycle={lastCycle.data}
+            />
 
             <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr]">
               <div className="flex flex-col gap-4">
                 <OrderPipeline summary={summary.data} error={summary.error} loading={summary.loading} />
-                <HoldQueueTable data={held.data} error={held.error} loading={held.loading} />
+                <HoldQueueTable key={hubId} data={held.data} error={held.error} loading={held.loading} />
               </div>
               <div className="flex flex-col gap-4">
                 <FleetRoster data={fleet.data} error={fleet.error} loading={fleet.loading} />
-                <OperationsPanel hubId={hubId} onAfterRun={lastCycle.refetchNow} onToast={showToast} />
+                <OperationsPanel
+                  key={hubId}
+                  hubId={hubId}
+                  onAfterRun={() => {
+                    fleet.refetchNow()
+                    held.refetchNow()
+                    summary.refetchNow()
+                    lastCycle.refetchNow()
+                  }}
+                  onToast={showToast}
+                />
               </div>
             </div>
           </>

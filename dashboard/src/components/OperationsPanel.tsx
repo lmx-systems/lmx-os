@@ -6,9 +6,10 @@ import type { RunLogEntry } from '../lib/types'
 
 interface OperationsPanelProps {
   hubId: string
-  // The KPI strip's last-cycle card polls GET /optimizer/{hub_id}/last-cycle
-  // on its own timer; this just lets a just-fired manual run show up there
-  // immediately instead of waiting up to POLL_INTERVAL_MS for the next tick.
+  // Everything a dispatch cycle can change (fleet state, the hold queue,
+  // order-status counts, the last-cycle snapshot) is normally caught by the
+  // next scheduled poll tick, up to POLL_INTERVAL_MS later. Calling this
+  // after a successful run forces all of it to refresh immediately instead.
   onAfterRun: () => void
   onToast: (message: string) => void
 }
@@ -45,14 +46,24 @@ export function OperationsPanel({ hubId, onAfterRun, onToast }: OperationsPanelP
       if (openJob === 'optimizer') {
         const result = await api.runOptimizerCycle(hubId)
         onAfterRun()
-        const summary = `${result.assignments.length} assigned · ${Math.round(result.duration_seconds * 1000)}ms`
+        const summary =
+          `${result.assignments.length} assigned · ${result.unassigned_stop_ids.length} unassigned · ` +
+          `${Math.round(result.duration_seconds * 1000)}ms` +
+          (result.over_budget ? ' · over budget' : '')
         const entry: RunLogEntry = { at: now, kind: 'optimizer', summary }
         setLog((l) => [entry, ...l].slice(0, MAX_LOG_ENTRIES))
-        onToast(
+        const toastParts = [
           result.assignments.length > 0
             ? `Cycle complete — ${result.assignments.length} order(s) assigned`
             : 'Cycle complete — nothing to assign',
-        )
+        ]
+        if (result.unassigned_stop_ids.length > 0) {
+          toastParts.push(`${result.unassigned_stop_ids.length} stop(s) left unassigned`)
+        }
+        if (result.over_budget) {
+          toastParts.push('over the cycle budget')
+        }
+        onToast(toastParts.join(' — '))
       } else {
         const result = await api.runLearningLoopJob(hubId)
         const summary = `${result.proposals_created.length} rule(s) proposed`

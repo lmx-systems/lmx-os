@@ -1,17 +1,26 @@
 import { KpiCard } from './ui/KpiCard'
-import { formatIsoRelative, minutesUntil } from '../lib/format'
+import { AT_RISK_MINUTES, formatIsoRelative, minutesUntil } from '../lib/format'
 import type { DriverState, HeldOrderView, LastCycleSnapshot, OrderStatusSummary } from '../lib/types'
 
 interface KpiStripProps {
   fleet: DriverState[] | null
+  fleetError: Error | null
   held: HeldOrderView[] | null
+  heldError: Error | null
   summary: OrderStatusSummary | null
+  summaryError: Error | null
   lastCycle: LastCycleSnapshot | null
 }
 
-const AT_RISK_MINUTES = 5
-
-export function KpiStrip({ fleet, held, summary, lastCycle }: KpiStripProps) {
+export function KpiStrip({
+  fleet,
+  fleetError,
+  held,
+  heldError,
+  summary,
+  summaryError,
+  lastCycle,
+}: KpiStripProps) {
   const available = fleet?.filter((d) => d.status === 'available').length ?? 0
   const enRoute = fleet?.filter((d) => d.status === 'en_route').length ?? 0
   const total = fleet?.length ?? 0
@@ -36,6 +45,7 @@ export function KpiStrip({ fleet, held, summary, lastCycle }: KpiStripProps) {
           )
         }
         sub={fleet === null ? undefined : `available · ${enRoute} en route`}
+        stale={Boolean(fleetError)}
       />
       <KpiCard
         label="Orders in flight"
@@ -45,6 +55,7 @@ export function KpiStrip({ fleet, held, summary, lastCycle }: KpiStripProps) {
             ? undefined
             : `${counts.held ?? 0} held · ${counts.queued ?? 0} queued · ${counts.assigned ?? 0} assigned`
         }
+        stale={Boolean(summaryError)}
       />
       <KpiCard
         label={`At risk (<${AT_RISK_MINUTES}m to deadline)`}
@@ -55,11 +66,13 @@ export function KpiStrip({ fleet, held, summary, lastCycle }: KpiStripProps) {
             ? 'None currently'
             : atRisk.map((o) => o.shop_name || o.order_id.slice(0, 8)).join(', ')
         }
+        stale={Boolean(heldError)}
       />
       <KpiCard
         label="Dispatched (assigned + delivered)"
         value={summary === null ? '—' : dispatched}
         sub={summary === null ? undefined : `${counts.delivered ?? 0} delivered`}
+        stale={Boolean(summaryError)}
       />
       <KpiCard
         label="Last dispatch cycle"
