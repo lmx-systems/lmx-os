@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     twilio_auth_token: str | None = None
     twilio_from_number: str | None = None
 
+    # Driver app Phase 3 (screens 1p/1q): where a driver's "contact
+    # support" message actually goes. Unset = the message is still stored
+    # (app/models/message.py) so it's not silently lost, but no SMS send
+    # is attempted - there's nowhere real to send it to yet. Same
+    # "unconfigured -> stub/store-only" pattern as everything else in this
+    # file with no credentials yet.
+    support_phone_number: str | None = None
+
     epicor_base_url: str | None = None
     epicor_api_key: str | None = None
 

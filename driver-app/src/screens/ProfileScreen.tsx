@@ -101,6 +101,17 @@ export function ProfileScreen({ navigation }: Props) {
         </Card>
       </Pressable>
 
+      <Text style={[typography.label, styles.sectionLabel]}>Help</Text>
+      <Pressable onPress={() => navigation.navigate('Support')}>
+        <Card style={styles.row}>
+          <View style={styles.rowText}>
+            <Text style={typography.body}>Contact support</Text>
+            <Text style={typography.small}>Wrong address, blocked access, safety concern</Text>
+          </View>
+          <Feather name="chevron-right" size={20} color={colors.textMuted} />
+        </Card>
+      </Pressable>
+
       <View style={styles.spacer} />
       <Text style={typography.small} onPress={signOut}>
         Log out

@@ -85,3 +85,36 @@ export interface Route {
 }
 
 export type PodMethod = 'photo' | 'signature' | 'pin';
+
+// Phase 3 (screens 1n/1o) - see EarningsView's docstring in
+// app/schemas/driver_app.py for why is_placeholder is always true today.
+export interface Earnings {
+  period_start: string;
+  period_end: string;
+  hours_worked: number;
+  hourly_rate_cents: number;
+  estimated_pay_cents: number;
+  is_placeholder: boolean;
+  note: string;
+}
+
+export interface TripSummary {
+  route_id: string;
+  completed_at: string;
+  stop_count: number;
+  hours: number;
+}
+
+// Phase 3 (screens 1p/1q) - masked SMS. Deliberately has no phone number
+// field - see MessageView's docstring in app/schemas/driver_app.py.
+export type MessageChannel = 'customer' | 'support';
+export type MessageDirection = 'outbound' | 'inbound';
+
+export interface Message {
+  message_id: string;
+  channel: MessageChannel;
+  direction: MessageDirection;
+  body: string;
+  created_at: string;
+  stop_id: string | null;
+}

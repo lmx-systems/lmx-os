@@ -19,7 +19,7 @@ review flagged, built solidly rather than everything built thinly.
 | 4 | Fleet State Manager | Built — Redis-backed driver state/location |
 | 5 | Dispatch Optimizer | Built — real Google Route Optimization call implemented, unverified against a live Google Cloud project |
 | 6 | Annotation and Learning Loop | Built — pattern detection + nightly-job service; flag-type naming convention not yet agreed with driver app team |
-| 7 | OS Shell (dashboards, driver app, shop SMS) | Started — orchestrator dashboard built (`dashboard/`); driver app Phase 1 (`driver-app/` + `app/api/driver_routes.py` — core delivery loop) and Phase 2 (profile screen: vehicle edit, documents, payment method) built, see below; client dashboard, driver app Phase 3 (earnings, messaging), shop SMS not started |
+| 7 | OS Shell (dashboards, driver app, shop SMS) | Started — orchestrator dashboard built (`dashboard/`); driver app Phase 1 (core delivery loop), Phase 2 (profile screen), and Phase 3 (earnings estimate, masked SMS messaging) all built, see below; client dashboard and shop SMS not started. Driver app earnings/messaging are display-only/stub-backed until a payroll provider and a real Twilio account are provisioned (`docs/NEXT_STEPS.md` items 15/16) |
 
 ## Data layer
 
@@ -116,10 +116,10 @@ Other known gaps in the dashboard itself:
 `app/driver_auth/` is its backend. Built against
 `LMX Driver App Wireframes.dc.html` (18 screens, 8 flows) — this pass
 covers screens 1a-1m (onboarding, availability/jobs, active job) only.
-Earnings, messaging/support (1n-1q) are Phase 3, not built; the profile
-screen (1r) is covered by Phase 2, below. See `driver-app/README.md` for
-what's stubbed inside the app itself (no camera/barcode SDK, no maps SDK,
-no real telephony).
+Earnings, messaging/support (1n-1q) are covered by Phase 3, further down;
+the profile screen (1r) is covered by Phase 2, below. See
+`driver-app/README.md` for what's stubbed inside the app itself (no
+camera/barcode SDK, no maps SDK).
 
 This closed three real gaps, not just "add some endpoints":
 
@@ -203,6 +203,71 @@ number to compute from yet.
   driver mid-delivery doesn't lose `ActiveRoute`'s navigation state by
   tapping over to Profile and back.
 
+## Driver app (component 7, Phase 3 — earnings + messaging)
+
+Covers screens 1n/1o (earnings, trip history) and 1p/1q (masked SMS
+contact with the customer and with dispatch/support) — the last of the
+screens called out as not-yet-built in Phase 1/2. Three decisions were
+Sourabh's to make, not mine, before any of this could be written:
+
+- **Pay formula**: explicit placeholder ($18.00/hr flat,
+  `PLACEHOLDER_HOURLY_RATE_CENTS` in `app/api/driver_routes.py`), not a
+  real one — there's still no fare/price field anywhere in
+  `Order`/`Route`/`Stop` to derive a real number from. "Hours worked" is
+  real data, though: each completed `Route`'s `updated_at - created_at`
+  span (job accepted -> last stop finished), summed for the current week.
+  Every response (`EarningsView`) carries `is_placeholder: true` and a
+  user-facing note saying so — this is deliberately not presented as a
+  real payroll figure anywhere in the app.
+- **Payroll**: drivers are W2 employees; pay will eventually run through
+  ADP or Gusto, but neither is chosen/provisioned yet (`docs/
+  NEXT_STEPS.md` item 15) — no client code was written against either
+  API, since guessing which one (and its schema) would be wasted, likely
+  wrong work. This app stays display-only until that's settled.
+- **Messaging**: masked SMS via Twilio, for both customer contact (from
+  the active-job screen) and dispatch/support contact (from Profile) —
+  not masked *voice* calling (a materially heavier Twilio Voice/Proxy
+  integration) and not in-app chat requiring new realtime infrastructure.
+
+What this closed:
+
+- **`app/models/message.py`** — `Message` rows for both channels
+  (`customer`/`support`), `direction` (`outbound`/`inbound`),
+  `counterparty_phone` (nullable — a support message sent before
+  `SUPPORT_PHONE_NUMBER` is configured has nowhere real to go yet, but is
+  still recorded, not dropped). Deliberately never serializes the real
+  phone number back to the driver app (`MessageView` omits it entirely) —
+  that's the actual "masked" part: the driver never sees the customer's
+  number, and the customer/support side only ever sees LMX's shared
+  Twilio number, never the driver's personal phone.
+- **`app/messaging/sms_client.py`** — same stub/real split as
+  `google_routes_client.py`: `TwilioSmsClient` sends for real once
+  `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM_NUMBER` are set;
+  `StubSmsClient` (used today — no Twilio account exists yet) logs and
+  returns no SID, so everything else (storage, the message-thread UI,
+  inbound webhook matching) is fully buildable and tested without a live
+  account.
+- **`app/api/webhooks.py`** — `POST /webhooks/twilio/inbound-sms`, a new
+  router exempt from both `SharedSecretAuthMiddleware` and driver JWT auth
+  (Twilio calls it directly, carrying neither). Matches an inbound
+  reply's `From` number against the most recent outbound `Message` sent
+  to that number to figure out which driver/channel/stop it belongs to.
+  Two real, named gaps, not polish items: (1) no Twilio request-signature
+  verification yet, so this endpoint currently trusts whatever posts to
+  it — must be closed before a real Twilio number ever points here; (2)
+  phone-number-only matching means a driver with two concurrent
+  conversations to the same number could have a reply attached to the
+  wrong one.
+- **Frontend**: a third bottom tab, Earnings (`EarningsScreen`,
+  `TripHistoryScreen`), sitting alongside Home and Profile since earnings
+  is neither part of the delivery loop nor an account/compliance setting.
+  `MessageCustomerScreen` is reachable from the active-job screen's
+  "Message" button, which previously showed an inert alert
+  (`driver-app/README.md` called this out explicitly); "Call" on that
+  same screen still shows an alert, now naming masked *voice* calling
+  specifically as the unbuilt piece, not messaging generally.
+  `SupportScreen` is reachable from Profile.
+
 ## Things that are stubbed, and why
 
 These exist so the full pipeline — ingest → classify → hold → release →
@@ -235,8 +300,18 @@ swapping in the real thing is a contained change:
   drift "the most common cause of Phase 1 slippage" — confirm against the
   actual client's webhook payload before go-live, and expect to adjust this
   one file.
-- **Twilio, ADP/Gusto**: not wired in at all yet. Not on the Phase 1 core
-  backend critical path per the design doc's own component breakdown.
+- **Twilio**: the client interface now exists (`app/messaging/sms_client.py`,
+  used by driver app Phase 3's messaging) and will send for real once
+  `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM_NUMBER` are set -
+  but no account is provisioned yet, so every send currently goes through
+  `StubSmsClient` (logs, no real SMS). Same for driver OTP codes
+  (`app/driver_auth/otp_store.py`) - still shown on-screen (`debug_code`)
+  rather than texted. See `docs/NEXT_STEPS.md` item 16.
+- **ADP/Gusto**: not wired in at all - no client code exists for either,
+  since which provider LMX will use hasn't been decided yet (`docs/
+  NEXT_STEPS.md` item 15). Driver app Phase 3's earnings screen is
+  display-only specifically because of this - it estimates a number, it
+  doesn't run payroll.
 
 ## Things that are best-effort interpretations, not confirmed spec
 

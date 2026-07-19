@@ -19,13 +19,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
+from app.config import settings
 from app.db import get_db
 from app.driver_auth.dependencies import AuthedDriver, get_current_driver
 from app.driver_auth.otp_store import OtpRateLimitExceeded, OtpStore
 from app.driver_auth.tokens import issue_token
 from app.fleet_state.manager import FleetStateManager
+from app.messaging.sms_client import get_sms_client
 from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
+from app.models.message import Message
 from app.models.order import Order, OrderStatus
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
@@ -39,12 +42,16 @@ from app.schemas.driver_app import (
     DriverDocumentView,
     DriverProfileUpdate,
     DriverProfileView,
+    EarningsView,
     JobOfferView,
+    MessageView,
     OfferStopSummary,
     PaymentMethodUpdate,
     RouteView,
     ScanParcelsBody,
+    SendMessageBody,
     StopView,
+    TripSummaryView,
 )
 from app.schemas.driver_auth import AuthToken, RequestOtpBody, RequestOtpResult, VerifyOtpBody
 from app.schemas.fleet import DriverState
@@ -701,3 +708,198 @@ async def complete_stop(
         await dispatch_event_bus.publish(driver.hub_id, "stop_completed")
 
     return await _stop_view_after_reload(session, stop)
+
+
+# ---------------------------------------------------------------------------
+# Messaging (screens 1p/1q) - masked SMS via app/messaging/sms_client.py.
+# "Masked" means the customer/support side only ever sees LMX's shared
+# Twilio number, and the driver app never receives the real counterparty
+# phone number back (see MessageView, which omits it entirely).
+# ---------------------------------------------------------------------------
+
+
+def _message_view(message: Message) -> MessageView:
+    return MessageView(
+        message_id=str(message.id),
+        channel=message.channel,
+        direction=message.direction,
+        body=message.body,
+        created_at=message.created_at,
+        stop_id=str(message.stop_id) if message.stop_id else None,
+    )
+
+
+@router.post("/stops/{stop_id}/message-customer", response_model=MessageView)
+async def message_customer(
+    stop_id: str,
+    body: SendMessageBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> MessageView:
+    stop = await _get_owned_stop(session, stop_id, driver)
+    if stop.stop_type != "dropoff":
+        raise HTTPException(status_code=409, detail="Only a dropoff stop has a customer to message")
+
+    order_id_result = await session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == stop.id))
+    order_id = order_id_result.scalar_one_or_none()
+    order = await session.get(Order, order_id) if order_id else None
+    if order is None or not order.delivery_contact_phone:
+        raise HTTPException(status_code=409, detail="No customer contact number on file for this stop")
+
+    twilio_sid = await get_sms_client().send(order.delivery_contact_phone, body.body)
+    message = Message(
+        hub_id=uuid.UUID(driver.hub_id),
+        driver_id=uuid.UUID(driver.driver_id),
+        stop_id=stop.id,
+        channel="customer",
+        direction="outbound",
+        body=body.body,
+        counterparty_phone=order.delivery_contact_phone,
+        twilio_sid=twilio_sid,
+    )
+    session.add(message)
+    await session.commit()
+    return _message_view(message)
+
+
+@router.get("/stops/{stop_id}/messages", response_model=list[MessageView])
+async def list_customer_messages(
+    stop_id: str, driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
+) -> list[MessageView]:
+    stop = await _get_owned_stop(session, stop_id, driver)
+    result = await session.execute(
+        select(Message).where(Message.stop_id == stop.id).order_by(Message.created_at)
+    )
+    return [_message_view(m) for m in result.scalars().all()]
+
+
+@router.post("/me/messages", response_model=MessageView)
+async def message_support(
+    body: SendMessageBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> MessageView:
+    # Unlike message_customer, there's no hard failure if
+    # SUPPORT_PHONE_NUMBER isn't configured (app/config.py) - the message
+    # is still recorded so it's not silently lost, just not actually sent
+    # anywhere yet. Same "unconfigured -> store, don't pretend" pattern the
+    # rest of this pass uses.
+    twilio_sid = None
+    if settings.support_phone_number:
+        twilio_sid = await get_sms_client().send(settings.support_phone_number, body.body)
+
+    message = Message(
+        hub_id=uuid.UUID(driver.hub_id),
+        driver_id=uuid.UUID(driver.driver_id),
+        stop_id=None,
+        channel="support",
+        direction="outbound",
+        body=body.body,
+        counterparty_phone=settings.support_phone_number,
+        twilio_sid=twilio_sid,
+    )
+    session.add(message)
+    await session.commit()
+    return _message_view(message)
+
+
+@router.get("/me/messages", response_model=list[MessageView])
+async def list_support_messages(
+    driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
+) -> list[MessageView]:
+    result = await session.execute(
+        select(Message)
+        .where(Message.driver_id == uuid.UUID(driver.driver_id), Message.channel == "support")
+        .order_by(Message.created_at)
+    )
+    return [_message_view(m) for m in result.scalars().all()]
+
+
+# ---------------------------------------------------------------------------
+# Earnings + trip history (screens 1n/1o) - see EarningsView/TripSummaryView
+# docstrings (app/schemas/driver_app.py) for why this is explicitly labeled
+# an estimate rather than a real payroll figure.
+# ---------------------------------------------------------------------------
+
+# Placeholder-flagged, not tuned against any real wage decision - see
+# docs/NEXT_STEPS.md item 14. A single global rate rather than a
+# per-driver field because there's no admin UI or payroll integration yet
+# to set one meaningfully; swapping this for a real per-driver/per-hub
+# rate is a contained change once that exists.
+PLACEHOLDER_HOURLY_RATE_CENTS = 1_800  # $18.00/hr
+
+
+def _week_bounds(now: datetime) -> tuple[datetime, datetime]:
+    start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, start + timedelta(days=7)
+
+
+async def _completed_routes_this_week(session: AsyncSession, driver_id: str) -> list[Route]:
+    start, end = _week_bounds(datetime.now(timezone.utc))
+    result = await session.execute(
+        select(Route).where(
+            Route.driver_id == uuid.UUID(driver_id),
+            Route.status == "completed",
+            Route.updated_at >= start,
+            Route.updated_at < end,
+        )
+    )
+    return list(result.scalars().all())
+
+
+def _route_hours(route: Route) -> float:
+    # Proxy for "hours worked" - route.created_at (job accepted) to
+    # route.updated_at (last touched, which for a completed route is when
+    # its last stop finished - see complete_stop above). There's no
+    # clock-in/out event anywhere in this system, so this doesn't subtract
+    # breaks or account for time before the route was created; it's a
+    # reasonable estimate, not a timesheet.
+    return max((route.updated_at - route.created_at).total_seconds() / 3600, 0.0)
+
+
+@router.get("/me/earnings", response_model=EarningsView)
+async def get_my_earnings(
+    driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
+) -> EarningsView:
+    start, end = _week_bounds(datetime.now(timezone.utc))
+    routes = await _completed_routes_this_week(session, driver.driver_id)
+    hours_worked = sum(_route_hours(r) for r in routes)
+    estimated_pay_cents = round(hours_worked * PLACEHOLDER_HOURLY_RATE_CENTS)
+    return EarningsView(
+        period_start=start.date(),
+        period_end=(end - timedelta(days=1)).date(),
+        hours_worked=round(hours_worked, 2),
+        hourly_rate_cents=PLACEHOLDER_HOURLY_RATE_CENTS,
+        estimated_pay_cents=estimated_pay_cents,
+    )
+
+
+@router.get("/me/trips", response_model=list[TripSummaryView])
+async def list_my_trips(
+    driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
+) -> list[TripSummaryView]:
+    result = await session.execute(
+        select(Route)
+        .where(Route.driver_id == uuid.UUID(driver.driver_id), Route.status == "completed")
+        .order_by(Route.updated_at.desc())
+    )
+    routes = list(result.scalars().all())
+    if not routes:
+        return []
+
+    stop_counts_result = await session.execute(
+        select(Stop.route_id, func.count())
+        .where(Stop.route_id.in_([r.id for r in routes]))
+        .group_by(Stop.route_id)
+    )
+    stop_counts = dict(stop_counts_result.all())
+
+    return [
+        TripSummaryView(
+            route_id=str(route.id),
+            completed_at=route.updated_at,
+            stop_count=stop_counts.get(route.id, 0),
+            hours=round(_route_hours(route), 2),
+        )
+        for route in routes
+    ]

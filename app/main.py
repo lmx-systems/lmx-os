@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.driver_routes import router as driver_router
 from app.api.routes import router as ops_router
+from app.api.webhooks import router as webhooks_router
 from app.config import settings
 from app.db import engine
 from app.driver_auth.tokens import assert_driver_jwt_secret_configured
@@ -79,3 +80,4 @@ app.add_middleware(
 app.include_router(ops_router)
 app.include_router(ingestion_router)
 app.include_router(driver_router)
+app.include_router(webhooks_router)

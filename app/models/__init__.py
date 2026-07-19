@@ -2,6 +2,7 @@ from app.models.client import Client
 from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
 from app.models.hub import Hub
+from app.models.message import Message
 from app.models.order import Order
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
@@ -14,6 +15,7 @@ __all__ = [
     "Driver",
     "DriverDocument",
     "Hub",
+    "Message",
     "Order",
     "Route",
     "RouteOffer",

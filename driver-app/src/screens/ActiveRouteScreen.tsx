@@ -87,12 +87,22 @@ export function ActiveRouteScreen({ navigation }: Props) {
               <Button
                 label="Call"
                 variant="outline"
-                onPress={() => Alert.alert('Calling', 'Masked calling is not wired up yet.')}
+                onPress={() =>
+                  Alert.alert(
+                    'Masked calling not available yet',
+                    'Voice calling needs its own Twilio Voice/Proxy setup, separate from the SMS messaging below. Use Message for now.',
+                  )
+                }
               />
               <Button
                 label="Message"
                 variant="outline"
-                onPress={() => Alert.alert('Message', 'In-app messaging is not wired up yet.')}
+                onPress={() =>
+                  navigation.navigate('MessageCustomer', {
+                    stopId: currentStop.stop_id,
+                    contactName: currentStop.contact_name,
+                  })
+                }
               />
             </View>
           )}

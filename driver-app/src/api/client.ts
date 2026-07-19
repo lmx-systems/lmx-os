@@ -5,10 +5,13 @@ import type {
   DocType,
   DriverDocument,
   DriverProfile,
+  Earnings,
   JobOffer,
+  Message,
   PodMethod,
   RequestOtpResult,
   Route,
+  TripSummary,
 } from './types';
 
 // app.json's extra.apiBaseUrl is the dev default (local backend). Point
@@ -120,6 +123,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  getEarnings: () => request<Earnings>('/driver/me/earnings'),
+
+  getTrips: () => request<TripSummary[]>('/driver/me/trips'),
+
+  messageCustomer: (stopId: string, body: string) =>
+    request<Message>(`/driver/stops/${stopId}/message-customer`, { method: 'POST', body: JSON.stringify({ body }) }),
+
+  getCustomerMessages: (stopId: string) => request<Message[]>(`/driver/stops/${stopId}/messages`),
+
+  messageSupport: (body: string) =>
+    request<Message>('/driver/me/messages', { method: 'POST', body: JSON.stringify({ body }) }),
+
+  getSupportMessages: () => request<Message[]>('/driver/me/messages'),
 };
 
 export { ApiError };

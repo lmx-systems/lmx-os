@@ -1,14 +1,18 @@
 # LMX Driver App
 
-React Native (Expo) app for drivers - Phase 1 of the driver app build (see
-`docs/NEXT_STEPS.md` item 12). Covers the core delivery loop from the
-wireframe spec (`LMX Driver App Wireframes.dc.html`, screens 1a-1m):
-sign in, vehicle setup, go online, accept a job offer, and run the
-pickup -> scan -> dropoff -> proof-of-delivery flow against the real LMX OS
-backend (`app/api/driver_routes.py`).
+React Native (Expo) app for drivers - now covers all 18 screens of the
+wireframe spec (`LMX Driver App Wireframes.dc.html`) across three phases
+(see `docs/NEXT_STEPS.md` items 12/13/14):
 
-Screens 1n-1r (earnings, messaging/support, full profile) are Phase 2/3 -
-not built here. See the root `docs/NEXT_STEPS.md` for the phasing.
+- **Phase 1** (screens 1a-1m): sign in, vehicle setup, go online, accept a
+  job offer, and run the pickup -> scan -> dropoff -> proof-of-delivery
+  flow against the real LMX OS backend (`app/api/driver_routes.py`).
+- **Phase 2** (screen 1r): profile - edit vehicle, license/insurance
+  documents (with a real going-online gate if either's expired), and a
+  masked (last-4-only) payment method.
+- **Phase 3** (screens 1n/1o/1p/1q): a placeholder earnings estimate and
+  trip history, plus masked SMS messaging with the customer (from the
+  active-job screen) and with dispatch/support (from Profile).
 
 ## Setup
 
@@ -41,13 +45,27 @@ extra header needed from this app.
   photo/signature URL rather than actually invoking the camera or a
   signature pad. The PIN field has no field to verify against yet - there's
   no PIN-issuance system server-side (see `app/models/stop.py`).
-- **Masked calling / messaging** (referenced on the active-job screen):
-  not built - Phase 3, needs a real Twilio/telephony integration.
-  Currently shows an inert alert.
+- **Messaging (1p/1q)**: real masked SMS - sends via
+  `app/messaging/sms_client.py`'s `TwilioSmsClient` once a Twilio account
+  is provisioned (`TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/
+  `TWILIO_FROM_NUMBER`); until then, every send goes through
+  `StubSmsClient` (logged, not actually delivered) - same "unconfigured ->
+  stub" pattern as OTP codes above. The inbound-reply webhook
+  (`app/api/webhooks.py`) also has no Twilio request-signature
+  verification yet - a real gap to close before pointing a live number at
+  it, not just a formatting note.
+- **Masked calling** (as opposed to messaging): still not built - would
+  need a separate, heavier Twilio Voice/Proxy integration. The "Call"
+  button on the active-job screen says so explicitly now.
 - **Navigation (1h)**: no turn-by-turn/maps SDK integration - screens 1h,
   1i, and 1l are merged into one `ActiveRouteScreen` showing the current
   stop plus the full stops list, without live turn directions.
-- **Earnings**: not built at all (Phase 2 - no backend for it yet).
+- **Earnings (1n/1o)**: real hours-worked data (computed from each
+  completed route's timestamps), run through an explicitly-labeled
+  placeholder hourly rate - not a real pay formula, and not connected to
+  any payroll system (ADP/Gusto - neither is provisioned yet, see
+  `docs/NEXT_STEPS.md` item 15). Every earnings response is marked
+  `is_placeholder: true` and shown that way in the app.
 
 ## Structure
 

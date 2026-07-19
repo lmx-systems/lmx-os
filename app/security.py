@@ -36,7 +36,11 @@ EXEMPT_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json"})
 # Matched as whole path segments (see _is_exempt), not a bare string
 # prefix - a future route that merely starts with these characters (e.g.
 # /drivers-report) must NOT silently inherit this exemption.
-EXEMPT_PREFIXES = ("/driver",)
+#
+# /webhooks: Twilio calls these directly (app/api/webhooks.py) and can't
+# carry our X-API-Key - see that module's own docstring for the real gap
+# this leaves (no request-signature verification yet either).
+EXEMPT_PREFIXES = ("/driver", "/webhooks")
 
 
 def _is_exempt(path: str) -> bool:

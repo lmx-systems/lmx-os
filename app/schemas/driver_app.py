@@ -123,3 +123,54 @@ class CompleteStopBody(BaseModel):
     signature_url: str | None = None
     pin: str | None = None
     left_at: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Messaging (screens 1p/1q) and earnings (screens 1n/1o) - Phase 3.
+# ---------------------------------------------------------------------------
+
+
+class SendMessageBody(BaseModel):
+    body: str
+
+
+class MessageView(BaseModel):
+    """Deliberately has no phone number field anywhere - the whole point of
+    'masked' is that the customer's/support's real number never reaches the
+    driver app. See Message.counterparty_phone's docstring."""
+
+    message_id: str
+    channel: str  # customer | support
+    direction: str  # outbound | inbound
+    body: str
+    created_at: datetime
+    stop_id: str | None = None
+
+
+class EarningsView(BaseModel):
+    """Screen 1n. is_placeholder is always True right now - see this
+    module's own note below and docs/NEXT_STEPS.md item 14. There is no
+    real fare/price field anywhere in Order/Route/Stop, so this is an
+    estimate built from a placeholder hourly rate and each route's
+    creation-to-completion span, not a verified payroll figure."""
+
+    period_start: date
+    period_end: date
+    hours_worked: float
+    hourly_rate_cents: int
+    estimated_pay_cents: int
+    is_placeholder: bool = True
+    note: str = (
+        "Estimate only - pay formula and payroll integration are not finalized. "
+        "Contact dispatch with pay questions."
+    )
+
+
+class TripSummaryView(BaseModel):
+    """Screen 1o, trip history. hours is the same route-span estimate
+    EarningsView aggregates - see that class's docstring."""
+
+    route_id: str
+    completed_at: datetime
+    stop_count: int
+    hours: float
