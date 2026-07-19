@@ -32,7 +32,17 @@ EXEMPT_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json"})
 # ops-tooling shared secret this middleware exists for. See docs/
 # NEXT_STEPS.md item 12 and this module's own docstring ("a client-facing
 # dashboard or driver app needs the real thing").
+#
+# Matched as whole path segments (see _is_exempt), not a bare string
+# prefix - a future route that merely starts with these characters (e.g.
+# /drivers-report) must NOT silently inherit this exemption.
 EXEMPT_PREFIXES = ("/driver",)
+
+
+def _is_exempt(path: str) -> bool:
+    if path in EXEMPT_PATHS:
+        return True
+    return any(path == prefix or path.startswith(f"{prefix}/") for prefix in EXEMPT_PREFIXES)
 
 
 class SharedSecretAuthMiddleware(BaseHTTPMiddleware):
@@ -47,11 +57,7 @@ class SharedSecretAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        if (
-            not settings.api_shared_secret
-            or request.url.path in EXEMPT_PATHS
-            or request.url.path.startswith(EXEMPT_PREFIXES)
-        ):
+        if not settings.api_shared_secret or _is_exempt(request.url.path):
             return await call_next(request)
 
         provided = request.headers.get(API_KEY_HEADER)

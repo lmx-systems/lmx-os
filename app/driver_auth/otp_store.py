@@ -31,9 +31,24 @@ logger = structlog.get_logger(__name__)
 OTP_TTL_SECONDS = 5 * 60
 MAX_VERIFY_ATTEMPTS = 5
 
+# Nothing throttled issuance itself - without this, anyone who can reach the
+# API could hammer a phone number to enumerate valid drivers (404 vs a fresh
+# code) or just spam issuance. Deliberately separate from the OTP key/TTL
+# above so a burst of requests can't reset MAX_VERIFY_ATTEMPTS's window.
+MAX_ISSUE_ATTEMPTS = 3
+ISSUE_RATE_LIMIT_WINDOW_SECONDS = OTP_TTL_SECONDS
+
 
 def _key(phone: str) -> str:
     return f"driver_auth:otp:{phone}"
+
+
+def _rate_limit_key(phone: str) -> str:
+    return f"driver_auth:otp:issue_count:{phone}"
+
+
+class OtpRateLimitExceeded(Exception):
+    pass
 
 
 @dataclass(frozen=True)
@@ -47,6 +62,17 @@ class OtpStore:
         self._redis = get_client()
 
     async def issue(self, phone: str) -> OtpIssueResult:
+        async with timed_operation("driver_auth.otp.rate_limit"):
+            pipe = self._redis.pipeline(transaction=True)
+            pipe.incr(_rate_limit_key(phone))
+            pipe.expire(_rate_limit_key(phone), ISSUE_RATE_LIMIT_WINDOW_SECONDS, nx=True)
+            count, _ = await pipe.execute()
+        if count > MAX_ISSUE_ATTEMPTS:
+            raise OtpRateLimitExceeded(
+                f"Too many codes requested for this number - try again in "
+                f"{ISSUE_RATE_LIMIT_WINDOW_SECONDS // 60} minutes"
+            )
+
         code = f"{random.randint(0, 9999):04d}"
         async with timed_operation("driver_auth.otp.issue"):
             pipe = self._redis.pipeline(transaction=True)

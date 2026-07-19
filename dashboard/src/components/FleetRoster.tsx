@@ -11,10 +11,11 @@ interface FleetRosterProps {
   loading: boolean
 }
 
-const STATUSES = ['all', 'available', 'en_route', 'on_break', 'off_shift'] as const
+const STATUSES = ['all', 'available', 'offered', 'en_route', 'on_break', 'off_shift'] as const
 const STATUS_LABEL: Record<(typeof STATUSES)[number], string> = {
   all: 'All',
   available: 'Available',
+  offered: 'Offer pending',
   en_route: 'En route',
   on_break: 'On break',
   off_shift: 'Off shift',

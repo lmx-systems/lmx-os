@@ -7,7 +7,9 @@
 export interface DriverState {
   driver_id: string
   hub_id: string
-  status: 'off_shift' | 'available' | 'en_route' | 'on_break'
+  // 'offered' = has a pending job offer (app/optimizer/service.py) - kept
+  // out of the assignable pool until the driver accepts/declines/it expires.
+  status: 'off_shift' | 'available' | 'offered' | 'en_route' | 'on_break'
   capacity_units: number
   load_units: number
   current_route_id: string | null

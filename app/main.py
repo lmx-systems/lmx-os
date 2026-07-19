@@ -20,6 +20,7 @@ from app.api.driver_routes import router as driver_router
 from app.api.routes import router as ops_router
 from app.config import settings
 from app.db import engine
+from app.driver_auth.tokens import assert_driver_jwt_secret_configured
 from app.ingestion.router import router as ingestion_router
 from app.logging_config import configure_logging, get_logger
 from app.optimizer.event_trigger import dispatch_event_bus
@@ -34,8 +35,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging()
     logger.info("lmx_os_starting")
 
-    # Fail fast on boot if Postgres/Redis aren't reachable, rather than
-    # surfacing a confusing error on the first real request.
+    # Fail fast on boot if Postgres/Redis aren't reachable, or driver
+    # sessions would be forgeable, rather than surfacing a confusing error
+    # (or a silent vulnerability) on the first real request.
+    assert_driver_jwt_secret_configured()
     async with engine.connect() as conn:
         await conn.run_sync(lambda _: None)
     redis_client = get_client()

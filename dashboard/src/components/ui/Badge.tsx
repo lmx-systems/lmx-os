@@ -20,6 +20,7 @@ export function TierBadge({ tier }: { tier: string }) {
 
 const STATUS_DOT_COLOR: Record<DriverState['status'], string> = {
   available: 'bg-[var(--green)]',
+  offered: 'bg-[var(--amber)]',
   en_route: 'bg-[var(--blue)]',
   on_break: 'bg-[var(--amber)]',
   off_shift: 'bg-[var(--gray)]',
@@ -27,6 +28,7 @@ const STATUS_DOT_COLOR: Record<DriverState['status'], string> = {
 
 const STATUS_LABEL: Record<DriverState['status'], string> = {
   available: 'Available',
+  offered: 'Offer pending',
   en_route: 'En route',
   on_break: 'On break',
   off_shift: 'Off shift',

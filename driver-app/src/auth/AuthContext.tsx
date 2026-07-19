@@ -1,10 +1,13 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { api, setAuthToken } from '../api/client';
 import type { DriverProfile } from '../api/types';
 
+// SecureStore (Keychain on iOS, EncryptedSharedPreferences on Android), not
+// AsyncStorage - this token is a 30-day-lived bearer credential for a real
+// driver session and shouldn't sit in plain, unencrypted app-sandbox storage.
 const TOKEN_STORAGE_KEY = 'lmx_driver_token';
 
 interface AuthContextValue {
@@ -26,7 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     (async () => {
-      const stored = await AsyncStorage.getItem(TOKEN_STORAGE_KEY);
+      const stored = await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
       if (stored) {
         setAuthToken(stored);
         try {
@@ -35,7 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsSignedIn(true);
         } catch {
           // Stored token is stale/invalid - fall through to signed-out.
-          await AsyncStorage.removeItem(TOKEN_STORAGE_KEY);
+          await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
           setAuthToken(null);
         }
       }
@@ -44,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (token: string) => {
-    await AsyncStorage.setItem(TOKEN_STORAGE_KEY, token);
+    await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, token);
     setAuthToken(token);
     const fetchedProfile = await api.getMyProfile();
     setProfileState(fetchedProfile);
@@ -52,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await AsyncStorage.removeItem(TOKEN_STORAGE_KEY);
+    await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
     setAuthToken(null);
     setProfileState(null);
     setIsSignedIn(false);

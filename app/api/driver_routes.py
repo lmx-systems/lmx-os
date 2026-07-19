@@ -21,7 +21,7 @@ from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
 from app.db import get_db
 from app.driver_auth.dependencies import AuthedDriver, get_current_driver
-from app.driver_auth.otp_store import OtpStore
+from app.driver_auth.otp_store import OtpRateLimitExceeded, OtpStore
 from app.driver_auth.tokens import issue_token
 from app.fleet_state.manager import FleetStateManager
 from app.models.driver import Driver
@@ -62,7 +62,10 @@ async def request_otp(body: RequestOtpBody, session: AsyncSession = Depends(get_
         # "Apply to drive" annotation (out of app scope).
         raise HTTPException(status_code=404, detail="No driver registered with this phone number")
 
-    issued = await OtpStore().issue(body.phone)
+    try:
+        issued = await OtpStore().issue(body.phone)
+    except OtpRateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     return RequestOtpResult(ok=True, debug_code=None if issued.sent_via_sms else issued.code)
 
 
@@ -154,7 +157,9 @@ async def update_my_availability(
 # ---------------------------------------------------------------------------
 
 
-async def _requeue_orders_from_offer(session: AsyncSession, hub_id: str, stop_payload: list[dict]) -> None:
+async def _requeue_orders_from_offer(
+    session: AsyncSession, hub_id: str, driver_id: str, stop_payload: list[dict]
+) -> None:
     """
     A declined/expired offer never touches Route/Stop - the orders just go
     back to the hold queue (Redis) with their original geography/SLA tier
@@ -162,7 +167,26 @@ async def _requeue_orders_from_offer(session: AsyncSession, hub_id: str, stop_pa
     reverts from "assigned" (set optimistically the moment the optimizer
     proposed the offer - see app/optimizer/service.py) back to "queued" so
     it doesn't lie about a dispatch that never actually happened.
+
+    Also puts the driver back in the optimizer's assignable pool - the
+    optimizer took them out of it the moment it made the offer (see
+    app/optimizer/service.py) precisely so they can't be offered a second,
+    overlapping job while this one is still pending.
     """
+    manager = FleetStateManager()
+    existing_state = await manager.get_driver_state(hub_id, driver_id)
+    if existing_state is not None and existing_state.status == "offered":
+        await manager.upsert_driver_state(
+            DriverState(
+                driver_id=driver_id,
+                hub_id=hub_id,
+                status="available",
+                capacity_units=existing_state.capacity_units,
+                load_units=existing_state.load_units,
+                current_route_id=existing_state.current_route_id,
+            )
+        )
+
     hold_queue = HoldQueueStore()
     now = datetime.now(timezone.utc)
     order_ids = [uuid.UUID(s["order_id"]) for s in stop_payload]
@@ -213,7 +237,7 @@ async def list_my_offers(
         if offer.expires_at <= now:
             offer.status = "expired"
             offer.responded_at = now
-            await _requeue_orders_from_offer(session, str(offer.hub_id), offer.stop_payload)
+            await _requeue_orders_from_offer(session, str(offer.hub_id), str(offer.driver_id), offer.stop_payload)
             continue
         live.append(
             JobOfferView(
@@ -239,7 +263,7 @@ async def decline_offer(
 
     offer.status = "declined"
     offer.responded_at = datetime.now(timezone.utc)
-    await _requeue_orders_from_offer(session, str(offer.hub_id), offer.stop_payload)
+    await _requeue_orders_from_offer(session, str(offer.hub_id), str(offer.driver_id), offer.stop_payload)
     await session.commit()
     return {"ok": True}
 
@@ -258,7 +282,7 @@ async def accept_offer(
     if offer.expires_at <= now:
         offer.status = "expired"
         offer.responded_at = now
-        await _requeue_orders_from_offer(session, str(offer.hub_id), offer.stop_payload)
+        await _requeue_orders_from_offer(session, str(offer.hub_id), str(offer.driver_id), offer.stop_payload)
         await session.commit()
         raise HTTPException(status_code=409, detail="Offer expired")
 

@@ -28,6 +28,7 @@ from app.models.order import Order, OrderStatus
 from app.models.route_offer import RouteOffer
 from app.optimizer.google_routes_client import RouteOptimizationClient, get_route_optimization_client
 from app.optimizer.last_cycle_store import LastCycleStore
+from app.schemas.fleet import DriverState
 from app.schemas.optimizer import DriverCandidate, LastCycleSnapshot, OptimizationResult, StopCandidate
 
 logger = structlog.get_logger(__name__)
@@ -130,6 +131,7 @@ class DispatchOptimizerService:
         if assignments:
             stops_by_id = {s.stop_id: s for s in stops}
             shop_name_by_order_id = {o.order_id: o.shop_name for o in released_orders}
+            fleet_by_id = {d.driver_id: d for d in fleet_snapshot}
             offer_time = datetime.now(timezone.utc)
             async with session_scope() as session:
                 for assignment in assignments:
@@ -159,6 +161,27 @@ class DispatchOptimizerService:
                             expires_at=offer_time + timedelta(seconds=settings.job_offer_ttl_seconds),
                         )
                     )
+
+                    # Take the driver out of the assignable pool the moment
+                    # they're offered a job, not just once they accept -
+                    # otherwise the very next cycle can offer them a second,
+                    # overlapping job before they've responded to the first
+                    # (get_fleet_snapshot only excludes non-"available"
+                    # drivers). Reverted back to "available" on decline/
+                    # expiry (app/api/driver_routes.py); accept moves it
+                    # straight to "en_route" instead.
+                    existing_state = fleet_by_id.get(assignment.driver_id)
+                    if existing_state is not None:
+                        await self._fleet_state.upsert_driver_state(
+                            DriverState(
+                                driver_id=existing_state.driver_id,
+                                hub_id=hub_id,
+                                status="offered",
+                                capacity_units=existing_state.capacity_units,
+                                load_units=existing_state.load_units,
+                                current_route_id=existing_state.current_route_id,
+                            )
+                        )
 
         duration = time.perf_counter() - cycle_start
         over_budget = duration > settings.optimizer_cycle_budget_seconds

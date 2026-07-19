@@ -11,7 +11,7 @@ class DriverLocation(BaseModel):
 class DriverState(BaseModel):
     driver_id: str
     hub_id: str
-    status: str  # off_shift | available | en_route | on_break
+    status: str  # off_shift | available | offered | en_route | on_break
     capacity_units: int
     load_units: float = 0
     current_route_id: str | None = None

@@ -13,33 +13,27 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import jwt
-import structlog
 
 from app.config import settings
 
-logger = structlog.get_logger(__name__)
-
 ALGORITHM = "HS256"
 
-_warned_insecure_secret = False
+_INSECURE_DEFAULT_SECRET = "dev-only-insecure-secret-change-in-production"
 
 
-def _check_secret_configured() -> None:
-    global _warned_insecure_secret
-    if _warned_insecure_secret:
-        return
-    if settings.driver_jwt_secret == "dev-only-insecure-secret-change-in-production" and (
-        settings.environment != "development"
-    ):
-        logger.warning(
-            "driver_jwt_secret_not_configured",
-            reason="DRIVER_JWT_SECRET unset outside development - driver sessions are forgeable",
+def assert_driver_jwt_secret_configured() -> None:
+    """Fail fast at boot rather than silently issuing forgeable driver
+    sessions - called once from app.main's lifespan, alongside the existing
+    Postgres/Redis reachability checks."""
+    if settings.driver_jwt_secret == _INSECURE_DEFAULT_SECRET and settings.environment != "development":
+        raise RuntimeError(
+            "DRIVER_JWT_SECRET is unset outside development - refusing to start. "
+            "Driver sessions would be signed with a secret published in this "
+            "repo's source, making them trivially forgeable."
         )
-    _warned_insecure_secret = True
 
 
 def issue_token(driver_id: str, hub_id: str) -> str:
-    _check_secret_configured()
     now = datetime.now(timezone.utc)
     payload = {
         "sub": driver_id,
