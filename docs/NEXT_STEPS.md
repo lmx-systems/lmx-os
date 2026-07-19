@@ -6,6 +6,11 @@ meant to be edited directly (by hand or by Claude Code), not regenerated.
 Last synced with `docs/ARCHITECTURE.md`: see that file for the full technical
 detail behind each item below.
 
+**See `docs/ROADMAP.md`** for the consolidated view: every open item across
+the whole system in one place (not just this row-by-row backlog), plus the
+phased plan for what comes after item 16 below to get LMX OS fully running
+at Hub 1.
+
 ## Engineering
 
 | # | Item | Why it matters | Status |
