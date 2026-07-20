@@ -22,7 +22,7 @@ from app.api.driver_routes import router as driver_router
 from app.api.routes import router as ops_router
 from app.api.webhooks import router as webhooks_router
 from app.client_auth.tokens import assert_client_jwt_secret_configured
-from app.config import settings
+from app.config import assert_jwt_secrets_are_distinct, settings
 from app.db import engine
 from app.driver_auth.tokens import assert_driver_jwt_secret_configured
 from app.ingestion.router import router as ingestion_router
@@ -44,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # (or a silent vulnerability) on the first real request.
     assert_driver_jwt_secret_configured()
     assert_client_jwt_secret_configured()
+    assert_jwt_secrets_are_distinct()
     async with engine.connect() as conn:
         await conn.run_sync(lambda _: None)
     redis_client = get_client()

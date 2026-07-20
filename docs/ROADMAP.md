@@ -53,7 +53,7 @@ list instead of leaving it scattered across three documents.
 | S6 | A real security review | Nobody outside this build has looked at this from a security angle yet — worth doing before real orders/drivers/money flow through it. |
 | S7 | Twilio inbound-webhook signature verification | `POST /webhooks/twilio/inbound-sms` currently trusts whatever posts to it — no `X-Twilio-Signature` check yet (`app/api/webhooks.py`'s own docstring flags this). Must close before a real Twilio number points here. |
 | ~~S8~~ | ~~Rate-limit `POST /client/auth/login`~~ | **Done** — `app/client_auth/login_rate_limit.py`, same "counter + NX-guarded TTL" shape as driver OTP issuance; resets on a successful login. |
-| S9 | Enforce `CLIENT_JWT_SECRET` ≠ `DRIVER_JWT_SECRET` at startup | Each secret's own startup check (`assert_client_jwt_secret_configured`/`assert_driver_jwt_secret_configured`) only rejects the shared insecure default — nothing stops both from being set to the *same* real value in production, which would make a client token and a driver token cryptographically interchangeable (they'd still fail today only because the two decode functions expect different payload shapes, not because the signature check would catch it). |
+| ~~S9~~ | ~~Enforce `CLIENT_JWT_SECRET` ≠ `DRIVER_JWT_SECRET` at startup~~ | **Done** — `app/config.py`'s `assert_jwt_secrets_are_distinct()`, called from `app/main.py`'s lifespan alongside the two existing per-secret checks; refuses to start outside `development` if both are ever set to the same real value. |
 
 ### Orchestrator dashboard (internal, for hub staff)
 
@@ -192,8 +192,8 @@ Shipped:
   reusing the existing Message/SmsClient infrastructure
   (`app/messaging/shop_notifications.py`).
 
-**Follow-ups this phase surfaced, not yet done:** E10, S8, S9, C3, C4, C5
-(see Part 1's tables above).
+**Follow-ups this phase surfaced, not yet done:** E10, C3, C4, C5 (S8 and S9
+are now both done — see Part 1's tables above).
 
 ### Phase 9 — Hub 1 pilot
 **Goal:** prove the model live.

@@ -111,3 +111,31 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def assert_jwt_secrets_are_distinct() -> None:
+    """Fail fast at boot, alongside assert_client_jwt_secret_configured()/
+    assert_driver_jwt_secret_configured(), if a real deployment ever ends up
+    with CLIENT_JWT_SECRET and DRIVER_JWT_SECRET set to the same value.
+
+    Each of those two checks only catches its own field falling back to the
+    published dev-only default - neither one notices if an operator instead
+    configures both env vars to one shared real secret. That would silently
+    defeat client_jwt_secret's whole reason for existing (see its docstring
+    above): a client token would decode successfully as a driver token and
+    vice versa, exactly the interchangeability this system is designed to
+    prevent. Both settings sharing the *default* value in development is
+    expected and fine - that path is already refused by the other two checks
+    outside development, so this one only needs to fire once a real,
+    non-default secret has been configured for both.
+    """
+    if (
+        settings.environment != "development"
+        and settings.client_jwt_secret == settings.driver_jwt_secret
+    ):
+        raise RuntimeError(
+            "CLIENT_JWT_SECRET and DRIVER_JWT_SECRET are set to the same value - "
+            "refusing to start. A client portal session token must never be "
+            "valid as a driver session token (or vice versa); configure two "
+            "distinct secrets."
+        )

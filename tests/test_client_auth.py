@@ -102,6 +102,37 @@ def test_allows_a_real_secret_outside_development():
         assert_client_jwt_secret_configured()  # must not raise
 
 
+def test_refuses_to_start_if_client_and_driver_secrets_match_outside_development():
+    from app.config import assert_jwt_secrets_are_distinct
+
+    with patch("app.config.settings") as mock_settings:
+        mock_settings.environment = "production"
+        mock_settings.client_jwt_secret = "same-secret-by-mistake"
+        mock_settings.driver_jwt_secret = "same-secret-by-mistake"
+        with pytest.raises(RuntimeError):
+            assert_jwt_secrets_are_distinct()
+
+
+def test_allows_matching_default_secrets_in_development():
+    from app.config import assert_jwt_secrets_are_distinct
+
+    with patch("app.config.settings") as mock_settings:
+        mock_settings.environment = "development"
+        mock_settings.client_jwt_secret = "dev-only-insecure-secret-change-in-production"
+        mock_settings.driver_jwt_secret = "dev-only-insecure-secret-change-in-production"
+        assert_jwt_secrets_are_distinct()  # must not raise
+
+
+def test_allows_distinct_real_secrets_outside_development():
+    from app.config import assert_jwt_secrets_are_distinct
+
+    with patch("app.config.settings") as mock_settings:
+        mock_settings.environment = "production"
+        mock_settings.client_jwt_secret = "real-client-secret"
+        mock_settings.driver_jwt_secret = "real-driver-secret"
+        assert_jwt_secrets_are_distinct()  # must not raise
+
+
 @pytest.mark.asyncio
 async def test_login_is_rate_limited_after_max_attempts(fake_redis):
     limiter = LoginRateLimiter()
