@@ -52,7 +52,7 @@ list instead of leaving it scattered across three documents.
 | S5 | General API rate limiting | Only driver OTP issuance is rate-limited (`app/driver_auth/otp_store.py`). Every other endpoint has none. |
 | S6 | A real security review | Nobody outside this build has looked at this from a security angle yet — worth doing before real orders/drivers/money flow through it. |
 | S7 | Twilio inbound-webhook signature verification | `POST /webhooks/twilio/inbound-sms` currently trusts whatever posts to it — no `X-Twilio-Signature` check yet (`app/api/webhooks.py`'s own docstring flags this). Must close before a real Twilio number points here. |
-| S8 | Rate-limit `POST /client/auth/login` | Phase 8's client portal login has no attempt limit, unlike driver OTP issuance (`app/driver_auth/otp_store.py`) — same category of gap as S5, but specifically a password-guessing surface now that a password exists in this system for the first time. |
+| ~~S8~~ | ~~Rate-limit `POST /client/auth/login`~~ | **Done** — `app/client_auth/login_rate_limit.py`, same "counter + NX-guarded TTL" shape as driver OTP issuance; resets on a successful login. |
 | S9 | Enforce `CLIENT_JWT_SECRET` ≠ `DRIVER_JWT_SECRET` at startup | Each secret's own startup check (`assert_client_jwt_secret_configured`/`assert_driver_jwt_secret_configured`) only rejects the shared insecure default — nothing stops both from being set to the *same* real value in production, which would make a client token and a driver token cryptographically interchangeable (they'd still fail today only because the two decode functions expect different payload shapes, not because the signature check would catch it). |
 
 ### Orchestrator dashboard (internal, for hub staff)
@@ -93,7 +93,7 @@ category:
 | # | Item | Why it matters |
 |---|---|---|
 | T1 | No load/performance test against the design doc's <5s-cycle/20-driver/100-order budget | The optimizer has a hard performance target that's never been tested under realistic load. |
-| T2 | Local dev/test sandbox can't fully exercise OTP-issuance rate limiting | The bundled test Redis (`redislite`, v6.2.14) doesn't support `EXPIRE...NX`; production Redis (7-alpine) does. Confirmed not a real bug, but worth a note so it doesn't get "rediscovered" and mistaken for one. |
+| T2 | Local dev/test sandbox can't fully exercise Redis-backed rate limiting (driver OTP issuance, and now client login) | The bundled test Redis (`redislite`/the sandbox's standalone binary, both v6.2.14) doesn't support `EXPIRE...NX`; production Redis (7-alpine) does. Confirmed not a real bug, but worth a note so it doesn't get "rediscovered" and mistaken for one - now affects `app/client_auth/login_rate_limit.py`'s tests too, same root cause. |
 
 ---
 

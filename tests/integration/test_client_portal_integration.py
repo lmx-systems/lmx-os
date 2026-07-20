@@ -13,6 +13,7 @@ from sqlalchemy import select
 from app.api.admin_routes import onboard_client
 from app.api.client_routes import get_my_order, get_my_profile, list_my_orders, login
 from app.client_auth.dependencies import AuthedClient
+from app.client_auth.login_rate_limit import MAX_LOGIN_ATTEMPTS
 from app.client_auth.tokens import decode_token
 from app.models.client import Client
 from app.models.client_rate import ClientRate
@@ -95,7 +96,7 @@ async def test_onboard_client_rejects_unknown_sla_tier(db_session):
     assert exc_info.value.status_code == 422
 
 
-async def test_client_login_succeeds_with_correct_credentials_and_issues_a_usable_token(db_session):
+async def test_client_login_succeeds_with_correct_credentials_and_issues_a_usable_token(db_session, real_redis_client):
     hub_id = await _seed_hub(db_session)
     result = await onboard_client(_onboarding_body(hub_id, email="login-ok@example.com"), session=db_session)
 
@@ -106,7 +107,7 @@ async def test_client_login_succeeds_with_correct_credentials_and_issues_a_usabl
     assert decode_token(token.access_token) == result.client_id
 
 
-async def test_client_login_rejects_wrong_password(db_session):
+async def test_client_login_rejects_wrong_password(db_session, real_redis_client):
     hub_id = await _seed_hub(db_session)
     await onboard_client(_onboarding_body(hub_id, email="login-bad-pw@example.com"), session=db_session)
 
@@ -118,10 +119,58 @@ async def test_client_login_rejects_wrong_password(db_session):
     assert exc_info.value.status_code == 401
 
 
-async def test_client_login_rejects_unknown_email(db_session):
+async def test_client_login_rejects_unknown_email(db_session, real_redis_client):
     with pytest.raises(HTTPException) as exc_info:
         await login(
             ClientLoginBody(email="nobody@example.com", password="whatever"),
+            session=db_session,
+        )
+    assert exc_info.value.status_code == 401
+
+
+async def test_client_login_is_rate_limited_after_too_many_attempts(db_session, real_redis_client):
+    hub_id = await _seed_hub(db_session)
+    await onboard_client(_onboarding_body(hub_id, email="rate-limited@example.com"), session=db_session)
+
+    for _ in range(MAX_LOGIN_ATTEMPTS):
+        with pytest.raises(HTTPException) as exc_info:
+            await login(
+                ClientLoginBody(email="rate-limited@example.com", password="wrong password"),
+                session=db_session,
+            )
+        assert exc_info.value.status_code == 401
+
+    with pytest.raises(HTTPException) as exc_info:
+        await login(
+            ClientLoginBody(email="rate-limited@example.com", password="wrong password"),
+            session=db_session,
+        )
+    assert exc_info.value.status_code == 429
+
+
+async def test_client_login_rate_limit_resets_after_a_successful_login(db_session, real_redis_client):
+    hub_id = await _seed_hub(db_session)
+    await onboard_client(_onboarding_body(hub_id, email="reset-on-success@example.com"), session=db_session)
+
+    for _ in range(MAX_LOGIN_ATTEMPTS - 1):
+        with pytest.raises(HTTPException) as exc_info:
+            await login(
+                ClientLoginBody(email="reset-on-success@example.com", password="wrong password"),
+                session=db_session,
+            )
+        assert exc_info.value.status_code == 401
+
+    # One correct login before the cap resets the counter...
+    await login(
+        ClientLoginBody(email="reset-on-success@example.com", password="correct horse battery staple"),
+        session=db_session,
+    )
+
+    # ...so a fresh run of wrong attempts starts from zero again instead of
+    # immediately 429ing.
+    with pytest.raises(HTTPException) as exc_info:
+        await login(
+            ClientLoginBody(email="reset-on-success@example.com", password="wrong password"),
             session=db_session,
         )
     assert exc_info.value.status_code == 401

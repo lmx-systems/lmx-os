@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.client_auth.dependencies import AuthedClient, get_current_client
+from app.client_auth.login_rate_limit import LoginRateLimitExceeded, LoginRateLimiter
 from app.client_auth.passwords import verify_password
 from app.client_auth.tokens import issue_token
 from app.db import get_db
@@ -32,6 +33,12 @@ router = APIRouter(prefix="/client", tags=["client"])
 
 @router.post("/auth/login", response_model=ClientAuthToken)
 async def login(body: ClientLoginBody, session: AsyncSession = Depends(get_db)) -> ClientAuthToken:
+    limiter = LoginRateLimiter()
+    try:
+        await limiter.check_and_increment(body.email)
+    except LoginRateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
     result = await session.execute(select(Client).where(Client.portal_email == body.email))
     client = result.scalar_one_or_none()
 
@@ -42,6 +49,7 @@ async def login(body: ClientLoginBody, session: AsyncSession = Depends(get_db)) 
     ):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    await limiter.reset(body.email)
     return ClientAuthToken(access_token=issue_token(str(client.id)))
 
 

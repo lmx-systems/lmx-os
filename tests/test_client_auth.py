@@ -7,7 +7,10 @@ coverage for the equivalent driver-app pieces.
 from unittest.mock import patch
 
 import pytest
+from fakeredis import aioredis as fakeredis_aioredis
 
+import app.client_auth.login_rate_limit as login_rate_limit_module
+from app.client_auth.login_rate_limit import MAX_LOGIN_ATTEMPTS, LoginRateLimitExceeded, LoginRateLimiter
 from app.client_auth.passwords import hash_password, verify_password
 from app.client_auth.tokens import (
     InvalidClientToken,
@@ -15,6 +18,13 @@ from app.client_auth.tokens import (
     decode_token,
     issue_token,
 )
+
+
+@pytest.fixture
+def fake_redis(monkeypatch):
+    client = fakeredis_aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(login_rate_limit_module, "get_client", lambda: client)
+    return client
 
 
 def test_hash_and_verify_password_roundtrip():
@@ -90,3 +100,35 @@ def test_allows_a_real_secret_outside_development():
         mock_settings.client_jwt_secret = "a-real-generated-secret"
         mock_settings.environment = "production"
         assert_client_jwt_secret_configured()  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_login_is_rate_limited_after_max_attempts(fake_redis):
+    limiter = LoginRateLimiter()
+    for _ in range(MAX_LOGIN_ATTEMPTS):
+        await limiter.check_and_increment("client@example.com")
+
+    with pytest.raises(LoginRateLimitExceeded):
+        await limiter.check_and_increment("client@example.com")
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limit_is_per_email(fake_redis):
+    limiter = LoginRateLimiter()
+    for _ in range(MAX_LOGIN_ATTEMPTS):
+        await limiter.check_and_increment("client@example.com")
+
+    # A different email has its own independent budget.
+    await limiter.check_and_increment("other-client@example.com")
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limit_resets_on_success(fake_redis):
+    limiter = LoginRateLimiter()
+    for _ in range(MAX_LOGIN_ATTEMPTS):
+        await limiter.check_and_increment("client@example.com")
+    await limiter.reset("client@example.com")
+
+    # The counter was cleared, so this doesn't raise even though it would
+    # have been the (MAX_LOGIN_ATTEMPTS + 1)th attempt otherwise.
+    await limiter.check_and_increment("client@example.com")
