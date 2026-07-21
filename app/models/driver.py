@@ -31,3 +31,11 @@ class Driver(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # actual payout ledger (docs/NEXT_STEPS.md item 12's earnings caveat) is
     # separate, larger work this deliberately doesn't attempt.
     payment_bank_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
+
+    # Payroll integration (roadmap items B4/A9 - provider: Rippling).
+    # The Rippling employee id this driver maps to. Drivers are hired and
+    # onboarded IN Rippling (W-4, I-9, bank details all live there - LMX
+    # never stores SSNs or bank accounts); this is the link back. Null =
+    # not yet linked, and the payroll export (app/payroll/) skips the
+    # driver with a logged warning rather than failing the whole run.
+    payroll_employee_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

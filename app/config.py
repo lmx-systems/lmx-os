@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     # file with no credentials yet.
     support_phone_number: str | None = None
 
+    # Payroll - Rippling (roadmap items B4/A9; decided July 2026). Same
+    # "unconfigured -> stub" pattern as Twilio above: no token means
+    # StubPayrollClient logs what would be submitted instead of sending.
+    # The base URL is overridable for Rippling's sandbox environment.
+    rippling_api_token: str | None = None
+    rippling_api_base_url: str = "https://api.rippling.com"
+
     # Twilio inbound-webhook signature verification (roadmap item S7).
     # Twilio signs against the exact public URL it was configured to POST
     # to - behind a proxy/load balancer that URL usually differs from what
