@@ -5,7 +5,7 @@ import type { DriverState } from '../../lib/types'
 // middling one, and visually confusing it with T2 would undersell what a
 // client is paying extra for.
 const TIER_STYLES: Record<string, string> = {
-  HOT_SHOT: 'bg-[#f1e8fd] text-[#7c3aed]',
+  HOT_SHOT: 'bg-[var(--premium-dim)] text-[var(--premium)]',
   T1: 'bg-[var(--red-dim)] text-[var(--red)]',
   T2: 'bg-[var(--amber-dim)] text-[var(--amber)]',
   T3: 'bg-[var(--surface-2)] text-[var(--gray)]',

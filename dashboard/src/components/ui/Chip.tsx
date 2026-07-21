@@ -9,10 +9,10 @@ export function Chip({ label, active, onClick }: ChipProps) {
     <button
       type="button"
       onClick={onClick}
-      className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium ${
+      className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium transition-colors duration-150 ${
         active
           ? 'border-[var(--accent)] bg-[var(--accent-dim)] text-[var(--accent)]'
-          : 'border-[var(--border-strong)] bg-[var(--surface-2)] text-[var(--text-secondary)]'
+          : 'border-[var(--border-strong)] bg-[var(--surface-2)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-3)]'
       }`}
     >
       {label}

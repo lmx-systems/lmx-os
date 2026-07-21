@@ -12,7 +12,7 @@ export function OrderDetail({ order, onBack }: OrderDetailProps) {
     <div className="flex flex-col gap-4">
       <button
         onClick={onBack}
-        className="w-fit text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+        className="w-fit text-xs font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:text-[var(--text-primary)]"
       >
         ← Back to orders
       </button>

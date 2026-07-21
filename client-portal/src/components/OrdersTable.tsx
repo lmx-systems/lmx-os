@@ -35,7 +35,7 @@ export function OrdersTable({ orders, onSelect }: OrdersTableProps) {
             <tr
               key={order.order_id}
               onClick={() => onSelect(order.order_id)}
-              className="cursor-pointer border-b border-[var(--border)] last:border-0 hover:bg-[var(--surface-2)]"
+              className="cursor-pointer border-b border-[var(--border)] transition-colors duration-150 last:border-0 hover:bg-[var(--surface-2)]"
             >
               <td className="px-4 py-2.5 font-medium text-[var(--text-primary)]">{order.external_order_ref}</td>
               <td className="px-4 py-2.5">

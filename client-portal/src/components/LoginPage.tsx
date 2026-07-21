@@ -30,7 +30,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg-page)] px-4">
-      <div className="w-full max-w-sm rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
+      <div className="w-full max-w-sm rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
         <div className="mb-6 flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] bg-[var(--accent)] text-sm font-bold text-white">
             LX
@@ -50,7 +50,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-white px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+              className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
               placeholder="you@yourcompany.com"
             />
           </label>
@@ -62,7 +62,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-white px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+              className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
               placeholder="••••••••"
             />
           </label>
@@ -72,7 +72,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
           <button
             type="submit"
             disabled={submitting}
-            className="mt-2 rounded-[var(--radius)] bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+            className="mt-2 rounded-[var(--radius)] bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-60"
           >
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>

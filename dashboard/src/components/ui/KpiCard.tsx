@@ -1,3 +1,4 @@
+import { AlertTriangle } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 interface KpiCardProps {
@@ -12,19 +13,18 @@ interface KpiCardProps {
 export function KpiCard({ label, value, sub, risk = false, stale = false, children }: KpiCardProps) {
   return (
     <div
-      className={`rounded-[var(--radius-lg)] border bg-[var(--surface)] p-3.5 ${
-        risk ? 'border-[#f0c4c6]' : 'border-[var(--border)]'
+      className={`rounded-[var(--radius-lg)] border bg-[var(--surface)] p-3.5 shadow-[var(--shadow-sm)] ${
+        risk ? 'border-[var(--red)]/25' : 'border-[var(--border)]'
       }`}
     >
       <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]">
         {label}
         {stale && (
-          <span
+          <AlertTriangle
+            size={14}
             className="text-[var(--amber)]"
-            title="Last refresh failed - showing the most recent value we successfully loaded"
-          >
-            ⚠
-          </span>
+            aria-label="Last refresh failed - showing the most recent value we successfully loaded"
+          />
         )}
       </div>
       <div className={`text-[26px] font-medium tracking-tight ${risk ? 'text-[var(--red)]' : ''}`}>

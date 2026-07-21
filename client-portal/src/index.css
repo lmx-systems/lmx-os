@@ -4,19 +4,43 @@
  * Same design tokens as dashboard/src/index.css - the client portal is a
  * separate app (different audience/auth/data scope - see docs/ROADMAP.md's
  * Phase 8 notes) but should look like it belongs to the same product.
+ * Every existing variable name is kept stable across light/dark so no
+ * consumer needs to change which token it reads - only the values swap.
  */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
-  --bg-page: #f6f7f9;
-  --surface: #ffffff;
-  --surface-2: #eef0f3;
-  --surface-3: #e4e7ec;
-  --border: #e2e5ea;
-  --border-strong: #cfd4dc;
-  --text-primary: #14171c;
-  --text-secondary: #5b6472;
-  --text-muted: #8b93a1;
-  --accent: #0c8599;
-  --accent-dim: #e2f6f9;
+  /* Neutral scale - cool gray, slight blue tint to pair with indigo */
+  --neutral-0: #ffffff;
+  --neutral-50: #f7f8fa;
+  --neutral-100: #eef0f3;
+  --neutral-150: #e4e7ec;
+  --neutral-200: #e2e5ea;
+  --neutral-300: #cfd4dc;
+  --neutral-400: #aab1bd;
+  --neutral-500: #8b93a1;
+  --neutral-600: #5b6472;
+  --neutral-700: #3a4150;
+  --neutral-800: #22262e;
+  --neutral-900: #14171c;
+
+  --bg-page: var(--neutral-50);
+  --surface: var(--neutral-0);
+  --surface-2: var(--neutral-100);
+  --surface-3: var(--neutral-150);
+  --border: var(--neutral-200);
+  --border-strong: var(--neutral-300);
+  --text-primary: var(--neutral-900);
+  --text-secondary: var(--neutral-600);
+  --text-muted: var(--neutral-500);
+
+  /* Primary - indigo. Distinct from the semantic --blue (~215°) and the
+     --premium violet used for the HOT_SHOT tier (~262°); indigo sits at
+     ~245°, a modern SaaS primary with solid white-on-fill contrast. */
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-dim: #eef0fe;
+
   --green: #1f9254;
   --green-dim: #e5f6ec;
   --blue: #2f6fdb;
@@ -27,12 +51,75 @@
   --red-dim: #fbe9ea;
   --gray: #6b7280;
   --gray-dim: #eef0f2;
+
+  /* Premium / HOT_SHOT - promoted from a hardcoded color in TierBadge.tsx */
+  --premium: #7c3aed;
+  --premium-dim: #f1e8fd;
+
+  --overlay: rgba(20, 23, 28, 0.45);
+
+  --radius-sm: 6px;
   --radius: 10px;
   --radius-lg: 14px;
+
+  --shadow-sm: 0 1px 2px rgba(20, 23, 28, 0.06);
+  --shadow-md: 0 2px 8px rgba(20, 23, 28, 0.08), 0 1px 2px rgba(20, 23, 28, 0.06);
+  --shadow-lg: 0 8px 28px rgba(20, 23, 28, 0.18);
+  --shadow-focus: 0 0 0 3px var(--accent-dim);
+}
+
+[data-theme="dark"] {
+  --neutral-0: #14171c;
+  --neutral-50: #1a1e24;
+  --neutral-100: #20242c;
+  --neutral-150: #262b34;
+  --neutral-200: #2d323c;
+  --neutral-300: #3a4150;
+  --neutral-400: #545c6c;
+  --neutral-500: #7b8494;
+  --neutral-600: #a0a8b5;
+  --neutral-700: #c5cad3;
+  --neutral-800: #e4e7ec;
+  --neutral-900: #f5f6f8;
+
+  --bg-page: #101317;
+  --surface: var(--neutral-50);
+  --surface-2: var(--neutral-100);
+  --surface-3: var(--neutral-150);
+  --border: var(--neutral-200);
+  --border-strong: var(--neutral-300);
+  --text-primary: var(--neutral-900);
+  --text-secondary: var(--neutral-600);
+  --text-muted: var(--neutral-500);
+
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-dim: #26244a;
+
+  --green: #34d399;
+  --green-dim: #103622;
+  --blue: #60a5fa;
+  --blue-dim: #12233f;
+  --amber: #fbbf24;
+  --amber-dim: #3a2a08;
+  --red: #f87171;
+  --red-dim: #3d1414;
+  --gray: #9aa2b1;
+  --gray-dim: #262b34;
+
+  --premium: #a78bfa;
+  --premium-dim: #2c2350;
+
+  --overlay: rgba(0, 0, 0, 0.6);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.5);
 }
 
 body {
   margin: 0;
   background-color: var(--bg-page);
   color: var(--text-primary);
+  font-family: 'Inter Variable', system-ui, sans-serif;
 }

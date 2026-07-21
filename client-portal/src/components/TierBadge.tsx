@@ -3,7 +3,7 @@
 // falling back to T2's amber, since it's the highest-urgency tier, not a
 // middling one.
 const TIER_STYLES: Record<string, string> = {
-  HOT_SHOT: 'bg-[#f1e8fd] text-[#7c3aed]',
+  HOT_SHOT: 'bg-[var(--premium-dim)] text-[var(--premium)]',
   T1: 'bg-[var(--red-dim)] text-[var(--red)]',
   T2: 'bg-[var(--amber-dim)] text-[var(--amber)]',
   T3: 'bg-[var(--surface-2)] text-[var(--gray)]',

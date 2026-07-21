@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { formatSecondsAgo } from '../lib/format'
+import { ThemeToggle } from './ui/ThemeToggle'
 
 interface TopBarProps {
   hubId: string
@@ -28,7 +29,7 @@ export function TopBar({ hubId, onChangeHubId, lastUpdatedAt }: TopBarProps) {
   return (
     <div className="mb-5 flex items-center gap-4 border-b border-[var(--border)] pb-4.5">
       <div className="flex items-center gap-2.5 text-[15px] font-medium">
-        <div className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] bg-gradient-to-br from-[var(--accent)] to-[#0891b2] text-xs font-bold text-white">
+        <div className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] bg-gradient-to-br from-[var(--accent)] to-[var(--accent-hover)] text-xs font-bold text-white">
           L
         </div>
         LMX OS
@@ -55,6 +56,8 @@ export function TopBar({ hubId, onChangeHubId, lastUpdatedAt }: TopBarProps) {
           Live · updated {formatSecondsAgo(secondsAgo)}
         </div>
       )}
+
+      <ThemeToggle />
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import type { ClientProfileView } from '../lib/types'
+import { ThemeToggle } from './ThemeToggle'
 
 interface TopBarProps {
   profile: ClientProfileView
@@ -17,12 +18,15 @@ export function TopBar({ profile, onLogout }: TopBarProps) {
           <div className="text-xs text-[var(--text-muted)]">{profile.portal_email}</div>
         </div>
       </div>
-      <button
-        onClick={onLogout}
-        className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
-      >
-        Sign out
-      </button>
+      <div className="flex items-center gap-2.5">
+        <ThemeToggle />
+        <button
+          onClick={onLogout}
+          className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)]"
+        >
+          Sign out
+        </button>
+      </div>
     </header>
   )
 }

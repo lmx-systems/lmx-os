@@ -26,7 +26,7 @@ export function ConfirmModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,23,28,0.45)]"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)]"
       onClick={busy ? undefined : onCancel}
     >
       <div
@@ -46,7 +46,7 @@ export function ConfirmModal({
           <button
             onClick={onConfirm}
             disabled={busy}
-            className="rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-3.5 py-2 text-[13px] font-medium text-white disabled:opacity-50"
+            className="rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-3.5 py-2 text-[13px] font-medium text-white transition-colors duration-150 hover:border-[var(--accent-hover)] hover:bg-[var(--accent-hover)] disabled:opacity-50"
           >
             {busy ? 'Running…' : confirmLabel}
           </button>

@@ -15,7 +15,7 @@ interface CardProps {
 export function Card({ title, meta, children, className = '' }: CardProps) {
   return (
     <section
-      className={`overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] ${className}`}
+      className={`overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)] ${className}`}
     >
       <div className="flex items-center gap-2.5 border-b border-[var(--border)] px-4 py-3">
         <h2 className="text-[14.5px] font-medium text-[var(--text-primary)]">{title}</h2>
