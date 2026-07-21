@@ -32,12 +32,13 @@ from app.api.driver_routes import (
     message_customer,
     message_support,
 )
-from app.api.webhooks import twilio_inbound_sms
+from app.api.webhooks import _find_matching_thread, twilio_inbound_sms
 from app.driver_auth.dependencies import AuthedDriver
 from app.messaging.twilio_signature import compute_signature
 from app.models.driver import Driver
 from app.models.driver_shift_event import DriverShiftEvent
 from app.models.hub import Hub
+from app.models.message import Message
 from app.models.route import Route
 from app.models.stop import Stop
 from app.schemas.driver_app import SendMessageBody
@@ -82,6 +83,39 @@ async def _seed_driver_only(db_session):
     db_session.add(Driver(id=driver_id, hub_id=hub_id, name="Sam E.", phone="+15555550299", vehicle_capacity_units=5))
     await db_session.commit()
     return hub_id, driver_id
+
+
+async def _seed_stop(db_session, hub_id, driver_id, status="arrived"):
+    """A bare Stop for the reply-matching tests below - these only need a
+    real stop_id to hang a Message/terminal-status check off, not a full
+    order/offer/route-acceptance chain."""
+    route = Route(hub_id=hub_id, driver_id=driver_id, status="active", plan_version=1)
+    db_session.add(route)
+    await db_session.flush()
+    stop = Stop(route_id=route.id, sequence=0, status=status, stop_type="dropoff")
+    db_session.add(stop)
+    await db_session.commit()
+    return stop.id
+
+
+async def _outbound(db_session, *, hub_id, driver_id, channel, stop_id, phone, body):
+    message = Message(
+        hub_id=hub_id, driver_id=driver_id, stop_id=stop_id, channel=channel,
+        direction="outbound", body=body, counterparty_phone=phone,
+    )
+    db_session.add(message)
+    await db_session.commit()
+    return message
+
+
+async def _inbound(db_session, *, hub_id, driver_id, channel, stop_id, phone, body):
+    message = Message(
+        hub_id=hub_id, driver_id=driver_id, stop_id=stop_id, channel=channel,
+        direction="inbound", body=body, counterparty_phone=phone,
+    )
+    db_session.add(message)
+    await db_session.commit()
+    return message
 
 
 async def test_message_customer_sends_via_stub_and_stores_thread(db_session, real_redis_client):
@@ -347,3 +381,100 @@ async def test_trips_lists_completed_routes_with_stop_counts_regardless_of_week(
     # doesn't show up in the current week's earnings estimate.
     earnings = await get_my_earnings(driver=authed, session=db_session)
     assert earnings.hours_worked == 0.0
+
+
+async def test_reply_matching_prefers_an_unanswered_thread_over_an_already_answered_one(db_session):
+    """The headline bug this hardens: two concurrent conversations to the
+    same phone number no longer collide on 'most recent' alone - an
+    already-answered thread is skipped in favor of one still waiting."""
+    hub_id, driver_id = await _seed_driver_only(db_session)
+    phone = "+15555559000"
+    answered_stop = await _seed_stop(db_session, hub_id, driver_id)
+    unanswered_stop = await _seed_stop(db_session, hub_id, driver_id)
+
+    await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=answered_stop, phone=phone, body="On my way")
+    await _inbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=answered_stop, phone=phone, body="ok thanks")
+    # Sent *after* the already-answered thread's outbound message, so a
+    # naive "most recent outbound" match would still (wrongly) prefer the
+    # answered one only if it ignored the reply above entirely - this
+    # ordering deliberately doesn't help the old bug, it's the "prefer
+    # unanswered" logic that has to do the actual work here.
+    await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=unanswered_stop, phone=phone, body="Almost there")
+
+    matched = await _find_matching_thread(db_session, phone)
+    assert matched.stop_id == unanswered_stop
+
+
+async def test_reply_matching_skips_a_terminal_stop_in_favor_of_an_active_one(db_session):
+    hub_id, driver_id = await _seed_driver_only(db_session)
+    phone = "+15555559001"
+    completed_stop = await _seed_stop(db_session, hub_id, driver_id, status="completed")
+    active_stop = await _seed_stop(db_session, hub_id, driver_id, status="arrived")
+
+    await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=completed_stop, phone=phone, body="delivered")
+    await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=active_stop, phone=phone, body="on my way")
+
+    matched = await _find_matching_thread(db_session, phone)
+    assert matched.stop_id == active_stop
+
+
+async def test_reply_matching_never_crosses_customer_and_support_channels(db_session):
+    with patch("app.api.webhooks.settings") as mock_settings:
+        mock_settings.support_phone_number = "+15555559999"
+
+        hub_id, driver_id = await _seed_driver_only(db_session)
+        stop_id = await _seed_stop(db_session, hub_id, driver_id)
+        # A customer thread that happens to share the support number, and
+        # a real support thread - a reply from the support number must
+        # only ever match the support thread.
+        await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=stop_id, phone="+15555559999", body="customer msg")
+        await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="support", stop_id=None, phone="+15555559999", body="support msg")
+
+        matched = await _find_matching_thread(db_session, "+15555559999")
+    assert matched.channel == "support"
+
+
+async def test_reply_matching_across_two_drivers_sharing_the_support_number(db_session):
+    """The concrete cross-driver collision this hardens: every driver's
+    support message shares the exact same counterparty_phone
+    (settings.support_phone_number) - a reply must go to whichever
+    driver's thread is still unanswered, not just whichever driver
+    texted support most recently."""
+    with patch("app.api.webhooks.settings") as mock_settings:
+        mock_settings.support_phone_number = "+15555558888"
+
+        hub_id, driver_a = await _seed_driver_only(db_session)
+        _hub_id2, driver_b = await _seed_driver_only(db_session)
+
+        await _outbound(db_session, hub_id=hub_id, driver_id=driver_b, channel="support", stop_id=None, phone="+15555558888", body="driver B's question")
+        await _inbound(db_session, hub_id=hub_id, driver_id=driver_b, channel="support", stop_id=None, phone="+15555558888", body="support answered B already")
+        # Driver A's message came *before* B's, chronologically - a naive
+        # "most recent outbound" match would (wrongly) prefer B's thread.
+        await _outbound(db_session, hub_id=hub_id, driver_id=driver_a, channel="support", stop_id=None, phone="+15555558888", body="driver A's question")
+
+        matched = await _find_matching_thread(db_session, "+15555558888")
+    assert matched.driver_id == driver_a
+
+
+async def test_reply_matching_logs_and_still_resolves_a_genuine_ambiguity(db_session):
+    """Two truly concurrent, unanswered threads to the same number - the
+    one real case this can't fully solve without new infrastructure (see
+    _find_matching_thread's docstring). Must not crash, and must surface
+    the ambiguity rather than silently guessing. Mocks the logger directly
+    rather than using pytest's caplog - this codebase's structlog setup
+    (app/logging_config.py) uses PrintLoggerFactory, which writes straight
+    to stdout and never touches stdlib logging handlers caplog hooks into."""
+    hub_id, driver_id = await _seed_driver_only(db_session)
+    phone = "+15555559002"
+    stop_1 = await _seed_stop(db_session, hub_id, driver_id)
+    stop_2 = await _seed_stop(db_session, hub_id, driver_id)
+    await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=stop_1, phone=phone, body="msg 1")
+    await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=stop_2, phone=phone, body="msg 2")
+
+    with patch("app.api.webhooks.logger") as mock_logger:
+        matched = await _find_matching_thread(db_session, phone)
+        mock_logger.warning.assert_called_once()
+        assert mock_logger.warning.call_args.args[0] == "inbound_sms_ambiguous_match"
+
+    assert matched is not None
+    assert matched.stop_id in (stop_1, stop_2)
