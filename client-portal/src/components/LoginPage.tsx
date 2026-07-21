@@ -31,12 +31,10 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg-page)] px-4">
       <div className="w-full max-w-sm rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm">
-        <div className="mb-6 flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] bg-[var(--accent)] text-sm font-bold text-white">
-            LX
-          </div>
+        <div className="mb-6 flex items-center gap-3">
+          <img src="/lmx-stamp.png" alt="LMX" className="h-10 w-auto" />
           <div>
-            <div className="text-[15px] font-semibold text-[var(--text-primary)]">LMX Client Portal</div>
+            <div className="text-[15px] font-semibold text-[var(--text-primary)]">Client Portal</div>
             <div className="text-xs text-[var(--text-muted)]">Sign in to your account</div>
           </div>
         </div>

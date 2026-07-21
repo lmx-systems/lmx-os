@@ -43,10 +43,8 @@ export function OpsLoginPage({ onLoggedIn }: OpsLoginPageProps) {
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6">
-        <div className="mb-6 flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] bg-gradient-to-br from-[var(--accent)] to-[#0891b2] text-sm font-bold text-white">
-            L
-          </div>
+        <div className="mb-6 flex items-center gap-3">
+          <img src="/lmx-stamp.png" alt="LMX" className="h-10 w-auto" />
           <div>
             <div className="text-[15px] font-semibold text-[var(--text-primary)]">LMX OS</div>
             <div className="text-xs text-[var(--text-muted)]">Orchestrator console — sign in</div>

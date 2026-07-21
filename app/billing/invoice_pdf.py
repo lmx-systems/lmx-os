@@ -9,15 +9,21 @@ gated on a processor decision.
 from __future__ import annotations
 
 import calendar
+import os
 from io import BytesIO
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.units import inch
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image as PdfImage, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 
 from app.billing.statements import Statement
+
+# Real LMX stamp (from docs/LMX branding via the asset pipeline - see
+# docs/LMX_Brand_Asset_Inventory.docx). Falls back to the text-only header
+# if the file is ever missing, rather than failing invoice generation.
+_LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "lmx-stamp.png")
 
 NAVY = colors.HexColor("#1F3A5F")
 SLATE = colors.HexColor("#5B6472")
@@ -42,13 +48,21 @@ def render_invoice_pdf(statement: Statement) -> bytes:
         title=f"LMX Invoice - {statement.client_name} - {statement.year}-{statement.month:02d}",
     )
     styles = getSampleStyleSheet()
-    h1 = ParagraphStyle("InvoiceH1", parent=styles["Title"], textColor=NAVY, fontSize=20, spaceAfter=2)
+    h1 = ParagraphStyle(
+        "InvoiceH1", parent=styles["Title"], textColor=NAVY, fontSize=20, spaceAfter=2, alignment=0
+    )
     meta = ParagraphStyle("InvoiceMeta", parent=styles["Normal"], textColor=SLATE, fontSize=10)
     note = ParagraphStyle("InvoiceNote", parent=styles["Normal"], textColor=AMBER, fontSize=9)
 
     month_name = calendar.month_name[statement.month]
-    elements = [
-        Paragraph("LMX — Delivery Invoice", h1),
+    elements = []
+    if os.path.exists(_LOGO_PATH):
+        # 317x128 source -> ~99x40pt, left-aligned above the title.
+        logo = PdfImage(_LOGO_PATH, width=99, height=40)
+        logo.hAlign = "LEFT"
+        elements.extend([logo, Spacer(1, 0.12 * inch)])
+    elements += [
+        Paragraph("Delivery Invoice" if os.path.exists(_LOGO_PATH) else "LMX — Delivery Invoice", h1),
         Paragraph(
             f"Client: {statement.client_name} &nbsp;·&nbsp; "
             f"Billing period: {month_name} {statement.year}",

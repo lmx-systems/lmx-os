@@ -7,12 +7,26 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "assetBundlePatterns": ["**/*"],
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#0C0C0B"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.lmx.driver"
     },
     "android": {
-      "package": "com.lmx.driver"
+      "package": "com.lmx.driver",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0C0C0B"
+      },
+      "notification": {
+        "icon": "./assets/notification-icon.png",
+        "color": "#0A6644"
+      }
     },
     "extra": {
       "apiBaseUrl": "http://localhost:8000"
