@@ -28,6 +28,7 @@ from app.driver_auth.tokens import assert_driver_jwt_secret_configured
 from app.ingestion.router import router as ingestion_router
 from app.logging_config import configure_logging, get_logger
 from app.optimizer.event_trigger import dispatch_event_bus
+from app.rate_limit import GeneralRateLimitMiddleware
 from app.redis_client import close_pool, get_client
 from app.security import SharedSecretAuthMiddleware
 
@@ -73,6 +74,13 @@ app = FastAPI(
 # handled before it ever reaches the auth check and gets rejected for
 # missing a header no browser sends on a preflight request.
 app.add_middleware(SharedSecretAuthMiddleware)
+
+# Added after auth (so it runs before it, per the ordering rule above) -
+# rate limiting should shed load/abuse before spending an auth check on
+# it, and it applies regardless of which auth path a route uses (shared
+# secret, driver JWT, client JWT), unlike SharedSecretAuthMiddleware's own
+# /driver, /client, /webhooks exemptions.
+app.add_middleware(GeneralRateLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

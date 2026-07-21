@@ -84,6 +84,13 @@ class Settings(BaseSettings):
     # see docs/ARCHITECTURE.md's auth caveat. Comma-separated in the env var.
     dashboard_cors_origins: str = "http://localhost:5173"
 
+    # General per-IP API rate limiting (app/rate_limit.py) - deliberately
+    # generous, see that module's docstring for why. Unlike
+    # api_shared_secret, there's no "0 = disabled" escape hatch - a real
+    # deployment should never want zero rate limiting, only a tuned cap.
+    general_rate_limit_max_requests: int = 600
+    general_rate_limit_window_seconds: int = 60
+
     # Interim stopgap for docs/ARCHITECTURE.md's "Recommended next steps"
     # item 0: every endpoint (bar /health and API docs) requires this value
     # in an X-API-Key header. Unset (the default) leaves the API open, same
