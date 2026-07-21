@@ -27,9 +27,9 @@ Point the app at your backend by editing `app.json`'s `expo.extra.apiBaseUrl`
 client on a physical device, `localhost` won't reach your laptop - use
 your machine's LAN IP or `ngrok` instead.
 
-The backend's driver routes are exempt from `API_SHARED_SECRET`
-(`app/security.py`) since they have their own real per-driver auth - no
-extra header needed from this app.
+The backend's driver routes are exempt from the ops-dashboard auth gate
+(`app/ops_auth/middleware.py`) since they have their own real per-driver
+auth - no extra header needed from this app.
 
 ## What's real vs. stubbed in this pass
 

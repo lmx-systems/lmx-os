@@ -6,10 +6,10 @@ import type {
   ClientProfileView,
 } from './types'
 
-// /client/* is exempt from the internal shared-secret stopgap
-// (app/security.py's EXEMPT_PREFIXES) - it has its own real per-client JWT
-// auth instead (app/client_auth/), unlike dashboard/'s API_SHARED_SECRET
-// approach. No shared secret to configure here.
+// /client/* is exempt from the ops-dashboard auth gate
+// (app/ops_auth/middleware.py's EXEMPT_PREFIXES) - it has its own real
+// per-client JWT auth instead (app/client_auth/), a separate auth domain
+// from dashboard/'s ops-user login. No ops credentials to configure here.
 //
 // Read at runtime first (docker/generate-env-config.sh writes
 // window.__RUNTIME_CONFIG__ from the real container env at startup, not

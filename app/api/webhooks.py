@@ -2,7 +2,7 @@
 Inbound webhooks - screens 1p/1q's messaging reply path
 (app/models/message.py, app/messaging/sms_client.py).
 
-Exempt from both SharedSecretAuthMiddleware (app/security.py's
+Exempt from both OpsUserAuthMiddleware (app/ops_auth/middleware.py's
 EXEMPT_PREFIXES) and driver JWT auth - Twilio calls this directly and
 carries neither. Request-signature verification
 (app/messaging/twilio_signature.py) only actually enforces when

@@ -6,10 +6,10 @@ RUN npm ci
 
 COPY . .
 
-# No VITE_API_BASE_URL/VITE_API_SHARED_SECRET baked in here anymore
-# (docs/ROADMAP.md D2) - the browser reads window.__RUNTIME_CONFIG__
-# instead (src/lib/api.ts), written by docker/generate-env-config.sh at
-# *container* startup from real env vars, not at image build time.
+# No VITE_API_BASE_URL baked in here anymore (docs/ROADMAP.md D2) - the
+# browser reads window.__RUNTIME_CONFIG__ instead (src/lib/api.ts),
+# written by docker/generate-env-config.sh at *container* startup from a
+# real env var, not at image build time.
 RUN npm run build
 
 FROM nginx:alpine

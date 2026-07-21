@@ -115,6 +115,17 @@ export interface HubSummary {
   name: string
 }
 
+export interface OpsAuthToken {
+  access_token: string
+  token_type: string
+}
+
+export interface OpsProfileView {
+  ops_user_id: string
+  email: string
+  name: string
+}
+
 // --- UI-local types below - no backend equivalent, not response mirrors ---
 
 export interface RunLogEntry {

@@ -37,7 +37,7 @@ logger = get_logger(__name__)
 # Health checks and API introspection aren't the surface this protects,
 # and gating them just risks breaking monitoring/tooling that polls them
 # on its own fast, fixed schedule - same reasoning as
-# app/security.py's SharedSecretAuthMiddleware.
+# app/ops_auth/middleware.py's OpsUserAuthMiddleware.
 EXEMPT_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json"})
 
 

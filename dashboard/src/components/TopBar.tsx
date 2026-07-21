@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { formatSecondsAgo } from '../lib/format'
-import type { HubSummary } from '../lib/types'
+import type { HubSummary, OpsProfileView } from '../lib/types'
 import { ThemeToggle } from './ui/ThemeToggle'
 
 interface TopBarProps {
   hubId: string
   onChangeHubId: (hubId: string) => void
   lastUpdatedAt: number | null
+  opsProfile: OpsProfileView
+  onLogout: () => void
 }
 
 /**
@@ -16,7 +18,7 @@ interface TopBarProps {
  * back empty (e.g. no hubs seeded yet) - ops shouldn't be blocked from
  * targeting a hub just because this convenience lookup had a bad moment.
  */
-export function TopBar({ hubId, onChangeHubId, lastUpdatedAt }: TopBarProps) {
+export function TopBar({ hubId, onChangeHubId, lastUpdatedAt, opsProfile, onLogout }: TopBarProps) {
   const [secondsAgo, setSecondsAgo] = useState(0)
   const [hubs, setHubs] = useState<HubSummary[] | null>(null)
 
@@ -86,6 +88,14 @@ export function TopBar({ hubId, onChangeHubId, lastUpdatedAt }: TopBarProps) {
           Live · updated {formatSecondsAgo(secondsAgo)}
         </div>
       )}
+
+      <span className="text-xs text-[var(--text-muted)]">{opsProfile.name}</span>
+      <button
+        onClick={onLogout}
+        className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)]"
+      >
+        Sign out
+      </button>
 
       <ThemeToggle />
     </div>

@@ -1,8 +1,8 @@
 """
 Internal/admin-only endpoints. Not client-facing, not driver-facing - gated
-by the existing SharedSecretAuthMiddleware (X-API-Key), same as the rest of
-app/api/routes.py's ops tooling. No new auth scheme needed here since
-whoever calls this is LMX ops, not a client or a driver.
+by the real per-account ops auth (app/ops_auth/, docs/ROADMAP.md S1), same
+as the rest of app/api/routes.py's ops tooling. No new auth scheme needed
+here since whoever calls this is LMX ops, not a client or a driver.
 
 Phase 8 (docs/ROADMAP.md): a minimal client onboarding endpoint. There's no
 admin UI yet to onboard a client's shops/rates/portal login as separate

@@ -97,23 +97,15 @@ class Settings(BaseSettings):
     dashboard_cors_origins: str = "http://localhost:5173"
 
     # General per-IP API rate limiting (app/rate_limit.py) - deliberately
-    # generous, see that module's docstring for why. Unlike
-    # api_shared_secret, there's no "0 = disabled" escape hatch - a real
-    # deployment should never want zero rate limiting, only a tuned cap.
+    # generous, see that module's docstring for why. There's no
+    # "0 = disabled" escape hatch - a real deployment should never want
+    # zero rate limiting, only a tuned cap.
     general_rate_limit_max_requests: int = 600
     general_rate_limit_window_seconds: int = 60
 
-    # Interim stopgap for docs/ARCHITECTURE.md's "Recommended next steps"
-    # item 0: every endpoint (bar /health and API docs) requires this value
-    # in an X-API-Key header. Unset (the default) leaves the API open, same
-    # as before this existed - fine for local dev, not for anything
-    # reachable beyond localhost. This is a shared secret, not per-user
-    # auth; a client-facing dashboard or driver app needs the real thing.
-    api_shared_secret: str | None = None
-
     # Driver app (Phase 1, see docs/NEXT_STEPS.md item 12): real per-driver
-    # auth, unlike api_shared_secret above. Signs/verifies the JWT issued on
-    # OTP verification (app/driver_auth/tokens.py). The default is an
+    # auth. Signs/verifies the JWT issued on OTP verification
+    # (app/driver_auth/tokens.py). The default is an
     # obviously-fake dev value, not a generated secret - deliberately loud
     # (see app/driver_auth/tokens.py's startup check) rather than silently
     # "secure-looking" in an environment nobody configured it for.
@@ -134,10 +126,16 @@ class Settings(BaseSettings):
     client_jwt_secret: str = "dev-only-insecure-secret-change-in-production"
     client_jwt_expiry_hours: int = 24 * 7  # shorter-lived than a driver's month; re-login weekly
 
-    # Minimal client onboarding (Phase 8): gates POST /admin/clients behind
-    # the existing internal ops shared secret (api_shared_secret above),
-    # not a new auth scheme - this is an internal/admin tool, not a
-    # client-facing or driver-facing surface.
+    # Ops dashboard (docs/ROADMAP.md S1) - password-based JWT for
+    # OpsUser.email/password_hash logins (app/ops_auth/), replacing the
+    # shared X-API-Key stopgap this file used to have. Deliberately a
+    # separate secret from client/driver_jwt_secret for the same
+    # non-interchangeability reason as those two - an ops session token
+    # authorizes fleet-wide read/write across every hub, which must never
+    # be satisfiable by a client or driver token even if one secret were
+    # ever compromised.
+    ops_jwt_secret: str = "dev-only-insecure-secret-change-in-production"
+    ops_jwt_expiry_hours: int = 24 * 7  # same cadence as client portal - weekly re-login
 
     @property
     def dashboard_cors_origin_list(self) -> list[str]:
@@ -154,27 +152,37 @@ settings = get_settings()
 
 def assert_jwt_secrets_are_distinct() -> None:
     """Fail fast at boot, alongside assert_client_jwt_secret_configured()/
-    assert_driver_jwt_secret_configured(), if a real deployment ever ends up
-    with CLIENT_JWT_SECRET and DRIVER_JWT_SECRET set to the same value.
+    assert_driver_jwt_secret_configured()/assert_ops_jwt_secret_configured(),
+    if a real deployment ever ends up with two of CLIENT_JWT_SECRET/
+    DRIVER_JWT_SECRET/OPS_JWT_SECRET set to the same value.
 
-    Each of those two checks only catches its own field falling back to the
-    published dev-only default - neither one notices if an operator instead
-    configures both env vars to one shared real secret. That would silently
-    defeat client_jwt_secret's whole reason for existing (see its docstring
-    above): a client token would decode successfully as a driver token and
-    vice versa, exactly the interchangeability this system is designed to
-    prevent. Both settings sharing the *default* value in development is
-    expected and fine - that path is already refused by the other two checks
-    outside development, so this one only needs to fire once a real,
-    non-default secret has been configured for both.
+    Each of those three checks only catches its own field falling back to
+    the published dev-only default - none of them notices if an operator
+    instead configures two of the three env vars to one shared real
+    secret. That would silently defeat the whole reason a separate secret
+    exists per token type: a token issued for one would decode
+    successfully as another, exactly the interchangeability this system
+    is designed to prevent - most severely for ops (a session that
+    authorizes fleet-wide read/write across every hub) being satisfiable
+    by a client or driver token. All three sharing the *default* value in
+    development is expected and fine - that path is already refused by
+    the other three checks outside development, so this one only needs
+    to fire once a real, non-default secret has been configured for two
+    (or all three) of them.
     """
-    if (
-        settings.environment != "development"
-        and settings.client_jwt_secret == settings.driver_jwt_secret
-    ):
-        raise RuntimeError(
-            "CLIENT_JWT_SECRET and DRIVER_JWT_SECRET are set to the same value - "
-            "refusing to start. A client portal session token must never be "
-            "valid as a driver session token (or vice versa); configure two "
-            "distinct secrets."
-        )
+    if settings.environment == "development":
+        return
+    secrets_by_name = {
+        "CLIENT_JWT_SECRET": settings.client_jwt_secret,
+        "DRIVER_JWT_SECRET": settings.driver_jwt_secret,
+        "OPS_JWT_SECRET": settings.ops_jwt_secret,
+    }
+    names = list(secrets_by_name)
+    for i, name_a in enumerate(names):
+        for name_b in names[i + 1 :]:
+            if secrets_by_name[name_a] == secrets_by_name[name_b]:
+                raise RuntimeError(
+                    f"{name_a} and {name_b} are set to the same value - refusing to "
+                    "start. A session token for one must never be valid as another "
+                    "(or vice versa); configure distinct secrets for all three."
+                )

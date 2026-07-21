@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.admin_routes import router as admin_router
 from app.api.client_routes import router as client_router
 from app.api.driver_routes import router as driver_router
+from app.api.ops_auth_routes import router as ops_auth_router
 from app.api.routes import router as ops_router
 from app.api.webhooks import router as webhooks_router
 from app.client_auth.tokens import assert_client_jwt_secret_configured
@@ -27,10 +28,11 @@ from app.db import engine
 from app.driver_auth.tokens import assert_driver_jwt_secret_configured
 from app.ingestion.router import router as ingestion_router
 from app.logging_config import configure_logging, get_logger
+from app.ops_auth.middleware import OpsUserAuthMiddleware
+from app.ops_auth.tokens import assert_ops_jwt_secret_configured
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.rate_limit import GeneralRateLimitMiddleware
 from app.redis_client import close_pool, get_client
-from app.security import SharedSecretAuthMiddleware
 
 logger = get_logger(__name__)
 
@@ -45,6 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # (or a silent vulnerability) on the first real request.
     assert_driver_jwt_secret_configured()
     assert_client_jwt_secret_configured()
+    assert_ops_jwt_secret_configured()
     assert_jwt_secrets_are_distinct()
     async with engine.connect() as conn:
         await conn.run_sync(lambda _: None)
@@ -77,13 +80,13 @@ app = FastAPI(
 # must be added after auth, not before, so CORS preflight (OPTIONS) is
 # handled before it ever reaches the auth check and gets rejected for
 # missing a header no browser sends on a preflight request.
-app.add_middleware(SharedSecretAuthMiddleware)
+app.add_middleware(OpsUserAuthMiddleware)
 
 # Added after auth (so it runs before it, per the ordering rule above) -
 # rate limiting should shed load/abuse before spending an auth check on
-# it, and it applies regardless of which auth path a route uses (shared
-# secret, driver JWT, client JWT), unlike SharedSecretAuthMiddleware's own
-# /driver, /client, /webhooks exemptions.
+# it, and it applies regardless of which auth path a route uses (ops JWT,
+# driver JWT, client JWT), unlike OpsUserAuthMiddleware's own /driver,
+# /client, /webhooks exemptions.
 app.add_middleware(GeneralRateLimitMiddleware)
 
 app.add_middleware(
@@ -95,6 +98,7 @@ app.add_middleware(
 )
 
 app.include_router(ops_router)
+app.include_router(ops_auth_router)
 app.include_router(ingestion_router)
 app.include_router(driver_router)
 app.include_router(webhooks_router)

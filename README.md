@@ -12,11 +12,12 @@ This repo also now includes the driver mobile app (`driver-app/`) and,
 as of Phase 8, a client-facing portal (`client-portal/`), a Hot Shot
 priority delivery tier, tiered client billing, and automatic shop SMS —
 see `docs/ARCHITECTURE.md` for the full component breakdown. **Still not
-here:** a validated DPH number, and a real production security posture —
-the internal ops API only has a shared-secret stopgap
-(`SharedSecretAuthMiddleware`), not per-user auth; see
-`docs/ARCHITECTURE.md` before pointing anything here at a non-local/
-private environment. Full scope breakdown and what's deliberately stubbed
+here:** a validated DPH number, and a full production security posture —
+the internal ops API now has real per-account auth (`app/ops_auth/`,
+`OpsUserAuthMiddleware`) but no role model yet (every ops user can do
+everything any other one can); see `docs/ARCHITECTURE.md` before pointing
+anything here at a non-local/private environment. Full scope breakdown
+and what's deliberately stubbed
 for now is in `docs/ARCHITECTURE.md`; the live punch list is in
 `docs/NEXT_STEPS.md`.
 

@@ -89,15 +89,17 @@ still the only thing `get_fleet_snapshot`/`get_available_driver_ids`
 touch) - all three enrichments live in the dashboard-facing route
 handlers or are written once at the point an event already happens.
 
-**Auth reminder still applies to the redesign as much as the old
-version:** `SharedSecretAuthMiddleware` (`app/security.py`) gates every
-endpoint but `/health`/docs behind an `X-API-Key` header when
-`API_SHARED_SECRET` is set — `dashboard/src/lib/api.ts` sends it
-automatically when `VITE_API_SHARED_SECRET` is set at build time. That's
-a shared secret, not per-user auth or access control; CORS
+**Auth update:** the shared-secret stopgap described in earlier versions
+of this section is gone. `OpsUserAuthMiddleware` (`app/ops_auth/
+middleware.py`) now gates every endpoint but `/health`/docs/`/driver`/
+`/client`/`/webhooks` behind a real per-account Bearer JWT
+(`app/ops_auth/`, `app/models/ops_user.py`) — `dashboard/` has its own
+login screen backed by `POST /ops/auth/login`, mirroring the client
+portal's auth shape. Bootstrap the first account with
+`python -m scripts.create_ops_user`. Still a real gap: no role model yet
+— every ops user can do everything any other one can. CORS
 (`DASHBOARD_CORS_ORIGINS`) restricts which browser *origins* can call in,
-which is a different thing again. Don't expose this beyond
-localhost/a private network on that basis alone.
+which is a different thing again.
 
 Other known gaps in the dashboard itself:
 - No "list hubs" endpoint exists yet (the `hubs` table has no read API), so
@@ -125,9 +127,9 @@ This closed three real gaps, not just "add some endpoints":
 
 - **Real per-driver auth.** `app/driver_auth/` — phone + OTP (Redis,
   single-use, attempt-capped) issuing a JWT session
-  (`app/driver_auth/tokens.py`). Entirely separate from
-  `SharedSecretAuthMiddleware`: driver routes are exempt from the shared
-  X-API-Key (`app/security.py`'s `EXEMPT_PREFIXES`) since they have their
+  (`app/driver_auth/tokens.py`). Entirely separate from the ops-dashboard
+  auth: driver routes are exempt from `OpsUserAuthMiddleware`
+  (`app/ops_auth/middleware.py`'s `EXEMPT_PREFIXES`) since they have their
   own real auth now. No Twilio SMS send is wired up — the OTP is returned
   in the response (`debug_code`) when no SMS provider is configured, the
   same "unconfigured third-party credential -> stub/dev mode" pattern the
@@ -248,16 +250,21 @@ What this closed:
   inbound webhook matching) is fully buildable and tested without a live
   account.
 - **`app/api/webhooks.py`** — `POST /webhooks/twilio/inbound-sms`, a new
-  router exempt from both `SharedSecretAuthMiddleware` and driver JWT auth
-  (Twilio calls it directly, carrying neither). Matches an inbound
-  reply's `From` number against the most recent outbound `Message` sent
-  to that number to figure out which driver/channel/stop it belongs to.
-  Two real, named gaps, not polish items: (1) no Twilio request-signature
-  verification yet, so this endpoint currently trusts whatever posts to
-  it — must be closed before a real Twilio number ever points here; (2)
-  phone-number-only matching means a driver with two concurrent
-  conversations to the same number could have a reply attached to the
-  wrong one.
+  router exempt from both `OpsUserAuthMiddleware` and driver JWT auth
+  (Twilio calls it directly, carrying neither). Real request-signature
+  verification now exists (`app/messaging/twilio_signature.py`), enforced
+  once `TWILIO_AUTH_TOKEN` is configured. Matches an inbound reply's
+  `From` number against a real, hardened lookup
+  (`app/api/webhooks.py`'s `_find_matching_thread`) - channel-aware (a
+  support reply can never land in a customer thread or a different
+  driver's support thread), prefers unanswered threads, requires a
+  non-terminal stop for customer replies - to figure out which
+  driver/channel/stop it belongs to. One real, named gap remains: two
+  genuinely concurrent, still-unanswered threads to the same number can't
+  be told apart from phone number alone (logged as
+  `inbound_sms_ambiguous_match` rather than silently guessed at) - that
+  needs either a Twilio Proxy-style number-per-conversation pool or a
+  reference code in the reply body, neither of which exists.
 - **Frontend**: a third bottom tab, Earnings (`EarningsScreen`,
   `TripHistoryScreen`), sitting alongside Home and Profile since earnings
   is neither part of the delivery loop nor an account/compliance setting.
@@ -309,13 +316,13 @@ work, and LMX had no committed client dates constraining build order.
   login per client company, not per-user, per Sourabh's call.
 - **`app/api/client_routes.py`**: `/client/auth/login`, `/client/me`,
   `/client/orders`, `/client/orders/{id}` — exempt from
-  `SharedSecretAuthMiddleware` (own real auth, same reasoning as
+  `OpsUserAuthMiddleware` (own real auth, same reasoning as
   `/driver`), scoped so a client can only ever see their own orders
   (404, not 403, for another client's order — same "don't confirm
   existence to an unauthorized caller" pattern as the driver app's
   `_get_owned_offer`/`_get_owned_stop`).
 - **`app/api/admin_routes.py`**: `POST /admin/clients` — internal-only
-  (gated by `SharedSecretAuthMiddleware`, *not* exempt, unlike
+  (gated by `OpsUserAuthMiddleware`, *not* exempt, unlike
   `/client`/`/driver`), creates a `Client`, its shop(s), its `ClientRate`
   row(s), and its portal login in one action. There's no other admin UI
   yet for onboarding a client in separate steps.
@@ -432,12 +439,15 @@ dashboard."** The rest is still roughly priority order.
    open to anyone who can reach it, which stopped being theoretical the
    moment `dashboard/` gave it a clickable UI. ~~Even a minimal
    shared-secret header or basic auth is better than nothing for an
-   internal tool~~ — **done**: `app/security.py`'s `SharedSecretAuthMiddleware`
-   gates every endpoint except `/health` and the API docs behind an
-   `X-API-Key` header (`API_SHARED_SECRET` env var; unset leaves the API
-   open, same as before this existed). Still just a shared secret, not
-   per-user auth — a client-facing dashboard or driver app needs the real
-   thing before it ships.
+   internal tool~~ — superseded: the shared-secret stopgap this line
+   originally described has been fully replaced. **Done**:
+   `app/ops_auth/middleware.py`'s `OpsUserAuthMiddleware` gates every
+   endpoint except `/health`, the API docs, and the driver/client/webhook
+   surfaces (each with their own real auth) behind a real per-account
+   Bearer JWT (`app/ops_auth/`, `app/models/ops_user.py`) — `dashboard/`
+   has a real login screen. Bootstrap the first account with
+   `python -m scripts.create_ops_user`. Still a real gap: no role model
+   yet — every ops user can do everything any other one can.
 1. ~~Stand up Postgres + Redis in a real environment and run the
    migration~~ — **Done.** `tests/integration/` now covers the migration
    itself, ingestion, `FleetStateManager`, and the full ingest-to-optimizer
@@ -468,33 +478,32 @@ dashboard."** The rest is still roughly priority order.
    instead of manual triggering.
 6. ~~Decide whether the Dispatch Optimizer should be triggered by an event
    bus vs. the manually-triggered endpoint~~ — done. `app/events/bus.py`
-   is a generic, in-process, per-hub-debounced event bus; the Dispatch
+   is a per-hub-debounced event bus, coordinated through Redis (a
+   `dirty_hubs` set for idempotent cross-instance coalescing, a
+   `SET NX EX` lock for mutual exclusion) rather than local asyncio state,
+   so it behaves correctly across more than one running instance - live-
+   verified with two real app containers sharing one Redis. The Dispatch
    Optimizer is wired to it in `app/optimizer/event_trigger.py`. Two of
    the design doc's three trigger events now publish for real: order
    ingestion (`app/ingestion/router.py`, event `order_held`) and driver
    status changes (`app/api/routes.py`, event `driver_status_changed`).
-   The third, **stop completed**, has no producer yet — component 7 (the
-   driver app) doesn't exist to call it; `Stop.status`'s `completed` state
-   (`app/models/stop.py`) is where that future endpoint should call
-   `dispatch_event_bus.publish(hub_id, "stop_completed")`. The manual
-   `/optimizer/{hub_id}/run-cycle` endpoint is kept for testing/ops.
-   Still worth a decision before Hub 1: this bus is in-process, so if the
-   app ever runs as more than one instance, each instance only reacts to
-   events it personally receives — fine for a single-instance deployment,
-   a real gap for a horizontally-scaled one. The Learning Loop's nightly
-   job (item 5) is a separate, deliberately-not-event-driven case — it's
-   scheduled, not event-triggered, so it still needs a real scheduler
-   wired to `/learning-loop/{hub_id}/run-nightly-job`.
+   `stop_completed`, the third, now has a producer too —
+   `app/api/driver_routes.py`'s `complete_stop`/`flag_stop_issue` publish
+   it. The manual `/optimizer/{hub_id}/run-cycle` endpoint is kept for
+   testing/ops. The Learning Loop's nightly job (item 5) is a separate,
+   deliberately-not-event-driven case — it's scheduled, not
+   event-triggered, so it still needs a real scheduler wired to
+   `/learning-loop/{hub_id}/run-nightly-job`.
 
 ## Operational notes
 
 - Starlette's `add_middleware()` inserts at the front of its middleware
   list, so the *last*-added middleware ends up outermost (runs first) -
   the opposite of the intuitive reading. `app/main.py` adds
-  `SharedSecretAuthMiddleware` before `CORSMiddleware` for exactly this
+  `OpsUserAuthMiddleware` before `CORSMiddleware` for exactly this
   reason: CORS has to run first so preflight `OPTIONS` requests are
-  handled before they ever reach the auth check (no browser sends
-  `X-API-Key` on a preflight). Getting this order backwards doesn't fail
+  handled before they ever reach the auth check (no browser sends a
+  bearer token on a preflight). Getting this order backwards doesn't fail
   loudly - every preflight 401s with no CORS headers attached, which the
   browser reports as a generic `Failed to fetch`, not a 401, making it
   look like a connectivity problem rather than an auth-ordering bug.

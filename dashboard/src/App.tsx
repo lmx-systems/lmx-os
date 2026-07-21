@@ -6,10 +6,13 @@ import { HoldQueueTable } from './components/HoldQueueTable'
 import { FleetRoster } from './components/FleetRoster'
 import { OperationsPanel } from './components/OperationsPanel'
 import { OnboardClientForm } from './components/OnboardClientForm'
+import { LoginPage } from './components/LoginPage'
 import { Toast } from './components/ui/Toast'
 import { usePolling } from './hooks/usePolling'
 import { useToast } from './hooks/useToast'
 import { api } from './lib/api'
+import { clearToken, getToken } from './lib/auth'
+import type { OpsProfileView } from './lib/types'
 
 const HUB_ID_STORAGE_KEY = 'lmx-os-dashboard.hub-id'
 const POLL_INTERVAL_MS = 5000
@@ -17,11 +20,51 @@ const POLL_INTERVAL_MS = 5000
 function App() {
   const [hubId, setHubId] = useState(() => localStorage.getItem(HUB_ID_STORAGE_KEY) ?? '')
   const { message, showToast } = useToast()
-  const enabled = hubId.length > 0
+
+  // Real per-account ops auth (docs/ROADMAP.md S1), replacing the old
+  // shared X-API-Key stopgap - mirrors client-portal/src/App.tsx's
+  // loggedIn/profile gating exactly.
+  const [loggedIn, setLoggedIn] = useState(() => getToken() !== null)
+  const [opsProfile, setOpsProfile] = useState<OpsProfileView | null>(null)
+  const [profileError, setProfileError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!loggedIn) return
+    let cancelled = false
+    setProfileError(null)
+    api
+      .myProfile()
+      .then((profile) => {
+        if (!cancelled) setOpsProfile(profile)
+      })
+      .catch(() => {
+        if (cancelled) return
+        // Most likely an expired/invalid token - api.ts already cleared
+        // it on a 401, so drop back to the login screen.
+        setLoggedIn(getToken() !== null)
+        setProfileError('Could not load your account. Please sign in again.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [loggedIn])
+
+  function handleLogout() {
+    clearToken()
+    setLoggedIn(false)
+    setOpsProfile(null)
+  }
 
   useEffect(() => {
     localStorage.setItem(HUB_ID_STORAGE_KEY, hubId)
   }, [hubId])
+
+  // Paused entirely while logged out (or the session's own profile hasn't
+  // loaded yet) - hooks still fire unconditionally at the top of the
+  // component regardless of which branch below actually renders, so
+  // without this the login screen would sit behind a background poll
+  // loop making authenticated calls with no valid session.
+  const enabled = loggedIn && opsProfile !== null && hubId.length > 0
 
   // Lifted here (rather than each section polling independently, as the
   // pre-redesign dashboard did) so the KPI strip's numbers always match
@@ -42,12 +85,30 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fleet.data, held.data, summary.data, lastCycle.data])
 
+  if (!loggedIn) {
+    return <LoginPage onLoggedIn={() => setLoggedIn(true)} />
+  }
+
+  if (!opsProfile) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-sm text-[var(--text-muted)]">
+        {profileError ?? 'Loading your account…'}
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen">
       <div className="mx-auto max-w-[1320px] px-7 py-5 pb-16">
-        <TopBar hubId={hubId} onChangeHubId={setHubId} lastUpdatedAt={enabled ? lastUpdatedAt : null} />
+        <TopBar
+          hubId={hubId}
+          onChangeHubId={setHubId}
+          lastUpdatedAt={hubId.length > 0 ? lastUpdatedAt : null}
+          opsProfile={opsProfile}
+          onLogout={handleLogout}
+        />
 
-        {!enabled ? (
+        {hubId.length === 0 ? (
           <p className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-muted)]">
             Select a hub above to load fleet state, the hold queue, and order status for that
             hub.

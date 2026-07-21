@@ -2,7 +2,6 @@
 
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string
-  readonly VITE_API_SHARED_SECRET?: string
 }
 
 interface ImportMeta {
@@ -17,6 +16,5 @@ interface ImportMeta {
 interface Window {
   __RUNTIME_CONFIG__?: {
     VITE_API_BASE_URL?: string
-    VITE_API_SHARED_SECRET?: string
   }
 }

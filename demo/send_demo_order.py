@@ -16,36 +16,64 @@ left the hold queue - falling back to a manual trigger only if it's still
 sitting there after the wait (belt-and-suspenders, not the headline path).
 
 Run demo/seed_demo_data.py first (once per fresh stack) so the Hub/
-Client/Shop/Driver this payload references actually exist.
+Client/Shop/Driver this payload references actually exist. Also requires
+a real ops-dashboard account (docs/ROADMAP.md S1) - this hits the same
+internal ops surface (/ingestion, /batch-queue, /optimizer) a logged-in
+dashboard session would, and that surface no longer accepts a bare shared
+secret. Create one first if you haven't:
+
+    python -m scripts.create_ops_user --email demo@lmxit.com --password "demo-password" --name "Demo"
 
 Usage:
     python -m demo.send_demo_order
     DEMO_API_BASE_URL=http://localhost:8000 python -m demo.send_demo_order
+    DEMO_OPS_EMAIL=... DEMO_OPS_PASSWORD=... python -m demo.send_demo_order
 """
 from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 
-from app.config import settings
 from demo.ids import CLIENT_ID, HUB_ID, SOURCE_SYSTEM
 
 BASE_URL = os.environ.get("DEMO_API_BASE_URL", "http://localhost:8000")
+DEMO_OPS_EMAIL = os.environ.get("DEMO_OPS_EMAIL", "demo@lmxit.com")
+DEMO_OPS_PASSWORD = os.environ.get("DEMO_OPS_PASSWORD", "demo-password")
 PAYLOAD_PATH = Path(__file__).parent / "epicor_sample_order.json"
 AUTO_DISPATCH_WAIT_SECONDS = 1.5  # margin over the <5s cycle budget for 1 order/1 driver
 
 
+_cached_headers: dict | None = None
+
+
 def _headers() -> dict:
-    # Matches app/security.py's SharedSecretAuthMiddleware - only needed if
-    # API_SHARED_SECRET is actually set for the stack being demoed against.
-    if settings.api_shared_secret:
-        return {"X-API-Key": settings.api_shared_secret}
-    return {}
+    # Cached for the life of this one script run - every call site below
+    # would otherwise log in again, which works (the rate limiter resets
+    # on each success) but is noisy and slower for no benefit here.
+    global _cached_headers
+    if _cached_headers is not None:
+        return _cached_headers
+
+    resp = httpx.post(
+        f"{BASE_URL}/ops/auth/login",
+        json={"email": DEMO_OPS_EMAIL, "password": DEMO_OPS_PASSWORD},
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        print(
+            f"Could not log in as {DEMO_OPS_EMAIL!r} ({resp.status_code}) - create this ops user first:\n"
+            f'  python -m scripts.create_ops_user --email {DEMO_OPS_EMAIL} --password "{DEMO_OPS_PASSWORD}" --name "Demo"',
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    _cached_headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    return _cached_headers
 
 
 def _held_order_ids() -> list[str]:

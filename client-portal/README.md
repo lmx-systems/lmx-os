@@ -7,9 +7,9 @@ client's order history and account details. Billing is placeholder/minimal
 today (`fee_cents` per order) pending a full billing system.
 
 Talks to the backend's `/client/*` API (`../app/api/client_routes.py`),
-authenticated with a JWT from `/client/auth/login` - not the
-`API_SHARED_SECRET` stopgap `../dashboard/` uses, since this has its own
-real per-client auth (`../app/client_auth/`).
+authenticated with a JWT from `/client/auth/login` - a separate auth
+domain from the ops-dashboard login `../dashboard/` uses, since this has
+its own real per-client auth (`../app/client_auth/`).
 
 New client companies are onboarded by LMX ops via `POST /admin/clients`
 (`../app/api/admin_routes.py`), not through this app - there's no
