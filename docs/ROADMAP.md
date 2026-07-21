@@ -45,10 +45,10 @@ list instead of leaving it scattered across three documents.
 
 | # | Item | Why it matters |
 |---|---|---|
-| S1 | Real per-user authentication for the ops dashboard | `SharedSecretAuthMiddleware` gates the API behind one shared `X-API-Key` — anyone with the key sees everything, no per-user identity, no roles. Fine for one person on a private network; not fine for a team. |
+| ~~S1~~ | ~~Real per-user authentication for the ops dashboard~~ | **Done** — `ops_users` table (migration `0009`, admin/operator roles, soft-deactivation, optional hub scoping), `app/ops_auth/` (third JWT surface, distinct secret — the distinctness check is now three-way pairwise), `POST /ops/auth/login` (rate-limited, same limiter as client login) + `GET /ops/me` + `POST /admin/ops-users`. Middleware accepts an ops Bearer token as the primary credential (role-gates `/admin/*` to admins); the shared `X-API-Key` remains as the bootstrap path for creating the first admin and for legacy scripts. Dashboard shows a sign-in screen only when the backend 401s — open-mode local dev unchanged. |
 | S2 | Secrets management | Every credential (DB password, API keys, JWT secret) lives in a `.env` file today. No vault/secrets manager in the loop. |
 | S3 | A real production hosting decision | `docker-compose.yml` is a single-instance local/dev setup — one Postgres container, one Redis container, no managed database, no autoscaling, no load balancer, no automated backups or disaster-recovery plan. |
-| S4 | Observability | No error tracking (e.g. Sentry), no metrics dashboards, no alerting. Right now the only way to know something broke is someone noticing. |
+| S4 | Observability | Partially done — `GET /metrics` (Prometheus format, `app/metrics.py`, auth-protected): optimizer cycle duration histogram + over-budget counter, hold-queue depth per hub, orders ingested, rate-limit rejections. Still open: error tracking (Sentry — needs an account/DSN), dashboards/alerting on top of the metrics (needs the hosting decision, S3). |
 | ~~S5~~ | ~~General API rate limiting~~ | **Done** — `app/rate_limit.py`: per-IP per-minute budget across the whole API (middleware, runs before auth so it shields API-key guessing too), Redis counter + NX-guarded TTL, fails open on Redis outage, 429 + Retry-After when exceeded. Disabled by default in dev (`RATE_LIMIT_REQUESTS_PER_MINUTE=0`); the targeted per-email/per-phone limiters remain. |
 | S6 | A real security review | Nobody outside this build has looked at this from a security angle yet — worth doing before real orders/drivers/money flow through it. |
 | ~~S7~~ | ~~Twilio inbound-webhook signature verification~~ | **Done** — `app/messaging/twilio_signature.py` (pure HMAC-SHA1 algorithm, constant-time compare) enforced in `app/api/webhooks.py`: 403 on missing/invalid `X-Twilio-Signature` when `TWILIO_AUTH_TOKEN` is set; skipped (logged) when unset, same stub posture as `SmsClient`. `TWILIO_WEBHOOK_PUBLIC_URL` handles the behind-a-proxy URL mismatch. |
@@ -84,7 +84,7 @@ category:
 
 | # | Item | Why it matters |
 |---|---|---|
-| C3 | A real billing/invoicing system | Phase 8 only computes and stores a per-order `fee_cents` (`app/models/order.py`) — there's no statement generation, invoice PDF, or payment collection anywhere. The client portal's billing view is deliberately minimal pending this. |
+| C3 | A real billing/invoicing system | Partially done — monthly statement assembly (`app/billing/statements.py`: delivered orders only, grouped by tier/rate, NULL fees surfaced as an explicit unbilled count, never $0) + invoice PDF (`app/billing/invoice_pdf.py`, reportlab), exposed to clients (`GET /client/billing/statements/{year}/{month}[/invoice.pdf]` + a Billing card in the portal) and to ops (`GET /admin/clients/{id}/statements/...` — same assembly, identical numbers). Still open: payment collection (needs a processor decision) and statement persistence/numbering for accounting-grade invoices. |
 | C4 | Multi-user client accounts | Client portal is explicitly one login per client company today (`Client.portal_email`), per Sourabh's call — a real multi-user/role model (e.g. AP vs. ops contacts at the same client) is a later decision, not an oversight. |
 | C5 | Self-service client signup | New clients are onboarded only via the internal `POST /admin/clients` form (dashboard) — there's no client-initiated signup flow, by design (this is a B2B onboarding relationship, not self-serve SaaS), but worth naming explicitly so it isn't assumed to exist. |
 
@@ -92,7 +92,7 @@ category:
 
 | # | Item | Why it matters |
 |---|---|---|
-| T1 | No load/performance test against the design doc's <5s-cycle/20-driver/100-order budget | The optimizer has a hard performance target that's never been tested under realistic load. |
+| ~~T1~~ | ~~No load/performance test against the design doc's <5s-cycle/20-driver/100-order budget~~ | **Done** — `tests/integration/test_optimizer_load.py` seeds exactly the design load against real Postgres+Redis and asserts the budget; measured 0.018s with the stub engine, i.e. the pipeline we own uses <1% of the budget. The live Google Route Optimization call's network latency is measured separately under E1's live verification. |
 | T2 | Local dev/test sandbox can't fully exercise Redis-backed rate limiting (driver OTP issuance, and now client login) | The bundled test Redis (`redislite`/the sandbox's standalone binary, both v6.2.14) doesn't support `EXPIRE...NX`; production Redis (7-alpine) does. Confirmed not a real bug, but worth a note so it doesn't get "rediscovered" and mistaken for one - now affects `app/client_auth/login_rate_limit.py`'s tests too, same root cause. |
 
 ---

@@ -17,12 +17,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.billing.statements import ClientNotFoundError, build_statement
 from app.client_auth.passwords import hash_password
 from app.db import get_db
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.models.shop import Shop
 from app.schemas.admin import ClientOnboardingBody, ClientOnboardingResult
+from app.schemas.billing import StatementLineView, StatementView
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -88,3 +90,28 @@ async def onboard_client(
 
     await session.commit()
     return ClientOnboardingResult(client_id=str(client.id), shop_ids=[str(sid) for sid in shop_ids])
+
+
+@router.get("/clients/{client_id}/statements/{year}/{month}", response_model=StatementView)
+async def get_client_statement(
+    client_id: str, year: int, month: int, session: AsyncSession = Depends(get_db)
+) -> StatementView:
+    """Ops-side view of a client's monthly statement (roadmap item C3) -
+    same assembly the client portal uses, so both sides always see
+    identical numbers."""
+    if not (1 <= month <= 12) or not (2020 <= year <= 2100):
+        raise HTTPException(status_code=422, detail="Invalid statement period")
+    try:
+        statement = await build_statement(session, client_id, year, month)
+    except ClientNotFoundError:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return StatementView(
+        client_id=statement.client_id,
+        client_name=statement.client_name,
+        year=statement.year,
+        month=statement.month,
+        lines=[StatementLineView(**vars(line)) for line in statement.lines],
+        total_cents=statement.total_cents,
+        delivered_order_count=statement.delivered_order_count,
+        unbilled_order_count=statement.unbilled_order_count,
+    )

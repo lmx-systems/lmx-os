@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from './lib/api'
 import { clearToken, getToken } from './lib/auth'
 import type { ClientOrderDetailView, ClientOrderSummaryView, ClientProfileView } from './lib/types'
+import { BillingCard } from './components/BillingCard'
 import { LoginPage } from './components/LoginPage'
 import { TopBar } from './components/TopBar'
 import { OrdersTable } from './components/OrdersTable'
@@ -81,6 +82,9 @@ export default function App() {
           <>
             <h1 className="mb-4 text-[16px] font-semibold text-[var(--text-primary)]">Your orders</h1>
             <OrdersTable orders={orders} onSelect={(orderId) => setView({ name: 'order-detail', orderId })} />
+            <div className="mt-6">
+              <BillingCard />
+            </div>
           </>
         )}
         {view.name === 'order-detail' &&

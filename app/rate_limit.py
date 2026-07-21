@@ -32,6 +32,7 @@ from starlette.types import ASGIApp
 
 from app.config import settings
 from app.logging_config import get_logger
+from app.metrics import RATE_LIMIT_REJECTIONS
 from app.redis_client import get_client
 
 logger = get_logger(__name__)
@@ -80,6 +81,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if count > limit:
+            RATE_LIMIT_REJECTIONS.inc()
             logger.warning("rate_limit_exceeded", ip=ip, count=count, limit=limit)
             return JSONResponse(
                 {"detail": "Too many requests - try again shortly"},

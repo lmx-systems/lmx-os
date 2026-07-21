@@ -4,6 +4,7 @@ import type {
   ClientOrderDetailView,
   ClientOrderSummaryView,
   ClientProfileView,
+  StatementView,
 } from './types'
 
 // Runtime config first (roadmap item D2 - injected by the Docker image's
@@ -68,4 +69,27 @@ export const api = {
   myOrders: () => request<ClientOrderSummaryView[]>('/client/orders'),
 
   myOrder: (orderId: string) => request<ClientOrderDetailView>(`/client/orders/${orderId}`),
+
+  myStatement: (year: number, month: number) =>
+    request<StatementView>(`/client/billing/statements/${year}/${month}`),
+}
+
+// PDF download is a raw-bytes fetch, not JSON - kept out of request<T>().
+export async function downloadInvoicePdf(year: number, month: number): Promise<void> {
+  const token = getToken()
+  const response = await fetch(`${API_BASE_URL}/client/billing/statements/${year}/${month}/invoice.pdf`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!response.ok) {
+    throw new ApiError(response.status, response.statusText)
+  }
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `lmx-invoice-${year}-${String(month).padStart(2, '0')}.pdf`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }

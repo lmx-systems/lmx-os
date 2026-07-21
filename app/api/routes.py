@@ -7,8 +7,11 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.metrics import render_latest
 
 from app.batch_queue.clustering import cluster_members
 from app.batch_queue.store import HoldQueueStore
@@ -35,6 +38,15 @@ router = APIRouter(tags=["ops"])
 @router.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@router.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    """Prometheus scrape target (roadmap item S4, app/metrics.py).
+    Deliberately NOT in the auth middleware's exempt list - a scraper
+    presents the X-API-Key (or an ops token) like any internal client."""
+    payload, content_type = render_latest()
+    return Response(content=payload, media_type=content_type)
 
 
 @router.get("/hubs", response_model=list[HubView])

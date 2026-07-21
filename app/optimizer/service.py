@@ -24,6 +24,7 @@ from app.batch_queue.store import HoldQueueStore
 from app.config import settings
 from app.db import session_scope
 from app.fleet_state.manager import FleetStateManager
+from app.metrics import HOLD_QUEUE_DEPTH, OPTIMIZER_CYCLE_SECONDS, OPTIMIZER_CYCLES_OVER_BUDGET
 from app.models.order import Order, OrderStatus
 from app.models.route_offer import RouteOffer
 from app.optimizer.google_routes_client import RouteOptimizationClient, get_route_optimization_client
@@ -185,6 +186,15 @@ class DispatchOptimizerService:
 
         duration = time.perf_counter() - cycle_start
         over_budget = duration > settings.optimizer_cycle_budget_seconds
+
+        # Prometheus (roadmap item S4). Queue depth is sampled here rather
+        # than on every add/remove - the cycle already reads the whole
+        # queue, so this is free and always fresh enough for a dashboard.
+        OPTIMIZER_CYCLE_SECONDS.labels(hub_id=hub_id, engine=self._route_client.engine_name).observe(duration)
+        HOLD_QUEUE_DEPTH.labels(hub_id=hub_id).set(len(held_orders) - len(assigned_stop_ids))
+        if over_budget:
+            OPTIMIZER_CYCLES_OVER_BUDGET.labels(hub_id=hub_id).inc()
+
         if over_budget:
             logger.warning(
                 "optimizer_cycle_over_budget",

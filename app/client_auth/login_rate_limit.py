@@ -15,26 +15,30 @@ MAX_LOGIN_ATTEMPTS = 5
 LOGIN_RATE_LIMIT_WINDOW_SECONDS = 15 * 60
 
 
-def _key(email: str) -> str:
-    return f"client_auth:login_attempts:{email}"
-
-
 class LoginRateLimitExceeded(Exception):
     pass
 
 
 class LoginRateLimiter:
-    def __init__(self) -> None:
+    """key_prefix separates surfaces: the client portal (default) and the
+    ops dashboard (app/ops_auth/) each get an independent per-email budget
+    - locking someone out of one must not lock them out of the other."""
+
+    def __init__(self, key_prefix: str = "client_auth") -> None:
         self._redis = get_client()
+        self._key_prefix = key_prefix
+
+    def _key(self, email: str) -> str:
+        return f"{self._key_prefix}:login_attempts:{email}"
 
     async def check_and_increment(self, email: str) -> None:
         """Raises LoginRateLimitExceeded once `email` has hit the cap
         within the current window. Call before verifying the password,
         same ordering app/driver_auth/otp_store.py uses for issuance."""
-        async with timed_operation("client_auth.login_rate_limit"):
+        async with timed_operation(f"{self._key_prefix}.login_rate_limit"):
             pipe = self._redis.pipeline(transaction=True)
-            pipe.incr(_key(email))
-            pipe.expire(_key(email), LOGIN_RATE_LIMIT_WINDOW_SECONDS, nx=True)
+            pipe.incr(self._key(email))
+            pipe.expire(self._key(email), LOGIN_RATE_LIMIT_WINDOW_SECONDS, nx=True)
             count, _ = await pipe.execute()
         if count > MAX_LOGIN_ATTEMPTS:
             raise LoginRateLimitExceeded(
@@ -42,7 +46,7 @@ class LoginRateLimiter:
             )
 
     async def reset(self, email: str) -> None:
-        """Clears the counter on a successful login so a client who
+        """Clears the counter on a successful login so someone who
         mistyped their password a few times isn't penalized on their next
         legitimate session."""
-        await self._redis.delete(_key(email))
+        await self._redis.delete(self._key(email))

@@ -131,6 +131,13 @@ class Settings(BaseSettings):
     client_jwt_secret: str = "dev-only-insecure-secret-change-in-production"
     client_jwt_expiry_hours: int = 24 * 7  # shorter-lived than a driver's month; re-login weekly
 
+    # Ops dashboard per-user auth (roadmap item S1, app/ops_auth/) - the
+    # third and most privileged token surface, so the shortest-lived.
+    # Distinct from both secrets above; assert_jwt_secrets_are_distinct
+    # checks all three pairwise.
+    ops_jwt_secret: str = "dev-only-insecure-secret-change-in-production"
+    ops_jwt_expiry_hours: int = 12  # a shift, roughly - re-login daily
+
     # Minimal client onboarding (Phase 8): gates POST /admin/clients behind
     # the existing internal ops shared secret (api_shared_secret above),
     # not a new auth scheme - this is an internal/admin tool, not a
@@ -165,13 +172,20 @@ def assert_jwt_secrets_are_distinct() -> None:
     outside development, so this one only needs to fire once a real,
     non-default secret has been configured for both.
     """
-    if (
-        settings.environment != "development"
-        and settings.client_jwt_secret == settings.driver_jwt_secret
-    ):
-        raise RuntimeError(
-            "CLIENT_JWT_SECRET and DRIVER_JWT_SECRET are set to the same value - "
-            "refusing to start. A client portal session token must never be "
-            "valid as a driver session token (or vice versa); configure two "
-            "distinct secrets."
-        )
+    if settings.environment == "development":
+        return
+
+    secrets_by_name = {
+        "DRIVER_JWT_SECRET": settings.driver_jwt_secret,
+        "CLIENT_JWT_SECRET": settings.client_jwt_secret,
+        "OPS_JWT_SECRET": settings.ops_jwt_secret,
+    }
+    names = list(secrets_by_name)
+    for i, name_a in enumerate(names):
+        for name_b in names[i + 1 :]:
+            if secrets_by_name[name_a] == secrets_by_name[name_b]:
+                raise RuntimeError(
+                    f"{name_a} and {name_b} are set to the same value - refusing "
+                    "to start. A session token from one audience must never be "
+                    "valid for another; configure distinct secrets."
+                )

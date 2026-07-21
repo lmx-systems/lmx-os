@@ -6,10 +6,11 @@ import { HoldQueueTable } from './components/HoldQueueTable'
 import { FleetRoster } from './components/FleetRoster'
 import { OperationsPanel } from './components/OperationsPanel'
 import { OnboardClientForm } from './components/OnboardClientForm'
+import { OpsLoginPage } from './components/OpsLoginPage'
 import { Toast } from './components/ui/Toast'
 import { usePolling } from './hooks/usePolling'
 import { useToast } from './hooks/useToast'
-import { api } from './lib/api'
+import { api, ApiError } from './lib/api'
 
 const HUB_ID_STORAGE_KEY = 'lmx-os-dashboard.hub-id'
 const POLL_INTERVAL_MS = 5000
@@ -18,6 +19,16 @@ function App() {
   const [hubId, setHubId] = useState(() => localStorage.getItem(HUB_ID_STORAGE_KEY) ?? '')
   const { message, showToast } = useToast()
   const enabled = hubId.length > 0
+
+  // Per-user auth (roadmap item S1): probe once on mount - a 401 means
+  // the backend requires a sign-in (ops users configured / shared secret
+  // enforced). A backend in open mode never 401s, so dev is unchanged.
+  const [authRequired, setAuthRequired] = useState(false)
+  useEffect(() => {
+    api.listHubs().catch((err) => {
+      if (err instanceof ApiError && err.status === 401) setAuthRequired(true)
+    })
+  }, [])
 
   useEffect(() => {
     localStorage.setItem(HUB_ID_STORAGE_KEY, hubId)
@@ -41,6 +52,10 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fleet.data, held.data, summary.data, lastCycle.data])
+
+  if (authRequired) {
+    return <OpsLoginPage onLoggedIn={() => window.location.reload()} />
+  }
 
   return (
     <div className="min-h-screen">

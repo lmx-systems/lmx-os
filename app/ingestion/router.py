@@ -8,6 +8,7 @@ from app.batch_queue.store import HoldQueueStore
 from app.db import get_db
 from app.ingestion.adapters.base import IngestionAdapterError
 from app.ingestion.service import ShopNotFoundError, ingest_order
+from app.metrics import ORDERS_INGESTED
 from app.optimizer.event_trigger import dispatch_event_bus
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
@@ -47,6 +48,8 @@ async def ingest_order_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    ORDERS_INGESTED.labels(hub_id=hub_id, source_system=source_system).inc()
 
     # A newly-held order is a "meaningful event" per the design doc - it
     # may have a cluster-mate already waiting, or be releasable immediately

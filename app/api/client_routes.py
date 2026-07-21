@@ -9,9 +9,12 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.billing.invoice_pdf import render_invoice_pdf
+from app.billing.statements import ClientNotFoundError, build_statement
 from app.client_auth.dependencies import AuthedClient, get_current_client
 from app.client_auth.login_rate_limit import LoginRateLimitExceeded, LoginRateLimiter
 from app.client_auth.passwords import verify_password
@@ -20,6 +23,7 @@ from app.db import get_db
 from app.models.client import Client
 from app.models.order import Order, OrderStatus
 from app.models.shop import Shop
+from app.schemas.billing import StatementLineView, StatementView
 from app.schemas.client_auth import (
     ClientAuthToken,
     ClientLoginBody,
@@ -27,6 +31,11 @@ from app.schemas.client_auth import (
     ClientOrderSummaryView,
     ClientProfileView,
 )
+
+
+def _validate_period(year: int, month: int) -> None:
+    if not (1 <= month <= 12) or not (2020 <= year <= 2100):
+        raise HTTPException(status_code=422, detail="Invalid statement period")
 
 router = APIRouter(prefix="/client", tags=["client"])
 
@@ -104,6 +113,54 @@ async def list_my_orders(
     shop_names = {s.id: s.name for s in shops_result.scalars().all()}
 
     return [_order_summary_view(o, shop_names.get(o.shop_id)) for o in orders]
+
+
+@router.get("/billing/statements/{year}/{month}", response_model=StatementView)
+async def get_my_statement(
+    year: int,
+    month: int,
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> StatementView:
+    """Monthly billing statement (roadmap item C3) - delivered orders only,
+    grouped by tier/rate; orders with no configured rate surface as an
+    explicit unbilled count, never $0."""
+    _validate_period(year, month)
+    try:
+        statement = await build_statement(session, client.client_id, year, month)
+    except ClientNotFoundError:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return StatementView(
+        client_id=statement.client_id,
+        client_name=statement.client_name,
+        year=statement.year,
+        month=statement.month,
+        lines=[StatementLineView(**vars(line)) for line in statement.lines],
+        total_cents=statement.total_cents,
+        delivered_order_count=statement.delivered_order_count,
+        unbilled_order_count=statement.unbilled_order_count,
+    )
+
+
+@router.get("/billing/statements/{year}/{month}/invoice.pdf")
+async def get_my_invoice_pdf(
+    year: int,
+    month: int,
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    _validate_period(year, month)
+    try:
+        statement = await build_statement(session, client.client_id, year, month)
+    except ClientNotFoundError:
+        raise HTTPException(status_code=404, detail="Client not found")
+    pdf_bytes = render_invoice_pdf(statement)
+    filename = f"lmx-invoice-{statement.year}-{statement.month:02d}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/orders/{order_id}", response_model=ClientOrderDetailView)

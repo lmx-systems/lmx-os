@@ -6,9 +6,11 @@ import type {
   HubView,
   LastCycleSnapshot,
   NightlyJobResult,
+  OpsAuthToken,
   OptimizationResult,
   OrderStatusSummary,
 } from './types'
+import { clearOpsToken, getOpsToken } from './auth'
 
 // Runtime config first (roadmap item D2 - injected by the Docker image's
 // entrypoint from env vars, so one built image can point at any API), then
@@ -39,13 +41,25 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Per-user ops token (roadmap item S1) wins over the legacy shared
+  // secret when both exist - mirrors the backend middleware's ordering
+  // (app/security.py). A 401 clears the stale token so App falls back to
+  // the login screen instead of looping.
+  const opsToken = getOpsToken()
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       'Content-Type': 'application/json',
-      ...(API_SHARED_SECRET ? { 'X-API-Key': API_SHARED_SECRET } : {}),
+      ...(opsToken
+        ? { Authorization: `Bearer ${opsToken}` }
+        : API_SHARED_SECRET
+          ? { 'X-API-Key': API_SHARED_SECRET }
+          : {}),
     },
     ...init,
   })
+  if (response.status === 401 && opsToken) {
+    clearOpsToken()
+  }
   if (!response.ok) {
     const body = await response.text().catch(() => '')
     throw new ApiError(response.status, body || response.statusText)
@@ -54,6 +68,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  opsLogin: (email: string, password: string) =>
+    request<OpsAuthToken>('/ops/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
   listHubs: () => request<HubView[]>('/hubs'),
 
   fleetOverview: (hubId: string) => request<DriverState[]>(`/fleet/${hubId}/drivers`),

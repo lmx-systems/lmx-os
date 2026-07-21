@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.admin_routes import router as admin_router
 from app.api.client_routes import router as client_router
 from app.api.driver_routes import router as driver_router
+from app.api.ops_auth_routes import admin_users_router, router as ops_auth_router
 from app.api.routes import router as ops_router
 from app.api.webhooks import router as webhooks_router
 from app.client_auth.tokens import assert_client_jwt_secret_configured
@@ -28,6 +29,7 @@ from app.driver_auth.tokens import assert_driver_jwt_secret_configured
 from app.ingestion.router import router as ingestion_router
 from app.learning_loop.scheduler import learning_loop_scheduler
 from app.logging_config import configure_logging, get_logger
+from app.ops_auth.tokens import assert_ops_jwt_secret_configured
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.rate_limit import RateLimitMiddleware
 from app.redis_client import close_pool, get_client
@@ -46,6 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # (or a silent vulnerability) on the first real request.
     assert_driver_jwt_secret_configured()
     assert_client_jwt_secret_configured()
+    assert_ops_jwt_secret_configured()
     assert_jwt_secrets_are_distinct()
     async with engine.connect() as conn:
         await conn.run_sync(lambda _: None)
@@ -105,3 +108,5 @@ app.include_router(driver_router)
 app.include_router(webhooks_router)
 app.include_router(client_router)
 app.include_router(admin_router)
+app.include_router(ops_auth_router)
+app.include_router(admin_users_router)
