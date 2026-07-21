@@ -13,7 +13,11 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#4f46e5"
+      "backgroundColor": "#0c0c0b"
+    },
+    "notification": {
+      "icon": "./assets/notification-icon.png",
+      "color": "#0a6644"
     },
     "ios": {
       "supportsTablet": false,
@@ -26,7 +30,7 @@
       "package": "com.lmx.driver",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#4f46e5"
+        "backgroundColor": "#0c0c0b"
       }
     },
     "extra": {

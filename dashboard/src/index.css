@@ -34,12 +34,15 @@
   --text-secondary: var(--neutral-600);
   --text-muted: var(--neutral-500);
 
-  /* Primary - indigo. Distinct from the semantic --blue (~215°) and the
-     --premium violet used for the HOT_SHOT tier (~262°); indigo sits at
-     ~245°, a modern SaaS primary with solid white-on-fill contrast. */
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-dim: #eef0fe;
+  /* Primary - brand green #0A6644, per the July 2026 brand decision
+     (docs/LMX_Brand_Asset_Inventory.docx) applied across dashboard,
+     client portal, and driver app alike - retires the earlier indigo.
+     Distinct from the semantic --green (~150°, brighter/more saturated,
+     used for live/success states) and the --premium violet used for the
+     HOT_SHOT tier (~262°). */
+  --accent: #0a6644;
+  --accent-hover: #06412b;
+  --accent-dim: #e5faf2;
 
   --green: #1f9254;
   --green-dim: #e5f6ec;
@@ -92,9 +95,9 @@
   --text-secondary: var(--neutral-600);
   --text-muted: var(--neutral-500);
 
-  --accent: #6366f1;
-  --accent-hover: #818cf8;
-  --accent-dim: #26244a;
+  --accent: #10a76f;
+  --accent-hover: #15d58e;
+  --accent-dim: #0b4731;
 
   --green: #34d399;
   --green-dim: #103622;

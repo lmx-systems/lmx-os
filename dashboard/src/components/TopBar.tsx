@@ -29,9 +29,7 @@ export function TopBar({ hubId, onChangeHubId, lastUpdatedAt }: TopBarProps) {
   return (
     <div className="mb-5 flex items-center gap-4 border-b border-[var(--border)] pb-4.5">
       <div className="flex items-center gap-2.5 text-[15px] font-medium">
-        <div className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] bg-gradient-to-br from-[var(--accent)] to-[var(--accent-hover)] text-xs font-bold text-white">
-          L
-        </div>
+        <img src="/lmx-mark.png" alt="LMX" className="h-[26px] w-[26px] rounded-[7px]" />
         LMX OS
       </div>
       <span className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-0.5 text-[11.5px] font-medium text-[var(--text-secondary)]">

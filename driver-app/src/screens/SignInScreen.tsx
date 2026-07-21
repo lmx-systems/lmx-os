@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { api, ApiError } from '../api/client';
@@ -39,7 +39,7 @@ export function SignInScreen({ navigation }: Props) {
   return (
     <ScreenContainer>
       <View style={styles.logo}>
-        <View style={styles.logoBox} />
+        <Image source={require('../../assets/lmx-mark.png')} style={styles.logoBox} />
       </View>
       <Text style={[styles.titleText, styles.centered]}>LMX Driver</Text>
       <Text style={[styles.subtitleText, styles.centered, styles.tagline]}>
@@ -68,7 +68,7 @@ export function SignInScreen({ navigation }: Props) {
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     logo: { alignItems: 'center', marginTop: spacing.xxl, marginBottom: spacing.lg },
-    logoBox: { width: 64, height: 64, borderRadius: 16, backgroundColor: colors.border },
+    logoBox: { width: 64, height: 64, borderRadius: 16 },
     titleText: { ...typography.title, color: colors.textPrimary },
     subtitleText: { ...typography.subtitle, color: colors.textSecondary },
     footerText: { ...typography.small, color: colors.textMuted },

@@ -1,12 +1,13 @@
 /**
- * Design tokens - light/dark palettes. Primary/accent is a utilitarian
- * green (not the two web apps' indigo) per the "LMX Driver App Wireframes"
- * spec (docs/LMX Driver App Wireframes.pdf) - a field-use app read
- * differently than an office console: high-contrast, one clear "go"
- * color for actions and success states alike, built for sunlight/gloves
- * rather than a branded consumer look. Typography is font-only (no
- * baked-in color) since text color has to vary with the active scheme -
- * callers apply color from the active palette at the point of use.
+ * Design tokens - light/dark palettes. Primary/accent/success share one
+ * value (a single clear "go" color for actions and success states alike,
+ * built for sunlight/gloves per the "LMX Driver App Wireframes" spec,
+ * docs/LMX Driver App Wireframes.pdf) - now the brand green #0A6644 per
+ * the July 2026 brand decision (docs/LMX_Brand_Asset_Inventory.docx),
+ * applied identically across dashboard, client portal, and this app.
+ * Typography is font-only (no baked-in color) since text color has to
+ * vary with the active scheme - callers apply color from the active
+ * palette at the point of use.
  */
 export interface ColorScheme {
   bg: string;
@@ -43,15 +44,15 @@ export const palette: { light: ColorScheme; dark: ColorScheme } = {
     textPrimary: '#14171c',
     textSecondary: '#5b6472',
     textMuted: '#8b93a1',
-    primary: '#16a34a',
-    primaryHover: '#15803d',
+    primary: '#0a6644',
+    primaryHover: '#06412b',
     primaryText: '#ffffff',
-    accent: '#16a34a',
-    accentDim: '#dcfce7',
+    accent: '#0a6644',
+    accentDim: '#e5faf2',
     danger: '#c62828',
     dangerDim: '#fbe9ea',
-    success: '#16a34a',
-    successDim: '#dcfce7',
+    success: '#0a6644',
+    successDim: '#e5faf2',
     warning: '#a15c07',
     warningDim: '#fdf1de',
     premium: '#7c3aed',
@@ -67,15 +68,15 @@ export const palette: { light: ColorScheme; dark: ColorScheme } = {
     textPrimary: '#f5f6f8',
     textSecondary: '#a0a8b5',
     textMuted: '#7b8494',
-    primary: '#22c55e',
-    primaryHover: '#4ade80',
+    primary: '#10a76f',
+    primaryHover: '#15d58e',
     primaryText: '#ffffff',
-    accent: '#22c55e',
-    accentDim: '#153824',
+    accent: '#10a76f',
+    accentDim: '#0b4731',
     danger: '#f87171',
     dangerDim: '#3d1414',
-    success: '#22c55e',
-    successDim: '#153824',
+    success: '#10a76f',
+    successDim: '#0b4731',
     warning: '#fbbf24',
     warningDim: '#3a2a08',
     premium: '#a78bfa',
