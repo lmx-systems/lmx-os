@@ -88,6 +88,37 @@ category:
 | C4 | Multi-user client accounts | Client portal is explicitly one login per client company today (`Client.portal_email`), per Sourabh's call — a real multi-user/role model (e.g. AP vs. ops contacts at the same client) is a later decision, not an oversight. |
 | C5 | Self-service client signup | New clients are onboarded only via the internal `POST /admin/clients` form (dashboard) — there's no client-initiated signup flow, by design (this is a B2B onboarding relationship, not self-serve SaaS), but worth naming explicitly so it isn't assumed to exist. |
 
+### Autonomy partners
+
+How autonomous delivery — AV cars, sidewalk bots, drones, each run by
+their operator — plugs in (cofounder conversation, July 2026). The
+decision: **no separate app; autonomy partners integrate into the same
+dispatch loop the driver app uses, via a capacity-provider adapter
+layer.** The driver app is the *human* interface to LMX's
+offer→accept→track→deliver loop; a partner's fleet API is a *machine*
+interface to the identical loop. Their operators supervise vehicles in
+the partner's own console — LMX owns the delivery lifecycle, the partner
+owns the vehicle. This is the supply-side mirror of the ingestion
+layer's demand-side adapters (Epicor/flat-file): nothing downstream
+should ever branch on which partner carried an order, the same way
+nothing branches on which POS created it.
+
+**None of this is being built now.** The near-term rule it imposes: when
+fleet/offer models get touched for other reasons, generalize toward a
+"courier" abstraction rather than deepening the human-driver coupling.
+The whole area is gated on a signed autonomy partner (a B-item when it
+becomes real) — but the abstraction debt is named here so it's a design
+constraint today, not a rewrite later.
+
+| # | Item | Why it matters |
+|---|---|---|
+| P1 | Courier abstraction over the fleet model | Today's fleet state is human-shaped (`DriverCandidate`, phone/OTP auth, an implicit person behind every route). Generalize to a courier with a `provider_type` (human_driver \| autonomy_partner), service area/geofence, speed profile, payload limits, and capability flags (can batch multi-stop? sidewalk-only? weather-sensitive?). Human drivers become one provider type, not the type system. |
+| P2 | Capacity-provider adapter layer | The supply-side mirror of `app/ingestion/adapters/`: one adapter per partner normalizing (a) capacity in — which vehicles are available, where, with what limits; (b) assignments out — a `RouteOffer` becomes an API call the partner's fleet manager accepts/declines within the same TTL a driver gets; (c) status back — partner webhooks map to our stop-status transitions and PoD. Ships with a stub partner (same unconfigured→stub pattern as Twilio/Rippling) so the whole loop is testable before any real partner exists. |
+| P3 | Mode-aware dispatch | The optimizer gains eligibility filtering (weight, distance, geofence, tier, weather) before candidate generation, and — later — cost-per-drop mode selection: choose the cheapest *eligible* mode per order, which is where autonomy actually pays off economically. Ties directly to the unit-economics work (cost per drop vs. price per drop). |
+| P4 | Unmanned handoff + proof of delivery | Nobody walks into the shop when a bot arrives: shop SMS grows a "load the bot" flow (compartment id, load-confirmed ack), and the customer side needs PIN-unlock delivery — which is exactly the A4 PIN issuance/verification item already on the driver-app list, making A4 shared infrastructure rather than app polish. |
+| P5 | Partner settlement | Per-delivery payout to the partner — a third money flow next to client billing (in) and driver payroll (out), structurally the same shape as `client_rates`: per-partner, per-mode rates, monthly statements. Reuses C3's statement machinery. |
+| P6 | Partner portal | A thin reporting surface (delivery history, settlement statements, failed-delivery disputes) like `client-portal/` — explicitly a *later* convenience, not the integration mechanism. Partners integrate through P2's API, full stop. |
+
 ### Intelligence layer
 
 Where LMX OS's "learning" actually stands, and the ladder to make it real
@@ -266,6 +297,32 @@ Sequencing relative to the pilot — this is the important part:
 service time or hold window) flows into dispatch decisions automatically
 from data rather than from a hand-set placeholder, with a human approval
 gate on every rule change.
+
+### Phase 11 — Autonomy partners
+**Goal:** deliveries carried by autonomous vehicles (AV cars, sidewalk
+bots, drones) through their operators, dispatched by the same loop that
+dispatches human drivers. See Part 1's "Autonomy partners" table (P1–P6)
+for the item-by-item detail; the architectural decision (adapter layer,
+not a separate app) is recorded there.
+
+Sequencing:
+- **Gate:** a signed autonomy partner with API access — this whole phase
+  is a business-development outcome first. Until then the only active
+  obligation is the design constraint: touch fleet/offer models in a
+  courier-shaped way (P1's abstraction), not a human-driver-shaped way.
+- **First buildable slice once a partner signs:** P1 + P2 with the stub
+  partner, proving the offer→accept→status loop end-to-end before any
+  real vehicle moves; then P3's eligibility filtering (a drone that gets
+  offered a 40lb pallet is a bug, not a learning).
+- **P4 (unmanned handoff/PIN)** is shared with the driver app's A4 —
+  building A4 earlier quietly de-risks this phase.
+- **Later:** P3's cost-per-drop mode selection (needs real partner
+  pricing + the unit-economics numbers), P5 settlement, P6 portal.
+
+**Exit criteria (long-horizon):** one real order, ingested from a real
+client POS, delivered by a partner vehicle with no LMX human in the
+loop — dispatched, tracked, PoD'd, and settled through the same pipeline
+as every human-driven delivery that day.
 
 ---
 
