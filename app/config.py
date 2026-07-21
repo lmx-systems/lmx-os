@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     epicor_base_url: str | None = None
     epicor_api_key: str | None = None
 
+    # Payroll (app/payroll/): W2 hours submission today, with 1099/gig pay
+    # rails expected to join behind the same PayrollProvider interface as
+    # the driver-classification phases roll out (docs/NEXT_STEPS.md). No
+    # Rippling account is provisioned yet - unset means every submission
+    # runs through StubPayrollProvider instead.
+    rippling_api_key: str | None = None
+    rippling_base_url: str | None = None
+
     # Origins allowed to call the API cross-origin - the orchestrator
     # dashboard (dashboard/) in dev, and whatever the dashboard is actually
     # deployed at in production. NOT a substitute for real authentication -

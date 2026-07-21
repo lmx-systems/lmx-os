@@ -35,3 +35,24 @@ class ClientOnboardingBody(BaseModel):
 class ClientOnboardingResult(BaseModel):
     client_id: str
     shop_ids: list[str]
+
+
+class DriverPayrollSubmission(BaseModel):
+    driver_id: str
+    driver_name: str
+    employment_type: str
+    # w2 drivers are paid monthly, 1099/gig weekly (app/payroll/hours.py) -
+    # per-submission, not per-run, since one hub can mix employment types
+    # with different period lengths in the same payroll run.
+    period_start: str
+    period_end: str
+    hours_worked: float
+    overtime_hours: float
+    estimated_pay_cents: int
+    provider_reference: str | None = None
+
+
+class PayrollRunResult(BaseModel):
+    hub_id: str
+    engine: str
+    submissions: list[DriverPayrollSubmission]

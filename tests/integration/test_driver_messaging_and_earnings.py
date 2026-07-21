@@ -20,8 +20,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
+import app.payroll.hours as payroll_hours
 from app.api.driver_routes import (
-    PLACEHOLDER_HOURLY_RATE_CENTS,
     get_my_earnings,
     list_customer_messages,
     list_my_trips,
@@ -32,6 +32,7 @@ from app.api.driver_routes import (
 from app.api.webhooks import twilio_inbound_sms
 from app.driver_auth.dependencies import AuthedDriver
 from app.models.driver import Driver
+from app.models.driver_shift_event import DriverShiftEvent
 from app.models.hub import Hub
 from app.models.route import Route
 from app.models.stop import Stop
@@ -130,33 +131,46 @@ async def test_inbound_webhook_from_unknown_number_does_not_error(db_session):
     assert response.status_code == 200
 
 
-async def test_earnings_is_placeholder_and_estimates_from_route_span(db_session):
+async def test_earnings_computes_hours_from_shift_events_not_route_span(db_session):
+    """Hours now come from the real online/offline log
+    (app/models/driver_shift_event.py), not a completed route's
+    created_at/updated_at span - a stale route sitting in the same window
+    must not move the total at all."""
     hub_id, driver_id = await _seed_driver_only(db_session)
     authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     now = datetime.now(timezone.utc)
-    route = Route(hub_id=hub_id, driver_id=driver_id, status="completed", plan_version=1)
-    route.created_at = now - timedelta(hours=3)
-    route.updated_at = now
-    db_session.add(route)
+    db_session.add_all(
+        [
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="available", occurred_at=now - timedelta(hours=3)),
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="off_shift", occurred_at=now),
+        ]
+    )
+    stale_route = Route(hub_id=hub_id, driver_id=driver_id, status="completed", plan_version=1)
+    stale_route.created_at = now - timedelta(hours=6)
+    stale_route.updated_at = now - timedelta(hours=5)
+    db_session.add(stale_route)
     await db_session.commit()
 
     earnings = await get_my_earnings(driver=authed, session=db_session)
     assert earnings.is_placeholder is True
-    assert earnings.hourly_rate_cents == PLACEHOLDER_HOURLY_RATE_CENTS
+    assert earnings.hourly_rate_cents == payroll_hours.PLACEHOLDER_HOURLY_RATE_CENTS
     assert 2.9 <= earnings.hours_worked <= 3.1
-    assert earnings.estimated_pay_cents == round(earnings.hours_worked * PLACEHOLDER_HOURLY_RATE_CENTS)
+    assert earnings.overtime_hours == 0.0
+    assert earnings.estimated_pay_cents == round(earnings.hours_worked * payroll_hours.PLACEHOLDER_HOURLY_RATE_CENTS)
 
 
-async def test_earnings_excludes_routes_outside_the_current_week(db_session):
+async def test_earnings_excludes_shift_events_from_before_the_current_period(db_session):
     hub_id, driver_id = await _seed_driver_only(db_session)
     authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
-    now = datetime.now(timezone.utc)
-    last_week_route = Route(hub_id=hub_id, driver_id=driver_id, status="completed", plan_version=1)
-    last_week_route.created_at = now - timedelta(days=9, hours=2)
-    last_week_route.updated_at = now - timedelta(days=9)
-    db_session.add(last_week_route)
+    long_ago = datetime.now(timezone.utc) - timedelta(days=60)  # outside even a monthly (w2) window
+    db_session.add_all(
+        [
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="available", occurred_at=long_ago),
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="off_shift", occurred_at=long_ago + timedelta(hours=2)),
+        ]
+    )
     await db_session.commit()
 
     earnings = await get_my_earnings(driver=authed, session=db_session)
@@ -164,7 +178,7 @@ async def test_earnings_excludes_routes_outside_the_current_week(db_session):
     assert earnings.estimated_pay_cents == 0
 
 
-async def test_earnings_excludes_non_completed_routes(db_session):
+async def test_earnings_is_zero_with_no_shift_events_even_with_an_active_route(db_session):
     hub_id, driver_id = await _seed_driver_only(db_session)
     authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
@@ -174,6 +188,27 @@ async def test_earnings_excludes_non_completed_routes(db_session):
 
     earnings = await get_my_earnings(driver=authed, session=db_session)
     assert earnings.hours_worked == 0.0
+
+
+async def test_earnings_uses_a_real_per_driver_rate_when_set(db_session):
+    hub_id, driver_id = await _seed_driver_only(db_session)
+    driver_row = await db_session.get(Driver, driver_id)
+    driver_row.hourly_rate_cents = 2_500
+    await db_session.commit()
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+
+    now = datetime.now(timezone.utc)
+    db_session.add_all(
+        [
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="available", occurred_at=now - timedelta(hours=2)),
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="off_shift", occurred_at=now),
+        ]
+    )
+    await db_session.commit()
+
+    earnings = await get_my_earnings(driver=authed, session=db_session)
+    assert earnings.is_placeholder is False
+    assert earnings.hourly_rate_cents == 2_500
 
 
 async def test_trips_lists_completed_routes_with_stop_counts_regardless_of_week(db_session):

@@ -12,21 +12,29 @@ app/schemas/admin.py's ClientOnboardingBody docstring.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.payroll.hours as payroll_hours
 from app.client_auth.passwords import hash_password
 from app.db import get_db
 from app.driver_auth.dependencies import revoked_devices_key
 from app.models.client import Client
 from app.models.client_rate import ClientRate
+from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.shop import Shop
+from app.payroll import get_payroll_provider
 from app.redis_client import get_client as get_redis_client
-from app.schemas.admin import ClientOnboardingBody, ClientOnboardingResult
+from app.schemas.admin import (
+    ClientOnboardingBody,
+    ClientOnboardingResult,
+    DriverPayrollSubmission,
+    PayrollRunResult,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -115,3 +123,64 @@ async def admin_revoke_driver_device(
     device.revoked_at = datetime.now(timezone.utc)
     await session.commit()
     await get_redis_client().sadd(revoked_devices_key(driver_id), device_id)
+
+
+@router.post("/payroll/{hub_id}/run", response_model=PayrollRunResult)
+async def run_payroll_for_hub(hub_id: str, session: AsyncSession = Depends(get_db)) -> PayrollRunResult:
+    """
+    Manually submit every driver-in-this-hub's most recently *completed*
+    pay period (w2 monthly, 1099/gig weekly - see app/payroll/hours.py) to
+    the configured PayrollProvider (app/payroll/, Rippling once
+    credentialed, StubPayrollProvider until then). Same "manual trigger
+    today, a real scheduler's hook later" pattern as
+    run_learning_loop_nightly_job (app/api/routes.py) - no scheduler
+    exists yet, and running this twice for the same period is safe to
+    retry (each call recomputes from the shift-event log and resubmits;
+    whether the payroll provider itself dedupes a repeat submission is
+    between it and whoever runs this).
+    """
+    drivers_result = await session.execute(select(Driver).where(Driver.hub_id == uuid.UUID(hub_id)))
+    drivers = list(drivers_result.scalars().all())
+
+    provider = get_payroll_provider()
+    now = datetime.now(timezone.utc)
+    submissions: list[DriverPayrollSubmission] = []
+
+    for driver in drivers:
+        start, end = payroll_hours.previous_pay_period_bounds(driver.employment_type, now)
+        rate_cents = driver.hourly_rate_cents or payroll_hours.PLACEHOLDER_HOURLY_RATE_CENTS
+        regular_hours, overtime_hours, estimated_pay_cents = await payroll_hours.hours_and_pay_for_period(
+            session,
+            driver_id=str(driver.id),
+            employment_type=driver.employment_type,
+            rate_cents=rate_cents,
+            start=start,
+            end=end,
+        )
+        if regular_hours == 0.0 and overtime_hours == 0.0:
+            continue  # nothing to submit for a driver who wasn't on duty at all last period
+
+        period_end_inclusive = (end - timedelta(days=1)).date()
+        reference = await provider.submit_hours(
+            driver_id=str(driver.id),
+            driver_name=driver.name,
+            period_start=start.date(),
+            period_end=period_end_inclusive,
+            hours_worked=round(regular_hours + overtime_hours, 2),
+            rate_cents=rate_cents,
+        )
+        submissions.append(
+            DriverPayrollSubmission(
+                driver_id=str(driver.id),
+                driver_name=driver.name,
+                employment_type=driver.employment_type,
+                period_start=start.date().isoformat(),
+                period_end=period_end_inclusive.isoformat(),
+                hours_worked=round(regular_hours, 2),
+                overtime_hours=round(overtime_hours, 2),
+                estimated_pay_cents=estimated_pay_cents,
+                provider_reference=reference,
+            )
+        )
+
+    return PayrollRunResult(hub_id=hub_id, engine=provider.engine_name, submissions=submissions)

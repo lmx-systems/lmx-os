@@ -21,13 +21,22 @@ function formatDate(iso: string): string {
   return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-// Screen 1n, "Earnings". Everything here is explicitly labeled an
-// estimate - there's no real fare/price field anywhere in Order/Route/
-// Stop to compute a true payout from yet, and no payroll integration
-// wired up (docs/NEXT_STEPS.md item 14). This shows real data (hours
-// worked, computed from actual route timestamps) run through a
-// placeholder hourly rate, not a fabricated number - but it is not what
-// you'll actually be paid.
+// w2 drivers get a monthly period, 1099/gig weekly (app/payroll/hours.py)
+// - the API doesn't send employment_type on EarningsView itself, so this
+// infers the label from how wide the period actually is rather than a
+// second round trip.
+function periodLabel(periodStart: string, periodEnd: string): string {
+  const days = (new Date(`${periodEnd}T00:00:00`).getTime() - new Date(`${periodStart}T00:00:00`).getTime()) / 86_400_000;
+  return days > 20 ? 'This month' : 'This week';
+}
+
+// Screen 1n, "Earnings". Hours now come from the real online/offline/
+// break log (app/models/driver_shift_event.py), not route timestamps,
+// and overtime_hours applies the federal 40hr/week 1.5x rule for w2
+// drivers - still explicitly labeled an estimate when hourly_rate_cents
+// is a placeholder (docs/NEXT_STEPS.md): no real fare/price field exists
+// for gig-style pay, and payroll integration (app/payroll/) isn't
+// credentialed yet, so this is not what you'll actually be paid.
 export function EarningsScreen({ navigation }: Props) {
   const colors = useThemeColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -53,20 +62,29 @@ export function EarningsScreen({ navigation }: Props) {
       )}
 
       <Text style={styles.weekLabel}>
-        This week · {formatDate(earnings.period_start)} - {formatDate(earnings.period_end)}
+        {periodLabel(earnings.period_start, earnings.period_end)} · {formatDate(earnings.period_start)} - {formatDate(earnings.period_end)}
       </Text>
       <Text style={styles.bigNumber}>{formatCents(earnings.estimated_pay_cents)}</Text>
 
       <View style={styles.statsRow}>
         <Card style={styles.statCard}>
-          <Text style={styles.statLabel}>Hours worked (est.)</Text>
+          <Text style={styles.statLabel}>Hours worked</Text>
           <Text style={styles.statValue}>{earnings.hours_worked.toFixed(1)}</Text>
         </Card>
         <Card style={styles.statCard}>
-          <Text style={styles.statLabel}>Rate (placeholder)</Text>
+          <Text style={styles.statLabel}>Rate{earnings.is_placeholder ? ' (placeholder)' : ''}</Text>
           <Text style={styles.statValue}>{formatCents(earnings.hourly_rate_cents)}/hr</Text>
         </Card>
       </View>
+
+      {earnings.overtime_hours > 0 && (
+        <Card style={styles.overtimeCard}>
+          <Text style={styles.statLabel}>Includes overtime</Text>
+          <Text style={styles.noteText}>
+            {earnings.overtime_hours.toFixed(1)} hour{earnings.overtime_hours === 1 ? '' : 's'} over 40/week, paid at 1.5x
+          </Text>
+        </Card>
+      )}
 
       <Button label="View trip history" variant="outline" onPress={() => navigation.navigate('TripHistory')} />
     </ScreenContainer>
@@ -81,6 +99,7 @@ const makeStyles = (colors: ColorScheme) =>
     weekLabel: { ...typography.label, color: colors.textPrimary },
     bigNumber: { fontSize: 40, fontWeight: '700', color: colors.textPrimary, marginTop: spacing.xs, marginBottom: spacing.lg },
     statsRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
+    overtimeCard: { backgroundColor: colors.accentDim, marginBottom: spacing.lg, gap: spacing.xs },
     statCard: { flex: 1 },
     statLabel: { ...typography.label, color: colors.textPrimary },
     statValue: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginTop: spacing.xs },

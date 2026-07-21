@@ -15,6 +15,9 @@ class DriverProfileView(BaseModel):
     name: str
     phone: str
     status: str
+    employment_type: str = "w2"
+    # w2 | contractor_1099 | gig - drives which pay model/document set/
+    # onboarding path applies (docs/NEXT_STEPS.md's phased rollout).
     vehicle_type: str | None = None
     plate_number: str | None = None
     delivery_zone: str | None = None
@@ -168,15 +171,19 @@ class MessageView(BaseModel):
 
 
 class EarningsView(BaseModel):
-    """Screen 1n. is_placeholder is always True right now - see this
-    module's own note below and docs/NEXT_STEPS.md item 14. There is no
-    real fare/price field anywhere in Order/Route/Stop, so this is an
-    estimate built from a placeholder hourly rate and each route's
-    creation-to-completion span, not a verified payroll figure."""
+    """Screen 1n. Hours now come from the real online/offline/break log
+    (app/models/driver_shift_event.py) rather than route-span, and the
+    rate is the driver's real hourly_rate_cents when one is set
+    (is_placeholder=False) - see docs/NEXT_STEPS.md. Still not a verified
+    payroll figure: overtime_hours applies only the federal 40hr/week 1.5x
+    rule (no state-specific daily-OT rules), and a workweek split across
+    two pay periods only sees the hours visible in THIS period (see
+    app/payroll/hours.py's hours_and_overtime docstring)."""
 
     period_start: date
     period_end: date
     hours_worked: float
+    overtime_hours: float = 0.0
     hourly_rate_cents: int
     estimated_pay_cents: int
     is_placeholder: bool = True

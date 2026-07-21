@@ -27,12 +27,14 @@ from app.driver_auth.dependencies import AuthedDriver, get_current_driver, revok
 from app.driver_auth.otp_store import OtpRateLimitExceeded, OtpStore
 from app.driver_auth.tokens import issue_token
 from app.fleet_state.manager import FleetStateManager
+import app.payroll.hours as payroll_hours
 from app.redis_client import get_client
 from app.messaging.shop_notifications import notify_shop_en_route, notify_shop_picked_up
 from app.messaging.sms_client import get_sms_client
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.driver_document import DriverDocument
+from app.models.driver_shift_event import DriverShiftEvent
 from app.models.message import Message
 from app.models.order import Order, OrderStatus, SLATier
 from app.models.route import Route
@@ -220,6 +222,7 @@ async def _profile_view(session: AsyncSession, row: Driver) -> DriverProfileView
         name=row.name,
         phone=row.phone,
         status=row.status,
+        employment_type=row.employment_type,
         vehicle_type=row.vehicle_type,
         plate_number=row.plate_number,
         delivery_zone=row.delivery_zone,
@@ -347,6 +350,20 @@ async def update_my_availability(
             current_route_id=existing.current_route_id if existing else None,
         )
     )
+
+    # Durable history of this transition, independent of the Redis fleet
+    # state above (which only ever holds the current status) - see
+    # app/models/driver_shift_event.py for why this exists.
+    session.add(
+        DriverShiftEvent(
+            driver_id=uuid.UUID(driver.driver_id),
+            hub_id=uuid.UUID(driver.hub_id),
+            event_type=body.status,
+            occurred_at=datetime.now(timezone.utc),
+        )
+    )
+    await session.commit()
+
     await dispatch_event_bus.publish(driver.hub_id, "driver_status_changed")
     return {"ok": True}
 
@@ -1211,42 +1228,19 @@ async def list_support_messages(
 # ---------------------------------------------------------------------------
 # Earnings + trip history (screens 1n/1o) - see EarningsView/TripSummaryView
 # docstrings (app/schemas/driver_app.py) for why this is explicitly labeled
-# an estimate rather than a real payroll figure.
+# an estimate rather than a real payroll figure. Hours/overtime math lives
+# in app/payroll/hours.py, shared with the admin payroll-run endpoint
+# (app/api/admin_routes.py) so the two never drift on what "hours worked"
+# means.
 # ---------------------------------------------------------------------------
-
-# Placeholder-flagged, not tuned against any real wage decision - see
-# docs/NEXT_STEPS.md item 14. A single global rate rather than a
-# per-driver field because there's no admin UI or payroll integration yet
-# to set one meaningfully; swapping this for a real per-driver/per-hub
-# rate is a contained change once that exists.
-PLACEHOLDER_HOURLY_RATE_CENTS = 1_800  # $18.00/hr
-
-
-def _week_bounds(now: datetime) -> tuple[datetime, datetime]:
-    start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-    return start, start + timedelta(days=7)
-
-
-async def _completed_routes_this_week(session: AsyncSession, driver_id: str) -> list[Route]:
-    start, end = _week_bounds(datetime.now(timezone.utc))
-    result = await session.execute(
-        select(Route).where(
-            Route.driver_id == uuid.UUID(driver_id),
-            Route.status == "completed",
-            Route.updated_at >= start,
-            Route.updated_at < end,
-        )
-    )
-    return list(result.scalars().all())
 
 
 def _route_hours(route: Route) -> float:
-    # Proxy for "hours worked" - route.created_at (job accepted) to
-    # route.updated_at (last touched, which for a completed route is when
-    # its last stop finished - see complete_stop above). There's no
-    # clock-in/out event anywhere in this system, so this doesn't subtract
-    # breaks or account for time before the route was created; it's a
-    # reasonable estimate, not a timesheet.
+    # Proxy for one *trip's* duration (screen 1o's trip history, a
+    # different, lower-stakes claim than "total hours worked this pay
+    # period" below) - route.created_at (job accepted) to route.updated_at
+    # (last touched, which for a completed route is when its last stop
+    # finished - see complete_stop above).
     return max((route.updated_at - route.created_at).total_seconds() / 3600, 0.0)
 
 
@@ -1254,16 +1248,31 @@ def _route_hours(route: Route) -> float:
 async def get_my_earnings(
     driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
 ) -> EarningsView:
-    start, end = _week_bounds(datetime.now(timezone.utc))
-    routes = await _completed_routes_this_week(session, driver.driver_id)
-    hours_worked = sum(_route_hours(r) for r in routes)
-    estimated_pay_cents = round(hours_worked * PLACEHOLDER_HOURLY_RATE_CENTS)
+    row = await _get_driver_row(session, driver)
+    rate_cents = row.hourly_rate_cents or payroll_hours.PLACEHOLDER_HOURLY_RATE_CENTS
+    is_placeholder = row.hourly_rate_cents is None
+
+    now = datetime.now(timezone.utc)
+    start, end = payroll_hours.pay_period_bounds(row.employment_type, now)
+    clipped_end = min(end, now)
+
+    regular_hours, overtime_hours, estimated_pay_cents = await payroll_hours.hours_and_pay_for_period(
+        session,
+        driver_id=driver.driver_id,
+        employment_type=row.employment_type,
+        rate_cents=rate_cents,
+        start=start,
+        end=clipped_end,
+    )
+
     return EarningsView(
         period_start=start.date(),
         period_end=(end - timedelta(days=1)).date(),
-        hours_worked=round(hours_worked, 2),
-        hourly_rate_cents=PLACEHOLDER_HOURLY_RATE_CENTS,
+        hours_worked=round(regular_hours + overtime_hours, 2),
+        overtime_hours=round(overtime_hours, 2),
+        hourly_rate_cents=rate_cents,
         estimated_pay_cents=estimated_pay_cents,
+        is_placeholder=is_placeholder,
     )
 
 

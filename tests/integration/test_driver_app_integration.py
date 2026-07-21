@@ -39,6 +39,7 @@ from app.driver_auth.tokens import decode_token
 from app.fleet_state.manager import FleetStateManager
 from app.models.client import Client
 from app.models.driver import Driver
+from app.models.driver_shift_event import DriverShiftEvent
 from app.models.hub import Hub
 from app.models.message import Message
 from app.models.order import Order, OrderStatus
@@ -560,3 +561,29 @@ async def test_dropoff_completes_after_its_pickup_was_flagged(db_session, real_r
     # get_my_route only returns status="active" routes, so a None result
     # here confirms the route flipped to "completed".
     assert route is None
+
+
+async def test_availability_toggle_records_a_shift_event(db_session, real_redis_client):
+    """POST /driver/me/state's Redis fleet-state write only ever holds the
+    *current* status - this is the durable history a real hours-worked
+    calculation will eventually read from (docs/NEXT_STEPS.md)."""
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+
+    await update_my_availability(DriverAvailabilityUpdate(status="off_shift"), driver=authed, session=db_session)
+
+    events_result = await db_session.execute(
+        select(DriverShiftEvent).where(DriverShiftEvent.driver_id == driver_id)
+    )
+    events = events_result.scalars().all()
+    assert len(events) == 1
+    assert events[0].event_type == "off_shift"
+    assert events[0].hub_id == hub_id
+
+
+async def test_profile_exposes_employment_type_defaulting_to_w2(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+
+    profile = await get_my_profile(driver=authed, session=db_session)
+    assert profile.employment_type == "w2"

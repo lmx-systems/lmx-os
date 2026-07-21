@@ -17,6 +17,19 @@ class Driver(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(24), default="off_shift", nullable=False)
     # off_shift | available | en_route | on_break
 
+    # Drives which pay model, document set, and onboarding path applies -
+    # the phased W2 -> 1099 -> gig rollout (docs/NEXT_STEPS.md) branches on
+    # this everywhere rather than assuming one classification. Defaults to
+    # w2 since that's every driver provisioned so far.
+    employment_type: Mapped[str] = mapped_column(String(24), default="w2", nullable=False)
+    # w2 | contractor_1099 | gig
+
+    # Real per-driver hourly rate. Null falls back to the global
+    # PLACEHOLDER_HOURLY_RATE_CENTS estimate (app/payroll/hours.py) - this
+    # column exists so a real rate can be set per driver without a second
+    # migration once payroll actually runs on it.
+    hourly_rate_cents: Mapped[int | None] = mapped_column(nullable=True)
+
     # Driver app onboarding (screen 1c, "Vehicle & profile setup"). Nullable
     # because existing/seeded drivers predate this screen; the app should
     # treat a null vehicle_type as "setup incomplete" and route there.

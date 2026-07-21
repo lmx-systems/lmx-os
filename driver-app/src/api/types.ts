@@ -97,6 +97,7 @@ export interface Earnings {
   period_start: string;
   period_end: string;
   hours_worked: number;
+  overtime_hours: number;
   hourly_rate_cents: number;
   estimated_pay_cents: number;
   is_placeholder: boolean;
