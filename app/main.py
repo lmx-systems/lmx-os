@@ -51,6 +51,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     redis_client = get_client()
     await redis_client.ping()
 
+    # Begins the poll loop that lets this instance pick up hub events
+    # published by *any* instance, not just itself - app/events/bus.py.
+    dispatch_event_bus.start()
+
     logger.info("lmx_os_ready")
     yield
 
