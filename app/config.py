@@ -47,6 +47,18 @@ class Settings(BaseSettings):
     twilio_auth_token: str | None = None
     twilio_from_number: str | None = None
 
+    # Inbound-webhook signature verification (app/api/webhooks.py,
+    # app/messaging/twilio_signature.py) needs the exact public URL Twilio
+    # was configured to call, scheme+host included - `request.url` as this
+    # app sees it is correct only when nothing sits in front of it. Behind
+    # a future reverse proxy/load balancer (Phase 5's hosting decision),
+    # set this to the real public base URL (e.g.
+    # "https://api.lmxit.com") so the scheme/host used in the signature
+    # computation matches what Twilio actually signed, not this
+    # container's internal view of the request. Unset = use request.url
+    # as-is, correct for today's un-proxied docker-compose deployment.
+    twilio_webhook_base_url: str | None = None
+
     # Driver app Phase 3 (screens 1p/1q): where a driver's "contact
     # support" message actually goes. Unset = the message is still stored
     # (app/models/message.py) so it's not silently lost, but no SMS send

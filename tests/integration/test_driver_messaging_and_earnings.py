@@ -16,9 +16,12 @@ with a real Order.delivery_contact_phone attached.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+from urllib.parse import urlencode
 
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 
 import app.payroll.hours as payroll_hours
 from app.api.driver_routes import (
@@ -31,6 +34,7 @@ from app.api.driver_routes import (
 )
 from app.api.webhooks import twilio_inbound_sms
 from app.driver_auth.dependencies import AuthedDriver
+from app.messaging.twilio_signature import compute_signature
 from app.models.driver import Driver
 from app.models.driver_shift_event import DriverShiftEvent
 from app.models.hub import Hub
@@ -40,6 +44,32 @@ from app.schemas.driver_app import SendMessageBody
 from tests.integration.test_driver_app_integration import _accept_one_offer, _seed
 
 pytestmark = pytest.mark.integration
+
+WEBHOOK_URL = "http://testserver/webhooks/twilio/inbound-sms"
+
+
+def _fake_twilio_request(form_fields: dict, signature: str | None = None) -> Request:
+    """A minimal real Starlette Request whose .form()/.url a direct
+    (non-HTTP) function call can still exercise - twilio_inbound_sms reads
+    both for signature verification (app/messaging/twilio_signature.py)."""
+    body = urlencode(form_fields).encode()
+    headers = [(b"content-type", b"application/x-www-form-urlencoded")]
+    if signature is not None:
+        headers.append((b"x-twilio-signature", signature.encode()))
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/webhooks/twilio/inbound-sms",
+        "query_string": b"",
+        "headers": headers,
+        "scheme": "http",
+        "server": ("testserver", 80),
+    }
+    return Request(scope, receive)
 
 
 async def _seed_driver_only(db_session):
@@ -115,8 +145,10 @@ async def test_inbound_webhook_matches_reply_to_most_recent_outbound_thread(db_s
 
     await message_customer(dropoff.stop_id, SendMessageBody(body="On my way!"), driver=authed, session=db_session)
 
+    fields = {"From": order.delivery_contact_phone, "Body": "Thanks, I'll be here", "MessageSid": "SM_test_123"}
     await twilio_inbound_sms(
-        From=order.delivery_contact_phone, Body="Thanks, I'll be here", MessageSid="SM_test_123", session=db_session
+        request=_fake_twilio_request(fields),
+        From=fields["From"], Body=fields["Body"], MessageSid=fields["MessageSid"], session=db_session,
     )
 
     thread = await list_customer_messages(dropoff.stop_id, driver=authed, session=db_session)
@@ -127,7 +159,83 @@ async def test_inbound_webhook_matches_reply_to_most_recent_outbound_thread(db_s
 async def test_inbound_webhook_from_unknown_number_does_not_error(db_session):
     # No prior outbound message to this number anywhere - should log and
     # no-op, not raise, since Twilio doesn't retry cleanly on a 500.
-    response = await twilio_inbound_sms(From="+19995551234", Body="???", MessageSid=None, session=db_session)
+    fields = {"From": "+19995551234", "Body": "???"}
+    response = await twilio_inbound_sms(
+        request=_fake_twilio_request(fields), From=fields["From"], Body=fields["Body"], MessageSid=None, session=db_session
+    )
+    assert response.status_code == 200
+
+
+async def test_inbound_webhook_skips_signature_check_when_twilio_not_configured(db_session):
+    """No TWILIO_AUTH_TOKEN configured (the default, and every test above
+    relies on this) - a request with no signature at all must still
+    succeed, same as production without a Twilio account provisioned yet."""
+    fields = {"From": "+19995551234", "Body": "no signature at all"}
+    response = await twilio_inbound_sms(
+        request=_fake_twilio_request(fields, signature=None),
+        From=fields["From"], Body=fields["Body"], MessageSid=None, session=db_session,
+    )
+    assert response.status_code == 200
+
+
+async def test_inbound_webhook_accepts_a_valid_signature_when_configured(db_session):
+    fields = {"From": "+19995551234", "Body": "ok", "MessageSid": "SM1"}
+    signature = compute_signature("test-auth-token", WEBHOOK_URL, fields)
+
+    with patch("app.api.webhooks.settings") as mock_settings:
+        mock_settings.twilio_auth_token = "test-auth-token"
+        mock_settings.twilio_webhook_base_url = None
+        response = await twilio_inbound_sms(
+            request=_fake_twilio_request(fields, signature=signature),
+            From=fields["From"], Body=fields["Body"], MessageSid=fields["MessageSid"], session=db_session,
+        )
+    assert response.status_code == 200
+
+
+async def test_inbound_webhook_rejects_an_invalid_signature_when_configured(db_session):
+    fields = {"From": "+19995551234", "Body": "ok", "MessageSid": "SM1"}
+
+    with patch("app.api.webhooks.settings") as mock_settings:
+        mock_settings.twilio_auth_token = "test-auth-token"
+        mock_settings.twilio_webhook_base_url = None
+        with pytest.raises(HTTPException) as exc_info:
+            await twilio_inbound_sms(
+                request=_fake_twilio_request(fields, signature="not-the-real-signature"),
+                From=fields["From"], Body=fields["Body"], MessageSid=fields["MessageSid"], session=db_session,
+            )
+    assert exc_info.value.status_code == 403
+
+
+async def test_inbound_webhook_rejects_a_missing_signature_when_configured(db_session):
+    fields = {"From": "+19995551234", "Body": "ok", "MessageSid": "SM1"}
+
+    with patch("app.api.webhooks.settings") as mock_settings:
+        mock_settings.twilio_auth_token = "test-auth-token"
+        mock_settings.twilio_webhook_base_url = None
+        with pytest.raises(HTTPException) as exc_info:
+            await twilio_inbound_sms(
+                request=_fake_twilio_request(fields, signature=None),
+                From=fields["From"], Body=fields["Body"], MessageSid=fields["MessageSid"], session=db_session,
+            )
+    assert exc_info.value.status_code == 403
+
+
+async def test_inbound_webhook_uses_the_configured_public_base_url_behind_a_proxy(db_session):
+    """twilio_webhook_base_url overrides scheme+host in the signature
+    computation - the whole reason it exists (see its docstring in
+    app/config.py): request.url reflects this container's internal view,
+    which can differ from the public URL Twilio actually signed."""
+    fields = {"From": "+19995551234", "Body": "behind a proxy"}
+    public_url = "https://api.lmxit.com/webhooks/twilio/inbound-sms"
+    signature = compute_signature("test-auth-token", public_url, fields)
+
+    with patch("app.api.webhooks.settings") as mock_settings:
+        mock_settings.twilio_auth_token = "test-auth-token"
+        mock_settings.twilio_webhook_base_url = "https://api.lmxit.com"
+        response = await twilio_inbound_sms(
+            request=_fake_twilio_request(fields, signature=signature),
+            From=fields["From"], Body=fields["Body"], MessageSid=None, session=db_session,
+        )
     assert response.status_code == 200
 
 

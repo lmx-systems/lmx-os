@@ -4,22 +4,25 @@ Inbound webhooks - screens 1p/1q's messaging reply path
 
 Exempt from both SharedSecretAuthMiddleware (app/security.py's
 EXEMPT_PREFIXES) and driver JWT auth - Twilio calls this directly and
-carries neither. Real Twilio request-signature validation
-(X-Twilio-Signature, verified with TWILIO_AUTH_TOKEN) is NOT implemented
-here yet - there's no live Twilio account to test it against in this pass
-(see docs/NEXT_STEPS.md) - so this endpoint currently trusts whatever
-posts to it. That's a real gap to close before this ever points at a
-production Twilio number, not a stylistic choice.
+carries neither. Request-signature verification
+(app/messaging/twilio_signature.py) only actually enforces when
+TWILIO_AUTH_TOKEN is configured - same "unconfigured credential -> trust/
+stub" pattern as app/messaging/sms_client.py, since there's no live
+Twilio account to validate a real signature against otherwise (see
+docs/NEXT_STEPS.md), and enforcing this in that state would just break
+local dev/tests rather than add real security.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db import get_db
 from app.logging_config import get_logger
+from app.messaging.twilio_signature import signature_is_valid
 from app.models.message import Message
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -28,13 +31,40 @@ logger = get_logger(__name__)
 _EMPTY_TWIML = "<Response></Response>"  # empty = "don't auto-reply"
 
 
+def _webhook_url(request: Request) -> str:
+    # request.url reflects this container's own view of the request,
+    # correct only when nothing sits in front of it - see
+    # settings.twilio_webhook_base_url's docstring for the reverse-proxy
+    # case, where Twilio actually signed the public URL, not this one.
+    if settings.twilio_webhook_base_url:
+        url = settings.twilio_webhook_base_url.rstrip("/") + request.url.path
+        if request.url.query:
+            url += f"?{request.url.query}"
+        return url
+    return str(request.url)
+
+
+async def _assert_valid_twilio_signature(request: Request) -> None:
+    if not settings.twilio_auth_token:
+        return
+    form = await request.form()
+    params = {key: str(value) for key, value in form.items()}
+    signature = request.headers.get("X-Twilio-Signature")
+    if not signature_is_valid(settings.twilio_auth_token, _webhook_url(request), params, signature):
+        logger.warning("twilio_signature_invalid", path=request.url.path)
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+
 @router.post("/twilio/inbound-sms")
 async def twilio_inbound_sms(
+    request: Request,
     From: str = Form(...),
     Body: str = Form(...),
     MessageSid: str | None = Form(None),
     session: AsyncSession = Depends(get_db),
 ) -> Response:
+    await _assert_valid_twilio_signature(request)
+
     # Match against the most recent outbound message sent to this number,
     # to figure out which driver/channel/stop the reply belongs to - there's
     # no session/proxy concept here, just phone-number matching. Real
