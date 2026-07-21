@@ -23,7 +23,7 @@ list instead of leaving it scattered across three documents.
 | B1 | Hire the senior backend engineer | Peer review names this the critical path — "do not hire down." Nothing below scales past one person without this. |
 | B2 | Sign the first client contract | Unlocks real Epicor payload verification and the only real test of the 2.5 DPH assumption. Doesn't block most engineering work below, which can proceed on demo data. |
 | B3 | Get access to the Source of Truth Index (Google Drive, LMX OS Brief v1.0–v1.2) | The batch-hold "4-question decision logic" and SLA hold-window minutes were reconstructed from a peer-review summary, not this canonical doc, because it wasn't reachable while building. |
-| B4 | Choose a payroll provider — ADP or Gusto | Drivers are W2 employees; the earnings screen is placeholder-only until this is picked and provisioned. |
+| B4 | Provision a real Rippling account/API credentials | **Rippling** was chosen (not ADP/Gusto — handles both W2 payroll and 1099 contractor payments on one platform, reusing the same integration across the worker-classification phases below). `app/payroll/`'s `PayrollProvider` interface and the real hours/overtime engineering behind it are built and tested against a stub (`docs/NEXT_STEPS.md` item 22) — no money moves until a real account exists and `RipplingPayrollProvider`'s endpoint shape (a best-effort guess, unverified) is confirmed against it. |
 | B5 | Provision a real Twilio account + phone number | Every SMS today (OTP codes, masked customer/support messaging) runs through a stub that logs instead of sending. |
 
 ### Core backend — unverified or placeholder logic
@@ -40,6 +40,8 @@ list instead of leaving it scattered across three documents.
 | E8 | Move the event bus off in-process | `app/events/bus.py` only works within a single running instance — the moment this runs as more than one process/container, event-triggered re-optimization silently stops working for events raised on a different instance than the one handling a given request. |
 | E9 | Validate the 2.5 deliveries-per-hour (DPH) figure | Called out by the peer review as a model assumption, not an established fact — only provable with real driver/order data at Hub 1 (gated on B2). |
 | E10 | Tune HOT_SHOT's skip-penalty/hold-window placeholders | Phase 8 added `HOT_SHOT` ahead of T1 in `SLA_TIER_SKIP_PENALTY` and a 2-minute hold window (`app/sla/engine.py`, `app/optimizer/google_routes_client.py`) — same "reasonable guess, not calibrated" status as E2/E5, now for a fourth, premium-priced tier. |
+| ~~E11~~ | ~~Real hours-worked/overtime calculation + admin payroll-run endpoint~~ | **Done** — `app/payroll/hours.py` replaces the old route-span earnings heuristic with real on-duty hours from a durable `driver_shift_events` log, plus federal 40hr/week overtime for `w2` drivers. New `POST /admin/payroll/{hub_id}/run`. Known gaps: no state-specific daily-OT rules, and a workweek split across two pay periods only sees hours visible in the period being computed — see `docs/NEXT_STEPS.md` item 22. |
+| ~~E12~~ | ~~Real vehicle-capacity tracking for mid-route insertion~~ | **Done** — replaced the placeholder `MAX_STOPS_PER_ACTIVE_ROUTE` stop-count cap with real `DriverState.capacity_units - load_units` tracking, now actually incremented/decremented by `complete_stop`/`flag_stop_issue` — see `docs/NEXT_STEPS.md` item 21. |
 
 ### Security & production readiness
 
@@ -62,19 +64,28 @@ list instead of leaving it scattered across three documents.
 | D1 | Add a "list hubs" endpoint | No read API exists for the `hubs` table, so hub selection is a raw UUID text field, not a dropdown — including in Phase 8's new "Onboard a new client" form, which inherits the same gap. |
 | D2 | Stop baking the API URL in at Docker build time | Vite bakes `VITE_API_BASE_URL` in at build time — pointing the dashboard at a different API means rebuilding the image, not just restarting the container. |
 
+### Cross-app / branding
+
+| # | Item | Why it matters |
+|---|---|---|
+| ~~D3~~ | ~~Real brand assets + unified brand-green accent across dashboard, client portal, driver app~~ | **Done** — placeholder "L"/"LX" box logos and mismatched indigo/approximate-green accents replaced with the real LMX mark and the decided brand green (`#0A6644`) everywhere. See `docs/NEXT_STEPS.md` item 20. Known gaps: no vector master (SVG/AI) exists, so every asset is raster-derived; native icon/splash/adaptive-icon changes need a real device build (A6) to verify visually — Expo Go always shows its own icon regardless of `app.json`. |
+
 ### Driver app
 
 | # | Item | Why it matters |
 |---|---|---|
-| A1 | Push notifications | Biggest real gap for daily use — a driver has to have the app open and polling to see a new job offer. No push infrastructure exists at all. |
+| ~~A0~~ | ~~Screen consolidation, flag-an-issue, offline write queue, device-bound biometric auth, live route-change push~~ | **Done**, ahead of this roadmap's original sequencing — matches a separate wireframe spec's design intent (consolidated screens, offline-first, device-bound re-entry instead of repeated OTP, live notification of mid-route changes) discovered mid-build. See `docs/NEXT_STEPS.md` item 19 for full detail. Real gap: this is foreground-only SSE (the driver has to have the app open), not true OS-level push — A1 below (job-offer push while backgrounded/killed) is still a distinct, unstarted gap. |
+| A1 | Push notifications | Biggest real gap for daily use — a driver has to have the app open and polling to see a new job offer. No push infrastructure exists at all (A0's live route-change push is a different, foreground-only mechanism for an already-active route, not this). |
 | A2 | Real camera/barcode scanning | "Scan next parcel" is a manual tap that increments a count — no camera/barcode SDK wired in. |
 | A3 | Real photo/signature capture + upload pipeline | Proof-of-delivery "tap to capture" records a placeholder URL — no actual camera/signature-pad integration or image storage. |
 | A4 | A real PIN-issuance/verification system | The PIN field on proof-of-delivery is recorded but never checked against anything — there's no system that issues a real PIN to verify against. |
 | A5 | Maps SDK / turn-by-turn navigation | Screens 1h/1i/1l are merged into one stops-list view with no live turn directions. |
-| A6 | Mobile app store deployment pipeline | No EAS build config, no TestFlight/Play Store presence — the app only runs today via the Expo dev client. |
+| A6 | Mobile app store deployment pipeline | No EAS build config, no TestFlight/Play Store presence — the app only runs today via the Expo dev client. Also the only way to visually verify A0/D3's native icon/splash/adaptive-icon work, since Expo Go always shows its own icon. |
 | A7 | Masked voice calling | Only masked SMS is built. Voice needs a separate, heavier Twilio Voice/Proxy integration. |
 | A8 | Harden inbound-SMS reply matching | Currently matches by phone number only — a driver with two concurrent conversations to the same number could have a reply attached to the wrong one. |
-| A9 | Real earnings formula + payroll integration | Current estimate is an explicitly-labeled placeholder ($18/hr flat) — gated on B4. |
+| A9 | Real earnings formula + payroll integration | Hours/overtime engineering and the `PayrollProvider` interface are now built (E11, gated on B4 for a real account) — what's left is genuinely a business decision, not code: state-specific daily-OT rules beyond the federal 40hr/week baseline, and confirming the Rippling integration against a live account. |
+| A10 | 1099 contractor onboarding — resolve the worker-autonomy question | Phase 2 of the W2 → 1099 → gig rollout (`docs/NEXT_STEPS.md` item 22). Today's single-push-offer, single-online-toggle, ops-provisioned model reads closer to "at-will staff" than "independent contractor" — a legal call on how much real job-choice/schedule-flexibility the product needs to show for defensible 1099 classification, needed **before** 1099 onboarding ships, not an engineering task itself. |
+| A11 | Gig per-delivery pay model | Phase 3 of the same rollout. No fare/price field exists anywhere in `Order`/`Route`/`Stop` — job offers show stop count/SLA tier, never a dollar amount. Needed before any gig-classified driver could be onboarded: a real pricing model, showing pay on the offer itself, instant/fast payout (e.g. Stripe Connect — a payroll-cycle assumption doesn't fit gig work), self-serve onboarding, and per-trip identity re-verification. |
 
 ### Whole components not started at all
 
@@ -106,10 +117,11 @@ is the path from there to a real, running Hub 1.
 **These phases are not strictly sequential.** Once there's more than one
 engineer (B1), 4/5/6/7 can mostly run in parallel — they touch different
 parts of the system. Phase 8 (client dashboard, Hot Shot tier, tiered
-billing, shop SMS, minimal client onboarding) has already shipped, ahead
-of the sequencing below — Sourabh's call, since the first client wanted
-these at MVP rather than deferred, and LMX had no committed dates
-constraining the build order.
+billing, shop SMS, minimal client onboarding) and part of Phase 6 (A0's
+screen redesign/offline queue/biometric auth/live push) and part of Phase
+7 (W2 payroll's engineering) have already shipped, ahead of the
+sequencing below — Sourabh's calls, since none of these had committed
+dates constraining the build order.
 
 ### Phase 4 — Make the placeholders real
 **Goal:** every "unverified" or "reconstructed from a summary" caveat in
@@ -140,23 +152,46 @@ security review.
 **Goal:** something a real driver can rely on for a full shift without
 developer tooling.
 
+A0 (screen consolidation, flag-an-issue, offline write queue, device-bound
+biometric auth, live route-change push) already shipped ahead of this
+phase's sequencing — Sourabh's call, following a separate wireframe spec
+discovered mid-build (`docs/NEXT_STEPS.md` item 19). What's left:
+
 - A1 (push notifications — do this first; everything else in this phase
   is polish by comparison)
 - A2–A5 (camera/barcode, photo/signature capture, PIN system, maps SDK)
 - A6 (app store deployment — start with TestFlight/Play internal testing,
-  not a public release, for the first pilot)
+  not a public release, for the first pilot; also the only way to
+  visually verify A0/D3's native icon/splash/adaptive-icon work)
 - A7, A8 (masked voice calling, harden SMS reply matching)
 
 **Exit criteria:** a driver can install this from an internal beta channel
 and complete a full day's routes without needing you or dev tooling.
 
-### Phase 7 — Payroll
-**Goal:** earnings becomes a real number, not an estimate.
+### Phase 7 — Payroll & worker classification
+**Goal:** earnings becomes a real number, not an estimate — phased across
+three worker classifications per Sourabh's stated sequencing: W2 employees
+first (paid monthly), then 1099 contractors (paid weekly), then gig
+per-delivery workers.
 
-- B4 (choose ADP or Gusto)
-- A9 (real pay formula — a business decision LMX/finance needs to make,
-  not something to reverse-engineer from code; wire the chosen payroll
-  API once the formula's agreed)
+**W2 (Phase 1 of this rollout) — mostly done:** `Driver.employment_type`/
+`hourly_rate_cents`, a durable `driver_shift_events` log, real on-duty
+hours replacing the old route-span heuristic, federal 40hr/week overtime,
+a monthly pay period, and the `PayrollProvider` interface (Rippling
+chosen — see B4) are all built and tested (`docs/NEXT_STEPS.md` item 22).
+What's left is B4 (a real Rippling account) and any state-specific
+daily-OT rules beyond the federal baseline — a business/legal decision,
+not more reverse-engineering from code.
+
+**1099 (Phase 2) — not started:** A10 (the worker-autonomy/misclassification
+question needs a legal answer before this ships) plus W-9 collection
+(likely inside Rippling's own onboarding, same as W2's I-9/W-4, not a new
+screen in this app).
+
+**Gig (Phase 3) — not started:** A11 (a real per-delivery fare model,
+priced offers, instant payout, self-serve onboarding, per-trip identity
+re-verification) — the largest of the three, closer to a second product
+line sharing this backend than a config change.
 
 ### Phase 8 — Client dashboard, Hot Shot tier, tiered billing, shop SMS — ✅ DONE
 **Goal:** make LMX successful with the first client — a full client
