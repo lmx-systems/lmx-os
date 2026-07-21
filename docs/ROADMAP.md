@@ -23,7 +23,7 @@ list instead of leaving it scattered across three documents.
 | B1 | Hire the senior backend engineer | Peer review names this the critical path — "do not hire down." Nothing below scales past one person without this. |
 | B2 | Sign the first client contract | Unlocks real Epicor payload verification and the only real test of the 2.5 DPH assumption. Doesn't block most engineering work below, which can proceed on demo data. |
 | B3 | Get access to the Source of Truth Index (Google Drive, LMX OS Brief v1.0–v1.2) | The batch-hold "4-question decision logic" and SLA hold-window minutes were reconstructed from a peer-review summary, not this canonical doc, because it wasn't reachable while building. |
-| B4 | Choose a payroll provider — ADP or Gusto | Drivers are W2 employees; the earnings screen is placeholder-only until this is picked and provisioned. |
+| B4 | ~~Choose a payroll provider~~ → **Decided: Rippling** (cofounder alignment, July 2026) | Drivers are W2 employees; the earnings screen is placeholder-only until Rippling is provisioned (account + API access) and a pay formula is agreed — see A9. |
 | B5 | Provision a real Twilio account + phone number | Every SMS today (OTP codes, masked customer/support messaging) runs through a stub that logs instead of sending. |
 
 ### Core backend — unverified or placeholder logic
@@ -74,7 +74,7 @@ list instead of leaving it scattered across three documents.
 | A6 | Mobile app store deployment pipeline | No EAS build config, no TestFlight/Play Store presence — the app only runs today via the Expo dev client. |
 | A7 | Masked voice calling | Only masked SMS is built. Voice needs a separate, heavier Twilio Voice/Proxy integration. |
 | ~~A8~~ | ~~Harden inbound-SMS reply matching~~ | **Done** — `app/api/webhooks.py`'s `_match_reply_to_thread`: candidates limited to a 24h window, conversations whose stop is still active are preferred over completed ones, and residual ambiguity (two active threads, same number) falls back to most-recent with a structured warning logged. Per-conversation proxy sessions (Twilio Proxy) remain the real fix if this ever matters at scale. |
-| A9 | Real earnings formula + payroll integration | Current estimate is an explicitly-labeled placeholder ($18/hr flat) — gated on B4. |
+| A9 | Real earnings formula + payroll integration | Current estimate is an explicitly-labeled placeholder — provider decided (Rippling, see B4); still needs a Rippling account with API access provisioned and the pay formula agreed (per-drop, hourly, or blend) before the integration is worth writing against live data. Integration scaffolding can proceed on the stub pattern meanwhile. |
 
 ### Whole components not started at all
 
@@ -153,7 +153,8 @@ and complete a full day's routes without needing you or dev tooling.
 ### Phase 7 — Payroll
 **Goal:** earnings becomes a real number, not an estimate.
 
-- B4 (choose ADP or Gusto)
+- B4 (provider decided: Rippling — remaining: account + payroll module,
+  API credentials/sandbox, driver↔employee mapping)
 - A9 (real pay formula — a business decision LMX/finance needs to make,
   not something to reverse-engineer from code; wire the chosen payroll
   API once the formula's agreed)
