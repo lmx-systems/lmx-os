@@ -103,7 +103,7 @@ category:
 
 | # | Item | Why it matters |
 |---|---|---|
-| T1 | No load/performance test against the design doc's <5s-cycle/20-driver/100-order budget | The optimizer has a hard performance target that's never been tested under realistic load. |
+| ~~T1~~ | ~~Load/performance test against the design doc's <5s-cycle/20-driver/100-order budget~~ | **Done** — `tests/integration/test_optimizer_load.py`, real Postgres Order/Driver rows (not just Redis/hold-queue data) so the writeback step does the same real work a live cycle would. Measured: 20 drivers/100 orders completes in **~0.08s** (~65x margin under the 5s budget); a 5x stress probe (100 drivers/500 orders, not a contractual target) completes in **~0.24s**. This tests the stub nearest-neighbor engine only - Google Route Optimization's own API latency (E1) is a separate, unmeasured external dependency without live credentials. |
 | T2 | Local dev/test sandbox can't fully exercise Redis-backed rate limiting (driver OTP issuance, and now client login) | The bundled test Redis (`redislite`/the sandbox's standalone binary, both v6.2.14) doesn't support `EXPIRE...NX`; production Redis (7-alpine) does. Confirmed not a real bug, but worth a note so it doesn't get "rediscovered" and mistaken for one - now affects `app/client_auth/login_rate_limit.py`'s tests too, same root cause. |
 
 ---
