@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.api.routes import get_last_cycle, list_fleet_overview, list_held_orders
+from app.api.routes import get_last_cycle, list_fleet_overview, list_held_orders, list_hubs
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
 from app.fleet_state.manager import FleetStateManager
@@ -129,3 +129,19 @@ async def test_run_cycle_writes_last_cycle_snapshot(db_session, real_redis_clien
     assert snapshot.engine == result.engine
     assert snapshot.assigned_count == 0
     assert snapshot.unassigned_count == 0
+
+
+async def test_list_hubs_excludes_inactive_and_sorts_by_name(db_session):
+    """Backs the dashboard's hub picker (docs/ROADMAP.md D1) - a raw UUID
+    paste field until now, since no read endpoint existed for `hubs`."""
+    db_session.add_all(
+        [
+            Hub(name="Zeta Hub", lat=34.05, lng=-118.25, active=True),
+            Hub(name="Alpha Hub", lat=34.06, lng=-118.26, active=True),
+            Hub(name="Inactive Hub", lat=34.07, lng=-118.27, active=False),
+        ]
+    )
+    await db_session.commit()
+
+    hubs = await list_hubs(session=db_session)
+    assert [h.name for h in hubs] == ["Alpha Hub", "Zeta Hub"]

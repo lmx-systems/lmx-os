@@ -17,6 +17,13 @@
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      Written at container startup, not image build time (see
+      Dockerfile/docs/ROADMAP.md D2) - a 404 here (e.g. local `npm run
+      dev`, where no entrypoint script has run) is harmless, src/lib/api.ts
+      falls back to the Vite build-time value.
+    -->
+    <script src="/env-config.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

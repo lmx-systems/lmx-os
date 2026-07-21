@@ -17,12 +17,14 @@ from app.db import get_db
 from app.fleet_state.manager import FleetStateManager
 from app.learning_loop.service import run_nightly_job
 from app.models.driver import Driver
+from app.models.hub import Hub
 from app.models.order import Order
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.last_cycle_store import LastCycleStore
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.batch_queue import HeldOrderView
 from app.schemas.fleet import DriverLocation, DriverState
+from app.schemas.hub import HubSummary
 from app.schemas.learning_loop import NightlyJobResult, ProposedRuleSummary
 from app.schemas.optimizer import LastCycleSnapshot, OptimizationResult
 from app.schemas.order import OrderStatusSummary
@@ -33,6 +35,16 @@ router = APIRouter(tags=["ops"])
 @router.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@router.get("/hubs", response_model=list[HubSummary])
+async def list_hubs(session: AsyncSession = Depends(get_db)) -> list[HubSummary]:
+    """Backs the dashboard's hub picker (docs/ROADMAP.md D1) - hub
+    selection was a raw UUID paste field until now, since no read endpoint
+    existed for the `hubs` table at all. Excludes inactive hubs - nothing
+    in ops tooling should be able to select one to act on."""
+    result = await session.execute(select(Hub).where(Hub.active.is_(True)).order_by(Hub.name))
+    return [HubSummary(hub_id=str(hub.id), name=hub.name) for hub in result.scalars().all()]
 
 
 @router.post("/fleet/{hub_id}/drivers/state")

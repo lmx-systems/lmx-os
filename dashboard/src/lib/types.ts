@@ -110,6 +110,11 @@ export interface ClientOnboardingResult {
   shop_ids: string[]
 }
 
+export interface HubSummary {
+  hub_id: string
+  name: string
+}
+
 // --- UI-local types below - no backend equivalent, not response mirrors ---
 
 export interface RunLogEntry {

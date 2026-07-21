@@ -49,7 +49,7 @@ function App() {
 
         {!enabled ? (
           <p className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-muted)]">
-            Paste a hub UUID above to load fleet state, the hold queue, and order status for that
+            Select a hub above to load fleet state, the hold queue, and order status for that
             hub.
           </p>
         ) : (

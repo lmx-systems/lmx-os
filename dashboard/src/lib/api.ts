@@ -3,6 +3,7 @@ import type {
   ClientOnboardingResult,
   DriverState,
   HeldOrderView,
+  HubSummary,
   LastCycleSnapshot,
   NightlyJobResult,
   OptimizationResult,
@@ -14,8 +15,16 @@ import type {
 // VITE_API_SHARED_SECRET isn't set, this sends no credentials at all,
 // same as before this existed - accurate for a backend with
 // API_SHARED_SECRET unset too.
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
-const API_SHARED_SECRET = import.meta.env.VITE_API_SHARED_SECRET
+//
+// Read at runtime first (docker/generate-env-config.sh writes
+// window.__RUNTIME_CONFIG__ from real container env vars at container
+// startup, not Docker image build time - see Dockerfile/docs/ROADMAP.md
+// D2), falling back to the Vite build-time value for local `npm run dev`,
+// where no entrypoint script ever runs and window.__RUNTIME_CONFIG__ is
+// never set.
+const API_BASE_URL =
+  window.__RUNTIME_CONFIG__?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const API_SHARED_SECRET = window.__RUNTIME_CONFIG__?.VITE_API_SHARED_SECRET || import.meta.env.VITE_API_SHARED_SECRET
 
 export class ApiError extends Error {
   status: number
@@ -43,6 +52,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  listHubs: () => request<HubSummary[]>('/hubs'),
+
   fleetOverview: (hubId: string) => request<DriverState[]>(`/fleet/${hubId}/drivers`),
 
   heldOrders: (hubId: string) => request<HeldOrderView[]>(`/batch-queue/${hubId}/held-orders`),

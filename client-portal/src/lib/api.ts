@@ -10,7 +10,13 @@ import type {
 // (app/security.py's EXEMPT_PREFIXES) - it has its own real per-client JWT
 // auth instead (app/client_auth/), unlike dashboard/'s API_SHARED_SECRET
 // approach. No shared secret to configure here.
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+//
+// Read at runtime first (docker/generate-env-config.sh writes
+// window.__RUNTIME_CONFIG__ from the real container env at startup, not
+// Docker image build time - see Dockerfile/docs/ROADMAP.md D2), falling
+// back to the Vite build-time value for local `npm run dev`.
+const API_BASE_URL =
+  window.__RUNTIME_CONFIG__?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
 export class ApiError extends Error {
   status: number
