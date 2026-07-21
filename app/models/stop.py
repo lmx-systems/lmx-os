@@ -58,6 +58,17 @@ class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # "Left at" field. Free text, not validated against anything.
     pod_left_at: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
+    # "Flag an issue" (driver-facing incident report, not to be confused
+    # with StopFlag below, which is an ops route-planning annotation for a
+    # different consumer - the Learning Loop). Sets status="failed".
+    failure_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # SHOP_CLOSED | ACCESS_ISSUE | COD_DISPUTE | PARTS_MISSING | REFUSED
+    flag_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Kept distinct from completed_at - this stop was never actually
+    # completed, and anything reading completed_at as "successfully
+    # delivered at" must not be corrupted by a failed stop's timestamp.
+    flagged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
 
 class StopOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """

@@ -6,6 +6,7 @@ import type {
   DriverDocument,
   DriverProfile,
   Earnings,
+  FlagReasonCode,
   JobOffer,
   Message,
   PodMethod,
@@ -17,13 +18,20 @@ import type {
 // app.json's extra.apiBaseUrl is the dev default (local backend). Point
 // this at the real LMX OS deployment for anything beyond a simulator
 // pointed at localhost - see driver-app/README.md.
-const API_BASE_URL: string =
+export const API_BASE_URL: string =
   (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ?? 'http://localhost:8000';
 
 let authToken: string | null = null;
 
 export function setAuthToken(token: string | null): void {
   authToken = token;
+}
+
+// For anything that can't go through the request() wrapper below - e.g.
+// realtime/routeEventsClient.ts, which needs to hand its own Authorization
+// header to an SSE client library rather than an ordinary fetch() call.
+export function getAuthToken(): string | null {
+  return authToken;
 }
 
 class ApiError extends Error {
@@ -70,11 +78,13 @@ export const api = {
       body: JSON.stringify({ phone }),
     }),
 
-  verifyOtp: (phone: string, code: string) =>
+  verifyOtp: (phone: string, code: string, deviceId: string, deviceName?: string) =>
     request<AuthToken>('/driver/auth/verify-otp', {
       method: 'POST',
-      body: JSON.stringify({ phone, code }),
+      body: JSON.stringify({ phone, code, device_id: deviceId, device_name: deviceName }),
     }),
+
+  refreshToken: () => request<AuthToken>('/driver/auth/refresh', { method: 'POST' }),
 
   getMyProfile: () => request<DriverProfile>('/driver/me'),
 
@@ -120,6 +130,12 @@ export const api = {
     body: { method: PodMethod; photo_url?: string; signature_url?: string; pin?: string; left_at?: string },
   ) =>
     request<Route['stops'][number]>(`/driver/stops/${stopId}/complete`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  flagStop: (stopId: string, body: { reason: FlagReasonCode; note?: string }) =>
+    request<Route['stops'][number]>(`/driver/stops/${stopId}/flag`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),

@@ -1,10 +1,14 @@
+import { useMemo } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet } from 'react-native';
 import type { ReactNode } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { colors, spacing } from '../theme';
+import { spacing, useThemeColors } from '../theme';
+import type { ColorScheme } from '../theme';
 
 export function ScreenContainer({ children, scroll = true }: { children: ReactNode; scroll?: boolean }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const Body = scroll ? ScrollView : (props: { children: ReactNode }) => <>{props.children}</>;
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -20,8 +24,9 @@ export function ScreenContainer({ children, scroll = true }: { children: ReactNo
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: colors.bg },
-  flex: { flex: 1 },
-  scrollContent: { padding: spacing.lg, flexGrow: 1 },
-});
+const makeStyles = (colors: ColorScheme) =>
+  StyleSheet.create({
+    safeArea: { flex: 1, backgroundColor: colors.bg },
+    flex: { flex: 1 },
+    scrollContent: { padding: spacing.lg, flexGrow: 1 },
+  });

@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { api, ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { getOrCreateDeviceId } from '../auth/deviceId';
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import type { AuthStackParamList } from '../navigation/types';
-import { colors, spacing, typography } from '../theme';
+import { spacing, typography, useThemeColors } from '../theme';
+import type { ColorScheme } from '../theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'VerifyCode'>;
 
@@ -16,6 +18,8 @@ const RESEND_COOLDOWN_SECONDS = 24;
 // Screen 1b, "Verify code" - 4-box OTP, auto-advance between boxes,
 // auto-submit on the 4th digit, resend disabled during the countdown.
 export function VerifyCodeScreen({ route, navigation }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { phone, debugCode } = route.params;
   const { signIn } = useAuth();
   const [digits, setDigits] = useState(['', '', '', '']);
@@ -34,7 +38,8 @@ export function VerifyCodeScreen({ route, navigation }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const token = await api.verifyOtp(phone, code);
+      const deviceId = await getOrCreateDeviceId();
+      const token = await api.verifyOtp(phone, code, deviceId);
       await signIn(token.access_token);
       // RootNavigator reacts to isSignedIn/profile and switches stacks -
       // nothing else to navigate to from here.
@@ -72,8 +77,8 @@ export function VerifyCodeScreen({ route, navigation }: Props) {
 
   return (
     <ScreenContainer>
-      <Text style={typography.title}>Enter the code</Text>
-      <Text style={[typography.subtitle, styles.subtitle]}>Sent to {phone}</Text>
+      <Text style={styles.title}>Enter the code</Text>
+      <Text style={styles.subtitle}>Sent to {phone}</Text>
 
       <View style={styles.boxRow}>
         {digits.map((digit, index) => (
@@ -97,7 +102,7 @@ export function VerifyCodeScreen({ route, navigation }: Props) {
       )}
       {error && <Text style={styles.error}>{error}</Text>}
 
-      <Text style={typography.small} onPress={handleResend}>
+      <Text style={styles.resendText} onPress={handleResend}>
         {cooldown > 0 ? `Resend code in 0:${cooldown.toString().padStart(2, '0')}` : 'Resend code'}
       </Text>
 
@@ -107,21 +112,24 @@ export function VerifyCodeScreen({ route, navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  subtitle: { marginBottom: spacing.xl },
-  boxRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
-  box: {
-    width: 56,
-    height: 56,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    textAlign: 'center',
-    fontSize: 22,
-    backgroundColor: colors.surface,
-    color: colors.textPrimary,
-  },
-  debugHint: { fontSize: 12, color: colors.accent, marginBottom: spacing.md },
-  error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
-  spacer: { flex: 1 },
-});
+const makeStyles = (colors: ColorScheme) =>
+  StyleSheet.create({
+    title: { ...typography.title, color: colors.textPrimary },
+    subtitle: { ...typography.subtitle, color: colors.textSecondary, marginBottom: spacing.xl },
+    boxRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
+    box: {
+      width: 56,
+      height: 56,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      textAlign: 'center',
+      fontSize: 22,
+      backgroundColor: colors.surface,
+      color: colors.textPrimary,
+    },
+    debugHint: { fontSize: 12, color: colors.accent, marginBottom: spacing.md },
+    resendText: { ...typography.small, color: colors.textMuted },
+    error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
+    spacer: { flex: 1 },
+  });

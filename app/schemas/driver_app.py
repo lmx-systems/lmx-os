@@ -3,6 +3,7 @@ Schemas for the driver-facing API (app/api/driver_routes.py) - screens
 1a-1m of LMX Driver App Wireframes.dc.html. See docs/NEXT_STEPS.md item 12
 for the gap analysis this closes.
 """
+import enum
 from datetime import date, datetime
 
 from pydantic import BaseModel
@@ -102,6 +103,8 @@ class StopView(BaseModel):
     eta: datetime | None = None
     completed_at: datetime | None = None
     left_at: str | None = None
+    failure_reason: str | None = None
+    flag_note: str | None = None
 
 
 class RouteView(BaseModel):
@@ -123,6 +126,23 @@ class CompleteStopBody(BaseModel):
     signature_url: str | None = None
     pin: str | None = None
     left_at: str | None = None
+
+
+class StopFailureReason(str, enum.Enum):
+    """"Flag an issue" reason codes - see the wireframe screen of the same
+    name. Plain str column on Stop (app/models/stop.py), not a Postgres
+    enum type - matches stop_type/pod_method's existing convention."""
+
+    SHOP_CLOSED = "SHOP_CLOSED"
+    ACCESS_ISSUE = "ACCESS_ISSUE"
+    COD_DISPUTE = "COD_DISPUTE"
+    PARTS_MISSING = "PARTS_MISSING"
+    REFUSED = "REFUSED"
+
+
+class FlagStopBody(BaseModel):
+    reason: StopFailureReason
+    note: str | None = None
 
 
 # ---------------------------------------------------------------------------

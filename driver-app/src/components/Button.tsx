@@ -1,6 +1,8 @@
+import { useMemo } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
 
-import { colors, radius, spacing } from '../theme';
+import { radius, spacing, useThemeColors } from '../theme';
+import type { ColorScheme } from '../theme';
 
 interface ButtonProps {
   label: string;
@@ -11,6 +13,8 @@ interface ButtonProps {
 }
 
 export function Button({ label, onPress, variant = 'primary', disabled, loading }: ButtonProps) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const isDisabled = disabled || loading;
   return (
     <Pressable
@@ -42,19 +46,21 @@ export function Button({ label, onPress, variant = 'primary', disabled, loading 
   );
 }
 
-const styles = StyleSheet.create({
-  base: {
-    borderRadius: radius.md,
-    paddingVertical: spacing.md + 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primary: { backgroundColor: colors.primary },
-  outline: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderStrong },
-  danger: { backgroundColor: colors.danger },
-  disabled: { opacity: 0.5 },
-  pressed: { opacity: 0.85 },
-  label: { color: colors.primaryText, fontSize: 16, fontWeight: '600' },
-  outlineLabel: { color: colors.textPrimary },
-  dangerLabel: { color: '#ffffff' },
-});
+const makeStyles = (colors: ColorScheme) =>
+  StyleSheet.create({
+    base: {
+      minHeight: 52,
+      borderRadius: radius.md,
+      paddingVertical: spacing.md + 4,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    primary: { backgroundColor: colors.primary },
+    outline: { backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.borderStrong },
+    danger: { backgroundColor: colors.danger },
+    disabled: { opacity: 0.5 },
+    pressed: { opacity: 0.85 },
+    label: { color: colors.primaryText, fontSize: 17, fontWeight: '700' },
+    outlineLabel: { color: colors.textPrimary },
+    dangerLabel: { color: '#ffffff' },
+  });

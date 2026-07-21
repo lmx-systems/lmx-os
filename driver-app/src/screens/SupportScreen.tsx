@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -7,7 +7,8 @@ import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TextField } from '../components/TextField';
 import type { Message } from '../api/types';
-import { colors, radius, spacing, typography } from '../theme';
+import { radius, spacing, typography, useThemeColors } from '../theme';
+import type { ColorScheme } from '../theme';
 
 const POLL_INTERVAL_MS = 8000;
 
@@ -17,6 +18,8 @@ const POLL_INTERVAL_MS = 8000;
 // here but nobody's actually being texted - dispatch should check this
 // with ops before relying on it.
 export function SupportScreen() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -50,7 +53,7 @@ export function SupportScreen() {
 
   return (
     <ScreenContainer scroll={false}>
-      <Text style={typography.subtitle}>Wrong address, blocked access, safety concern - message dispatch here.</Text>
+      <Text style={styles.introText}>Wrong address, blocked access, safety concern - message dispatch here.</Text>
 
       <FlatList
         style={styles.list}
@@ -73,13 +76,15 @@ export function SupportScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  list: { flex: 1, marginTop: spacing.md },
-  bubble: { maxWidth: '80%', borderRadius: radius.md, padding: spacing.sm + 2, marginBottom: spacing.sm },
-  outbound: { backgroundColor: colors.primary, alignSelf: 'flex-end' },
-  inbound: { backgroundColor: colors.border, alignSelf: 'flex-start' },
-  outboundText: { color: colors.primaryText },
-  inboundText: { color: colors.textPrimary },
-  composerRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end' },
-  composerField: { flex: 1 },
-});
+const makeStyles = (colors: ColorScheme) =>
+  StyleSheet.create({
+    introText: { ...typography.subtitle, color: colors.textSecondary },
+    list: { flex: 1, marginTop: spacing.md },
+    bubble: { maxWidth: '80%', borderRadius: radius.md, padding: spacing.sm + 2, marginBottom: spacing.sm },
+    outbound: { backgroundColor: colors.primary, alignSelf: 'flex-end' },
+    inbound: { backgroundColor: colors.border, alignSelf: 'flex-start' },
+    outboundText: { color: colors.primaryText },
+    inboundText: { color: colors.textPrimary },
+    composerRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end' },
+    composerField: { flex: 1 },
+  });

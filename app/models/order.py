@@ -28,6 +28,12 @@ class OrderStatus(str, enum.Enum):
     assigned = "assigned"   # attached to a stop on a route
     delivered = "delivered"
     cancelled = "cancelled"
+    # A driver flagged the stop covering this order (shop closed, access
+    # blocked, a dispute, etc. - app/api/driver_routes.py's flag_stop_issue).
+    # Distinct from cancelled: this order was actually attempted, not
+    # cancelled pre-dispatch - ops needs to decide on redelivery/refund,
+    # not just close it out.
+    delivery_failed = "delivery_failed"
 
 
 class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):

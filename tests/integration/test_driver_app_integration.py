@@ -22,6 +22,7 @@ from app.api.driver_routes import (
     arrive_at_stop,
     complete_stop,
     decline_offer,
+    flag_stop_issue,
     get_my_profile,
     get_my_route,
     list_my_offers,
@@ -43,9 +44,17 @@ from app.models.message import Message
 from app.models.order import Order, OrderStatus
 from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
+from app.models.stop import Stop
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.service import DispatchOptimizerService
-from app.schemas.driver_app import CompleteStopBody, DriverAvailabilityUpdate, DriverProfileUpdate, ScanParcelsBody
+from app.schemas.driver_app import (
+    CompleteStopBody,
+    DriverAvailabilityUpdate,
+    DriverProfileUpdate,
+    FlagStopBody,
+    ScanParcelsBody,
+    StopFailureReason,
+)
 from app.schemas.driver_auth import RequestOtpBody, VerifyOtpBody
 from app.schemas.fleet import DriverLocation, DriverState
 
@@ -112,10 +121,14 @@ async def test_full_driver_app_core_loop(db_session, real_redis_client):
     otp_result = await request_otp(RequestOtpBody(phone="+15555550199"), session=db_session)
     assert otp_result.debug_code is not None  # no Twilio configured in tests
 
-    token = await verify_otp(VerifyOtpBody(phone="+15555550199", code=otp_result.debug_code), session=db_session)
-    decoded_driver_id, decoded_hub_id = decode_token(token.access_token)
+    token = await verify_otp(
+        VerifyOtpBody(phone="+15555550199", code=otp_result.debug_code, device_id="test-device"),
+        session=db_session,
+    )
+    decoded_driver_id, decoded_hub_id, decoded_device_id = decode_token(token.access_token)
     assert decoded_driver_id == str(driver_id)
-    authed = AuthedDriver(driver_id=decoded_driver_id, hub_id=decoded_hub_id)
+    assert decoded_device_id == "test-device"
+    authed = AuthedDriver(driver_id=decoded_driver_id, hub_id=decoded_hub_id, device_id=decoded_device_id)
 
     profile = await get_my_profile(driver=authed, session=db_session)
     assert profile.setup_complete is False  # no vehicle_type yet
@@ -192,7 +205,7 @@ async def test_full_driver_app_core_loop(db_session, real_redis_client):
 
 async def test_declined_offer_requeues_order_for_reassignment(db_session, real_redis_client):
     hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     await DispatchOptimizerService().run_cycle(str(hub_id))
     offers = await list_my_offers(driver=authed, session=db_session)
@@ -232,7 +245,7 @@ async def test_declined_offer_requeues_order_for_reassignment(db_session, real_r
 async def _accept_one_offer(db_session, hub_id, driver_id):
     """Shared setup for the stop-state-machine tests below: go straight
     from a fresh seed to an accepted route with one pickup + one dropoff."""
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
     await DispatchOptimizerService().run_cycle(str(hub_id))
     offers = await list_my_offers(driver=authed, session=db_session)
     route = await accept_offer(offers[0].offer_id, driver=authed, session=db_session)
@@ -279,7 +292,22 @@ async def test_complete_stop_rejects_dropoff_before_its_pickup_is_completed(db_s
     assert exc_info.value.status_code == 409
 
 
-async def test_complete_stop_rejects_being_called_twice(db_session, real_redis_client):
+async def test_complete_stop_is_idempotent_on_retry(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
+    await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
+    first = await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+
+    # A retried/double-tapped complete call (e.g. an offline-queue replay
+    # after a dropped response) must return the same success, not a 409 -
+    # this is what makes it safe for a client to blindly retry.
+    second = await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+    assert second == first
+
+
+async def test_complete_stop_replay_with_different_payload_keeps_original(db_session, real_redis_client):
     hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
     authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
 
@@ -287,9 +315,26 @@ async def test_complete_stop_rejects_being_called_twice(db_session, real_redis_c
     await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
     await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
 
-    # A retried/double-tapped complete call must not re-run the completion
-    # side effects (order status flip, route-finished check, event publish)
-    # a second time.
+    # First write wins - a replay with a different payload must not silently
+    # overwrite already-committed proof-of-delivery. StopView doesn't
+    # surface pod_method, so check the row directly.
+    await complete_stop(pickup.stop_id, CompleteStopBody(method="signature"), driver=authed, session=db_session)
+    db_session.expire_all()
+    pickup_row = await db_session.get(Stop, uuid.UUID(pickup.stop_id))
+    assert pickup_row.pod_method == "photo"
+
+
+async def test_complete_stop_still_rejects_a_failed_stop(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
+    pickup_row = await db_session.get(Stop, uuid.UUID(pickup.stop_id))
+    pickup_row.status = "failed"
+    await db_session.commit()
+
+    # A genuine conflict (stop already terminal via a DIFFERENT terminal
+    # status than "completed") must still 409, not be treated as a replay.
     with pytest.raises(HTTPException) as exc_info:
         await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
     assert exc_info.value.status_code == 409
@@ -322,7 +367,7 @@ async def test_accept_offer_never_commingles_a_hot_shot_pickup(db_session, real_
     order's, and that "every pickup precedes every dropoff" still holds.
     """
     hub_id, client_id, shop_id, driver_id, regular_order = await _seed(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     now = datetime.now(timezone.utc)
     hot_order = Order(
@@ -419,7 +464,7 @@ async def test_completing_a_pickup_stop_sends_a_picked_up_shop_sms(db_session, r
 
 async def test_hot_shot_pickup_gets_the_premium_shop_sms_copy(db_session, real_redis_client):
     hub_id, client_id, shop_id, driver_id, regular_order = await _seed(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     now = datetime.now(timezone.utc)
     hot_order = Order(
@@ -450,3 +495,68 @@ async def test_hot_shot_pickup_gets_the_premium_shop_sms_copy(db_session, real_r
     assert len(messages) == 1
     assert "Hot Shot" in messages[0].body
     assert "Thanks for LMX'ing it!" in messages[0].body
+
+
+async def test_flag_stop_sets_failed_and_order_delivery_failed(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
+    flagged = await flag_stop_issue(
+        pickup.stop_id,
+        FlagStopBody(reason=StopFailureReason.SHOP_CLOSED, note="Gate padlocked, no answer"),
+        driver=authed,
+        session=db_session,
+    )
+    assert flagged.status == "failed"
+    assert flagged.failure_reason == "SHOP_CLOSED"
+    assert flagged.flag_note == "Gate padlocked, no answer"
+
+    # Capture the plain UUID before expire_all() - accessing order.id on the
+    # now-expired ORM instance would trigger a synchronous lazy-load outside
+    # any async-aware call, raising MissingGreenlet.
+    order_id = order.id
+    db_session.expire_all()
+    refreshed_order = await db_session.get(Order, order_id)
+    assert refreshed_order.status == OrderStatus.delivery_failed
+
+
+async def test_flag_stop_rejects_an_already_terminal_stop(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
+    await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
+    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await flag_stop_issue(
+            pickup.stop_id, FlagStopBody(reason=StopFailureReason.SHOP_CLOSED), driver=authed, session=db_session
+        )
+    assert exc_info.value.status_code == 409
+
+
+async def test_dropoff_completes_after_its_pickup_was_flagged(db_session, real_redis_client):
+    """Regression test for the route-finished bug this feature surfaced:
+    a *failed* pickup must not count as "unfinished" forever, or a route
+    with one flagged stop could never be completed."""
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
+    await flag_stop_issue(
+        pickup.stop_id, FlagStopBody(reason=StopFailureReason.SHOP_CLOSED), driver=authed, session=db_session
+    )
+
+    await arrive_at_stop(dropoff.stop_id, driver=authed, session=db_session)
+    completed_dropoff = await complete_stop(
+        dropoff.stop_id, CompleteStopBody(method="signature"), driver=authed, session=db_session
+    )
+    assert completed_dropoff.status == "completed"
+
+    db_session.expire_all()
+    route = await get_my_route(driver=authed, session=db_session)
+    # None of this route's stops are still non-terminal, so it's finished -
+    # get_my_route only returns status="active" routes, so a None result
+    # here confirms the route flipped to "completed".
+    assert route is None

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -9,7 +9,8 @@ import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TextField } from '../components/TextField';
 import type { ProfileStackParamList } from '../navigation/types';
-import { colors, spacing, typography } from '../theme';
+import { spacing, typography, useThemeColors } from '../theme';
+import type { ColorScheme } from '../theme';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'PaymentMethod'>;
 
@@ -18,6 +19,8 @@ type Props = NativeStackScreenProps<ProfileStackParamList, 'PaymentMethod'>;
 // docstring and docs/NEXT_STEPS.md item 12). No account/routing number is
 // ever asked for here.
 export function PaymentMethodScreen({ navigation }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { profile, setProfile } = useAuth();
   const [last4, setLast4] = useState('');
   const [busy, setBusy] = useState(false);
@@ -43,8 +46,8 @@ export function PaymentMethodScreen({ navigation }: Props) {
   return (
     <ScreenContainer>
       <Card style={styles.card}>
-        <Text style={typography.label}>Currently on file</Text>
-        <Text style={typography.body}>
+        <Text style={styles.cardLabel}>Currently on file</Text>
+        <Text style={styles.cardBody}>
           {profile?.payment_bank_last4 ? `Bank account ending •••• ${profile.payment_bank_last4}` : 'Nothing on file yet'}
         </Text>
       </Card>
@@ -65,7 +68,10 @@ export function PaymentMethodScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  card: { marginBottom: spacing.lg },
-  error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
-});
+const makeStyles = (colors: ColorScheme) =>
+  StyleSheet.create({
+    card: { marginBottom: spacing.lg },
+    cardLabel: { ...typography.label, color: colors.textPrimary },
+    cardBody: { ...typography.body, color: colors.textPrimary },
+    error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
+  });

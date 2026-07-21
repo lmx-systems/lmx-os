@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 
 import { api } from '../api/client';
@@ -7,7 +7,8 @@ import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TextField } from '../components/TextField';
 import type { DocType, DriverDocument } from '../api/types';
-import { colors, spacing, typography } from '../theme';
+import { spacing, typography, useThemeColors } from '../theme';
+import type { ColorScheme } from '../theme';
 
 const DOC_LABELS: Record<DocType, string> = {
   license: "Driver's license",
@@ -21,6 +22,8 @@ function todayIso(): string {
 }
 
 function DocumentCard({ docType, doc, onSaved }: { docType: DocType; doc: DriverDocument | null; onSaved: (d: DriverDocument) => void }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [expiresAt, setExpiresAt] = useState(doc?.expires_at ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +50,8 @@ function DocumentCard({ docType, doc, onSaved }: { docType: DocType; doc: Driver
 
   return (
     <Card style={styles.card}>
-      <Text style={typography.body}>{DOC_LABELS[docType]}</Text>
-      <Text style={[typography.small, !doc && styles.missing, expired && styles.expired]}>
+      <Text style={styles.docLabel}>{DOC_LABELS[docType]}</Text>
+      <Text style={[styles.statusText, !doc && styles.missing, expired && styles.expired]}>
         {doc ? (expired ? `Expired ${doc.expires_at}` : `Valid until ${doc.expires_at}`) : 'Not on file - required to go online'}
       </Text>
 
@@ -101,10 +104,13 @@ export function DocumentsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  card: { marginBottom: spacing.lg },
-  dateInput: { marginTop: spacing.md, marginBottom: spacing.sm },
-  missing: { color: colors.warning },
-  expired: { color: colors.danger },
-  errorText: { color: colors.danger, marginBottom: spacing.sm, fontSize: 13 },
-});
+const makeStyles = (colors: ColorScheme) =>
+  StyleSheet.create({
+    card: { marginBottom: spacing.lg },
+    docLabel: { ...typography.body, color: colors.textPrimary },
+    statusText: { ...typography.small, color: colors.textMuted },
+    dateInput: { marginTop: spacing.md, marginBottom: spacing.sm },
+    missing: { color: colors.warning },
+    expired: { color: colors.danger },
+    errorText: { color: colors.danger, marginBottom: spacing.sm, fontSize: 13 },
+  });

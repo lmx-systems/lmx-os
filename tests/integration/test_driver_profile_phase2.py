@@ -46,7 +46,7 @@ async def _seed_driver(db_session):
 
 async def test_payment_method_roundtrip(db_session):
     hub_id, driver_id = await _seed_driver(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     profile = await get_my_profile(driver=authed, session=db_session)
     assert profile.payment_bank_last4 is None
@@ -59,7 +59,7 @@ async def test_payment_method_roundtrip(db_session):
 
 async def test_documents_roundtrip_and_are_not_expired_by_default(db_session):
     hub_id, driver_id = await _seed_driver(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     assert await list_my_documents(driver=authed, session=db_session) == []
 
@@ -87,7 +87,7 @@ async def test_documents_roundtrip_and_are_not_expired_by_default(db_session):
 
 async def test_going_online_blocked_when_a_document_is_expired(db_session, real_redis_client):
     hub_id, driver_id = await _seed_driver(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     expired = date.today() - timedelta(days=1)
     await update_my_document("insurance", DriverDocumentUpdate(expires_at=expired), driver=authed, session=db_session)
@@ -104,7 +104,7 @@ async def test_going_online_blocked_when_a_document_is_expired(db_session, real_
 
 async def test_renewing_an_expired_document_unblocks_going_online(db_session, real_redis_client):
     hub_id, driver_id = await _seed_driver(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     expired = date.today() - timedelta(days=1)
     await update_my_document("insurance", DriverDocumentUpdate(expires_at=expired), driver=authed, session=db_session)
@@ -120,7 +120,7 @@ async def test_renewing_an_expired_document_unblocks_going_online(db_session, re
 
 async def test_trip_count_reflects_completed_routes(db_session):
     hub_id, driver_id = await _seed_driver(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     profile = await get_my_profile(driver=authed, session=db_session)
     assert profile.trip_count == 0

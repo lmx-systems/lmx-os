@@ -12,12 +12,13 @@ the DPH advantage in production.
 """
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import update
+from sqlalchemy import func, select, update
 
 from app.batch_queue.queue import run_hold_cycle
 from app.batch_queue.store import HoldQueueStore
@@ -25,13 +26,24 @@ from app.config import settings
 from app.db import session_scope
 from app.fleet_state.manager import FleetStateManager
 from app.models.order import Order, OrderStatus
+from app.models.route import Route
 from app.models.route_offer import RouteOffer
+from app.models.stop import Stop, StopOrder
 from app.optimizer.google_routes_client import RouteOptimizationClient, get_route_optimization_client
 from app.optimizer.last_cycle_store import LastCycleStore
+from app.redis_client import get_client
 from app.schemas.fleet import DriverState
 from app.schemas.optimizer import DriverCandidate, LastCycleSnapshot, OptimizationResult, StopCandidate
 
 logger = structlog.get_logger(__name__)
+
+# v1 capacity proxy for mid-route insertion - a simple stop-count cap, not
+# a real weight/volume check. DriverState.load_units is carried through
+# unchanged everywhere it's touched today (see the fleet_state upserts
+# elsewhere in this module) rather than actually incremented per
+# assignment, so it isn't a meaningful signal yet; a real capacity model
+# is a fast-follow once that's wired up.
+MAX_STOPS_PER_ACTIVE_ROUTE = 8
 
 
 class DispatchOptimizerService:
@@ -96,10 +108,24 @@ class DispatchOptimizerService:
         else:
             assignments, unassigned = [], [s.stop_id for s in stops]
 
+        # Live route-change push: anything still unassigned after the
+        # normal idle-driver matching above gets a shot at an already-
+        # active route with spare capacity, rather than sitting held
+        # indefinitely whenever this hub has no idle driver to offer it to
+        # right now. See _insert_unassigned_into_active_routes's docstring
+        # for what "pushed, not yanked" means here.
+        inserted_into_active_routes: set[str] = set()
+        if unassigned:
+            stops_by_id = {s.stop_id: s for s in stops}
+            inserted_into_active_routes = await self._insert_unassigned_into_active_routes(
+                hub_id, unassigned, stops_by_id
+            )
+            unassigned = [order_id for order_id in unassigned if order_id not in inserted_into_active_routes]
+
         # Only remove from the hold queue what actually got assigned -
         # anything left unassigned (e.g. no driver had capacity) stays held
         # so it's picked up again next cycle rather than silently dropped.
-        assigned_stop_ids = {stop_id for a in assignments for stop_id in a.stop_ids}
+        assigned_stop_ids = {stop_id for a in assignments for stop_id in a.stop_ids} | inserted_into_active_routes
         for order_id in assigned_stop_ids:
             await self._hold_queue.remove(hub_id, order_id)
 
@@ -228,3 +254,121 @@ class DispatchOptimizerService:
             duration_seconds=round(duration, 3),
             over_budget=over_budget,
         )
+
+    async def _insert_unassigned_into_active_routes(
+        self, hub_id: str, unassigned_order_ids: list[str], stops_by_id: dict[str, StopCandidate]
+    ) -> set[str]:
+        """
+        Live route-change push (v1): before this method existed, nothing
+        anywhere ever resequenced or added to a Route already active for a
+        driver mid-shift - run_cycle only ever created brand-new RouteOffers
+        for idle ("available") drivers. This is the first capability to
+        mutate an active route, so the "pushed, not yanked" invariant is
+        built in from day one rather than retrofitted: a new stop is only
+        ever appended after every stop already on the route (by sequence),
+        so the driver's current in-progress stop - and everything before
+        it - is never touched, resequenced, or reassigned out from under
+        them. The driver is notified via the SSE channel published below
+        (app/api/driver_routes.py's GET /driver/me/route-events), never by
+        silently changing what GET /driver/me/route returns next time they
+        happen to poll it.
+
+        v1 simplifications, called out explicitly rather than left silent:
+        one order at a time (no batch-commingling multiple unassigned
+        orders into a single new pickup stop even if they share a shop),
+        no HOT_SHOT-first resequencing of the newly-appended stops (accept_offer
+        does this for a route's *initial* stops; this always appends
+        last), and capacity is MAX_STOPS_PER_ACTIVE_ROUTE, a simple count
+        cap - see that constant's comment for why a real weight/volume
+        check isn't wired up yet.
+        """
+        inserted: set[str] = set()
+
+        async with session_scope() as session:
+            routes_result = await session.execute(
+                select(Route).where(Route.hub_id == uuid.UUID(hub_id), Route.status == "active")
+            )
+            active_routes = list(routes_result.scalars().all())
+            if not active_routes:
+                return inserted
+
+            for order_id in unassigned_order_ids:
+                if stops_by_id.get(order_id) is None:
+                    continue
+
+                order = await session.get(Order, uuid.UUID(order_id))
+                if order is None or order.delivery_lat is None or order.delivery_lng is None:
+                    # No delivery address on file yet for this order - can't
+                    # generate a dropoff stop for it. accept_offer never hits
+                    # this gap since a route is always built from a full
+                    # offer payload with both sides already resolved.
+                    continue
+
+                for route in active_routes:
+                    stop_count = (
+                        await session.execute(
+                            select(func.count()).select_from(Stop).where(Stop.route_id == route.id)
+                        )
+                    ).scalar_one()
+                    if stop_count >= MAX_STOPS_PER_ACTIVE_ROUTE:
+                        continue
+
+                    next_sequence = (
+                        (await session.execute(select(func.max(Stop.sequence)).where(Stop.route_id == route.id))).scalar_one()
+                        or 0
+                    ) + 1
+
+                    pickup = Stop(
+                        route_id=route.id,
+                        shop_id=order.shop_id,
+                        sequence=next_sequence,
+                        stop_type="pickup",
+                        parcel_count=1,
+                    )
+                    session.add(pickup)
+                    await session.flush()
+                    session.add(StopOrder(stop_id=pickup.id, order_id=order.id))
+
+                    dropoff = Stop(
+                        route_id=route.id,
+                        shop_id=None,
+                        sequence=next_sequence + 1,
+                        stop_type="dropoff",
+                        parcel_count=1,
+                    )
+                    session.add(dropoff)
+                    await session.flush()
+                    session.add(StopOrder(stop_id=dropoff.id, order_id=order.id))
+
+                    route.plan_version += 1
+                    await session.execute(
+                        update(Order)
+                        .where(Order.id == order.id)
+                        .values(status=OrderStatus.assigned, assigned_at=datetime.now(timezone.utc))
+                    )
+                    await session.commit()
+
+                    event_payload = {
+                        "type": "route_updated",
+                        "route_id": str(route.id),
+                        "plan_version": route.plan_version,
+                        "change": "stop_added",
+                        "affected_stop_ids": [str(pickup.id), str(dropoff.id)],
+                        "message": "New stop added ahead on your route",
+                        "occurred_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    await get_client().publish(f"driver_route_events:{route.driver_id}", json.dumps(event_payload))
+
+                    logger.info(
+                        "route_stop_inserted_live",
+                        hub_id=hub_id,
+                        route_id=str(route.id),
+                        driver_id=str(route.driver_id),
+                        order_id=order_id,
+                        plan_version=route.plan_version,
+                    )
+
+                    inserted.add(order_id)
+                    break  # this order placed - move on to the next unassigned one
+
+        return inserted

@@ -5,17 +5,35 @@
     "scheme": "lmxdriver",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
-    "assetBundlePatterns": ["**/*"],
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#4f46e5"
+    },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.lmx.driver"
+      "bundleIdentifier": "com.lmx.driver",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Unlock LMX Driver with Face ID instead of re-entering a verification code every shift."
+      }
     },
     "android": {
-      "package": "com.lmx.driver"
+      "package": "com.lmx.driver",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#4f46e5"
+      }
     },
     "extra": {
       "apiBaseUrl": "http://localhost:8000"
-    }
+    },
+    "plugins": [
+      "expo-font"
+    ]
   }
 }

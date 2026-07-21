@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -8,7 +8,8 @@ import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TextField } from '../components/TextField';
 import type { ProfileStackParamList } from '../navigation/types';
-import { colors, radius, spacing, typography } from '../theme';
+import { radius, spacing, typography, useThemeColors } from '../theme';
+import type { ColorScheme } from '../theme';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'EditVehicle'>;
 
@@ -18,6 +19,8 @@ const VEHICLE_TYPES = ['car', 'van', 'bike'] as const;
 // (1c, VehicleSetupScreen) but reachable any time from Profile, pre-filled
 // with the driver's current values instead of starting blank.
 export function EditVehicleScreen({ navigation }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { profile, setProfile } = useAuth();
   const [vehicleType, setVehicleType] = useState<(typeof VEHICLE_TYPES)[number]>(
     (profile?.vehicle_type as (typeof VEHICLE_TYPES)[number]) ?? 'car',
@@ -48,7 +51,7 @@ export function EditVehicleScreen({ navigation }: Props) {
 
   return (
     <ScreenContainer>
-      <Text style={typography.label}>Vehicle type</Text>
+      <Text style={styles.fieldLabel}>Vehicle type</Text>
       <View style={styles.segmentRow}>
         {VEHICLE_TYPES.map((type) => (
           <Pressable
@@ -78,18 +81,20 @@ export function EditVehicleScreen({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  segmentRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs, marginBottom: spacing.lg },
-  segment: {
-    flex: 1,
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-  },
-  segmentActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  segmentLabel: { color: colors.textPrimary, fontWeight: '600' },
-  segmentLabelActive: { color: colors.primaryText },
-  error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
-});
+const makeStyles = (colors: ColorScheme) =>
+  StyleSheet.create({
+    fieldLabel: { ...typography.label, color: colors.textPrimary },
+    segmentRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs, marginBottom: spacing.lg },
+    segment: {
+      flex: 1,
+      paddingVertical: spacing.sm + 2,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: 'center',
+    },
+    segmentActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    segmentLabel: { color: colors.textPrimary, fontWeight: '600' },
+    segmentLabelActive: { color: colors.primaryText },
+    error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
+  });

@@ -13,21 +13,25 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sse_starlette.sse import EventSourceResponse
 
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
 from app.config import settings
 from app.db import get_db
-from app.driver_auth.dependencies import AuthedDriver, get_current_driver
+from app.driver_auth.dependencies import AuthedDriver, get_current_driver, revoked_devices_key
 from app.driver_auth.otp_store import OtpRateLimitExceeded, OtpStore
 from app.driver_auth.tokens import issue_token
 from app.fleet_state.manager import FleetStateManager
+from app.redis_client import get_client
 from app.messaging.shop_notifications import notify_shop_en_route, notify_shop_picked_up
 from app.messaging.sms_client import get_sms_client
 from app.models.driver import Driver
+from app.models.driver_device import DriverDevice
 from app.models.driver_document import DriverDocument
 from app.models.message import Message
 from app.models.order import Order, OrderStatus, SLATier
@@ -44,6 +48,7 @@ from app.schemas.driver_app import (
     DriverProfileUpdate,
     DriverProfileView,
     EarningsView,
+    FlagStopBody,
     JobOfferView,
     MessageView,
     OfferStopSummary,
@@ -54,10 +59,17 @@ from app.schemas.driver_app import (
     StopView,
     TripSummaryView,
 )
-from app.schemas.driver_auth import AuthToken, RequestOtpBody, RequestOtpResult, VerifyOtpBody
+from app.schemas.driver_auth import (
+    AuthToken,
+    DriverDeviceView,
+    RequestOtpBody,
+    RequestOtpResult,
+    VerifyOtpBody,
+)
 from app.schemas.fleet import DriverState
 
 router = APIRouter(prefix="/driver", tags=["driver"])
+logger = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +103,96 @@ async def verify_otp(body: VerifyOtpBody, session: AsyncSession = Depends(get_db
     if driver is None:
         raise HTTPException(status_code=404, detail="No driver registered with this phone number")
 
-    return AuthToken(access_token=issue_token(str(driver.id), str(driver.hub_id)))
+    now = datetime.now(timezone.utc)
+    device_result = await session.execute(
+        select(DriverDevice).where(
+            DriverDevice.driver_id == driver.id, DriverDevice.device_id == body.device_id
+        )
+    )
+    device = device_result.scalar_one_or_none()
+    if device is None:
+        device = DriverDevice(
+            driver_id=driver.id, device_id=body.device_id, device_name=body.device_name, last_seen_at=now
+        )
+        session.add(device)
+    else:
+        device.last_seen_at = now
+        device.device_name = body.device_name or device.device_name
+        # Re-verifying OTP is itself re-proof of identity - if this device
+        # was previously revoked (e.g. "not my phone anymore" turned out to
+        # be wrong, or a driver got their phone back), a fresh OTP clears it.
+        device.revoked_at = None
+    await session.commit()
+
+    await get_client().srem(revoked_devices_key(str(driver.id)), body.device_id)
+
+    return AuthToken(access_token=issue_token(str(driver.id), str(driver.hub_id), body.device_id))
+
+
+@router.post("/auth/refresh", response_model=AuthToken)
+async def refresh_token(
+    driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
+) -> AuthToken:
+    """
+    Lets a driver's session slide forward indefinitely on each app open
+    without redoing OTP, as long as their device isn't revoked - the
+    existing ~month-long token expiry already outlives any single shift,
+    so this isn't fixing a TTL problem, it's what the client calls after a
+    successful biometric unlock to keep a long-lived device-bound session
+    alive without a second refresh-token artifact type.
+    """
+    device_result = await session.execute(
+        select(DriverDevice).where(
+            DriverDevice.driver_id == uuid.UUID(driver.driver_id), DriverDevice.device_id == driver.device_id
+        )
+    )
+    device = device_result.scalar_one_or_none()
+    if device is not None:
+        device.last_seen_at = datetime.now(timezone.utc)
+        await session.commit()
+
+    return AuthToken(access_token=issue_token(driver.driver_id, driver.hub_id, driver.device_id))
+
+
+@router.get("/me/devices", response_model=list[DriverDeviceView])
+async def list_my_devices(
+    driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
+) -> list[DriverDeviceView]:
+    result = await session.execute(
+        select(DriverDevice)
+        .where(DriverDevice.driver_id == uuid.UUID(driver.driver_id), DriverDevice.revoked_at.is_(None))
+        .order_by(DriverDevice.last_seen_at.desc())
+    )
+    return [
+        DriverDeviceView(
+            device_id=d.device_id,
+            device_name=d.device_name,
+            last_seen_at=d.last_seen_at.isoformat(),
+            is_current=d.device_id == driver.device_id,
+        )
+        for d in result.scalars().all()
+    ]
+
+
+@router.delete("/me/devices/{device_id}", status_code=204)
+async def revoke_my_device(
+    device_id: str, driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
+) -> None:
+    """Self-service "this isn't my phone anymore" - takes effect on that
+    device's very next request (checked in get_current_driver), not just
+    the next time it tries to refresh."""
+    result = await session.execute(
+        select(DriverDevice).where(
+            DriverDevice.driver_id == uuid.UUID(driver.driver_id), DriverDevice.device_id == device_id
+        )
+    )
+    device = result.scalar_one_or_none()
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    device.revoked_at = datetime.now(timezone.utc)
+    await session.commit()
+    await get_client().sadd(revoked_devices_key(driver.driver_id), device_id)
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +694,8 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     order_ids=[str(o) for o in order_ids],
                     eta=stop.eta,
                     completed_at=stop.completed_at,
+                    failure_reason=stop.failure_reason,
+                    flag_note=stop.flag_note,
                 )
             )
         else:
@@ -615,6 +718,8 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     eta=stop.eta,
                     completed_at=stop.completed_at,
                     left_at=stop.pod_left_at,
+                    failure_reason=stop.failure_reason,
+                    flag_note=stop.flag_note,
                 )
             )
 
@@ -636,8 +741,50 @@ async def get_my_route(
     return await _load_route_view(session, route.id)
 
 
-async def _get_owned_stop(session: AsyncSession, stop_id: str, driver: AuthedDriver) -> Stop:
-    stop = await session.get(Stop, uuid.UUID(stop_id))
+@router.get("/me/route-events")
+async def stream_my_route_events(driver: AuthedDriver = Depends(get_current_driver)) -> EventSourceResponse:
+    """
+    Live route-change push (the wireframe's "New stop added ahead" banner).
+    Redis pub/sub, not the in-process HubEventBus (app/events/bus.py) -
+    that bus always reruns the dispatch optimizer regardless of which
+    handler you'd want, and pub/sub broadcasts to every subscriber
+    regardless of which backend replica holds the connection, which
+    matters once this runs behind more than one instance (S3/E8 in
+    docs/ROADMAP.md). One channel per driver, not per hub - a driver only
+    ever cares about their own route, so there's nothing to filter out.
+
+    Client is expected to treat this as "go refetch GET /driver/me/route,"
+    not as the source of truth for what changed - the event payload is
+    enough to render a banner, but the authoritative stop list always
+    comes from a real fetch. Route.plan_version (returned by that same
+    endpoint) is the missed-event backstop: a driver reconnecting after
+    being offline compares their last-known plan_version to the fresh
+    fetch's, and a mismatch alone is enough to know a resync is needed even
+    if the pub/sub message that caused it was never received.
+    """
+
+    async def event_generator():
+        redis = get_client()
+        pubsub = redis.pubsub()
+        channel = f"driver_route_events:{driver.driver_id}"
+        await pubsub.subscribe(channel)
+        try:
+            yield {"event": "connected", "data": "{}"}
+            async for message in pubsub.listen():
+                if message["type"] != "message":
+                    continue
+                yield {"event": "route_updated", "data": message["data"]}
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+
+    return EventSourceResponse(event_generator())
+
+
+async def _get_owned_stop(
+    session: AsyncSession, stop_id: str, driver: AuthedDriver, *, for_update: bool = False
+) -> Stop:
+    stop = await session.get(Stop, uuid.UUID(stop_id), with_for_update=for_update)
     if stop is None:
         raise HTTPException(status_code=404, detail="Stop not found")
     route = await session.get(Route, stop.route_id)
@@ -735,8 +882,34 @@ async def complete_stop(
     driver: AuthedDriver = Depends(get_current_driver),
     session: AsyncSession = Depends(get_db),
 ) -> StopView:
-    stop = await _get_owned_stop(session, stop_id, driver)
-    _assert_stop_not_terminal(stop, "complete")
+    # for_update: without this, two concurrent completion calls for the same
+    # stop (e.g. an offline-queue retry racing a request that already landed)
+    # could both read status != "completed" before either commits.
+    stop = await _get_owned_stop(session, stop_id, driver, for_update=True)
+
+    if stop.status == "completed":
+        # Idempotent replay, not a conflict - an offline-queue retry (or any
+        # client that resubmits after a dropped response) must see this as
+        # the same success it already got, not a 409. First write wins: a
+        # differing payload is logged for observability but never persisted
+        # - this endpoint's idempotency exists to make blind retries of an
+        # identical request safe, not to let a second call silently amend
+        # already-committed proof-of-delivery.
+        if (body.method, body.photo_url, body.signature_url, body.pin, body.left_at) != (
+            stop.pod_method,
+            stop.pod_photo_url,
+            stop.pod_signature_url,
+            stop.pod_pin,
+            stop.pod_left_at,
+        ):
+            logger.warning(
+                "stop_complete_replay_payload_mismatch",
+                stop_id=stop_id,
+                driver_id=driver.driver_id,
+            )
+        return await _stop_view_after_reload(session, stop)
+
+    _assert_stop_not_terminal(stop, "complete")  # still 409s on status == "failed" - a genuine conflict
     if stop.status == "pending":
         raise HTTPException(status_code=409, detail="Arrive at this stop before completing it")
     if stop.stop_type == "pickup" and stop.scanned_count < stop.parcel_count:
@@ -756,7 +929,10 @@ async def complete_stop(
                 Stop.route_id == stop.route_id,
                 Stop.stop_type == "pickup",
                 Stop.sequence < stop.sequence,
-                Stop.status != "completed",
+                # notin_ terminal, not != "completed" - a *failed* pickup is
+                # never going to become completed, so treating it as
+                # "unfinished" would block this dropoff from ever completing.
+                Stop.status.notin_(_TERMINAL_STOP_STATUSES),
             )
         )
         if unfinished_pickups.scalar_one() > 0:
@@ -785,7 +961,9 @@ async def complete_stop(
             )
 
     remaining_result = await session.execute(
-        select(func.count()).select_from(Stop).where(Stop.route_id == stop.route_id, Stop.status != "completed")
+        select(func.count())
+        .select_from(Stop)
+        .where(Stop.route_id == stop.route_id, Stop.status.notin_(_TERMINAL_STOP_STATUSES))
     )
     route_finished = remaining_result.scalar_one() == 0
     if route_finished:
@@ -810,7 +988,7 @@ async def complete_stop(
                 Stop.route_id == stop.route_id,
                 Stop.stop_type == "pickup",
                 Stop.sequence > stop.sequence,
-                Stop.status != "completed",
+                Stop.status.notin_(_TERMINAL_STOP_STATUSES),
             )
             .order_by(Stop.sequence)
             .limit(1)
@@ -834,6 +1012,56 @@ async def complete_stop(
             state.current_route_id = None
             await manager.upsert_driver_state(state)
         await dispatch_event_bus.publish(driver.hub_id, "stop_completed")
+
+    return await _stop_view_after_reload(session, stop)
+
+
+@router.post("/stops/{stop_id}/flag", response_model=StopView)
+async def flag_stop_issue(
+    stop_id: str,
+    body: FlagStopBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> StopView:
+    """
+    "Flag an issue" (wireframe screen of the same name) - a stop that can't
+    be completed normally (shop closed, access blocked, a dispute, etc.)
+    becomes terminal via a specific reason code instead of being a dead
+    end. Not the same thing as StopFlag (app/models/stop.py) - that's an
+    ops route-planning annotation for the Learning Loop, a different
+    consumer with different semantics; this is a driver-facing incident
+    report.
+    """
+    stop = await _get_owned_stop(session, stop_id, driver, for_update=True)
+    _assert_stop_not_terminal(stop, "flag")
+
+    stop.status = "failed"
+    stop.failure_reason = body.reason.value
+    stop.flag_note = body.note
+    stop.flagged_at = datetime.now(timezone.utc)
+
+    order_ids_result = await session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == stop.id))
+    order_ids = [row[0] for row in order_ids_result.all()]
+    if order_ids:
+        await session.execute(
+            update(Order).where(Order.id.in_(order_ids)).values(status=OrderStatus.delivery_failed)
+        )
+
+    remaining_result = await session.execute(
+        select(func.count())
+        .select_from(Stop)
+        .where(Stop.route_id == stop.route_id, Stop.status.notin_(_TERMINAL_STOP_STATUSES))
+    )
+    if remaining_result.scalar_one() == 0:
+        route = await session.get(Route, stop.route_id)
+        route.status = "completed"
+
+    await session.commit()
+
+    # Ops notification reuses the existing in-process event bus, same
+    # pattern as complete_stop's "stop_completed" - no new SSE/pubsub here,
+    # that's a separate mechanism (see the live route-change push feature).
+    await dispatch_event_bus.publish(driver.hub_id, "stop_failed")
 
     return await _stop_view_after_reload(session, stop)
 

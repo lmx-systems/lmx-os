@@ -92,10 +92,11 @@ async def test_otp_issuance_rate_limit_is_per_phone_number(fake_redis):
 
 
 def test_issue_and_decode_token_roundtrip():
-    token = issue_token("driver-1", "hub-1")
-    driver_id, hub_id = decode_token(token)
+    token = issue_token("driver-1", "hub-1", "device-1")
+    driver_id, hub_id, device_id = decode_token(token)
     assert driver_id == "driver-1"
     assert hub_id == "hub-1"
+    assert device_id == "device-1"
 
 
 def test_decode_rejects_garbage_token():

@@ -33,11 +33,12 @@ def assert_driver_jwt_secret_configured() -> None:
         )
 
 
-def issue_token(driver_id: str, hub_id: str) -> str:
+def issue_token(driver_id: str, hub_id: str, device_id: str) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": driver_id,
         "hub_id": hub_id,
+        "device_id": device_id,
         "iat": now,
         "exp": now + timedelta(hours=settings.driver_jwt_expiry_hours),
     }
@@ -48,10 +49,12 @@ class InvalidDriverToken(Exception):
     pass
 
 
-def decode_token(token: str) -> tuple[str, str]:
-    """Returns (driver_id, hub_id). Raises InvalidDriverToken if invalid/expired."""
+def decode_token(token: str) -> tuple[str, str, str]:
+    """Returns (driver_id, hub_id, device_id). Raises InvalidDriverToken if
+    invalid/expired/missing the device_id claim (e.g. a token issued before
+    device-bound auth existed - re-authenticating issues a current one)."""
     try:
         payload = jwt.decode(token, settings.driver_jwt_secret, algorithms=[ALGORITHM])
-    except jwt.PyJWTError as exc:
+        return payload["sub"], payload["hub_id"], payload["device_id"]
+    except (jwt.PyJWTError, KeyError) as exc:
         raise InvalidDriverToken(str(exc)) from exc
-    return payload["sub"], payload["hub_id"]

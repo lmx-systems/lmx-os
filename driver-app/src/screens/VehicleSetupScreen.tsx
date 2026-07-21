@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { api, ApiError } from '../api/client';
@@ -6,7 +6,8 @@ import { useAuth } from '../auth/AuthContext';
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TextField } from '../components/TextField';
-import { colors, radius, spacing, typography } from '../theme';
+import { radius, spacing, typography, useThemeColors } from '../theme';
+import type { ColorScheme } from '../theme';
 
 const VEHICLE_TYPES = ['car', 'van', 'bike'] as const;
 
@@ -15,6 +16,8 @@ const VEHICLE_TYPES = ['car', 'van', 'bike'] as const;
 // profile.vehicle_type is null). Document/insurance uploads aren't part
 // of this screen in v1 - they live in the profile screen (1r, Phase 2).
 export function VehicleSetupScreen() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { setProfile } = useAuth();
   const [vehicleType, setVehicleType] = useState<(typeof VEHICLE_TYPES)[number]>('car');
   const [plateNumber, setPlateNumber] = useState('');
@@ -42,10 +45,10 @@ export function VehicleSetupScreen() {
 
   return (
     <ScreenContainer>
-      <Text style={typography.small}>Step 2 of 2</Text>
-      <Text style={[typography.title, styles.title]}>Your vehicle</Text>
+      <Text style={styles.stepText}>Step 2 of 2</Text>
+      <Text style={styles.title}>Your vehicle</Text>
 
-      <Text style={typography.label}>Vehicle type</Text>
+      <Text style={styles.fieldLabel}>Vehicle type</Text>
       <View style={styles.segmentRow}>
         {VEHICLE_TYPES.map((type) => (
           <Pressable
@@ -75,19 +78,22 @@ export function VehicleSetupScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  title: { marginBottom: spacing.lg },
-  segmentRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs, marginBottom: spacing.lg },
-  segment: {
-    flex: 1,
-    paddingVertical: spacing.sm + 2,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-  },
-  segmentActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  segmentLabel: { color: colors.textPrimary, fontWeight: '600' },
-  segmentLabelActive: { color: colors.primaryText },
-  error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
-});
+const makeStyles = (colors: ColorScheme) =>
+  StyleSheet.create({
+    stepText: { ...typography.small, color: colors.textMuted },
+    title: { ...typography.title, color: colors.textPrimary, marginBottom: spacing.lg },
+    fieldLabel: { ...typography.label, color: colors.textPrimary },
+    segmentRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs, marginBottom: spacing.lg },
+    segment: {
+      flex: 1,
+      paddingVertical: spacing.sm + 2,
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: 'center',
+    },
+    segmentActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    segmentLabel: { color: colors.textPrimary, fontWeight: '600' },
+    segmentLabelActive: { color: colors.primaryText },
+    error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
+  });

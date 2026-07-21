@@ -8,14 +8,17 @@ export type AuthStackParamList = {
 // than under Profile). Its own stack, separate from Profile - a driver
 // mid-route shouldn't lose that navigation state by tapping over to the
 // Profile tab and back.
+//
+// Consolidated per the wireframe redesign: Home now covers what used to be
+// three screens (Home/AvailableJobs/ActiveRoute - offers and route state
+// live inline on one screen, not separate pushed routes), and StopDetail
+// covers what used to be three more (ArrivedPickup/ScanParcels/
+// ProofOfDelivery - one state-driven screen instead of a step-by-step
+// pushed sequence).
 export type HomeStackParamList = {
   Home: undefined;
-  AvailableJobs: undefined;
-  JobDetail: { offerId: string };
-  ActiveRoute: undefined;
-  ArrivedPickup: { stopId: string };
-  ScanParcels: { stopId: string; parcelCount: number; scannedCount: number };
-  ProofOfDelivery: { stopId: string };
+  StopDetail: { stopId: string };
+  FlagIssue: { stopId: string };
   MessageCustomer: { stopId: string; contactName: string | null };
 };
 

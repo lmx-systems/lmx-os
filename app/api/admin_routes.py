@@ -12,6 +12,7 @@ app/schemas/admin.py's ClientOnboardingBody docstring.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -19,9 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.client_auth.passwords import hash_password
 from app.db import get_db
+from app.driver_auth.dependencies import revoked_devices_key
 from app.models.client import Client
 from app.models.client_rate import ClientRate
+from app.models.driver_device import DriverDevice
 from app.models.shop import Shop
+from app.redis_client import get_client as get_redis_client
 from app.schemas.admin import ClientOnboardingBody, ClientOnboardingResult
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -88,3 +92,26 @@ async def onboard_client(
 
     await session.commit()
     return ClientOnboardingResult(client_id=str(client.id), shop_ids=[str(sid) for sid in shop_ids])
+
+
+@router.delete("/drivers/{driver_id}/devices/{device_id}", status_code=204)
+async def admin_revoke_driver_device(
+    driver_id: str, device_id: str, session: AsyncSession = Depends(get_db)
+) -> None:
+    """
+    The "driver calls dispatch, ops revokes on their behalf" path - same
+    effect as the driver-facing DELETE /driver/me/devices/{device_id}, for
+    when the driver themselves can't (lost phone, no app access).
+    """
+    result = await session.execute(
+        select(DriverDevice).where(
+            DriverDevice.driver_id == uuid.UUID(driver_id), DriverDevice.device_id == device_id
+        )
+    )
+    device = result.scalar_one_or_none()
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    device.revoked_at = datetime.now(timezone.utc)
+    await session.commit()
+    await get_redis_client().sadd(revoked_devices_key(driver_id), device_id)

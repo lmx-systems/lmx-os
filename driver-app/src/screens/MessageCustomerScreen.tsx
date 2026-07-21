@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -9,7 +9,8 @@ import { ScreenContainer } from '../components/ScreenContainer';
 import { TextField } from '../components/TextField';
 import type { Message } from '../api/types';
 import type { HomeStackParamList } from '../navigation/types';
-import { colors, radius, spacing, typography } from '../theme';
+import { radius, spacing, typography, useThemeColors } from '../theme';
+import type { ColorScheme } from '../theme';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'MessageCustomer'>;
 
@@ -20,6 +21,8 @@ const POLL_INTERVAL_MS = 5000;
 // personal phone, and this screen never sees the customer's real number
 // either (the API response has no phone field at all - see MessageView).
 export function MessageCustomerScreen({ route }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const { stopId, contactName } = route.params;
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState('');
@@ -54,7 +57,7 @@ export function MessageCustomerScreen({ route }: Props) {
 
   return (
     <ScreenContainer scroll={false}>
-      <Text style={typography.subtitle}>{contactName ? `To ${contactName}` : 'Masked SMS - your number stays private'}</Text>
+      <Text style={styles.headerSubtitle}>{contactName ? `To ${contactName}` : 'Masked SMS - your number stays private'}</Text>
 
       <FlatList
         style={styles.list}
@@ -77,13 +80,15 @@ export function MessageCustomerScreen({ route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  list: { flex: 1, marginTop: spacing.md },
-  bubble: { maxWidth: '80%', borderRadius: radius.md, padding: spacing.sm + 2, marginBottom: spacing.sm },
-  outbound: { backgroundColor: colors.primary, alignSelf: 'flex-end' },
-  inbound: { backgroundColor: colors.border, alignSelf: 'flex-start' },
-  outboundText: { color: colors.primaryText },
-  inboundText: { color: colors.textPrimary },
-  composerRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end' },
-  composerField: { flex: 1 },
-});
+const makeStyles = (colors: ColorScheme) =>
+  StyleSheet.create({
+    headerSubtitle: { ...typography.subtitle, color: colors.textSecondary },
+    list: { flex: 1, marginTop: spacing.md },
+    bubble: { maxWidth: '80%', borderRadius: radius.md, padding: spacing.sm + 2, marginBottom: spacing.sm },
+    outbound: { backgroundColor: colors.primary, alignSelf: 'flex-end' },
+    inbound: { backgroundColor: colors.border, alignSelf: 'flex-start' },
+    outboundText: { color: colors.primaryText },
+    inboundText: { color: colors.textPrimary },
+    composerRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-end' },
+    composerField: { flex: 1 },
+  });

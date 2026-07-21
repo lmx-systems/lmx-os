@@ -84,7 +84,7 @@ async def test_message_customer_rejects_a_pickup_stop(db_session, real_redis_cli
 
 async def test_message_support_stores_even_when_no_support_number_configured(db_session):
     hub_id, driver_id = await _seed_driver_only(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     sent = await message_support(SendMessageBody(body="Gate code needed at 4th & Main"), driver=authed, session=db_session)
     assert sent.channel == "support"
@@ -98,8 +98,8 @@ async def test_message_support_stores_even_when_no_support_number_configured(db_
 async def test_support_messages_are_scoped_per_driver(db_session):
     hub_id, driver_id = await _seed_driver_only(db_session)
     _hub_id2, driver_id2 = await _seed_driver_only(db_session)
-    authed_1 = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
-    authed_2 = AuthedDriver(driver_id=str(driver_id2), hub_id=str(hub_id))
+    authed_1 = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+    authed_2 = AuthedDriver(driver_id=str(driver_id2), hub_id=str(hub_id), device_id="test-device-2")
 
     await message_support(SendMessageBody(body="From driver 1"), driver=authed_1, session=db_session)
     await message_support(SendMessageBody(body="From driver 2"), driver=authed_2, session=db_session)
@@ -132,7 +132,7 @@ async def test_inbound_webhook_from_unknown_number_does_not_error(db_session):
 
 async def test_earnings_is_placeholder_and_estimates_from_route_span(db_session):
     hub_id, driver_id = await _seed_driver_only(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     now = datetime.now(timezone.utc)
     route = Route(hub_id=hub_id, driver_id=driver_id, status="completed", plan_version=1)
@@ -150,7 +150,7 @@ async def test_earnings_is_placeholder_and_estimates_from_route_span(db_session)
 
 async def test_earnings_excludes_routes_outside_the_current_week(db_session):
     hub_id, driver_id = await _seed_driver_only(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     now = datetime.now(timezone.utc)
     last_week_route = Route(hub_id=hub_id, driver_id=driver_id, status="completed", plan_version=1)
@@ -166,7 +166,7 @@ async def test_earnings_excludes_routes_outside_the_current_week(db_session):
 
 async def test_earnings_excludes_non_completed_routes(db_session):
     hub_id, driver_id = await _seed_driver_only(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     active_route = Route(hub_id=hub_id, driver_id=driver_id, status="active", plan_version=1)
     db_session.add(active_route)
@@ -178,7 +178,7 @@ async def test_earnings_excludes_non_completed_routes(db_session):
 
 async def test_trips_lists_completed_routes_with_stop_counts_regardless_of_week(db_session):
     hub_id, driver_id = await _seed_driver_only(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id))
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
     now = datetime.now(timezone.utc)
     route = Route(hub_id=hub_id, driver_id=driver_id, status="completed", plan_version=1)

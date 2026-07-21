@@ -75,7 +75,12 @@ export interface Stop {
   eta: string | null;
   completed_at: string | null;
   left_at: string | null;
+  failure_reason: FlagReasonCode | null;
+  flag_note: string | null;
 }
+
+// Mirrors app/schemas/driver_app.py's StopFailureReason enum.
+export type FlagReasonCode = 'SHOP_CLOSED' | 'ACCESS_ISSUE' | 'COD_DISPUTE' | 'PARTS_MISSING' | 'REFUSED';
 
 export interface Route {
   route_id: string;

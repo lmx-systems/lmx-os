@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -7,7 +7,8 @@ import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TextField } from '../components/TextField';
 import type { AuthStackParamList } from '../navigation/types';
-import { colors, spacing, typography } from '../theme';
+import { spacing, typography, useThemeColors } from '../theme';
+import type { ColorScheme } from '../theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'SignIn'>;
 
@@ -15,6 +16,8 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'SignIn'>;
 // screen. "Apply to drive" (non-drivers) is explicitly out of app scope
 // per the wireframe's annotation - drivers are provisioned by ops.
 export function SignInScreen({ navigation }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,8 +41,8 @@ export function SignInScreen({ navigation }: Props) {
       <View style={styles.logo}>
         <View style={styles.logoBox} />
       </View>
-      <Text style={[typography.title, styles.centered]}>LMX Driver</Text>
-      <Text style={[typography.subtitle, styles.centered, styles.tagline]}>
+      <Text style={[styles.titleText, styles.centered]}>LMX Driver</Text>
+      <Text style={[styles.subtitleText, styles.centered, styles.tagline]}>
         Deliver more, drive smarter.
       </Text>
 
@@ -55,18 +58,22 @@ export function SignInScreen({ navigation }: Props) {
 
       <Button label="Continue" onPress={handleContinue} loading={loading} disabled={!phone.trim()} />
 
-      <Text style={[typography.small, styles.centered, styles.footer]}>
+      <Text style={[styles.footerText, styles.centered, styles.footer]}>
         New driver? Apply to drive
       </Text>
     </ScreenContainer>
   );
 }
 
-const styles = StyleSheet.create({
-  logo: { alignItems: 'center', marginTop: spacing.xxl, marginBottom: spacing.lg },
-  logoBox: { width: 64, height: 64, borderRadius: 16, backgroundColor: colors.border },
-  centered: { textAlign: 'center' },
-  tagline: { marginBottom: spacing.xxl },
-  footer: { marginTop: spacing.lg },
-  error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
-});
+const makeStyles = (colors: ColorScheme) =>
+  StyleSheet.create({
+    logo: { alignItems: 'center', marginTop: spacing.xxl, marginBottom: spacing.lg },
+    logoBox: { width: 64, height: 64, borderRadius: 16, backgroundColor: colors.border },
+    titleText: { ...typography.title, color: colors.textPrimary },
+    subtitleText: { ...typography.subtitle, color: colors.textSecondary },
+    footerText: { ...typography.small, color: colors.textMuted },
+    centered: { textAlign: 'center' },
+    tagline: { marginBottom: spacing.xxl },
+    footer: { marginTop: spacing.lg },
+    error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
+  });
