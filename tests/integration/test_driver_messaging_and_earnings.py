@@ -31,6 +31,7 @@ from app.api.driver_routes import (
 )
 from app.api.webhooks import twilio_inbound_sms
 from app.driver_auth.dependencies import AuthedDriver
+from tests.twilio_request_helpers import make_twilio_form_request
 from app.models.driver import Driver
 from app.models.hub import Hub
 from app.models.route import Route
@@ -115,7 +116,10 @@ async def test_inbound_webhook_matches_reply_to_most_recent_outbound_thread(db_s
     await message_customer(dropoff.stop_id, SendMessageBody(body="On my way!"), driver=authed, session=db_session)
 
     await twilio_inbound_sms(
-        From=order.delivery_contact_phone, Body="Thanks, I'll be here", MessageSid="SM_test_123", session=db_session
+        make_twilio_form_request(
+            {"From": order.delivery_contact_phone, "Body": "Thanks, I'll be here", "MessageSid": "SM_test_123"}
+        ),
+        session=db_session,
     )
 
     thread = await list_customer_messages(dropoff.stop_id, driver=authed, session=db_session)
@@ -126,8 +130,105 @@ async def test_inbound_webhook_matches_reply_to_most_recent_outbound_thread(db_s
 async def test_inbound_webhook_from_unknown_number_does_not_error(db_session):
     # No prior outbound message to this number anywhere - should log and
     # no-op, not raise, since Twilio doesn't retry cleanly on a 500.
-    response = await twilio_inbound_sms(From="+19995551234", Body="???", MessageSid=None, session=db_session)
+    response = await twilio_inbound_sms(
+        make_twilio_form_request({"From": "+19995551234", "Body": "???"}), session=db_session
+    )
     assert response.status_code == 200
+
+
+async def _seed_two_conversations(db_session, phone: str):
+    """Two customer conversations from the same driver to the same phone
+    number, on two different dropoff stops (roadmap item A8's ambiguity
+    case). Returns (active_stop_id, completed_stop_id)."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.message import Message
+
+    hub_id, driver_id = await _seed_driver_only(db_session)
+    route = Route(hub_id=hub_id, driver_id=driver_id, status="active", plan_version=1)
+    db_session.add(route)
+    await db_session.commit()
+
+    now = datetime.now(timezone.utc)
+    completed_stop = Stop(
+        route_id=route.id, sequence=1, stop_type="dropoff", status="completed",
+        completed_at=now - timedelta(minutes=30),
+    )
+    active_stop = Stop(route_id=route.id, sequence=2, stop_type="dropoff", status="en_route")
+    db_session.add_all([completed_stop, active_stop])
+    await db_session.commit()
+
+    # The COMPLETED stop's outbound is the more recent one - under the old
+    # most-recent-wins matching, the reply would misattach to it.
+    older = Message(
+        hub_id=hub_id, driver_id=driver_id, stop_id=active_stop.id,
+        channel="customer", direction="outbound", body="On my way with your first package",
+        counterparty_phone=phone,
+    )
+    older.created_at = now - timedelta(minutes=40)
+    newer = Message(
+        hub_id=hub_id, driver_id=driver_id, stop_id=completed_stop.id,
+        channel="customer", direction="outbound", body="Your other package was delivered",
+        counterparty_phone=phone,
+    )
+    newer.created_at = now - timedelta(minutes=5)
+    db_session.add_all([older, newer])
+    await db_session.commit()
+    return active_stop.id, completed_stop.id
+
+
+async def test_inbound_reply_prefers_active_stop_over_completed(db_session):
+    # A8: with two recent conversations to the same number, the reply
+    # attaches to the still-active delivery, not the most recent message
+    # (which belongs to an already-completed stop).
+    from sqlalchemy import select as sa_select
+
+    from app.models.message import Message
+
+    phone = "+15559998877"
+    active_stop_id, _completed_stop_id = await _seed_two_conversations(db_session, phone)
+
+    await twilio_inbound_sms(
+        make_twilio_form_request({"From": phone, "Body": "Are you close?"}), session=db_session
+    )
+
+    result = await db_session.execute(
+        sa_select(Message).where(Message.direction == "inbound", Message.counterparty_phone == phone)
+    )
+    inbound = result.scalars().one()
+    assert inbound.stop_id == active_stop_id
+
+
+async def test_inbound_reply_ignores_threads_older_than_match_window(db_session):
+    # A8: an outbound message from 2 days ago is not a match candidate -
+    # the reply is recorded as unmatched (logged) rather than attached to
+    # a stale conversation.
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import select as sa_select
+
+    from app.models.message import Message
+
+    phone = "+15550001111"
+    hub_id, driver_id = await _seed_driver_only(db_session)
+    stale = Message(
+        hub_id=hub_id, driver_id=driver_id, stop_id=None,
+        channel="support", direction="outbound", body="old thread",
+        counterparty_phone=phone,
+    )
+    stale.created_at = datetime.now(timezone.utc) - timedelta(hours=48)
+    db_session.add(stale)
+    await db_session.commit()
+
+    response = await twilio_inbound_sms(
+        make_twilio_form_request({"From": phone, "Body": "hello again"}), session=db_session
+    )
+    assert response.status_code == 200
+
+    result = await db_session.execute(
+        sa_select(Message).where(Message.direction == "inbound", Message.counterparty_phone == phone)
+    )
+    assert result.scalars().all() == []  # unmatched -> not stored against any thread
 
 
 async def test_earnings_is_placeholder_and_estimates_from_route_span(db_session):

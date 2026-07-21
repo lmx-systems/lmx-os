@@ -463,9 +463,11 @@ dashboard."** The rest is still roughly priority order.
    implemented but never exercised against the live API.
 5. ~~Build the nightly pattern-detection job that populates `proposed_rules`
    (component 6)~~ — done (`app/learning_loop/`). Still needs: the
-   flag-type naming convention confirmed with the driver-app team, and a
-   real scheduler wired to `/learning-loop/{hub_id}/run-nightly-job`
-   instead of manual triggering.
+   flag-type naming convention confirmed with the driver-app team. A real
+   scheduler now exists (`app/learning_loop/scheduler.py`, roadmap item
+   E7): each active hub's job runs nightly at 2am in the hub's own
+   timezone, with a Redis SET NX marker making runs idempotent across
+   restarts/instances; the manual endpoint remains for ops/testing.
 6. ~~Decide whether the Dispatch Optimizer should be triggered by an event
    bus vs. the manually-triggered endpoint~~ — done. `app/events/bus.py`
    is a generic, in-process, per-hub-debounced event bus; the Dispatch
@@ -478,13 +480,15 @@ dashboard."** The rest is still roughly priority order.
    (`app/models/stop.py`) is where that future endpoint should call
    `dispatch_event_bus.publish(hub_id, "stop_completed")`. The manual
    `/optimizer/{hub_id}/run-cycle` endpoint is kept for testing/ops.
-   Still worth a decision before Hub 1: this bus is in-process, so if the
-   app ever runs as more than one instance, each instance only reacts to
-   events it personally receives — fine for a single-instance deployment,
-   a real gap for a horizontally-scaled one. The Learning Loop's nightly
-   job (item 5) is a separate, deliberately-not-event-driven case — it's
-   scheduled, not event-triggered, so it still needs a real scheduler
-   wired to `/learning-loop/{hub_id}/run-nightly-job`.
+   The multi-instance gap is now closed (roadmap item E8): set
+   `EVENT_BUS_BACKEND=redis` and `app/events/redis_bus.py` carries events
+   over Redis pub/sub with per-event dedupe and a cluster-wide per-hub
+   run-lock + pending marker, preserving the in-process bus's "one running
+   call + at most one coalesced rerun" debounce across instances. The
+   in-process bus remains the default for single-instance deployments.
+   The Learning Loop's nightly job (item 5) is a separate,
+   deliberately-not-event-driven case — it's scheduled, and now has a real
+   scheduler (`app/learning_loop/scheduler.py`).
 
 ## Operational notes
 

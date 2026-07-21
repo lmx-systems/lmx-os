@@ -6,15 +6,19 @@ RUN npm ci
 
 COPY . .
 
-# Vite bakes VITE_* env vars in at build time, not runtime - the browser
-# calls this URL directly, so it needs to be whatever the API is reachable
-# at from the client's browser, not from inside the Docker network. See
-# the equivalent comment in dashboard/Dockerfile.
-ARG VITE_API_BASE_URL=http://localhost:8000
+# Runtime config (roadmap item D2): the API URL is no longer baked in at
+# build time - see the equivalent comment in dashboard/Dockerfile. The
+# VITE_* build arg remains only as a legacy fallback; runtime config wins
+# when both are present (src/lib/api.ts).
+ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# nginx:alpine runs /docker-entrypoint.d/*.sh before serving - this is
+# what regenerates runtime-config.js from env vars on every start.
+COPY docker/40-runtime-config.sh /docker-entrypoint.d/40-runtime-config.sh
+RUN chmod +x /docker-entrypoint.d/40-runtime-config.sh
 EXPOSE 80

@@ -26,8 +26,10 @@ from app.config import assert_jwt_secrets_are_distinct, settings
 from app.db import engine
 from app.driver_auth.tokens import assert_driver_jwt_secret_configured
 from app.ingestion.router import router as ingestion_router
+from app.learning_loop.scheduler import learning_loop_scheduler
 from app.logging_config import configure_logging, get_logger
 from app.optimizer.event_trigger import dispatch_event_bus
+from app.rate_limit import RateLimitMiddleware
 from app.redis_client import close_pool, get_client
 from app.security import SharedSecretAuthMiddleware
 
@@ -50,12 +52,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     redis_client = get_client()
     await redis_client.ping()
 
+    # Nightly Learning Loop runs per hub, in the hub's own timezone
+    # (roadmap item E7, app/learning_loop/scheduler.py).
+    learning_loop_scheduler.start()
+    # No-op for the in-process bus; subscribes to Redis pub/sub when
+    # EVENT_BUS_BACKEND=redis (roadmap item E8, app/events/redis_bus.py).
+    await dispatch_event_bus.start()
+
     logger.info("lmx_os_ready")
     yield
 
+    await learning_loop_scheduler.stop()
     # Let any event-triggered dispatch cycle in flight finish before the
     # connection pools it depends on go away (app/optimizer/event_trigger.py).
     await dispatch_event_bus.wait_idle()
+    await dispatch_event_bus.stop()
     await engine.dispose()
     await close_pool()
     logger.info("lmx_os_shutdown")
@@ -72,7 +83,13 @@ app = FastAPI(
 # must be added after auth, not before, so CORS preflight (OPTIONS) is
 # handled before it ever reaches the auth check and gets rejected for
 # missing a header no browser sends on a preflight request.
+#
+# Rate limiting is added after auth (= runs before it), deliberately: it
+# should shield the auth check itself from brute force (API-key guessing),
+# not just what's behind it. Final order outermost-first:
+# CORS -> RateLimit -> SharedSecretAuth -> routes.
 app.add_middleware(SharedSecretAuthMiddleware)
+app.add_middleware(RateLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

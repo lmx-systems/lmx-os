@@ -17,12 +17,14 @@ from app.db import get_db
 from app.fleet_state.manager import FleetStateManager
 from app.learning_loop.service import run_nightly_job
 from app.models.driver import Driver
+from app.models.hub import Hub
 from app.models.order import Order
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.last_cycle_store import LastCycleStore
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.batch_queue import HeldOrderView
 from app.schemas.fleet import DriverLocation, DriverState
+from app.schemas.hub import HubView
 from app.schemas.learning_loop import NightlyJobResult, ProposedRuleSummary
 from app.schemas.optimizer import LastCycleSnapshot, OptimizationResult
 from app.schemas.order import OrderStatusSummary
@@ -33,6 +35,34 @@ router = APIRouter(tags=["ops"])
 @router.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@router.get("/hubs", response_model=list[HubView])
+async def list_hubs(
+    include_inactive: bool = False, session: AsyncSession = Depends(get_db)
+) -> list[HubView]:
+    """
+    All hubs, for hub pickers in the internal dashboard (roadmap item D1) -
+    replaces pasting a raw hub UUID into a text field. Inactive hubs are
+    excluded by default so a decommissioned hub can't be selected for new
+    work; pass include_inactive=true for admin/debug views that need
+    everything.
+    """
+    stmt = select(Hub).order_by(Hub.name)
+    if not include_inactive:
+        stmt = stmt.where(Hub.active.is_(True))
+    result = await session.execute(stmt)
+    return [
+        HubView(
+            hub_id=str(hub.id),
+            name=hub.name,
+            timezone=hub.timezone,
+            lat=hub.lat,
+            lng=hub.lng,
+            active=hub.active,
+        )
+        for hub in result.scalars().all()
+    ]
 
 
 @router.post("/fleet/{hub_id}/drivers/state")

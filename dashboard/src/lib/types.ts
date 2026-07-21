@@ -4,6 +4,16 @@
 // boundary. If that assumption stops holding (e.g. this dashboard starts
 // taking write-heavy user input), reach for zod instead of hand-rolled types.
 
+// GET /hubs (roadmap item D1) - powers the hub dropdown in TopBar.
+export interface HubView {
+  hub_id: string
+  name: string
+  timezone: string
+  lat: number
+  lng: number
+  active: boolean
+}
+
 export interface DriverState {
   driver_id: string
   hub_id: string

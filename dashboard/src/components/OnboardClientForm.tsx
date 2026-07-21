@@ -101,7 +101,7 @@ export function OnboardClientForm({ hubId, onToast }: OnboardClientFormProps) {
   return (
     <Card title="Onboard a new client" meta="Phase 8 — minimal">
       {disabled && (
-        <p className="text-sm text-[var(--text-muted)]">Paste a hub UUID above to onboard a client to it.</p>
+        <p className="text-sm text-[var(--text-muted)]">Select a hub above to onboard a client to it.</p>
       )}
 
       {!disabled && (

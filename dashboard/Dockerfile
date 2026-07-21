@@ -6,14 +6,17 @@ RUN npm ci
 
 COPY . .
 
-# Vite bakes VITE_* env vars in at build time, not runtime - the browser
-# calls this URL directly (it's not proxied through the dashboard
-# container), so it needs to be whatever the API is reachable at from the
-# user's browser, not from inside the Docker network.
-ARG VITE_API_BASE_URL=http://localhost:8000
+# Runtime config (roadmap item D2): the API URL and shared secret are no
+# longer baked in at build time. The image serves a runtime-config.js
+# generated at container START from the API_BASE_URL / API_SHARED_SECRET
+# environment variables (docker/40-runtime-config.sh below) - point one
+# built image at any backend with `docker run -e`, no rebuild.
+#
+# The VITE_* build args remain only as a legacy fallback for anyone still
+# building with them; runtime config wins when both are present
+# (src/lib/api.ts).
+ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
-# Must match the backend's API_SHARED_SECRET, if set - see the note in
-# dashboard/src/lib/api.ts. Baked in at build time same as the URL above.
 ARG VITE_API_SHARED_SECRET=
 ENV VITE_API_SHARED_SECRET=$VITE_API_SHARED_SECRET
 RUN npm run build
@@ -21,4 +24,8 @@ RUN npm run build
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# nginx:alpine runs /docker-entrypoint.d/*.sh before serving - this is
+# what regenerates runtime-config.js from env vars on every start.
+COPY docker/40-runtime-config.sh /docker-entrypoint.d/40-runtime-config.sh
+RUN chmod +x /docker-entrypoint.d/40-runtime-config.sh
 EXPOSE 80

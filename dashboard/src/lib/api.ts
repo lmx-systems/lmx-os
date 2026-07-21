@@ -3,19 +3,30 @@ import type {
   ClientOnboardingResult,
   DriverState,
   HeldOrderView,
+  HubView,
   LastCycleSnapshot,
   NightlyJobResult,
   OptimizationResult,
   OrderStatusSummary,
 } from './types'
 
+// Runtime config first (roadmap item D2 - injected by the Docker image's
+// entrypoint from env vars, so one built image can point at any API), then
+// the build-time VITE_* vars for local dev, then localhost.
+declare global {
+  interface Window {
+    __LMX_RUNTIME_CONFIG__?: { API_BASE_URL?: string; API_SHARED_SECRET?: string }
+  }
+}
+const runtimeConfig = window.__LMX_RUNTIME_CONFIG__ ?? {}
+
 // Only a shared-secret stopgap exists on the backend (see
-// docs/ARCHITECTURE.md item 0), not real per-user auth. When
-// VITE_API_SHARED_SECRET isn't set, this sends no credentials at all,
-// same as before this existed - accurate for a backend with
-// API_SHARED_SECRET unset too.
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
-const API_SHARED_SECRET = import.meta.env.VITE_API_SHARED_SECRET
+// docs/ARCHITECTURE.md item 0), not real per-user auth. When no shared
+// secret is configured, this sends no credentials at all, same as before
+// this existed - accurate for a backend with API_SHARED_SECRET unset too.
+const API_BASE_URL =
+  runtimeConfig.API_BASE_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const API_SHARED_SECRET = runtimeConfig.API_SHARED_SECRET || import.meta.env.VITE_API_SHARED_SECRET
 
 export class ApiError extends Error {
   status: number
@@ -43,6 +54,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  listHubs: () => request<HubView[]>('/hubs'),
+
   fleetOverview: (hubId: string) => request<DriverState[]>(`/fleet/${hubId}/drivers`),
 
   heldOrders: (hubId: string) => request<HeldOrderView[]>(`/batch-queue/${hubId}/held-orders`),

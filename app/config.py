@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     # file with no credentials yet.
     support_phone_number: str | None = None
 
+    # Twilio inbound-webhook signature verification (roadmap item S7).
+    # Twilio signs against the exact public URL it was configured to POST
+    # to - behind a proxy/load balancer that URL usually differs from what
+    # the app sees on request.url (scheme, host, port). Set this to the
+    # URL registered in the Twilio console; unset falls back to the
+    # request's own URL, which is correct when the app is directly exposed.
+    twilio_webhook_public_url: str | None = None
+
     epicor_base_url: str | None = None
     epicor_api_key: str | None = None
 
@@ -63,6 +71,27 @@ class Settings(BaseSettings):
     # deployed at in production. NOT a substitute for real authentication -
     # see docs/ARCHITECTURE.md's auth caveat. Comma-separated in the env var.
     dashboard_cors_origins: str = "http://localhost:5173"
+
+    # Hub event bus backend (roadmap item E8): "in_process" (default -
+    # correct and simplest for a single app instance) or "redis"
+    # (app/events/redis_bus.py - required the moment this runs as more
+    # than one instance, or events published on one instance would never
+    # trigger dispatch cycles on another).
+    event_bus_backend: str = "in_process"
+
+    # Learning Loop nightly scheduler (roadmap item E7,
+    # app/learning_loop/scheduler.py): runs each hub's pattern-detection
+    # job at this hour in the hub's own timezone. Disable for test
+    # environments that don't want a background task running.
+    learning_loop_scheduler_enabled: bool = True
+    learning_loop_schedule_hour: int = 2  # 2am hub-local
+
+    # General API rate limiting (roadmap item S5, app/rate_limit.py):
+    # per-IP request budget per minute across the whole API. 0 disables it
+    # (the default for local dev - the dashboard's 5s polling alone is ~50
+    # req/min per tab, so anything real should be set with that in mind;
+    # 240 is a reasonable production starting point).
+    rate_limit_requests_per_minute: int = 0
 
     # Interim stopgap for docs/ARCHITECTURE.md's "Recommended next steps"
     # item 0: every endpoint (bar /health and API docs) requires this value

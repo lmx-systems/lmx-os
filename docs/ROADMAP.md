@@ -36,8 +36,8 @@ list instead of leaving it scattered across three documents.
 | E4 | Verify the batch-hold "4-question decision logic" against the Source of Truth Index | `app/batch_queue/queue.py`'s SLA → cluster-mate → driver-availability → hold-cap sequence is a reasoned interpretation, not a confirmed spec (gated on B3). |
 | E5 | Recalibrate SLA hold-window minutes (T1=10min, T2=45min, T3=120min) | Placeholder values — the first thing to retune once real Hub 1 data exists. Per-shop overrides already exist (`active_rules`), so this is a data change, not a code change, once the right numbers are known. |
 | E6 | Confirm the Learning Loop's flag-type naming convention with a driver-app stakeholder | `HOLD_TOO_SHORT_FLAG`/`HOLD_TOO_LONG_FLAG` (`app/learning_loop/detection.py`) is a proposed contract, not one anyone outside this build has signed off on. |
-| E7 | Wire a real scheduler for the Learning Loop's nightly job | Still manual-trigger only (`POST /learning-loop/{hub_id}/run-nightly-job`) — needs a cron/scheduled task instead of a person remembering to call it. |
-| E8 | Move the event bus off in-process | `app/events/bus.py` only works within a single running instance — the moment this runs as more than one process/container, event-triggered re-optimization silently stops working for events raised on a different instance than the one handling a given request. |
+| ~~E7~~ | ~~Wire a real scheduler for the Learning Loop's nightly job~~ | **Done** — `app/learning_loop/scheduler.py`: in-app asyncio scheduler started from the lifespan, runs each active hub at 2am *hub-local* time (`Hub.timezone`), idempotent via a per-hub-per-night Redis SET NX marker (safe across restarts and multiple instances). Manual endpoint unchanged. |
+| ~~E8~~ | ~~Move the event bus off in-process~~ | **Done** — `app/events/redis_bus.py`, selected via `EVENT_BUS_BACKEND=redis`: Redis pub/sub transport with per-event dedupe (SET NX) plus a cluster-wide per-hub run-lock + pending marker, preserving the in-process bus's debounce semantics across instances. In-process remains the default for single-instance/dev. |
 | E9 | Validate the 2.5 deliveries-per-hour (DPH) figure | Called out by the peer review as a model assumption, not an established fact — only provable with real driver/order data at Hub 1 (gated on B2). |
 | E10 | Tune HOT_SHOT's skip-penalty/hold-window placeholders | Phase 8 added `HOT_SHOT` ahead of T1 in `SLA_TIER_SKIP_PENALTY` and a 2-minute hold window (`app/sla/engine.py`, `app/optimizer/google_routes_client.py`) — same "reasonable guess, not calibrated" status as E2/E5, now for a fourth, premium-priced tier. |
 
@@ -49,9 +49,9 @@ list instead of leaving it scattered across three documents.
 | S2 | Secrets management | Every credential (DB password, API keys, JWT secret) lives in a `.env` file today. No vault/secrets manager in the loop. |
 | S3 | A real production hosting decision | `docker-compose.yml` is a single-instance local/dev setup — one Postgres container, one Redis container, no managed database, no autoscaling, no load balancer, no automated backups or disaster-recovery plan. |
 | S4 | Observability | No error tracking (e.g. Sentry), no metrics dashboards, no alerting. Right now the only way to know something broke is someone noticing. |
-| S5 | General API rate limiting | Only driver OTP issuance is rate-limited (`app/driver_auth/otp_store.py`). Every other endpoint has none. |
+| ~~S5~~ | ~~General API rate limiting~~ | **Done** — `app/rate_limit.py`: per-IP per-minute budget across the whole API (middleware, runs before auth so it shields API-key guessing too), Redis counter + NX-guarded TTL, fails open on Redis outage, 429 + Retry-After when exceeded. Disabled by default in dev (`RATE_LIMIT_REQUESTS_PER_MINUTE=0`); the targeted per-email/per-phone limiters remain. |
 | S6 | A real security review | Nobody outside this build has looked at this from a security angle yet — worth doing before real orders/drivers/money flow through it. |
-| S7 | Twilio inbound-webhook signature verification | `POST /webhooks/twilio/inbound-sms` currently trusts whatever posts to it — no `X-Twilio-Signature` check yet (`app/api/webhooks.py`'s own docstring flags this). Must close before a real Twilio number points here. |
+| ~~S7~~ | ~~Twilio inbound-webhook signature verification~~ | **Done** — `app/messaging/twilio_signature.py` (pure HMAC-SHA1 algorithm, constant-time compare) enforced in `app/api/webhooks.py`: 403 on missing/invalid `X-Twilio-Signature` when `TWILIO_AUTH_TOKEN` is set; skipped (logged) when unset, same stub posture as `SmsClient`. `TWILIO_WEBHOOK_PUBLIC_URL` handles the behind-a-proxy URL mismatch. |
 | ~~S8~~ | ~~Rate-limit `POST /client/auth/login`~~ | **Done** — `app/client_auth/login_rate_limit.py`, same "counter + NX-guarded TTL" shape as driver OTP issuance; resets on a successful login. |
 | ~~S9~~ | ~~Enforce `CLIENT_JWT_SECRET` ≠ `DRIVER_JWT_SECRET` at startup~~ | **Done** — `app/config.py`'s `assert_jwt_secrets_are_distinct()`, called from `app/main.py`'s lifespan alongside the two existing per-secret checks; refuses to start outside `development` if both are ever set to the same real value. |
 
@@ -59,8 +59,8 @@ list instead of leaving it scattered across three documents.
 
 | # | Item | Why it matters |
 |---|---|---|
-| D1 | Add a "list hubs" endpoint | No read API exists for the `hubs` table, so hub selection is a raw UUID text field, not a dropdown — including in Phase 8's new "Onboard a new client" form, which inherits the same gap. |
-| D2 | Stop baking the API URL in at Docker build time | Vite bakes `VITE_API_BASE_URL` in at build time — pointing the dashboard at a different API means rebuilding the image, not just restarting the container. |
+| ~~D1~~ | ~~Add a "list hubs" endpoint~~ | **Done** — `GET /hubs` (`app/api/routes.py`, active hubs sorted by name, `include_inactive=true` for admin views); the dashboard's TopBar is now a real hub dropdown, falling back to the old UUID text input if the hubs list can't load. |
+| ~~D2~~ | ~~Stop baking the API URL in at Docker build time~~ | **Done** — both `dashboard/` and `client-portal/` serve a `runtime-config.js` regenerated at container start from `API_BASE_URL` (+ `API_SHARED_SECRET` for dashboard) env vars via nginx's `/docker-entrypoint.d/`; one built image now points anywhere with `docker run -e`. VITE_* build args remain as a legacy fallback only. |
 
 ### Driver app
 
@@ -73,7 +73,7 @@ list instead of leaving it scattered across three documents.
 | A5 | Maps SDK / turn-by-turn navigation | Screens 1h/1i/1l are merged into one stops-list view with no live turn directions. |
 | A6 | Mobile app store deployment pipeline | No EAS build config, no TestFlight/Play Store presence — the app only runs today via the Expo dev client. |
 | A7 | Masked voice calling | Only masked SMS is built. Voice needs a separate, heavier Twilio Voice/Proxy integration. |
-| A8 | Harden inbound-SMS reply matching | Currently matches by phone number only — a driver with two concurrent conversations to the same number could have a reply attached to the wrong one. |
+| ~~A8~~ | ~~Harden inbound-SMS reply matching~~ | **Done** — `app/api/webhooks.py`'s `_match_reply_to_thread`: candidates limited to a 24h window, conversations whose stop is still active are preferred over completed ones, and residual ambiguity (two active threads, same number) falls back to most-recent with a structured warning logged. Per-conversation proxy sessions (Twilio Proxy) remain the real fix if this ever matters at scale. |
 | A9 | Real earnings formula + payroll integration | Current estimate is an explicitly-labeled placeholder ($18/hr flat) — gated on B4. |
 
 ### Whole components not started at all

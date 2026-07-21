@@ -45,29 +45,29 @@ services:
   dashboard:
     build:
       context: ./dashboard
-      args:
-        # Baked in at build time - see the note in dashboard/Dockerfile.
-        # Override if the API is reachable at a different host/port than
-        # the default docker-compose port mapping.
-        VITE_API_BASE_URL: ${DASHBOARD_API_BASE_URL:-http://localhost:8000}
-        # Must match the app service's API_SHARED_SECRET (from .env), if set.
-        VITE_API_SHARED_SECRET: ${API_SHARED_SECRET:-}
     depends_on:
       - app
+    environment:
+      # Injected at container START (roadmap item D2, docker/
+      # 40-runtime-config.sh) - change these and `docker compose up -d`,
+      # no image rebuild. Must be reachable from the user's BROWSER, not
+      # from inside the Docker network.
+      API_BASE_URL: ${DASHBOARD_API_BASE_URL:-http://localhost:8000}
+      # Must match the app service's API_SHARED_SECRET (from .env), if set.
+      API_SHARED_SECRET: ${API_SHARED_SECRET:-}
     ports:
       - "5173:80"
 
   client-portal:
     build:
       context: ./client-portal
-      args:
-        # Baked in at build time - see the note in client-portal/Dockerfile.
-        # No VITE_API_SHARED_SECRET here, unlike dashboard - /client/* has
-        # its own real per-client JWT auth (app/client_auth/), not the
-        # internal ops shared-secret stopgap.
-        VITE_API_BASE_URL: ${CLIENT_PORTAL_API_BASE_URL:-http://localhost:8000}
     depends_on:
       - app
+    environment:
+      # Injected at container START (roadmap item D2) - no shared secret
+      # here, unlike dashboard: /client/* has its own real per-client JWT
+      # auth (app/client_auth/), not the internal ops shared-secret stopgap.
+      API_BASE_URL: ${CLIENT_PORTAL_API_BASE_URL:-http://localhost:8000}
     ports:
       - "5174:80"
 

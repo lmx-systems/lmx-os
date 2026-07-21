@@ -6,11 +6,22 @@ import type {
   ClientProfileView,
 } from './types'
 
+// Runtime config first (roadmap item D2 - injected by the Docker image's
+// entrypoint from env vars, so one built image can point at any API), then
+// the build-time VITE_* var for local dev, then localhost.
+declare global {
+  interface Window {
+    __LMX_RUNTIME_CONFIG__?: { API_BASE_URL?: string }
+  }
+}
+const runtimeConfig = window.__LMX_RUNTIME_CONFIG__ ?? {}
+
 // /client/* is exempt from the internal shared-secret stopgap
 // (app/security.py's EXEMPT_PREFIXES) - it has its own real per-client JWT
 // auth instead (app/client_auth/), unlike dashboard/'s API_SHARED_SECRET
 // approach. No shared secret to configure here.
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+const API_BASE_URL =
+  runtimeConfig.API_BASE_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
 export class ApiError extends Error {
   status: number

@@ -70,3 +70,10 @@ class HubEventBus:
         in progress isn't abruptly cancelled mid-way."""
         while self._tasks:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
+
+    async def start(self) -> None:
+        """No-op - exists so the in-process and Redis buses share one
+        lifecycle interface (see app/events/redis_bus.py)."""
+
+    async def stop(self) -> None:
+        """No-op - see start()."""

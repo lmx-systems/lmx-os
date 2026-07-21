@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { formatSecondsAgo } from '../lib/format'
+import { api } from '../lib/api'
+import type { HubView } from '../lib/types'
 
 interface TopBarProps {
   hubId: string
@@ -8,13 +10,30 @@ interface TopBarProps {
 }
 
 /**
- * There's still no "list hubs" endpoint on the backend (Hub rows exist in
- * Postgres, nothing exposes them - see docs/NEXT_STEPS.md), so hub
- * selection stays a text input rather than a dropdown. Restyled to look
- * like part of the console instead of a bare form field.
+ * Hub selection is a real dropdown now that GET /hubs exists (roadmap item
+ * D1) - previously a raw UUID text input. Falls back to a text input if the
+ * hubs list can't be loaded (backend down, auth misconfigured), so the
+ * dashboard is never *less* usable than it was before the dropdown existed.
  */
 export function TopBar({ hubId, onChangeHubId, lastUpdatedAt }: TopBarProps) {
   const [secondsAgo, setSecondsAgo] = useState(0)
+  const [hubs, setHubs] = useState<HubView[] | null>(null)
+  const [hubsError, setHubsError] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .listHubs()
+      .then((result) => {
+        if (!cancelled) setHubs(result)
+      })
+      .catch(() => {
+        if (!cancelled) setHubsError(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (lastUpdatedAt === null) return
@@ -24,6 +43,12 @@ export function TopBar({ hubId, onChangeHubId, lastUpdatedAt }: TopBarProps) {
     }, 1000)
     return () => clearInterval(id)
   }, [lastUpdatedAt])
+
+  // A previously-selected hub id (from localStorage) that isn't in the
+  // fetched list - e.g. a hub deactivated since last session - still shows
+  // as an option so the select doesn't silently display the wrong thing.
+  const knownIds = hubs?.map((h) => h.hub_id) ?? []
+  const staleSelection = hubId.length > 0 && hubs !== null && !knownIds.includes(hubId)
 
   return (
     <div className="mb-5 flex items-center gap-4 border-b border-[var(--border)] pb-4.5">
@@ -37,15 +62,33 @@ export function TopBar({ hubId, onChangeHubId, lastUpdatedAt }: TopBarProps) {
         Orchestrator console
       </span>
 
-      <input
-        id="hub-id"
-        type="text"
-        aria-label="Hub ID"
-        value={hubId}
-        onChange={(e) => onChangeHubId(e.target.value)}
-        placeholder="Paste a hub UUID"
-        className="w-72 rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 py-1.5 text-[13.5px] font-medium text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none"
-      />
+      {hubs !== null && !hubsError ? (
+        <select
+          id="hub-id"
+          aria-label="Hub"
+          value={hubId}
+          onChange={(e) => onChangeHubId(e.target.value)}
+          className="w-72 rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 py-1.5 text-[13.5px] font-medium text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+        >
+          <option value="">Select a hub…</option>
+          {hubs.map((hub) => (
+            <option key={hub.hub_id} value={hub.hub_id}>
+              {hub.name}
+            </option>
+          ))}
+          {staleSelection && <option value={hubId}>Unknown hub ({hubId.slice(0, 8)}…)</option>}
+        </select>
+      ) : (
+        <input
+          id="hub-id"
+          type="text"
+          aria-label="Hub ID"
+          value={hubId}
+          onChange={(e) => onChangeHubId(e.target.value)}
+          placeholder={hubsError ? 'Hub list unavailable — paste a hub UUID' : 'Loading hubs…'}
+          className="w-72 rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 py-1.5 text-[13.5px] font-medium text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none"
+        />
+      )}
 
       <div className="flex-1" />
 

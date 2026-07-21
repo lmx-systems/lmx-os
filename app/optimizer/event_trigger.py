@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import structlog
 
+from app.config import settings
 from app.events.bus import HubEventBus
+from app.events.redis_bus import RedisHubEventBus
 from app.optimizer.service import DispatchOptimizerService
 
 logger = structlog.get_logger(__name__)
@@ -35,4 +37,12 @@ async def _run_cycle(hub_id: str) -> None:
     )
 
 
-dispatch_event_bus = HubEventBus(_run_cycle)
+# Backend selected by EVENT_BUS_BACKEND (roadmap item E8): in-process for a
+# single instance (default), Redis pub/sub for multi-instance deployments.
+# Both expose the same publish/start/stop/wait_idle interface; app.main's
+# lifespan drives start/stop.
+dispatch_event_bus = (
+    RedisHubEventBus(_run_cycle)
+    if settings.event_bus_backend == "redis"
+    else HubEventBus(_run_cycle)
+)
