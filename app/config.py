@@ -70,6 +70,18 @@ class Settings(BaseSettings):
     epicor_base_url: str | None = None
     epicor_api_key: str | None = None
 
+    # Observability (docs/ROADMAP.md S4) - error tracking via Sentry
+    # (app/logging_config.py). Unset = sentry_sdk.init() is never called
+    # at all, so every sentry_sdk.capture_*() call becomes an
+    # already-safe no-op (the SDK's own behavior with no client
+    # configured) - same "unconfigured credential -> stub" status as
+    # Twilio/Rippling elsewhere in this file. traces_sample_rate defaults
+    # to 0 (no performance-monitoring transactions sent, error tracking
+    # only) - deliberately conservative until there's a real account to
+    # judge event-volume cost against.
+    sentry_dsn: str | None = None
+    sentry_traces_sample_rate: float = 0.0
+
     # Payroll (app/payroll/): W2 hours submission today, with 1099/gig pay
     # rails expected to join behind the same PayrollProvider interface as
     # the driver-classification phases roll out (docs/NEXT_STEPS.md). No

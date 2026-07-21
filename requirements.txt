@@ -18,3 +18,4 @@ pyjwt>=2.8.0
 python-multipart>=0.0.9
 bcrypt>=4.1.2
 sse-starlette>=2.1.0
+sentry-sdk[fastapi]>=2.0.0
