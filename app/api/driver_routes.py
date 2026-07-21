@@ -947,18 +947,21 @@ async def complete_stop(
     stop.pod_pin = body.pin
     stop.pod_left_at = body.left_at
 
+    # Every stop's orders, regardless of type - the dropoff branch below
+    # needs them for the Order.status update, and the vehicle-load
+    # adjustment further down needs them for both stop types.
+    order_ids_result = await session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == stop.id))
+    order_ids = [row[0] for row in order_ids_result.all()]
+
     # Only a *dropoff* stop's completion means an order was actually
     # delivered - completing a pickup stop just means the parcels were
     # collected, so its orders stay "assigned" (there's no intermediate
     # "picked up" OrderStatus value in v1; the route/stop status already
     # captures that detail more precisely than Order.status does).
-    if stop.stop_type == "dropoff":
-        order_ids_result = await session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == stop.id))
-        order_ids = [row[0] for row in order_ids_result.all()]
-        if order_ids:
-            await session.execute(
-                update(Order).where(Order.id.in_(order_ids)).values(status=OrderStatus.delivered)
-            )
+    if stop.stop_type == "dropoff" and order_ids:
+        await session.execute(
+            update(Order).where(Order.id.in_(order_ids)).values(status=OrderStatus.delivered)
+        )
 
     remaining_result = await session.execute(
         select(func.count())
@@ -971,6 +974,25 @@ async def complete_stop(
         route.status = "completed"
 
     await session.commit()
+
+    # Real vehicle-load tracking - a pickup's weight enters the vehicle the
+    # moment it's completed here, a dropoff's the moment it leaves. This is
+    # what app/optimizer/service.py's live-route-push capacity check reads
+    # (DriverState.load_units was never incremented anywhere before this).
+    # Defensive `if state:` - skip silently if this driver has no fleet
+    # state yet, same pattern the route-finished block below already uses.
+    if order_ids:
+        weight_result = await session.execute(select(Order.weight_units).where(Order.id.in_(order_ids)))
+        total_weight = float(sum(row[0] for row in weight_result.all()))
+        if total_weight > 0:
+            fleet_state_manager = FleetStateManager()
+            state = await fleet_state_manager.get_driver_state(driver.hub_id, driver.driver_id)
+            if state:
+                if stop.stop_type == "pickup":
+                    state.load_units = state.load_units + total_weight
+                else:
+                    state.load_units = max(0.0, state.load_units - total_weight)
+                await fleet_state_manager.upsert_driver_state(state)
 
     # Phase 8 shop SMS - completing a pickup stop means (1) that shop just
     # had their order picked up, and (2) whichever pickup stop is next in
@@ -1057,6 +1079,21 @@ async def flag_stop_issue(
         route.status = "completed"
 
     await session.commit()
+
+    # Vehicle-load tracking, mirroring complete_stop's: a flagged *dropoff*
+    # still means that weight leaves the vehicle (whatever the resolution
+    # turns out to be, it's no longer this driver's responsibility) - a
+    # flagged *pickup* needs no adjustment, since nothing was ever loaded
+    # for a stop whose pickup never completed.
+    if stop.stop_type == "dropoff" and order_ids:
+        weight_result = await session.execute(select(Order.weight_units).where(Order.id.in_(order_ids)))
+        total_weight = float(sum(row[0] for row in weight_result.all()))
+        if total_weight > 0:
+            fleet_state_manager = FleetStateManager()
+            state = await fleet_state_manager.get_driver_state(driver.hub_id, driver.driver_id)
+            if state:
+                state.load_units = max(0.0, state.load_units - total_weight)
+                await fleet_state_manager.upsert_driver_state(state)
 
     # Ops notification reuses the existing in-process event bus, same
     # pattern as complete_stop's "stop_completed" - no new SSE/pubsub here,

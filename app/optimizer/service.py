@@ -37,14 +37,6 @@ from app.schemas.optimizer import DriverCandidate, LastCycleSnapshot, Optimizati
 
 logger = structlog.get_logger(__name__)
 
-# v1 capacity proxy for mid-route insertion - a simple stop-count cap, not
-# a real weight/volume check. DriverState.load_units is carried through
-# unchanged everywhere it's touched today (see the fleet_state upserts
-# elsewhere in this module) rather than actually incremented per
-# assignment, so it isn't a meaningful signal yet; a real capacity model
-# is a fast-follow once that's wired up.
-MAX_STOPS_PER_ACTIVE_ROUTE = 8
-
 
 class DispatchOptimizerService:
     def __init__(
@@ -278,9 +270,11 @@ class DispatchOptimizerService:
         orders into a single new pickup stop even if they share a shop),
         no HOT_SHOT-first resequencing of the newly-appended stops (accept_offer
         does this for a route's *initial* stops; this always appends
-        last), and capacity is MAX_STOPS_PER_ACTIVE_ROUTE, a simple count
-        cap - see that constant's comment for why a real weight/volume
-        check isn't wired up yet.
+        last). Capacity is checked against the driver's live
+        DriverState.load_units/capacity_units in Redis (the same ledger
+        complete_stop/flag_stop_issue maintain) rather than a stop count -
+        a route with no fleet state on file (driver offline/unknown) is
+        skipped defensively rather than assumed to have room.
         """
         inserted: set[str] = set()
 
@@ -304,13 +298,14 @@ class DispatchOptimizerService:
                     # offer payload with both sides already resolved.
                     continue
 
+                candidate_weight = stops_by_id[order_id].weight_units
+
                 for route in active_routes:
-                    stop_count = (
-                        await session.execute(
-                            select(func.count()).select_from(Stop).where(Stop.route_id == route.id)
-                        )
-                    ).scalar_one()
-                    if stop_count >= MAX_STOPS_PER_ACTIVE_ROUTE:
+                    driver_state = await self._fleet_state.get_driver_state(hub_id, str(route.driver_id))
+                    if driver_state is None:
+                        continue
+                    remaining_capacity = max(driver_state.capacity_units - driver_state.load_units, 0.0)
+                    if remaining_capacity < candidate_weight:
                         continue
 
                     next_sequence = (

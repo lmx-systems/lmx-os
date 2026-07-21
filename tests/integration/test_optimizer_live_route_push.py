@@ -4,14 +4,11 @@ is the first capability anywhere that mutates a Route already active for a
 driver mid-shift. Tested directly against the method rather than through
 the full run_cycle/hold-queue pipeline - run_hold_cycle's rule 3 ("no
 available driver at all -> keep holding") means an order is never even
-released from hold unless an *available* (idle) driver exists, and
-DriverState.load_units is never actually incremented anywhere in this
-codebase (see MAX_STOPS_PER_ACTIVE_ROUTE's comment in
-app/optimizer/service.py), so an idle driver always looks like they have
-full capacity and the stub nearest-neighbor engine has no real reason to
-leave a stop unassigned when one exists. Testing the method directly
-avoids fighting that to construct an artificial "released but unassigned"
-state.
+released from hold unless an *available* (idle) driver exists, so the
+stub nearest-neighbor engine always has an idle driver to prefer over an
+active-route insertion and has no real reason to leave a stop unassigned
+when one exists. Testing the method directly avoids fighting that to
+construct an artificial "released but unassigned" state.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -19,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select
 
+from app.fleet_state.manager import FleetStateManager
 from app.models.client import Client
 from app.models.driver import Driver
 from app.models.hub import Hub
@@ -28,14 +26,18 @@ from app.models.shop import Shop
 from app.models.stop import Stop
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.optimizer import StopCandidate
+from app.schemas.fleet import DriverState
 
 pytestmark = pytest.mark.integration
 
 
-async def _seed_active_route(db_session):
+async def _seed_active_route(db_session, *, load_units=1.0):
     """One driver already mid-shift: an active Route with one pickup stop
     already completed and a dropoff stop still in progress - the "current
-    stop" that insertion must never touch."""
+    stop" that insertion must never touch. Also seeds the Redis DriverState
+    that the capacity check reads - vehicle_capacity_units=5 matches
+    capacity_units=5 here, and load_units defaults to 1 to reflect the one
+    already-completed pickup's weight already sitting in the vehicle."""
     hub_id, client_id, shop_id, driver_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     db_session.add(Hub(id=hub_id, name="Live Push Test Hub", lat=34.05, lng=-118.25))
     await db_session.commit()
@@ -63,6 +65,13 @@ async def _seed_active_route(db_session):
         ]
     )
     await db_session.commit()
+
+    await FleetStateManager().upsert_driver_state(
+        DriverState(
+            driver_id=str(driver_id), hub_id=str(hub_id), status="en_route",
+            capacity_units=5, load_units=load_units, current_route_id=str(route.id),
+        )
+    )
     return hub_id, client_id, shop_id, driver_id, route, current_dropoff
 
 
@@ -124,23 +133,52 @@ async def test_insert_appends_after_existing_stops_without_touching_them(db_sess
     assert refreshed_order.status == OrderStatus.assigned
 
 
-async def test_insert_skips_routes_at_the_stop_count_cap(db_session, real_redis_client):
-    hub_id, client_id, shop_id, driver_id, route, _current_dropoff = await _seed_active_route(db_session)
+async def test_insert_skips_routes_without_enough_remaining_capacity(db_session, real_redis_client):
+    # Driver is already loaded to capacity (5/5) - no room for another
+    # order's weight, regardless of stop count.
+    hub_id, client_id, shop_id, driver_id, route, _current_dropoff = await _seed_active_route(
+        db_session, load_units=5.0
+    )
     order, _new_shop_id = await _seed_new_order(db_session, hub_id, client_id)
-
-    # Pad the route up to the cap with harmless extra completed stops.
-    from app.optimizer.service import MAX_STOPS_PER_ACTIVE_ROUTE
-
-    existing_count = 2
-    for seq in range(existing_count, MAX_STOPS_PER_ACTIVE_ROUTE):
-        db_session.add(Stop(route_id=route.id, shop_id=None, sequence=seq, stop_type="dropoff", status="completed", parcel_count=1))
-    await db_session.commit()
 
     candidate = StopCandidate(stop_id=str(order.id), order_ids=[str(order.id)], lat=34.061, lng=-118.261, weight_units=1.0, sla_tier="T2")
     inserted = await DispatchOptimizerService()._insert_unassigned_into_active_routes(
         str(hub_id), [str(order.id)], {str(order.id): candidate}
     )
     assert inserted == set()  # no room on this route, and no other active route to try
+
+
+async def test_insert_skips_routes_with_no_fleet_state_on_file(db_session, real_redis_client):
+    # A route whose driver has no DriverState in Redis at all (never
+    # upserted, or hub/driver id mismatch) is skipped defensively rather
+    # than assumed to have unlimited room.
+    hub_id, client_id, shop_id, driver_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    db_session.add(Hub(id=hub_id, name="No Fleet State Hub", lat=34.05, lng=-118.25))
+    await db_session.commit()
+    db_session.add(Client(id=client_id, hub_id=hub_id, name="Existing Client", pos_system="flat_file"))
+    await db_session.commit()
+    db_session.add_all(
+        [
+            Shop(
+                id=shop_id, client_id=client_id, name="Existing Shop", address="1 Existing Way",
+                lat=34.05, lng=-118.25, external_ref="SHOP-EXISTING",
+            ),
+            Driver(id=driver_id, hub_id=hub_id, name="No Fleet State D.", phone="+15555550401", vehicle_capacity_units=5),
+        ]
+    )
+    await db_session.commit()
+    route = Route(hub_id=hub_id, driver_id=driver_id, status="active", plan_version=1)
+    db_session.add(route)
+    await db_session.flush()
+    db_session.add(Stop(route_id=route.id, shop_id=shop_id, sequence=0, stop_type="dropoff", status="arrived", parcel_count=1))
+    await db_session.commit()
+
+    order, _new_shop_id = await _seed_new_order(db_session, hub_id, client_id)
+    candidate = StopCandidate(stop_id=str(order.id), order_ids=[str(order.id)], lat=34.061, lng=-118.261, weight_units=1.0, sla_tier="T2")
+    inserted = await DispatchOptimizerService()._insert_unassigned_into_active_routes(
+        str(hub_id), [str(order.id)], {str(order.id): candidate}
+    )
+    assert inserted == set()
 
 
 async def test_insert_returns_empty_when_no_active_routes_exist(db_session, real_redis_client):
