@@ -1,7 +1,7 @@
 /**
  * Minimal design tokens - matches the wireframes' mid-fi grayscale look
- * (black primary actions, light surfaces) rather than introducing new
- * brand color decisions nobody's signed off on yet.
+ * (black primary actions, light surfaces). Accent is the LMX brand green,
+ * per Sourabh's July 2026 branding call (docs/LMX_Brand_Asset_Inventory.docx).
  */
 export const colors = {
   bg: '#f6f7f9',
@@ -13,7 +13,8 @@ export const colors = {
   textMuted: '#8b93a1',
   primary: '#14171c',
   primaryText: '#ffffff',
-  accent: '#0c8599',
+  // LMX brand green (matches the green-X mark + the web apps' --accent).
+  accent: '#0a6644',
   danger: '#c62828',
   success: '#1f9254',
   warning: '#a15c07',

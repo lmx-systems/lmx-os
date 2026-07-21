@@ -15,8 +15,10 @@
   --text-primary: #14171c;
   --text-secondary: #5b6472;
   --text-muted: #8b93a1;
-  --accent: #0c8599;
-  --accent-dim: #e2f6f9;
+  /* LMX brand green (sampled from the green-X mark in docs/LMX branding)
+     - replaces the design-phase teal per Sourabh's July 2026 call. */
+  --accent: #0a6644;
+  --accent-dim: #e6f1eb;
   --green: #1f9254;
   --green-dim: #e5f6ec;
   --blue: #2f6fdb;
