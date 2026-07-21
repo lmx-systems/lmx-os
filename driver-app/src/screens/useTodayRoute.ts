@@ -24,9 +24,17 @@ export function useTodayRoute() {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    const fetchedRoute = await api.getMyRoute();
-    setRoute(fetchedRoute);
-    setOffers(fetchedRoute ? [] : await api.getMyOffers());
+    try {
+      const fetchedRoute = await api.getMyRoute();
+      setRoute(fetchedRoute);
+      setOffers(fetchedRoute ? [] : await api.getMyOffers());
+    } catch {
+      // A transient network blip (e.g. backend restarting) shouldn't
+      // surface as an unhandled promise rejection from the background
+      // poll below - the next successful poll/focus naturally recovers,
+      // same as the pre-redesign HomeScreen's poll had no error handling
+      // either. useFocusEffect's caller still sees this resolve normally.
+    }
   }, []);
 
   useFocusEffect(
