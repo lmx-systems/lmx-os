@@ -108,6 +108,7 @@ dashboard/        Component 7: internal orchestrator dashboard (Vite/React/TS/Ta
 driver-app/       Component 7: driver mobile app (Expo/React Native)
 client-portal/    Component 7 (Phase 8): client-facing web app (Vite/React/TS/Tailwind)
 docs/             Architecture + handoff notes, living next-steps tracker
+infra/            Production hosting (AWS, Terraform) - see infra/README.md
 ```
 
 ## Configuration

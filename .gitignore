@@ -14,3 +14,11 @@ htmlcov/
 dist/
 build/
 .DS_Store
+
+# Terraform (infra/) - local provider cache and state; real state lives
+# in the S3 backend (infra/aws/versions.tf), never in this repo.
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+

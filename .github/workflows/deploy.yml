@@ -1,0 +1,96 @@
+name: Deploy
+
+# Runs after CI's checks pass on main, not in parallel with them - a red
+# CI run should never even attempt a deploy. Manual dispatch exists for a
+# rollback: re-run this workflow against an older commit SHA.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write # required for the OIDC token exchange - infra/aws/github_oidc.tf's trust policy
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECS_CLUSTER: lmx-prod-cluster
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC, no stored access keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Every image gets tagged with the commit SHA - infra/aws/ecr.tf's
+      # repos are IMMUTABLE, so this is also what makes the eventual
+      # rollback path ("re-run this workflow at an older SHA") work: that
+      # older tag still exists and was never overwritten.
+      - name: Build and push app image
+        run: |
+          docker build -t "${{ steps.ecr.outputs.registry }}/lmx-prod-app:${{ github.sha }}" .
+          docker push "${{ steps.ecr.outputs.registry }}/lmx-prod-app:${{ github.sha }}"
+
+      - name: Build and push dashboard image
+        run: |
+          docker build -t "${{ steps.ecr.outputs.registry }}/lmx-prod-dashboard:${{ github.sha }}" ./dashboard
+          docker push "${{ steps.ecr.outputs.registry }}/lmx-prod-dashboard:${{ github.sha }}"
+
+      - name: Build and push client-portal image
+        run: |
+          docker build -t "${{ steps.ecr.outputs.registry }}/lmx-prod-client-portal:${{ github.sha }}" ./client-portal
+          docker push "${{ steps.ecr.outputs.registry }}/lmx-prod-client-portal:${{ github.sha }}"
+
+      # Registers a new task-definition revision pointed at the just-pushed
+      # tag and updates each service to use it - ECS then does a rolling
+      # replacement (new tasks pass their ALB health check before old ones
+      # are drained), not a hard cutover.
+      - name: Deploy app
+        run: |
+          aws ecs describe-task-definition --task-definition lmx-prod-app \
+            --query 'taskDefinition' --output json \
+            | jq --arg IMAGE "${{ steps.ecr.outputs.registry }}/lmx-prod-app:${{ github.sha }}" \
+              '.containerDefinitions[0].image = $IMAGE
+               | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            > /tmp/app-task-def.json
+          aws ecs register-task-definition --cli-input-json file:///tmp/app-task-def.json
+          aws ecs update-service --cluster $ECS_CLUSTER --service lmx-prod-app --task-definition lmx-prod-app --force-new-deployment
+
+      - name: Deploy dashboard
+        run: |
+          aws ecs describe-task-definition --task-definition lmx-prod-dashboard \
+            --query 'taskDefinition' --output json \
+            | jq --arg IMAGE "${{ steps.ecr.outputs.registry }}/lmx-prod-dashboard:${{ github.sha }}" \
+              '.containerDefinitions[0].image = $IMAGE
+               | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            > /tmp/dashboard-task-def.json
+          aws ecs register-task-definition --cli-input-json file:///tmp/dashboard-task-def.json
+          aws ecs update-service --cluster $ECS_CLUSTER --service lmx-prod-dashboard --task-definition lmx-prod-dashboard --force-new-deployment
+
+      - name: Deploy client-portal
+        run: |
+          aws ecs describe-task-definition --task-definition lmx-prod-client-portal \
+            --query 'taskDefinition' --output json \
+            | jq --arg IMAGE "${{ steps.ecr.outputs.registry }}/lmx-prod-client-portal:${{ github.sha }}" \
+              '.containerDefinitions[0].image = $IMAGE
+               | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            > /tmp/client-portal-task-def.json
+          aws ecs register-task-definition --cli-input-json file:///tmp/client-portal-task-def.json
+          aws ecs update-service --cluster $ECS_CLUSTER --service lmx-prod-client-portal --task-definition lmx-prod-client-portal --force-new-deployment
+
+      - name: Wait for app service to stabilize
+        run: aws ecs wait services-stable --cluster $ECS_CLUSTER --services lmx-prod-app
