@@ -96,8 +96,10 @@ middleware.py`) now gates every endpoint but `/health`/docs/`/driver`/
 (`app/ops_auth/`, `app/models/ops_user.py`) — `dashboard/` has its own
 login screen backed by `POST /ops/auth/login`, mirroring the client
 portal's auth shape. Bootstrap the first account with
-`python -m scripts.create_ops_user`. Still a real gap: no role model yet
-— every ops user can do everything any other one can. CORS
+`python -m scripts.create_ops_user --role admin|viewer` (migration
+`0012` added a real `admin`/`viewer` role - `require_admin`
+(`app/ops_auth/dependencies.py`) gates the mutating endpoints, and the
+dashboard hides those controls entirely for a viewer). CORS
 (`DASHBOARD_CORS_ORIGINS`) restricts which browser *origins* can call in,
 which is a different thing again.
 
@@ -446,8 +448,11 @@ dashboard."** The rest is still roughly priority order.
    surfaces (each with their own real auth) behind a real per-account
    Bearer JWT (`app/ops_auth/`, `app/models/ops_user.py`) — `dashboard/`
    has a real login screen. Bootstrap the first account with
-   `python -m scripts.create_ops_user`. Still a real gap: no role model
-   yet — every ops user can do everything any other one can.
+   `python -m scripts.create_ops_user --role admin|viewer`. A real
+   `admin`/`viewer` role model exists (migration `0012`) - `require_admin`
+   gates mutating endpoints, and the dashboard hides those controls
+   entirely for a viewer. Still just two roles, not a full permissions
+   matrix.
 1. ~~Stand up Postgres + Redis in a real environment and run the
    migration~~ — **Done.** `tests/integration/` now covers the migration
    itself, ingestion, `FleetStateManager`, and the full ingest-to-optimizer

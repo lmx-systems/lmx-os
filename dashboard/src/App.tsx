@@ -132,18 +132,27 @@ function App() {
               </div>
               <div className="flex flex-col gap-4">
                 <FleetRoster data={fleet.data} error={fleet.error} loading={fleet.loading} />
-                <OperationsPanel
-                  key={hubId}
-                  hubId={hubId}
-                  onAfterRun={() => {
-                    fleet.refetchNow()
-                    held.refetchNow()
-                    summary.refetchNow()
-                    lastCycle.refetchNow()
-                  }}
-                  onToast={showToast}
-                />
-                <OnboardClientForm hubId={hubId} onToast={showToast} />
+                {opsProfile.role === 'admin' && (
+                  <>
+                    {/* Mutating actions (run-cycle, run-nightly-job, onboard
+                        a client) are admin-only on the backend
+                        (app/ops_auth/dependencies.py's require_admin) - a
+                        viewer never even sees the controls for actions
+                        they'd get a 403 from. */}
+                    <OperationsPanel
+                      key={hubId}
+                      hubId={hubId}
+                      onAfterRun={() => {
+                        fleet.refetchNow()
+                        held.refetchNow()
+                        summary.refetchNow()
+                        lastCycle.refetchNow()
+                      }}
+                      onToast={showToast}
+                    />
+                    <OnboardClientForm hubId={hubId} onToast={showToast} />
+                  </>
+                )}
               </div>
             </div>
           </>

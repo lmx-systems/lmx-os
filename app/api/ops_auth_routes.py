@@ -43,4 +43,4 @@ async def login(body: OpsLoginBody, session: AsyncSession = Depends(get_db)) -> 
 
 @router.get("/me", response_model=OpsProfileView)
 async def get_my_profile(ops_user: AuthedOpsUser = Depends(get_current_ops_user)) -> OpsProfileView:
-    return OpsProfileView(ops_user_id=ops_user.ops_user_id, email=ops_user.email, name=ops_user.name)
+    return OpsProfileView(ops_user_id=ops_user.ops_user_id, email=ops_user.email, name=ops_user.name, role=ops_user.role)

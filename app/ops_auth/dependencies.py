@@ -24,7 +24,7 @@ from fastapi import Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, session_scope
-from app.models.ops_user import OpsUser
+from app.models.ops_user import ADMIN_ROLE, OpsUser
 from app.ops_auth.tokens import InvalidOpsToken, decode_token
 
 
@@ -33,6 +33,7 @@ class AuthedOpsUser:
     ops_user_id: str
     email: str
     name: str
+    role: str
 
 
 class InvalidOpsSession(Exception):
@@ -49,7 +50,7 @@ async def authenticate(token: str, session: AsyncSession) -> AuthedOpsUser:
     if row is None or not row.is_active:
         raise InvalidOpsSession("Ops user not found or deactivated")
 
-    return AuthedOpsUser(ops_user_id=str(row.id), email=row.email, name=row.name)
+    return AuthedOpsUser(ops_user_id=str(row.id), email=row.email, name=row.name, role=row.role)
 
 
 async def authenticate_token(token: str) -> AuthedOpsUser:
@@ -71,3 +72,14 @@ async def get_current_ops_user(
         return await authenticate(token, session)
     except InvalidOpsSession:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+
+async def require_admin(ops_user: AuthedOpsUser = Depends(get_current_ops_user)) -> AuthedOpsUser:
+    """For the specific mutating endpoints a viewer shouldn't reach
+    (running an optimizer/learning-loop cycle, onboarding a client,
+    revoking a driver device) - OpsUserAuthMiddleware only ever checks
+    "is this a valid ops session," not which role it has, since role
+    matters only to a handful of specific routes, not the whole surface."""
+    if ops_user.role != ADMIN_ROLE:
+        raise HTTPException(status_code=403, detail="This action requires an admin ops role")
+    return ops_user

@@ -13,18 +13,21 @@ from starlette.responses import PlainTextResponse
 
 from app.api.ops_auth_routes import get_my_profile, login
 from app.client_auth.passwords import hash_password
-from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user
+from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user, require_admin
 from app.ops_auth.login_rate_limit import MAX_LOGIN_ATTEMPTS
 from app.ops_auth.middleware import OpsUserAuthMiddleware
 from app.ops_auth.tokens import issue_token
-from app.models.ops_user import OpsUser
+from app.models.ops_user import ADMIN_ROLE, VIEWER_ROLE, OpsUser
 from app.schemas.ops_auth import OpsLoginBody
 
 pytestmark = pytest.mark.integration
 
 
-async def _seed_ops_user(db_session, *, email="ops@example.com", password="correct horse battery staple", is_active=True):
-    ops_user = OpsUser(email=email, password_hash=hash_password(password), name="Test Ops", is_active=is_active)
+async def _seed_ops_user(
+    db_session, *, email="ops@example.com", password="correct horse battery staple",
+    is_active=True, role=ADMIN_ROLE,
+):
+    ops_user = OpsUser(email=email, password_hash=hash_password(password), name="Test Ops", is_active=is_active, role=role)
     db_session.add(ops_user)
     await db_session.commit()
     return ops_user
@@ -76,11 +79,12 @@ async def test_login_is_rate_limited_after_too_many_attempts(db_session, real_re
 
 async def test_get_my_profile_returns_the_authed_users_own_data(db_session, real_redis_client):
     ops_user = await _seed_ops_user(db_session, email="profile@example.com")
-    authed = AuthedOpsUser(ops_user_id=str(ops_user.id), email=ops_user.email, name=ops_user.name)
+    authed = AuthedOpsUser(ops_user_id=str(ops_user.id), email=ops_user.email, name=ops_user.name, role=ops_user.role)
 
     profile = await get_my_profile(ops_user=authed)
     assert profile.email == "profile@example.com"
     assert profile.name == "Test Ops"
+    assert profile.role == "admin"
 
 
 async def test_get_current_ops_user_rejects_a_deactivated_users_token(db_session, real_redis_client):
@@ -162,3 +166,36 @@ async def test_middleware_rejects_a_deactivated_users_token(db_session, real_red
     middleware = OpsUserAuthMiddleware(app=None)
     response = await middleware.dispatch(_fake_request("/hubs", authorization=f"Bearer {token}"), _ok)
     assert response.status_code == 401
+
+
+# --- require_admin (role gating for mutating endpoints) -----------------
+
+
+async def test_require_admin_allows_an_admin_user():
+    admin = AuthedOpsUser(ops_user_id="u1", email="a@example.com", name="Admin", role=ADMIN_ROLE)
+    result = await require_admin(ops_user=admin)
+    assert result is admin
+
+
+async def test_require_admin_rejects_a_viewer_user():
+    viewer = AuthedOpsUser(ops_user_id="u2", email="v@example.com", name="Viewer", role=VIEWER_ROLE)
+    with pytest.raises(HTTPException) as exc_info:
+        await require_admin(ops_user=viewer)
+    assert exc_info.value.status_code == 403
+
+
+async def test_viewer_role_round_trips_through_real_login_and_profile(db_session, real_redis_client):
+    """A real, seeded viewer account - not just a hand-built AuthedOpsUser -
+    logs in and sees its own role reflected correctly."""
+    await _seed_ops_user(db_session, email="real-viewer@example.com", role=VIEWER_ROLE)
+
+    token = await login(OpsLoginBody(email="real-viewer@example.com", password="correct horse battery staple"), session=db_session)
+    authed = await get_current_ops_user(authorization=f"Bearer {token.access_token}", session=db_session)
+    assert authed.role == VIEWER_ROLE
+
+    profile = await get_my_profile(ops_user=authed)
+    assert profile.role == "viewer"
+
+    with pytest.raises(HTTPException) as exc_info:
+        await require_admin(ops_user=authed)
+    assert exc_info.value.status_code == 403

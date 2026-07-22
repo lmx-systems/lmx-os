@@ -124,6 +124,7 @@ export interface OpsProfileView {
   ops_user_id: string
   email: string
   name: string
+  role: 'admin' | 'viewer'
 }
 
 // --- UI-local types below - no backend equivalent, not response mirrors ---

@@ -27,6 +27,7 @@ from app.models.client_rate import ClientRate
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.shop import Shop
+from app.ops_auth.dependencies import AuthedOpsUser, require_admin
 from app.payroll import get_payroll_provider
 from app.redis_client import get_client as get_redis_client
 from app.schemas.admin import (
@@ -49,7 +50,7 @@ VALID_SLA_TIERS = {"HOT_SHOT", "T1", "T2", "T3"}
 
 @router.post("/clients", response_model=ClientOnboardingResult)
 async def onboard_client(
-    body: ClientOnboardingBody, session: AsyncSession = Depends(get_db)
+    body: ClientOnboardingBody, session: AsyncSession = Depends(get_db), _admin: AuthedOpsUser = Depends(require_admin)
 ) -> ClientOnboardingResult:
     existing = await session.execute(select(Client.id).where(Client.portal_email == body.portal_email))
     if existing.scalar_one_or_none() is not None:
@@ -104,7 +105,10 @@ async def onboard_client(
 
 @router.delete("/drivers/{driver_id}/devices/{device_id}", status_code=204)
 async def admin_revoke_driver_device(
-    driver_id: str, device_id: str, session: AsyncSession = Depends(get_db)
+    driver_id: str,
+    device_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
 ) -> None:
     """
     The "driver calls dispatch, ops revokes on their behalf" path - same
@@ -126,7 +130,9 @@ async def admin_revoke_driver_device(
 
 
 @router.post("/payroll/{hub_id}/run", response_model=PayrollRunResult)
-async def run_payroll_for_hub(hub_id: str, session: AsyncSession = Depends(get_db)) -> PayrollRunResult:
+async def run_payroll_for_hub(
+    hub_id: str, session: AsyncSession = Depends(get_db), _admin: AuthedOpsUser = Depends(require_admin)
+) -> PayrollRunResult:
     """
     Manually submit every driver-in-this-hub's most recently *completed*
     pay period (w2 monthly, 1099/gig weekly - see app/payroll/hours.py) to

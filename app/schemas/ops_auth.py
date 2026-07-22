@@ -16,3 +16,4 @@ class OpsProfileView(BaseModel):
     ops_user_id: str
     email: str
     name: str
+    role: str

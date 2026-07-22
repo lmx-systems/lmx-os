@@ -9,10 +9,14 @@ running this at least once.
 
 Safe to re-run for an existing email - updates the password/name and
 reactivates the account (is_active=True) rather than erroring, so this
-also doubles as "reset my password" or "un-revoke this account."
+also doubles as "reset my password" or "un-revoke this account." Omitting
+--role on a re-run leaves an existing user's role untouched - re-running
+this for a password reset should never silently downgrade an admin to a
+viewer just because --role wasn't specified again.
 
 Usage:
     python -m scripts.create_ops_user --email you@lmxit.com --password "..." --name "Your Name"
+    python -m scripts.create_ops_user --email viewer@lmxit.com --password "..." --name "Viewer" --role viewer
 
 Requires DATABASE_URL to point at the stack to create the user in
 (defaults in app/config.py match `docker compose up`'s port mappings).
@@ -27,10 +31,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.client_auth.passwords import hash_password
 from app.config import settings
-from app.models.ops_user import OpsUser
+from app.models.ops_user import ADMIN_ROLE, OPS_ROLES, OpsUser
 
 
-async def _create_or_update(email: str, password: str, name: str) -> str:
+async def _create_or_update(email: str, password: str, name: str, role: str | None) -> str:
     engine = create_async_engine(settings.database_url)
     session_factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
     try:
@@ -39,13 +43,18 @@ async def _create_or_update(email: str, password: str, name: str) -> str:
             ops_user = result.scalar_one_or_none()
 
             if ops_user is None:
-                ops_user = OpsUser(email=email, password_hash=hash_password(password), name=name, is_active=True)
+                ops_user = OpsUser(
+                    email=email, password_hash=hash_password(password), name=name,
+                    role=role or ADMIN_ROLE, is_active=True,
+                )
                 session.add(ops_user)
                 await session.commit()
                 return "created"
 
             ops_user.password_hash = hash_password(password)
             ops_user.name = name
+            if role is not None:
+                ops_user.role = role
             ops_user.is_active = True
             await session.commit()
             return "updated"
@@ -58,9 +67,13 @@ def main() -> None:
     parser.add_argument("--email", required=True)
     parser.add_argument("--password", required=True)
     parser.add_argument("--name", required=True)
+    parser.add_argument(
+        "--role", choices=OPS_ROLES, default=None,
+        help="Defaults to 'admin' for a brand-new user; leaves an existing user's role untouched if omitted.",
+    )
     args = parser.parse_args()
 
-    result = asyncio.run(_create_or_update(args.email, args.password, args.name))
+    result = asyncio.run(_create_or_update(args.email, args.password, args.name, args.role))
     print(f"Ops user {args.email} {result}.")
 
 

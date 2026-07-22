@@ -19,6 +19,7 @@ from app.learning_loop.service import run_nightly_job
 from app.models.driver import Driver
 from app.models.hub import Hub
 from app.models.order import Order
+from app.ops_auth.dependencies import AuthedOpsUser, require_admin
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.last_cycle_store import LastCycleStore
 from app.optimizer.service import DispatchOptimizerService
@@ -135,13 +136,14 @@ async def get_order_status_summary(
 
 
 @router.post("/optimizer/{hub_id}/run-cycle", response_model=OptimizationResult)
-async def run_optimizer_cycle(hub_id: str) -> OptimizationResult:
+async def run_optimizer_cycle(hub_id: str, _admin: AuthedOpsUser = Depends(require_admin)) -> OptimizationResult:
     """
     Manually trigger one Dispatch Optimizer cycle for a hub. Real cycles
     are now event-triggered (see app/optimizer/event_trigger.py) off order
     ingestion and driver status changes rather than polled - this endpoint
     remains for manual triggering, testing, and ops (e.g. forcing a cycle
-    after an out-of-band fleet-state fix).
+    after an out-of-band fleet-state fix). Admin-only (docs/ROADMAP.md S1) -
+    a viewer can watch a cycle happen but not force one.
     """
     service = DispatchOptimizerService()
     return await service.run_cycle(hub_id)
@@ -161,13 +163,14 @@ async def get_last_cycle(hub_id: str) -> LastCycleSnapshot | None:
 
 @router.post("/learning-loop/{hub_id}/run-nightly-job", response_model=NightlyJobResult)
 async def run_learning_loop_nightly_job(
-    hub_id: str, session: AsyncSession = Depends(get_db)
+    hub_id: str, session: AsyncSession = Depends(get_db), _admin: AuthedOpsUser = Depends(require_admin)
 ) -> NightlyJobResult:
     """
     Manually trigger the Learning Loop's pattern-detection job for a hub
     (component 6). In production this runs on a schedule (nightly, per the
     design doc) rather than on demand - this endpoint exists for manual
     triggering, testing, and as the hook a scheduler would call into.
+    Admin-only (docs/ROADMAP.md S1).
 
     Detected patterns become `proposed_rules` rows - nothing is
     auto-promoted to `active_rules`. A human reviews and promotes.

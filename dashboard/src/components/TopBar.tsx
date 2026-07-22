@@ -89,7 +89,14 @@ export function TopBar({ hubId, onChangeHubId, lastUpdatedAt, opsProfile, onLogo
         </div>
       )}
 
-      <span className="text-xs text-[var(--text-muted)]">{opsProfile.name}</span>
+      <span className="text-xs text-[var(--text-muted)]">
+        {opsProfile.name}
+        {opsProfile.role === 'viewer' && (
+          <span className="ml-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 text-[10.5px] font-medium">
+            view only
+          </span>
+        )}
+      </span>
       <button
         onClick={onLogout}
         className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)]"
