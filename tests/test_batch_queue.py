@@ -53,14 +53,43 @@ def test_question3_no_available_drivers_keeps_holding_even_without_cluster_mate(
     assert decision.reason == "no_available_drivers"
 
 
-def test_question4_absolute_cap_forces_release_despite_cluster_mate():
-    order = make_held_order("o1", 34.05, -118.25, held_minutes_ago=45)
-    mate = make_held_order("o2", 34.051, -118.25)
-    decision = evaluate_held_order(
-        order, [mate], available_driver_count=3, now=NOW, max_absolute_hold_minutes=30
-    )
+def test_question4_conflict_with_imminent_higher_priority_order_keeps_holding():
+    # Only one driver available, and a T1 order elsewhere is about to hit
+    # its own hold_deadline - dispatching this T2 order now would strand it.
+    order = make_held_order("o1", 34.05, -118.25, sla_tier="T2", deadline_minutes_from_now=60)
+    urgent = make_held_order(
+        "urgent", 40.0, -120.0, sla_tier="T1", deadline_minutes_from_now=5
+    )  # far away - not a cluster-mate
+    decision = evaluate_held_order(order, [urgent], available_driver_count=1, now=NOW)
+    assert decision.action == "keep_holding"
+    assert decision.reason == "would_conflict_with_higher_priority_order"
+
+
+def test_question4_does_not_fire_when_drivers_have_spare_capacity():
+    order = make_held_order("o1", 34.05, -118.25, sla_tier="T2", deadline_minutes_from_now=60)
+    urgent = make_held_order("urgent", 40.0, -120.0, sla_tier="T1", deadline_minutes_from_now=5)
+    # Two drivers available - sending this order doesn't cost the urgent one anything.
+    decision = evaluate_held_order(order, [urgent], available_driver_count=2, now=NOW)
     assert decision.action == "release"
-    assert decision.reason == "absolute_hold_cap_reached"
+    assert decision.reason == "no_cluster_mate_and_drivers_available"
+
+
+def test_question4_does_not_fire_for_a_less_urgent_order():
+    order = make_held_order("o1", 34.05, -118.25, sla_tier="T1", deadline_minutes_from_now=60)
+    less_urgent = make_held_order("o2", 40.0, -120.0, sla_tier="T3", deadline_minutes_from_now=5)
+    decision = evaluate_held_order(order, [less_urgent], available_driver_count=1, now=NOW)
+    assert decision.action == "release"
+    assert decision.reason == "no_cluster_mate_and_drivers_available"
+
+
+def test_question4_ignores_a_cluster_mate_even_if_more_urgent():
+    # A cluster-mate is released together with this order, not competing
+    # with it for a driver, so it should never trigger the conflict check.
+    order = make_held_order("o1", 34.05, -118.25, sla_tier="T2", deadline_minutes_from_now=60)
+    mate = make_held_order("o2", 34.051, -118.25, sla_tier="T1", deadline_minutes_from_now=5)
+    decision = evaluate_held_order(order, [mate], available_driver_count=1, now=NOW)
+    assert decision.action == "keep_holding"
+    assert decision.reason == "cluster_mate_found"
 
 
 def test_question2_cluster_mate_keeps_holding():

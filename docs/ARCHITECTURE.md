@@ -400,30 +400,42 @@ swapping in the real thing is a contained change:
   display-only specifically because of this - it estimates a number, it
   doesn't run payroll.
 
-## Things that are best-effort interpretations, not confirmed spec
+## Things that were best-effort interpretations, now confirmed against spec
 
 The canonical decision logic lives in the Google Drive "Source of Truth
-Index" (LMX OS Brief v1.0–v1.2), which is outside this local project cache
-and wasn't available while building this. Two things in particular should
-be checked against it before Hub 1 goes live:
+Index," which points to `LMX_OS_Tech_Strategy_and_Design.docx` and
+`LMX_OS_Architecture.docx` as the actual technical spec (docs/ROADMAP.md
+B3). Both of the items below were checked against those documents directly
+and updated to match:
 
-1. **The batch-hold queue's "4-question decision logic."** The peer review
-   names this mechanism but the four questions themselves weren't in the
-   local docs. `app/batch_queue/queue.py` implements a reasoned
-   interpretation (SLA deadline check → cluster-mate check → driver
-   availability check → absolute hold cap), documented inline and
-   structured so each question is independently testable and swappable.
-   Now also covered end-to-end against real Postgres + Redis — see
-   `tests/integration/test_end_to_end_pipeline.py`.
-   Treat it as a solid first draft, not an approved algorithm.
+1. **The batch-hold queue's "4-question decision logic"** (`app/batch_queue/queue.py`).
+   The real four questions, per `LMX_OS_Tech_Strategy_and_Design.docx`
+   Section 6: (1) has the hold deadline been reached, (2) is there a
+   geographic cluster within the default 0.8mi radius, (3) is a driver
+   already heading this direction with capacity, (4) would dispatching now
+   break another optimization (create a conflict for a higher-priority
+   order arriving soon). Questions 1 and 2 already matched what was built.
+   Question 4 did not — the earlier interpretation substituted a fabricated
+   absolute hold-time cap, which is now replaced with a genuine
+   conflict-avoidance check (`_would_conflict_with_a_more_urgent_order`):
+   when driver availability is tight (≤1 available), holding continues if
+   dispatching this order would strand a more urgent, still-held order
+   whose own deadline is imminent. Question 3 (driver already heading this
+   direction) isn't implemented in this pure, no-I/O evaluator — its
+   closest equivalent is the Dispatch Optimizer's mid-route insertion logic
+   (`app/optimizer/service.py`). Covered end-to-end against real Postgres +
+   Redis — see `tests/integration/test_end_to_end_pipeline.py`.
 2. **SLA hold-window minutes** (`app/sla/engine.py`,
-   `DEFAULT_HOLD_WINDOW_MINUTES`). Placeholder values (T1=10min, T2=45min,
-   T3=120min). The peer review flags the 2.5 DPH figure itself as
-   unvalidated ("in our model, proving it live at Hub 1" rather than
-   established fact) — these hold windows are a direct input to that
-   number and are the first thing to recalibrate against real Hub 1 data.
-   Per-shop/per-hub overrides already exist via `active_rules` so this
-   doesn't require a code change to retune, just data.
+   `DEFAULT_HOLD_WINDOW_MINUTES`). Was a placeholder guess (T1=10min,
+   T2=45min, T3=120min); now the confirmed spec values (T1=8min, T2=90min,
+   T3=1080min/18hrs) from the same urgency-tier table. T2 and T3 were off
+   by a wide margin (2x and 9x respectively) — worth knowing if anything
+   was reasoned about using the old numbers. The 2.5 DPH figure itself
+   remains unvalidated ("in our model, proving it live at Hub 1" per the
+   peer review) — these hold windows are a direct input to that number and
+   still the first thing to recalibrate further against real Hub 1 data.
+   Per-shop/per-hub overrides already exist via `active_rules` so retuning
+   doesn't require a code change, just data.
 3. **Learning Loop flag-type naming convention** (`app/learning_loop/detection.py`,
    `HOLD_TOO_SHORT_FLAG` / `HOLD_TOO_LONG_FLAG`). The nightly job detects
    repeated driver annotations and proposes shop-specific SLA hold-window

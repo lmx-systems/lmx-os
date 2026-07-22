@@ -6,13 +6,17 @@ a hold-deadline: the latest moment the Batch-Hold Queue is allowed to keep
 holding this order before it must be released for routing, even without a
 good clustering match.
 
-IMPORTANT - these default hold windows are placeholders, not validated
-numbers. Per the peer review, the 2.5 DPH target is "a flat assertion...
-should be reframed as 'in our model, proving it live at Hub 1'." Do not
-treat the constants below as gospel; they exist so the pipeline is
-end-to-end runnable, and are the first thing to recalibrate against real
-Hub 1 data. Per-shop/per-hub overrides live in the active_rules table
-(rule_type='sla_hold_window_override') and always win over these defaults.
+Hold-window minutes below are now confirmed against the canonical spec
+(docs/ROADMAP.md B3/E5) - "LMX_OS_Tech_Strategy_and_Design.docx", Section 6
+("Component 3 - Batch-Hold Queue")'s urgency-tier table, sourced via the
+Source of Truth Index. They replace an earlier placeholder guess
+(T1=10/T2=45/T3=120) reconstructed from a peer-review summary that named
+the tiers but not their real max-hold values. Still worth recalibrating
+against real Hub 1 data eventually (the DPH target itself remains "in our
+model, proving it live" per that same peer review), but these specific
+numbers are the real spec now, not a guess. Per-shop/per-hub overrides live
+in the active_rules table (rule_type='sla_hold_window_override') and always
+win over these defaults.
 """
 from __future__ import annotations
 
@@ -21,18 +25,20 @@ from datetime import datetime, timedelta
 
 from app.schemas.order import ClassifiedOrder, NormalizedOrder
 
-# Default hold windows in minutes, keyed by tier. Placeholder values pending
-# Hub 1 calibration - see module docstring. HOT_SHOT is intentionally near
-# zero, not exactly zero - see resolve_hold_window_minutes/the Batch-Hold
-# Queue (app/batch_queue/queue.py), which also bypasses the cluster-mate
-# wait entirely for this tier so it never sits around for a pairing that
-# should never happen anyway (Phase 8: HOT_SHOT is direct point-to-point,
-# never commingled - see accept_offer in app/api/driver_routes.py).
+# Default hold windows in minutes, keyed by tier - see module docstring for
+# source. HOT_SHOT has no entry in the canonical spec (it's this codebase's
+# own Phase 8 addition, added after that spec was written) - its near-zero
+# value is a deliberate local choice, not sourced from the same document;
+# see resolve_hold_window_minutes/the Batch-Hold Queue
+# (app/batch_queue/queue.py), which also bypasses the cluster-mate wait
+# entirely for this tier so it never sits around for a pairing that should
+# never happen anyway (Phase 8: HOT_SHOT is direct point-to-point, never
+# commingled - see accept_offer in app/api/driver_routes.py).
 DEFAULT_HOLD_WINDOW_MINUTES: dict[str, int] = {
     "HOT_SHOT": 2,
-    "T1": 10,
-    "T2": 45,
-    "T3": 120,
+    "T1": 8,
+    "T2": 90,
+    "T3": 1080,  # 18 hours
 }
 
 # Keys inside NormalizedOrder.raw_payload that force a tier regardless of

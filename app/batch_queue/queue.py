@@ -6,51 +6,68 @@ nearby orders into one stop instead of dispatching one order at a time -
 this is the mechanism the design doc credits for the DPH advantage over
 single-order dispatch incumbents.
 
-NOTE ON SOURCE OF TRUTH: the canonical decision-logic spec lives in the
-Google Drive "Source of Truth Index" (LMX OS Brief v1.0-1.2), which is not
-in this local project cache. What follows is a best-effort, clearly-labeled
-implementation of the "0.8-mile default clustering radius + 4-question
-per-cycle decision logic" described in the peer review, structured so each
-question is isolated and swappable once the canonical spec is confirmed.
-Treat the four questions below as an interpretation to validate, not as
-already-approved business logic.
+NOTE ON SOURCE OF TRUTH: the canonical decision-logic spec is now confirmed
+(docs/ROADMAP.md B3/E4) - "LMX_OS_Tech_Strategy_and_Design.docx", Section 6
+("Component 3 - Batch-Hold Queue")'s "four questions evaluated per order on
+each cycle", sourced via the Source of Truth Index. The real four questions
+are: (1) has the hold deadline been reached, (2) is there a geographic
+cluster within the default 0.8mi radius, (3) is a driver already heading
+this direction with capacity, (4) would dispatching now break another
+optimization (create a conflict for a higher-priority order arriving
+soon). Below replaces an earlier placeholder interpretation whose fourth
+question was a fabricated absolute hold-time cap, not sourced from
+anything - real question 4 is a genuine conflict-avoidance check, not a
+timer, and is no longer needed as a separate safety net now that each
+tier's SLA hold_deadline (question 1) is itself the real, spec-confirmed
+ceiling on how long an order can be held.
 
-The four per-cycle questions, evaluated in order for every held order:
+The per-cycle questions, evaluated in order for every held order:
   0. Is this order HOT_SHOT? -> if yes, release immediately. Phase 8:
      HOT_SHOT is direct point-to-point and must never be commingled with
      another order's pickup (see accept_offer in app/api/driver_routes.py),
      so there is no clustering benefit to holding it at all - waiting for a
      cluster-mate that can never be paired with it only adds latency to
      the tier Sourabh is charging a premium for. This intentionally skips
-     even the "no available drivers" check (question 3): releasing costs
-     nothing beyond moving the order from held to queued, ready to be
-     picked up the moment a driver is free.
-  1. Is this order past its SLA hold_deadline? -> if yes, force-release now,
-     no matter what clustering looks like. SLA always wins.
-  2. Is there at least one other held order within the cluster radius?
-     -> if yes, this order is a commingling candidate; keep holding unless
-     rule 4 also fires.
-  3. Is there currently no available driver at the hub at all? -> if yes,
+     even the "no available drivers" check below: releasing costs nothing
+     beyond moving the order from held to queued, ready to be picked up
+     the moment a driver is free. Not one of the four canonical questions -
+     a local addition this codebase needed once Phase 8 introduced the
+     tier, predating the confirmed spec.
+  1. (Question 1) Is this order past its SLA hold_deadline? -> if yes,
+     force-release now, no matter what clustering looks like. SLA always
+     wins.
+  2. Is there currently no available driver at the hub at all? -> if yes,
      releasing wouldn't lead to a dispatch anyway, so keep holding
      regardless of clustering (avoids releasing into a queue with nothing
-     to assign to).
-  4. Has this order already been held past an absolute safety cap
-     (independent of its SLA tier)? -> if yes, force-release even if it
-     has cluster-mates, so a bad clustering match can never hold an order
-     indefinitely.
+     to assign to). A prerequisite underlying question 3, not one of the
+     four questions itself - if there is no driver at all, trivially none
+     is "heading this direction" either.
+  3. (Question 4) Would dispatching this order right now risk stranding a
+     more urgent, still-held order that's about to need this same scarce
+     driver supply? Only a real risk when driver availability is already
+     tight (<=1 available) - with drivers to spare, dispatching this order
+     doesn't cost the other one anything. See _would_conflict_with_a_more_
+     urgent_order for the exact rule.
+  4. (Question 2) Is there at least one other held order within the
+     cluster radius? -> if yes, this order is a commingling candidate;
+     keep holding.
+
+Question 3 ("is a driver already heading this direction with capacity, add
+to route") is not implemented in this function - it requires real-time
+fleet position/route data, which this pure, no-I/O evaluator deliberately
+doesn't have access to (see docs/ARCHITECTURE.md's engineering-decisions
+list on why the SLA/hold-queue domain layer stays I/O-free). The closest
+existing equivalent lives one layer up, in the Dispatch Optimizer's
+mid-route insertion logic (app/optimizer/service.py) - a released order can
+still be added to an already-active driver's route there.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.batch_queue.clustering import cluster_members
 from app.config import settings
-
-# Absolute safety cap - question 4. Independent of SLA tier; exists purely
-# so clustering logic can never hold an order longer than this no matter
-# what else is going on.
-MAX_ABSOLUTE_HOLD_MINUTES = 30
 
 
 @dataclass(frozen=True)
@@ -75,6 +92,46 @@ class BatchDecision:
     cluster_mate_ids: list[str]
 
 
+_TIER_URGENCY = {"HOT_SHOT": 0, "T1": 1, "T2": 2, "T3": 3}  # lower = more urgent
+
+# How soon a more-urgent order's hold_deadline has to be for it to count as
+# "about to need a driver" for question 4's conflict check - not itself one
+# of the four canonical questions' parameters (the spec names the check,
+# not a specific threshold), but a value has to be picked for the check to
+# be evaluable at all. 10 minutes matches this tier system's tightest real
+# window (T1's own 8-minute max hold, docs/ROADMAP.md E5) plus a small
+# margin, rather than an arbitrary round number.
+CONFLICT_RISK_WINDOW_MINUTES = 10
+
+
+def _would_conflict_with_a_more_urgent_order(
+    order: HeldOrder,
+    other_held_orders: list[HeldOrder],
+    cluster_mate_ids: list[str],
+    *,
+    available_driver_count: int,
+    now: datetime,
+) -> bool:
+    """Question 4: dispatching `order` now is only a real risk to another
+    held order when there's at most one driver to go around - with spare
+    capacity, sending this order costs the more urgent one nothing. Among
+    non-cluster-mates (a cluster-mate would be released together with this
+    order, not competing with it for a driver), a more urgent order whose
+    own hold_deadline is imminent is the one this order could strand."""
+    if available_driver_count > 1:
+        return False
+
+    threshold = now + timedelta(minutes=CONFLICT_RISK_WINDOW_MINUTES)
+    this_urgency = _TIER_URGENCY.get(order.sla_tier, _TIER_URGENCY["T3"])
+    return any(
+        other.order_id not in cluster_mate_ids
+        and _TIER_URGENCY.get(other.sla_tier, _TIER_URGENCY["T3"]) < this_urgency
+        and other.hold_deadline <= threshold
+        for other in other_held_orders
+        if other.order_id != order.order_id
+    )
+
+
 def evaluate_held_order(
     order: HeldOrder,
     other_held_orders: list[HeldOrder],
@@ -82,7 +139,6 @@ def evaluate_held_order(
     available_driver_count: int,
     now: datetime,
     cluster_radius_miles: float | None = None,
-    max_absolute_hold_minutes: int = MAX_ABSOLUTE_HOLD_MINUTES,
 ) -> BatchDecision:
     radius = cluster_radius_miles or settings.batch_hold_cluster_radius_miles
 
@@ -110,8 +166,8 @@ def evaluate_held_order(
     ]
     cluster_mate_ids = cluster_members(order.shop_lat, order.shop_lng, candidates, radius)
 
-    # Question 3: nothing to dispatch to, so holding costs nothing extra -
-    # keep holding regardless of clustering.
+    # Prerequisite underlying question 3: nothing to dispatch to, so holding
+    # costs nothing extra - keep holding regardless of clustering.
     if available_driver_count == 0:
         return BatchDecision(
             order_id=order.order_id,
@@ -120,13 +176,14 @@ def evaluate_held_order(
             cluster_mate_ids=cluster_mate_ids,
         )
 
-    # Question 4: absolute safety cap overrides a good cluster match.
-    held_minutes = (now - order.held_since).total_seconds() / 60
-    if held_minutes >= max_absolute_hold_minutes:
+    # Question 4: dispatching now would strand a more urgent order.
+    if _would_conflict_with_a_more_urgent_order(
+        order, other_held_orders, cluster_mate_ids, available_driver_count=available_driver_count, now=now
+    ):
         return BatchDecision(
             order_id=order.order_id,
-            action="release",
-            reason="absolute_hold_cap_reached",
+            action="keep_holding",
+            reason="would_conflict_with_higher_priority_order",
             cluster_mate_ids=cluster_mate_ids,
         )
 
