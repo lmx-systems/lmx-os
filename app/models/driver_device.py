@@ -28,3 +28,14 @@ class DriverDevice(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     device_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Push notifications for new job offers (docs/ROADMAP.md A1) -
+    # registered by the driver app once signed in (POST
+    # /driver/me/push-token), null until then. A revoked device's token is
+    # left in place rather than cleared - revocation is already checked
+    # independently on every request (app/driver_auth/dependencies.py's
+    # Redis denylist); app/messaging/job_offer_notifications.py filters out
+    # revoked devices at send time instead of relying on this column being
+    # unset.
+    expo_push_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    push_token_registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

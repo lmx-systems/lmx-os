@@ -25,6 +25,7 @@ from app.batch_queue.store import HoldQueueStore
 from app.config import settings
 from app.db import session_scope
 from app.fleet_state.manager import FleetStateManager
+from app.messaging.job_offer_notifications import notify_driver_of_new_offer
 from app.models.order import Order, OrderStatus
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
@@ -151,6 +152,11 @@ class DispatchOptimizerService:
             shop_name_by_order_id = {o.order_id: o.shop_name for o in released_orders}
             fleet_by_id = {d.driver_id: d for d in fleet_snapshot}
             offer_time = datetime.now(timezone.utc)
+            # (driver_id, stop_count) pairs to push-notify after the offers
+            # below are actually committed - sent outside the session block
+            # so a driver is never notified about an offer that failed to
+            # persist (app/messaging/job_offer_notifications.py).
+            offers_to_notify: list[tuple[str, int]] = []
             async with session_scope() as session:
                 for assignment in assignments:
                     offer_stops = []
@@ -179,6 +185,7 @@ class DispatchOptimizerService:
                             expires_at=offer_time + timedelta(seconds=settings.job_offer_ttl_seconds),
                         )
                     )
+                    offers_to_notify.append((assignment.driver_id, len(offer_stops)))
 
                     # Take the driver out of the assignable pool the moment
                     # they're offered a job, not just once they accept -
@@ -200,6 +207,9 @@ class DispatchOptimizerService:
                                 current_route_id=existing_state.current_route_id,
                             )
                         )
+
+            for driver_id, stop_count in offers_to_notify:
+                await notify_driver_of_new_offer(driver_id, stop_count, settings.job_offer_ttl_seconds)
 
         duration = time.perf_counter() - cycle_start
         over_budget = duration > settings.optimizer_cycle_budget_seconds

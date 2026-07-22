@@ -46,11 +46,11 @@ export function useTodayRoute() {
 
   useEffect(() => {
     // Only worth polling for new offers while idle (no active route),
-    // online, and foregrounded - also paused while backgrounded, since a
-    // driver can stay marked online for a whole shift with the phone in
-    // their pocket and an offer can't be meaningfully acted on without a
-    // push-notification system (which doesn't exist yet) while the app
-    // isn't in the foreground anyway.
+    // online, and foregrounded - a backgrounded driver relies on the push
+    // notification sent at offer-creation time instead
+    // (notifications/registerForPushNotifications.ts, docs/ROADMAP.md A1);
+    // tapping it brings this screen into focus, which useFocusEffect above
+    // already refreshes on its own.
     if (!isForeground || !isOnline || route) return;
     const id = setInterval(refresh, OFFER_POLL_INTERVAL_MS);
     return () => clearInterval(id);

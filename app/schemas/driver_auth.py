@@ -35,3 +35,8 @@ class DriverDeviceView(BaseModel):
     device_name: str | None = None
     last_seen_at: str
     is_current: bool
+
+
+class PushTokenBody(BaseModel):
+    device_id: str
+    expo_push_token: str

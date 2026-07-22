@@ -13,6 +13,7 @@ from sqlalchemy import select
 from app.api.driver_routes import (
     list_my_devices,
     refresh_token,
+    register_push_token,
     request_otp,
     revoke_my_device,
     verify_otp,
@@ -22,7 +23,7 @@ from app.driver_auth.tokens import decode_token
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.hub import Hub
-from app.schemas.driver_auth import RequestOtpBody, VerifyOtpBody
+from app.schemas.driver_auth import PushTokenBody, RequestOtpBody, VerifyOtpBody
 
 pytestmark = pytest.mark.integration
 
@@ -115,3 +116,34 @@ async def test_list_my_devices_marks_the_current_device(db_session, real_redis_c
     other = next(d for d in devices if d.device_id == "device-b")
     assert current.is_current is True
     assert other.is_current is False
+
+
+async def test_register_push_token_stores_it_on_the_right_device(db_session, real_redis_client):
+    hub_id, driver_id = await _seed_driver(db_session)
+    token = await _sign_in(db_session, "+15555550300", "device-a")
+    authed = await get_current_driver(authorization=f"Bearer {token}")
+
+    await register_push_token(
+        PushTokenBody(device_id="device-a", expo_push_token="ExponentPushToken[abc123]"),
+        driver=authed,
+        session=db_session,
+    )
+
+    result = await db_session.execute(select(DriverDevice).where(DriverDevice.driver_id == driver_id))
+    row = result.scalar_one()
+    assert row.expo_push_token == "ExponentPushToken[abc123]"
+    assert row.push_token_registered_at is not None
+
+
+async def test_register_push_token_404s_for_a_device_that_never_signed_in(db_session, real_redis_client):
+    hub_id, driver_id = await _seed_driver(db_session)
+    token = await _sign_in(db_session, "+15555550300", "device-a")
+    authed = await get_current_driver(authorization=f"Bearer {token}")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await register_push_token(
+            PushTokenBody(device_id="device-never-signed-in", expo_push_token="ExponentPushToken[xyz]"),
+            driver=authed,
+            session=db_session,
+        )
+    assert exc_info.value.status_code == 404

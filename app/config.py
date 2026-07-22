@@ -55,6 +55,22 @@ class Settings(BaseSettings):
     twilio_auth_token: str | None = None
     twilio_from_number: str | None = None
 
+    # Push notifications for new job offers (docs/ROADMAP.md A1,
+    # app/messaging/push_client.py). Unlike Twilio/Rippling, Expo's push
+    # service needs no account/credential to call in the basic case - the
+    # real gap is client-side: the driver app has no EAS project id
+    # configured yet (see driver-app/app.json), which
+    # Notifications.getExpoPushTokenAsync() requires to mint a real push
+    # token, so no device can register one regardless of this flag today.
+    # Defaults to disabled (not credential-gated, since there's no
+    # credential to gate on) so a real send is never attempted before
+    # that's deliberately turned on.
+    expo_push_enabled: bool = False
+    # Optional - Expo's "enhanced security" mode. Unset is a fully valid,
+    # working configuration; only needed if that mode is turned on for the
+    # Expo project later.
+    expo_push_access_token: str | None = None
+
     # Inbound-webhook signature verification (app/api/webhooks.py,
     # app/messaging/twilio_signature.py) needs the exact public URL Twilio
     # was configured to call, scheme+host included - `request.url` as this

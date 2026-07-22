@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 
 import { api, setAuthToken } from '../api/client';
 import type { DriverProfile } from '../api/types';
+import { registerForPushNotifications } from '../notifications/registerForPushNotifications';
 
 // SecureStore (Keychain on iOS, EncryptedSharedPreferences on Android), not
 // AsyncStorage - this token is a long-lived bearer credential for a real
@@ -60,6 +61,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // fresh (app/api/driver_routes.py's /auth/refresh) - best-effort, a
     // failure here shouldn't block sign-in.
     api.refreshToken().catch(() => {});
+    // Registers this device for job-offer push notifications
+    // (docs/ROADMAP.md A1) - also best-effort; no-ops entirely on a
+    // build with no EAS project id configured yet, see that module.
+    registerForPushNotifications().catch(() => {});
   }, []);
 
   useEffect(() => {

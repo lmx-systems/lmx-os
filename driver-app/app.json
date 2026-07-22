@@ -37,7 +37,14 @@
       "apiBaseUrl": "http://localhost:8000"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#0a6644"
+        }
+      ]
     ]
   }
 }

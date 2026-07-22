@@ -64,6 +64,7 @@ from app.schemas.driver_app import (
 from app.schemas.driver_auth import (
     AuthToken,
     DriverDeviceView,
+    PushTokenBody,
     RequestOtpBody,
     RequestOtpResult,
     VerifyOtpBody,
@@ -201,6 +202,30 @@ async def revoke_my_device(
     device.revoked_at = datetime.now(timezone.utc)
     await session.commit()
     await get_client().sadd(revoked_devices_key(driver.driver_id), device_id)
+
+
+@router.post("/me/push-token", status_code=204)
+async def register_push_token(
+    body: PushTokenBody, driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
+) -> None:
+    """Called once per app launch after sign-in (docs/ROADMAP.md A1) so
+    app/messaging/job_offer_notifications.py has somewhere real to send a
+    new-job-offer push. `body.device_id` must already have a DriverDevice
+    row - verify_otp creates one for every device the moment it signs in,
+    so a call here for a device that was never signed in is a genuine
+    404, not a race to handle."""
+    result = await session.execute(
+        select(DriverDevice).where(
+            DriverDevice.driver_id == uuid.UUID(driver.driver_id), DriverDevice.device_id == body.device_id
+        )
+    )
+    device = result.scalar_one_or_none()
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    device.expo_push_token = body.expo_push_token
+    device.push_token_registered_at = datetime.now(timezone.utc)
+    await session.commit()
 
 
 # ---------------------------------------------------------------------------

@@ -86,6 +86,12 @@ export const api = {
 
   refreshToken: () => request<AuthToken>('/driver/auth/refresh', { method: 'POST' }),
 
+  registerPushToken: (deviceId: string, expoPushToken: string) =>
+    request<void>('/driver/me/push-token', {
+      method: 'POST',
+      body: JSON.stringify({ device_id: deviceId, expo_push_token: expoPushToken }),
+    }),
+
   getMyProfile: () => request<DriverProfile>('/driver/me'),
 
   updateMyProfile: (body: { vehicle_type: string; plate_number: string; delivery_zone: string }) =>
