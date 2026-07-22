@@ -13,6 +13,9 @@ import type {
   RequestOtpResult,
   Route,
   TripSummary,
+  UploadContentType,
+  UploadKind,
+  UploadUrlResult,
 } from './types';
 
 // app.json's extra.apiBaseUrl is the dev default (local backend). Point
@@ -129,6 +132,12 @@ export const api = {
     request<Route['stops'][number]>(`/driver/stops/${stopId}/scan`, {
       method: 'POST',
       body: JSON.stringify({ scanned_count: scannedCount }),
+    }),
+
+  createUploadUrl: (stopId: string, kind: UploadKind, contentType: UploadContentType) =>
+    request<UploadUrlResult>(`/driver/stops/${stopId}/upload-url`, {
+      method: 'POST',
+      body: JSON.stringify({ kind, content_type: contentType }),
     }),
 
   completeStop: (

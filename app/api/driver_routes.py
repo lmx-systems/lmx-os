@@ -60,6 +60,8 @@ from app.schemas.driver_app import (
     SendMessageBody,
     StopView,
     TripSummaryView,
+    UploadUrlRequestBody,
+    UploadUrlResult,
 )
 from app.schemas.driver_auth import (
     AuthToken,
@@ -70,6 +72,7 @@ from app.schemas.driver_auth import (
     VerifyOtpBody,
 )
 from app.schemas.fleet import DriverState
+from app.storage.photo_upload_client import generate_object_key, get_photo_upload_client
 
 router = APIRouter(prefix="/driver", tags=["driver"])
 logger = structlog.get_logger(__name__)
@@ -921,6 +924,35 @@ async def scan_parcels(
     stop.scanned_count = max(0, min(body.scanned_count, stop.parcel_count))
     await session.commit()
     return await _stop_view_after_reload(session, stop)
+
+
+_CONTENT_TYPE_EXTENSION = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+
+
+@router.post("/stops/{stop_id}/upload-url", response_model=UploadUrlResult)
+async def create_upload_url(
+    stop_id: str,
+    body: UploadUrlRequestBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> UploadUrlResult:
+    """Requested just before capturing a parcel-scan barcode image or a
+    proof-of-delivery photo/signature (docs/ROADMAP.md A2/A3) - the driver
+    app uploads directly to the returned upload_url (never proxied through
+    this backend), then submits final_url as CompleteStopBody's
+    photo_url/signature_url. Ownership-checked the same way every other
+    stop-scoped endpoint is, even though nothing is written to the stop
+    here - a driver has no reason to mint upload URLs for a stop that
+    isn't theirs."""
+    await _get_owned_stop(session, stop_id, driver)
+
+    key = generate_object_key(
+        driver.driver_id, stop_id, body.kind, _CONTENT_TYPE_EXTENSION[body.content_type]
+    )
+    upload = get_photo_upload_client().create_upload(key, body.content_type)
+    return UploadUrlResult(
+        upload_url=upload.upload_url, final_url=upload.final_url, requires_upload=upload.requires_upload
+    )
 
 
 @router.post("/stops/{stop_id}/complete", response_model=StopView)

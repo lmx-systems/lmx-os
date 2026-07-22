@@ -23,7 +23,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.lmx.driver",
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Unlock LMX Driver with Face ID instead of re-entering a verification code every shift."
+        "NSFaceIDUsageDescription": "Unlock LMX Driver with Face ID instead of re-entering a verification code every shift.",
+        "NSCameraUsageDescription": "LMX Driver uses the camera to scan parcel barcodes and capture proof-of-delivery photos."
       }
     },
     "android": {
@@ -31,7 +32,10 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0c0c0b"
-      }
+      },
+      "permissions": [
+        "CAMERA"
+      ]
     },
     "extra": {
       "apiBaseUrl": "http://localhost:8000"
@@ -43,6 +47,12 @@
         {
           "icon": "./assets/notification-icon.png",
           "color": "#0a6644"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "LMX Driver uses the camera to scan parcel barcodes and capture proof-of-delivery photos."
         }
       ]
     ]

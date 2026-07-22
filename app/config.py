@@ -71,6 +71,20 @@ class Settings(BaseSettings):
     # Expo project later.
     expo_push_access_token: str | None = None
 
+    # Real proof-of-delivery photo/signature capture and parcel-scan
+    # barcode images (docs/ROADMAP.md A2/A3, app/storage/photo_upload_client.py)
+    # upload to S3 via a presigned PUT URL the driver app requests just
+    # before capturing. Unset bucket = same "unconfigured -> stub" status
+    # as Twilio/Rippling/Expo push - the stub issues a local marker URL
+    # (unchanged from this app's original local-capture:// placeholder
+    # shape) instead of a real presigned one, so the rest of the capture
+    # flow is fully buildable/testable without a real AWS account. Uses
+    # boto3's own default credential chain (env vars/IAM role), same as
+    # app/secrets_provider.py's AWSSecretsManagerProvider - no separate
+    # access-key settings here on purpose.
+    photo_upload_bucket: str | None = None
+    photo_upload_region: str = "us-east-1"
+
     # Inbound-webhook signature verification (app/api/webhooks.py,
     # app/messaging/twilio_signature.py) needs the exact public URL Twilio
     # was configured to call, scheme+host included - `request.url` as this

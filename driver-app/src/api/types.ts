@@ -91,6 +91,15 @@ export interface Route {
 
 export type PodMethod = 'photo' | 'signature' | 'pin';
 
+export type UploadKind = 'photo' | 'signature' | 'scan';
+export type UploadContentType = 'image/jpeg' | 'image/png' | 'image/webp';
+
+export interface UploadUrlResult {
+  upload_url: string;
+  final_url: string;
+  requires_upload: boolean;
+}
+
 // Phase 3 (screens 1n/1o) - see EarningsView's docstring in
 // app/schemas/driver_app.py for why is_placeholder is always true today.
 export interface Earnings {

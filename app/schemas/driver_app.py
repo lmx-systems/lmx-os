@@ -122,6 +122,21 @@ class ScanParcelsBody(BaseModel):
     scanned_count: int
 
 
+class UploadUrlRequestBody(BaseModel):
+    kind: Literal["photo", "signature", "scan"]
+    # An explicit, closed allowlist - not an arbitrary string - since a
+    # presigned PUT's ContentType is otherwise a driver-controlled value
+    # written straight into an S3 request (docs/ROADMAP.md A2/A3,
+    # app/storage/photo_upload_client.py).
+    content_type: Literal["image/jpeg", "image/png", "image/webp"]
+
+
+class UploadUrlResult(BaseModel):
+    upload_url: str
+    final_url: str
+    requires_upload: bool
+
+
 class CompleteStopBody(BaseModel):
     """Proof of delivery, screen 1m."""
 

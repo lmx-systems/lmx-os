@@ -51,9 +51,11 @@ export function StopDetailScreen({ route, navigation }: Props) {
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const pending = useOutboxPending(stopId);
 
-  // POD form state (dropoff only)
+  // POD form state (dropoff only). capturedUrl is the real, already-
+  // uploaded URL from PodCapture (app/api/uploadCapturedFile.ts) - not
+  // fabricated here anymore (docs/ROADMAP.md A3).
   const [method, setMethod] = useState<PodMethod>('photo');
-  const [captured, setCaptured] = useState(false);
+  const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
   const [pin, setPin] = useState('');
   const [leftAt, setLeftAt] = useState('front door');
 
@@ -109,8 +111,8 @@ export function StopDetailScreen({ route, navigation }: Props) {
   async function handleDropoffComplete() {
     await outboxManager.enqueue('complete', stopId, {
       method,
-      photo_url: method === 'photo' ? `local-capture://${stopId}.jpg` : undefined,
-      signature_url: method === 'signature' ? `local-capture://${stopId}.png` : undefined,
+      photo_url: method === 'photo' ? (capturedUrl ?? undefined) : undefined,
+      signature_url: method === 'signature' ? (capturedUrl ?? undefined) : undefined,
       pin: method === 'pin' ? pin : undefined,
       left_at: leftAt.trim() || undefined,
     });
@@ -189,13 +191,14 @@ export function StopDetailScreen({ route, navigation }: Props) {
 
         {action.kind === 'confirmDelivery' && stop.stop_type === 'dropoff' && (
           <PodCapture
+            stopId={stopId}
             method={method}
             onChangeMethod={(m) => {
               setMethod(m);
-              setCaptured(false);
+              setCapturedUrl(null);
             }}
-            captured={captured}
-            onCapture={() => setCaptured(true)}
+            captured={capturedUrl !== null}
+            onCapture={setCapturedUrl}
             pin={pin}
             onChangePin={setPin}
             leftAt={leftAt}
