@@ -33,7 +33,7 @@ Health check: `curl http://localhost:8000/health`
 
 Interactive API docs: `http://localhost:8000/docs`
 
-Dashboard: `http://localhost:5173` (paste a hub UUID to load data)
+Dashboard: `http://localhost:5173` (pick a hub from the dropdown to load data)
 
 Client portal: `http://localhost:5174` (needs a client onboarded first via
 the dashboard's "Onboard a new client" form, or `POST /admin/clients`)

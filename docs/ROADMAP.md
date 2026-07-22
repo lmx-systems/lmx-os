@@ -61,8 +61,8 @@ list instead of leaving it scattered across three documents.
 
 | # | Item | Why it matters |
 |---|---|---|
-| D1 | Add a "list hubs" endpoint | No read API exists for the `hubs` table, so hub selection is a raw UUID text field, not a dropdown — including in Phase 8's new "Onboard a new client" form, which inherits the same gap. |
-| D2 | Stop baking the API URL in at Docker build time | Vite bakes `VITE_API_BASE_URL` in at build time — pointing the dashboard at a different API means rebuilding the image, not just restarting the container. |
+| ~~D1~~ | ~~Add a "list hubs" endpoint~~ | **Done** — `GET /hubs` (`app/api/routes.py`, `app/schemas/hub.py`'s `HubSummary`) backs a real dropdown in `dashboard/src/components/TopBar.tsx`; the old raw-UUID text field survives only as a fallback if that fetch fails or returns empty. The "Onboard a new client" form takes `hubId` from the same TopBar-selected value, so it inherited the fix with no separate change. |
+| ~~D2~~ | ~~Stop baking the API URL in at Docker build time~~ | **Done** — `dashboard/docker/generate-env-config.sh` runs as an nginx entrypoint script at container start, writing `env-config.js` from the real `DASHBOARD_API_BASE_URL` env var; `src/lib/api.ts` reads `window.__RUNTIME_CONFIG__` first, falling back to the Vite build-time env var for local `npm run dev` only. Pointing the same image at a different API is now a restart, not a rebuild. `client-portal/` mirrors this exact pattern. |
 
 ### Cross-app / branding
 

@@ -104,15 +104,20 @@ dashboard hides those controls entirely for a viewer). CORS
 which is a different thing again.
 
 Other known gaps in the dashboard itself:
-- No "list hubs" endpoint exists yet (the `hubs` table has no read API), so
-  hub selection is a plain text field for a hub UUID, not a dropdown —
-  `dashboard/src/components/TopBar.tsx` documents this inline.
-- Docker: `dashboard/Dockerfile` builds a static bundle served by nginx.
-  Vite bakes `VITE_API_BASE_URL` in at *build* time (the browser calls the
-  API directly, not through the dashboard container), so changing the API
-  URL means rebuilding the image, not just restarting the container —
-  fine for one internal deployment, worth revisiting if this needs to
-  point at different API URLs per environment without a rebuild.
+- `GET /hubs` (`app/api/routes.py`, backed by `app/schemas/hub.py`'s
+  `HubSummary`) now backs a real dropdown in `TopBar.tsx` — the old raw-UUID
+  text field is still there as a fallback only if that fetch fails or
+  returns empty, so hub selection is never blocked by a bad API moment.
+- Docker: `dashboard/Dockerfile` builds a static bundle served by nginx, but
+  the API URL is no longer baked in at build time. `docker/generate-
+  env-config.sh` runs as an nginx `docker-entrypoint.d/` script at
+  *container start*, writing `env-config.js` from the real
+  `DASHBOARD_API_BASE_URL` env var; `src/lib/api.ts` reads
+  `window.__RUNTIME_CONFIG__` first, falling back to the Vite build-time env
+  var for local `npm run dev`. Pointing the same image at a different API
+  now means restarting the container with a different env var, not
+  rebuilding it. `client-portal/` mirrors this exact pattern
+  (`CLIENT_PORTAL_API_BASE_URL`).
 
 ## Driver app (component 7, Phase 1 — core delivery loop)
 
