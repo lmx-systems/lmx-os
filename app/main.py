@@ -22,6 +22,7 @@ from app.api.driver_routes import router as driver_router
 from app.api.ops_auth_routes import router as ops_auth_router
 from app.api.routes import router as ops_router
 from app.api.webhooks import router as webhooks_router
+from app.api.webhooks import warn_if_twilio_webhook_unauthenticated
 from app.client_auth.tokens import assert_client_jwt_secret_configured
 from app.config import assert_jwt_secrets_are_distinct, settings
 from app.db import engine
@@ -49,6 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     assert_client_jwt_secret_configured()
     assert_ops_jwt_secret_configured()
     assert_jwt_secrets_are_distinct()
+    warn_if_twilio_webhook_unauthenticated()
     async with engine.connect() as conn:
         await conn.run_sync(lambda _: None)
     redis_client = get_client()

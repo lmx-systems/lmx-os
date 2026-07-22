@@ -32,6 +32,7 @@ from app.api.driver_routes import (
     update_my_profile,
     verify_otp,
 )
+from app.driver_auth.otp_store import MAX_ISSUE_ATTEMPTS
 from app.batch_queue.store import HoldQueueStore
 from app.batch_queue.queue import HeldOrder
 from app.driver_auth.dependencies import AuthedDriver
@@ -587,3 +588,22 @@ async def test_profile_exposes_employment_type_defaulting_to_w2(db_session, real
 
     profile = await get_my_profile(driver=authed, session=db_session)
     assert profile.employment_type == "w2"
+
+
+async def test_request_otp_rate_limit_applies_to_unregistered_phone_numbers_too(db_session, real_redis_client):
+    """Security-review regression test (S6): request_otp used to run the
+    "does this phone belong to a driver" existence check before charging
+    any rate limit at all, making the 404-vs-200 response an unthrottled
+    oracle for enumerating real driver phone numbers. The limiter must now
+    be charged first, so probing a number that was never registered still
+    burns down to a 429 exactly like probing a real one would."""
+    unregistered_phone = "+15555559999"
+
+    for _ in range(MAX_ISSUE_ATTEMPTS):
+        with pytest.raises(HTTPException) as exc_info:
+            await request_otp(RequestOtpBody(phone=unregistered_phone), session=db_session)
+        assert exc_info.value.status_code == 404
+
+    with pytest.raises(HTTPException) as exc_info:
+        await request_otp(RequestOtpBody(phone=unregistered_phone), session=db_session)
+    assert exc_info.value.status_code == 429

@@ -157,6 +157,27 @@ async def _assert_valid_twilio_signature(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Invalid Twilio signature")
 
 
+def warn_if_twilio_webhook_unauthenticated() -> None:
+    """Called once from app/main.py's lifespan (docs/ROADMAP.md S6). Unlike
+    the driver/client/ops JWT secrets, an unconfigured TWILIO_AUTH_TOKEN
+    doesn't just disable a feature - it means /webhooks/twilio/inbound-sms
+    accepts *unsigned* POSTs from anyone (see _assert_valid_twilio_signature
+    above), since this endpoint is exempted from every other auth path.
+    A hard boot-refusal here would break the documented "unconfigured
+    third-party credential -> stub mode" convention this whole codebase
+    otherwise relies on (Twilio SMS sending is legitimately optional), so
+    this is a loud warning, not an assert - the operator needs to know this
+    endpoint is wide open, not be blocked from starting without Twilio."""
+    if settings.environment != "development" and not settings.twilio_auth_token:
+        logger.warning(
+            "twilio_webhook_signature_verification_disabled",
+            detail=(
+                "TWILIO_AUTH_TOKEN is not configured outside development - "
+                "/webhooks/twilio/inbound-sms accepts unsigned requests from anyone"
+            ),
+        )
+
+
 @router.post("/twilio/inbound-sms")
 async def twilio_inbound_sms(
     request: Request,

@@ -49,7 +49,9 @@ async def list_hubs(session: AsyncSession = Depends(get_db)) -> list[HubSummary]
 
 
 @router.post("/fleet/{hub_id}/drivers/state")
-async def upsert_driver_state(hub_id: str, state: DriverState) -> dict:
+async def upsert_driver_state(
+    hub_id: str, state: DriverState, _admin: AuthedOpsUser = Depends(require_admin)
+) -> dict:
     manager = FleetStateManager()
     await manager.upsert_driver_state(state)
     # A status change (available/en_route/off_shift/on_break) changes what
@@ -60,7 +62,9 @@ async def upsert_driver_state(hub_id: str, state: DriverState) -> dict:
 
 
 @router.post("/fleet/{hub_id}/drivers/location")
-async def upsert_driver_location(hub_id: str, location: DriverLocation) -> dict:
+async def upsert_driver_location(
+    hub_id: str, location: DriverLocation, _admin: AuthedOpsUser = Depends(require_admin)
+) -> dict:
     manager = FleetStateManager()
     await manager.update_driver_location(location, hub_id)
     return {"ok": True}

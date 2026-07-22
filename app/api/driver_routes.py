@@ -82,16 +82,22 @@ logger = structlog.get_logger(__name__)
 
 @router.post("/auth/request-otp", response_model=RequestOtpResult)
 async def request_otp(body: RequestOtpBody, session: AsyncSession = Depends(get_db)) -> RequestOtpResult:
+    otp_store = OtpStore()
+    try:
+        # Charged before the existence check below, not after - otherwise
+        # the 404/200 distinction on an unthrottled endpoint is a phone-
+        # number-enumeration oracle for who's a registered driver.
+        await otp_store.check_rate_limit(body.phone)
+    except OtpRateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
     result = await session.execute(select(Driver.id).where(Driver.phone == body.phone))
     if result.scalar_one_or_none() is None:
         # Drivers are provisioned by ops, not self-registered - see 1a's
         # "Apply to drive" annotation (out of app scope).
         raise HTTPException(status_code=404, detail="No driver registered with this phone number")
 
-    try:
-        issued = await OtpStore().issue(body.phone)
-    except OtpRateLimitExceeded as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    issued = await otp_store.issue(body.phone, skip_rate_limit_check=True)
     return RequestOtpResult(ok=True, debug_code=None if issued.sent_via_sms else issued.code)
 
 

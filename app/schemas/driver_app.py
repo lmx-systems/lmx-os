@@ -5,8 +5,9 @@ for the gap analysis this closes.
 """
 import enum
 from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DriverProfileView(BaseModel):
@@ -66,7 +67,7 @@ class DriverDocumentUpdate(BaseModel):
 class DriverAvailabilityUpdate(BaseModel):
     """Screen 1d/1e's online/offline toggle."""
 
-    status: str  # available | off_shift | on_break | en_route
+    status: Literal["available", "off_shift", "on_break", "en_route"]
 
 
 class OfferStopSummary(BaseModel):
@@ -124,7 +125,7 @@ class ScanParcelsBody(BaseModel):
 class CompleteStopBody(BaseModel):
     """Proof of delivery, screen 1m."""
 
-    method: str  # photo | signature | pin
+    method: Literal["photo", "signature", "pin"]
     photo_url: str | None = None
     signature_url: str | None = None
     pin: str | None = None
@@ -154,7 +155,10 @@ class FlagStopBody(BaseModel):
 
 
 class SendMessageBody(BaseModel):
-    body: str
+    # ~1 SMS segment set's worth - this goes straight to
+    # app.messaging.sms_client.SmsClient.send() (billed per segment) and
+    # into a Text column with no cap otherwise.
+    body: str = Field(max_length=1600)
 
 
 class MessageView(BaseModel):
