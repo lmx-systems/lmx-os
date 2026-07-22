@@ -9,6 +9,14 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.secrets_provider import load_secrets_into_environment
+
+# Must run before Settings is ever constructed below - see
+# app/secrets_provider.py's module docstring for why this specific
+# placement (top of this module, before the class body) is what makes a
+# real vault's values actually take effect with zero other code changes.
+load_secrets_into_environment()
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
