@@ -28,6 +28,7 @@ from app.config import assert_jwt_secrets_are_distinct, settings
 from app.db import engine
 from app.driver_auth.tokens import assert_driver_jwt_secret_configured
 from app.ingestion.router import router as ingestion_router
+from app.learning_loop.scheduler import learning_loop_scheduler
 from app.logging_config import configure_logging, get_logger
 from app.ops_auth.middleware import OpsUserAuthMiddleware
 from app.ops_auth.tokens import assert_ops_jwt_secret_configured
@@ -60,12 +61,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # published by *any* instance, not just itself - app/events/bus.py.
     dispatch_event_bus.start()
 
+    # Begins the poll loop that runs the Learning Loop's nightly job for
+    # real, once a day per hub, instead of relying on a person remembering
+    # to call POST /learning-loop/{hub_id}/run-nightly-job - see
+    # app/learning_loop/scheduler.py (docs/ROADMAP.md E7).
+    learning_loop_scheduler.start()
+
     logger.info("lmx_os_ready")
     yield
 
     # Let any event-triggered dispatch cycle in flight finish before the
     # connection pools it depends on go away (app/optimizer/event_trigger.py).
     await dispatch_event_bus.wait_idle()
+    await learning_loop_scheduler.stop()
     await engine.dispose()
     await close_pool()
     logger.info("lmx_os_shutdown")
