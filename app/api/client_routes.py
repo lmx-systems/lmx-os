@@ -12,14 +12,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.billing.service import invoice_detail_view, invoice_summary_view
 from app.client_auth.dependencies import AuthedClient, get_current_client
 from app.client_auth.login_rate_limit import LoginRateLimitExceeded, LoginRateLimiter
 from app.client_auth.passwords import verify_password
 from app.client_auth.tokens import issue_token
 from app.db import get_db
 from app.models.client import Client
+from app.models.invoice import Invoice
 from app.models.order import Order, OrderStatus
 from app.models.shop import Shop
+from app.schemas.billing import InvoiceDetailView, InvoiceSummaryView
 from app.schemas.client_auth import (
     ClientAuthToken,
     ClientLoginBody,
@@ -126,3 +129,31 @@ async def get_my_order(
         delivery_address=order.delivery_address,
         delivery_contact_name=order.delivery_contact_name,
     )
+
+
+@router.get("/invoices", response_model=list[InvoiceSummaryView])
+async def list_my_invoices(
+    client: AuthedClient = Depends(get_current_client), session: AsyncSession = Depends(get_db)
+) -> list[InvoiceSummaryView]:
+    result = await session.execute(
+        select(Invoice)
+        .where(Invoice.client_id == uuid.UUID(client.client_id))
+        .order_by(Invoice.period_start.desc())
+    )
+    invoices = list(result.scalars().all())
+    return [await invoice_summary_view(session, invoice) for invoice in invoices]
+
+
+@router.get("/invoices/{invoice_id}", response_model=InvoiceDetailView)
+async def get_my_invoice(
+    invoice_id: str,
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> InvoiceDetailView:
+    invoice = await session.get(Invoice, uuid.UUID(invoice_id))
+    # 404, not 403, for an invoice that exists but belongs to another
+    # client - same convention as get_my_order above.
+    if invoice is None or str(invoice.client_id) != client.client_id:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    return await invoice_detail_view(session, invoice)

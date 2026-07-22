@@ -95,7 +95,7 @@ category:
 
 | # | Item | Why it matters |
 |---|---|---|
-| C3 | A real billing/invoicing system | Phase 8 only computes and stores a per-order `fee_cents` (`app/models/order.py`) — there's no statement generation, invoice PDF, or payment collection anywhere. The client portal's billing view is deliberately minimal pending this. |
+| ~~C3~~ | ~~A real billing/invoicing system~~ | **Partially done** — `app/billing/service.py`'s `generate_invoice()` sweeps a client's delivered, priced, not-yet-billed orders in a date range into a new `Invoice` (`invoice_id` on `Order` prevents double-billing across periods); admin-triggered via `POST /admin/clients/{client_id}/invoices/generate`. Client portal has a real Invoices tab: a list + itemized detail view with a print-friendly layout ("Print / Save as PDF" via the browser, not a server-generated PDF binary — a deliberate scope cut, same class of decision as the payroll module's Rippling gate). Real gap still open: payment collection (a real processor, e.g. Stripe Connect) is explicitly out of scope here, same as B4 for driver payroll — this only produces a statement of what's owed. |
 | C4 | Multi-user client accounts | Client portal is explicitly one login per client company today (`Client.portal_email`), per Sourabh's call — a real multi-user/role model (e.g. AP vs. ops contacts at the same client) is a later decision, not an oversight. |
 | C5 | Self-service client signup | New clients are onboarded only via the internal `POST /admin/clients` form (dashboard) — there's no client-initiated signup flow, by design (this is a B2B onboarding relationship, not self-serve SaaS), but worth naming explicitly so it isn't assumed to exist. |
 

@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.payroll.hours as payroll_hours
+from app.billing.service import NoBillableOrdersError, generate_invoice, invoice_detail_view
 from app.client_auth.passwords import hash_password
 from app.db import get_db
 from app.driver_auth.dependencies import revoked_devices_key
@@ -36,6 +37,7 @@ from app.schemas.admin import (
     DriverPayrollSubmission,
     PayrollRunResult,
 )
+from app.schemas.billing import InvoiceDetailView, InvoiceGenerateBody
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -190,3 +192,30 @@ async def run_payroll_for_hub(
         )
 
     return PayrollRunResult(hub_id=hub_id, engine=provider.engine_name, submissions=submissions)
+
+
+@router.post("/clients/{client_id}/invoices/generate", response_model=InvoiceDetailView)
+async def generate_client_invoice(
+    client_id: str,
+    body: InvoiceGenerateBody,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> InvoiceDetailView:
+    """
+    Sweeps this client's delivered, priced, not-yet-billed orders in
+    [period_start, period_end) into a new statement (docs/ROADMAP.md C3,
+    app/billing/service.py). Safe to call repeatedly for different, later
+    periods - already-billed orders (Order.invoice_id set) are never
+    picked up twice; running it again for a period with nothing new to
+    bill 404s rather than creating an empty invoice.
+    """
+    client = await session.get(Client, uuid.UUID(client_id))
+    if client is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    try:
+        invoice = await generate_invoice(session, uuid.UUID(client_id), body.period_start, body.period_end)
+    except NoBillableOrdersError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return await invoice_detail_view(session, invoice)

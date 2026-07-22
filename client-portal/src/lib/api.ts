@@ -4,6 +4,8 @@ import type {
   ClientOrderDetailView,
   ClientOrderSummaryView,
   ClientProfileView,
+  InvoiceDetailView,
+  InvoiceSummaryView,
 } from './types'
 
 // /client/* is exempt from the ops-dashboard auth gate
@@ -63,4 +65,8 @@ export const api = {
   myOrders: () => request<ClientOrderSummaryView[]>('/client/orders'),
 
   myOrder: (orderId: string) => request<ClientOrderDetailView>(`/client/orders/${orderId}`),
+
+  myInvoices: () => request<InvoiceSummaryView[]>('/client/invoices'),
+
+  myInvoice: (invoiceId: string) => request<InvoiceDetailView>(`/client/invoices/${invoiceId}`),
 }

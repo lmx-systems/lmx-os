@@ -126,3 +126,13 @@ body {
   color: var(--text-primary);
   font-family: 'Inter Variable', system-ui, sans-serif;
 }
+
+/* Invoice printing (InvoiceDetail.tsx, docs/ROADMAP.md C3) - plain white
+   page, no app chrome, regardless of light/dark theme or which surface
+   tokens currently resolve to a colored background. */
+@media print {
+  body {
+    background-color: white;
+    color: black;
+  }
+}

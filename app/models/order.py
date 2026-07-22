@@ -96,3 +96,12 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # never silently look like a free delivery on the client portal or in
     # payroll math (docs/NEXT_STEPS.md item 14's driver-earnings gap).
     fee_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Set once by app/billing/service.py's generate_invoice() when this
+    # (delivered, fee_cents-priced) order is swept into a client's
+    # statement for a period - null means "not yet billed," which is what
+    # keeps a later invoice run from double-billing an order that was
+    # already included in an earlier one (docs/ROADMAP.md C3).
+    invoice_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("invoices.id"), nullable=True, index=True
+    )

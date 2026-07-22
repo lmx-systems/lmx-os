@@ -8,7 +8,7 @@ interface TopBarProps {
 
 export function TopBar({ profile, onLogout }: TopBarProps) {
   return (
-    <header className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-6 py-3">
+    <header className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-6 py-3 print:hidden">
       <div className="flex items-center gap-2.5">
         <img src="/lmx-mark.png" alt="LMX" className="h-8 w-8 rounded-[var(--radius)]" />
         <div>
