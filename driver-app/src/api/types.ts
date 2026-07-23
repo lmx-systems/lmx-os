@@ -133,3 +133,16 @@ export interface Message {
   created_at: string;
   stop_id: string | null;
 }
+
+// Masked voice calling (docs/ROADMAP.md A7) - same no-phone-number rule as
+// Message, see CallView's docstring in app/schemas/driver_app.py. The
+// driver's own phone rings via a real carrier call; this is just the
+// resulting log entry, not anything used to place the call client-side.
+export type CallStatus = 'initiated' | 'connected' | 'completed' | 'failed' | 'no-answer';
+
+export interface Call {
+  call_id: string;
+  status: CallStatus;
+  created_at: string;
+  duration_seconds: number | null;
+}

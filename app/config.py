@@ -95,6 +95,12 @@ class Settings(BaseSettings):
     # computation matches what Twilio actually signed, not this
     # container's internal view of the request. Unset = use request.url
     # as-is, correct for today's un-proxied docker-compose deployment.
+    #
+    # Also doubles as the base for the *outbound* URLs masked voice
+    # calling hands Twilio (docs/ROADMAP.md A7, app/api/driver_routes.py's
+    # call_customer) - Twilio needs somewhere public to call back into for
+    # the connect-TwiML and call-status webhooks, and this is the same
+    # "our real public address" value either direction needs.
     twilio_webhook_base_url: str | None = None
 
     # Driver app Phase 3 (screens 1p/1q): where a driver's "contact

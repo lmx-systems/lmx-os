@@ -16,3 +16,14 @@ class Hub(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     lat: Mapped[float] = mapped_column(nullable=False)
     lng: Mapped[float] = mapped_column(nullable=False)
     active: Mapped[bool] = mapped_column(default=True)
+
+    # Two-letter USPS state code (e.g. "CA") - the real, neutral fact
+    # state-specific overtime rules need (docs/ROADMAP.md A9,
+    # app/payroll/overtime_rules.py), independent of whichever actual
+    # rule ends up applying. Nullable: no Hub creation/edit API or UI
+    # exists yet (hubs are seed/DB-provisioned only), and every hub
+    # predates this column, so it has to start out unset rather than
+    # guessed at from lat/lng. Unset = app/payroll/overtime_rules.py's
+    # federal-only default applies, same behavior as before this column
+    # existed.
+    state_code: Mapped[str | None] = mapped_column(String(2), nullable=True)

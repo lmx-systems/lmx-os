@@ -20,6 +20,11 @@ interface PodCaptureProps {
   onCapture: (url: string) => void;
   pin: string;
   onChangePin: (pin: string) => void;
+  // Real PIN verification (docs/ROADMAP.md A4) - null until a submit
+  // attempt comes back rejected (wrong PIN, none issued, or too many
+  // attempts); StopDetailScreen clears it again as soon as the driver
+  // edits the PIN, so a stale error never lingers past a new attempt.
+  pinError: string | null;
   leftAt: string;
   onChangeLeftAt: (leftAt: string) => void;
   onSubmit: () => void;
@@ -39,6 +44,7 @@ export function PodCapture({
   onCapture,
   pin,
   onChangePin,
+  pinError,
   leftAt,
   onChangeLeftAt,
   onSubmit,
@@ -104,7 +110,10 @@ export function PodCapture({
           {uploadError && <Text style={styles.errorText}>{uploadError}</Text>}
         </>
       ) : (
-        <TextField label="Delivery PIN" placeholder="1234" keyboardType="number-pad" value={pin} onChangeText={onChangePin} maxLength={6} />
+        <>
+          <TextField label="Delivery PIN" placeholder="1234" keyboardType="number-pad" value={pin} onChangeText={onChangePin} maxLength={6} />
+          {pinError && <Text style={styles.errorText}>{pinError}</Text>}
+        </>
       )}
 
       <TextField label="Left at" value={leftAt} onChangeText={onChangeLeftAt} />

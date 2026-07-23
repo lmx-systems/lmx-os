@@ -1,3 +1,4 @@
+from app.models.call import Call
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.models.driver import Driver
@@ -13,6 +14,7 @@ from app.models.shop import Shop
 from app.models.stop import Stop, StopFlag, StopOrder
 
 __all__ = [
+    "Call",
     "Client",
     "ClientRate",
     "Driver",

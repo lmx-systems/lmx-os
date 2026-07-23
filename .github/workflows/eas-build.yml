@@ -1,0 +1,51 @@
+name: EAS Build (driver app)
+
+# Manual and tag-triggered, not on every push to main - an EAS build
+# consumes real (metered, once a real Expo account exists) build
+# minutes and produces a real binary for testers to install, so this
+# should be a deliberate action, not something that fires on every
+# commit the way CI's test suite does.
+on:
+  push:
+    tags:
+      - "driver-app-v*"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "eas.json build profile"
+        required: true
+        default: preview
+        type: choice
+        options: [development, preview, production]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: driver-app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: driver-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # EXPO_TOKEN is a repo secret (Settings -> Secrets and variables ->
+      # Actions) - a personal or robot-account access token generated at
+      # expo.dev/accounts/[account]/settings/access-tokens, once a real
+      # Expo account/project exists (see driver-app's EAS section in
+      # docs/ROADMAP.md A6 for the one-time `eas init`/`eas login` this
+      # depends on). Nothing in this workflow can run before that exists.
+      - name: EAS build
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          PROFILE="${{ inputs.profile || 'production' }}"
+          npx eas-cli build --platform all --profile "$PROFILE" --non-interactive --no-wait

@@ -29,8 +29,11 @@ from app.driver_auth.tokens import issue_token
 from app.fleet_state.manager import FleetStateManager
 import app.payroll.hours as payroll_hours
 from app.redis_client import get_client
+from app.messaging.delivery_pin import MAX_PIN_VERIFICATION_ATTEMPTS, generate_delivery_pin, send_delivery_pin_sms
 from app.messaging.shop_notifications import notify_shop_en_route, notify_shop_picked_up
 from app.messaging.sms_client import get_sms_client
+from app.messaging.voice_client import get_voice_client
+from app.models.call import Call
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.driver_document import DriverDocument
@@ -43,6 +46,7 @@ from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.schemas.driver_app import (
+    CallView,
     CompleteStopBody,
     DriverAvailabilityUpdate,
     DriverDocumentUpdate,
@@ -636,11 +640,25 @@ async def accept_offer(
         offer.stop_payload,
         key=lambda s: 0 if uuid.UUID(s["order_id"]) in hot_shot_id_set else 1,
     )
+    # Collected here, sent after the main commit below - same "generate
+    # now, notify best-effort afterward" split as the shop SMS further
+    # down, so a Twilio blip can never roll back a route the driver
+    # already accepted.
+    dropoffs_needing_pin_sms: list[tuple[Stop, Order]] = []
+
     for stop_summary in sorted_stop_payload:
         order = orders_by_id.get(uuid.UUID(stop_summary["order_id"]))
         if order is None:
             continue
         dropoff = Stop(route_id=route.id, shop_id=None, sequence=sequence, stop_type="dropoff", parcel_count=1)
+        # Real PIN issuance (docs/ROADMAP.md A4) - only when there's
+        # somewhere real to send it. No contact phone on file means
+        # method="pin" simply won't be an option complete_stop accepts
+        # for this stop, same as everywhere else in this app that treats
+        # "nothing configured" as "can't do this," not "silently succeed."
+        if order.delivery_contact_phone:
+            dropoff.delivery_pin = generate_delivery_pin()
+            dropoffs_needing_pin_sms.append((dropoff, order))
         session.add(dropoff)
         await session.flush()
         session.add(StopOrder(stop_id=dropoff.id, order_id=order.id))
@@ -665,6 +683,16 @@ async def accept_offer(
     await dispatch_event_bus.publish(str(offer.hub_id), "driver_status_changed")
 
     await session.commit()
+
+    # Real PIN issuance (docs/ROADMAP.md A4): text each dropoff's PIN to
+    # its customer now that the route above is durably committed.
+    # Best-effort, same reasoning as the shop SMS immediately below.
+    for dropoff, order in dropoffs_needing_pin_sms:
+        await send_delivery_pin_sms(
+            session, hub_id=offer.hub_id, driver_id=offer.driver_id, stop=dropoff, order=order
+        )
+    if dropoffs_needing_pin_sms:
+        await session.commit()
 
     # Phase 8 shop SMS: the driver is headed to their first pickup the
     # moment this offer is accepted - notify that shop now. Best-effort:
@@ -1018,6 +1046,23 @@ async def complete_stop(
         if unfinished_pickups.scalar_one() > 0:
             raise HTTPException(status_code=409, detail="Complete this route's pickup stop(s) first")
 
+    if body.method == "pin":
+        # Real verification (docs/ROADMAP.md A4) - stop.delivery_pin is
+        # the actual PIN texted to the customer at accept_offer time
+        # (app/messaging/delivery_pin.py), not just recorded and trusted.
+        if stop.delivery_pin is None:
+            raise HTTPException(
+                status_code=409, detail="No PIN was issued for this stop - use photo or signature instead"
+            )
+        if stop.pin_verification_attempts >= MAX_PIN_VERIFICATION_ATTEMPTS:
+            raise HTTPException(
+                status_code=409, detail="Too many incorrect PIN attempts - use photo or signature instead"
+            )
+        if body.pin != stop.delivery_pin:
+            stop.pin_verification_attempts += 1
+            await session.commit()
+            raise HTTPException(status_code=400, detail="Incorrect PIN")
+
     now = datetime.now(timezone.utc)
     stop.status = "completed"
     stop.completed_at = now
@@ -1241,7 +1286,9 @@ async def list_customer_messages(
 ) -> list[MessageView]:
     stop = await _get_owned_stop(session, stop_id, driver)
     result = await session.execute(
-        select(Message).where(Message.stop_id == stop.id).order_by(Message.created_at)
+        select(Message)
+        .where(Message.stop_id == stop.id, Message.channel == "customer")
+        .order_by(Message.created_at)
     )
     return [_message_view(m) for m in result.scalars().all()]
 
@@ -1289,6 +1336,69 @@ async def list_support_messages(
 
 
 # ---------------------------------------------------------------------------
+# Masked voice calling (docs/ROADMAP.md A7) - app/messaging/voice_client.py.
+# "Masked" here means two real phone calls bridged by Twilio, not in-app
+# audio: this endpoint places a call to the *driver's* own phone, and once
+# they answer, app/api/webhooks.py's voice_connect tells Twilio to <Dial>
+# the customer with LMX's shared number as caller ID. The customer's real
+# number never reaches the driver app (see CallView, which omits it).
+# ---------------------------------------------------------------------------
+
+
+def _call_view(call: Call) -> CallView:
+    return CallView(
+        call_id=str(call.id),
+        status=call.status,
+        created_at=call.created_at,
+        duration_seconds=call.duration_seconds,
+    )
+
+
+@router.post("/stops/{stop_id}/call", response_model=CallView)
+async def call_customer(
+    stop_id: str,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> CallView:
+    stop = await _get_owned_stop(session, stop_id, driver)
+    if stop.stop_type != "dropoff":
+        raise HTTPException(status_code=409, detail="Only a dropoff stop has a customer to call")
+
+    order_id_result = await session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == stop.id))
+    order_id = order_id_result.scalar_one_or_none()
+    order = await session.get(Order, order_id) if order_id else None
+    if order is None or not order.delivery_contact_phone:
+        raise HTTPException(status_code=409, detail="No customer contact number on file for this stop")
+
+    driver_row = await _get_driver_row(session, driver)
+
+    call = Call(
+        hub_id=uuid.UUID(driver.hub_id),
+        driver_id=uuid.UUID(driver.driver_id),
+        stop_id=stop.id,
+        counterparty_phone=order.delivery_contact_phone,
+        status="initiated",
+    )
+    session.add(call)
+    await session.flush()
+
+    # Twilio needs a publicly-reachable URL to call back into for both the
+    # connect-TwiML and the status callback - same setting webhooks.py's
+    # inbound-signature check uses for the reverse direction (see
+    # settings.twilio_webhook_base_url's docstring). Unset (today's
+    # un-proxied docker-compose dev stack) still lets the stub client run
+    # end-to-end since it never actually dials out.
+    base_url = (settings.twilio_webhook_base_url or "").rstrip("/")
+    call.twilio_call_sid = await get_voice_client().place_masked_call(
+        driver_phone=driver_row.phone,
+        connect_url=f"{base_url}/webhooks/twilio/voice-connect/{call.id}",
+        status_callback_url=f"{base_url}/webhooks/twilio/voice-status/{call.id}",
+    )
+    await session.commit()
+    return _call_view(call)
+
+
+# ---------------------------------------------------------------------------
 # Earnings + trip history (screens 1n/1o) - see EarningsView/TripSummaryView
 # docstrings (app/schemas/driver_app.py) for why this is explicitly labeled
 # an estimate rather than a real payroll figure. Hours/overtime math lives
@@ -1322,6 +1432,7 @@ async def get_my_earnings(
     regular_hours, overtime_hours, estimated_pay_cents = await payroll_hours.hours_and_pay_for_period(
         session,
         driver_id=driver.driver_id,
+        hub_id=str(row.hub_id),
         employment_type=row.employment_type,
         rate_cents=rate_cents,
         start=start,

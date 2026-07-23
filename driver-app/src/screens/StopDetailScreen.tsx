@@ -58,6 +58,20 @@ export function StopDetailScreen({ route, navigation }: Props) {
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
   const [pin, setPin] = useState('');
   const [leftAt, setLeftAt] = useState('front door');
+  // PIN completion (docs/ROADMAP.md A4) is verified for real server-side
+  // and can genuinely be wrong - unlike photo/signature, it can't go
+  // through the fire-and-forget offline outbox (a wrong PIN would fail
+  // silently in the background after the driver already navigated away).
+  // It's submitted directly and awaited instead, so a rejection surfaces
+  // immediately and the driver can ask the customer again.
+  const [submittingPin, setSubmittingPin] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+  // Masked voice calling (docs/ROADMAP.md A7) - the driver's own phone
+  // rings via a real carrier call once this resolves (app/messaging/
+  // voice_client.py bridges it to the customer server-side), so there's
+  // no in-app call UI to show beyond "requested" - just enough state to
+  // disable the button mid-request and surface a failure to place it.
+  const [callingCustomer, setCallingCustomer] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -103,17 +117,41 @@ export function StopDetailScreen({ route, navigation }: Props) {
     await outboxManager.enqueue('scan', stopId, { scannedCount: stop.scanned_count + 1 });
   }
 
+  async function handleCallCustomer() {
+    setCallingCustomer(true);
+    try {
+      await api.callCustomer(stopId);
+    } catch (err) {
+      Alert.alert('Could not place call', err instanceof ApiError ? err.message : 'Try again in a moment.');
+    } finally {
+      setCallingCustomer(false);
+    }
+  }
+
   async function handlePickupComplete() {
     await outboxManager.enqueue('complete', stopId, { method: 'photo' });
     navigation.navigate('Home');
   }
 
   async function handleDropoffComplete() {
+    if (method === 'pin') {
+      setSubmittingPin(true);
+      setPinError(null);
+      try {
+        await api.completeStop(stopId, { method: 'pin', pin, left_at: leftAt.trim() || undefined });
+        navigation.navigate('Home');
+      } catch (err) {
+        setPinError(err instanceof ApiError ? err.message : 'Could not verify PIN. Try again.');
+      } finally {
+        setSubmittingPin(false);
+      }
+      return;
+    }
+
     await outboxManager.enqueue('complete', stopId, {
       method,
       photo_url: method === 'photo' ? (capturedUrl ?? undefined) : undefined,
       signature_url: method === 'signature' ? (capturedUrl ?? undefined) : undefined,
-      pin: method === 'pin' ? pin : undefined,
       left_at: leftAt.trim() || undefined,
     });
     navigation.navigate('Home');
@@ -160,16 +198,7 @@ export function StopDetailScreen({ route, navigation }: Props) {
 
       {stop.stop_type === 'dropoff' && stop.contact_name && (
         <View style={styles.contactRow}>
-          <Button
-            label="Call"
-            variant="outline"
-            onPress={() =>
-              Alert.alert(
-                'Masked calling not available yet',
-                'Voice calling needs its own Twilio Voice/Proxy setup, separate from the SMS messaging below. Use Message for now.',
-              )
-            }
-          />
+          <Button label="Call" variant="outline" onPress={handleCallCustomer} loading={callingCustomer} />
           <Button
             label="Message"
             variant="outline"
@@ -196,15 +225,20 @@ export function StopDetailScreen({ route, navigation }: Props) {
             onChangeMethod={(m) => {
               setMethod(m);
               setCapturedUrl(null);
+              setPinError(null);
             }}
             captured={capturedUrl !== null}
             onCapture={setCapturedUrl}
             pin={pin}
-            onChangePin={setPin}
+            onChangePin={(value) => {
+              setPin(value);
+              setPinError(null);
+            }}
+            pinError={pinError}
             leftAt={leftAt}
             onChangeLeftAt={setLeftAt}
             onSubmit={handleDropoffComplete}
-            busy={false}
+            busy={submittingPin}
           />
         )}
 

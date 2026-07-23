@@ -7,6 +7,7 @@ regardless of what day the test suite happens to run on.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -14,6 +15,7 @@ import app.payroll.hours as payroll_hours
 from app.models.driver import Driver
 from app.models.driver_shift_event import DriverShiftEvent
 from app.models.hub import Hub
+from app.payroll.overtime_rules import OvertimeRule
 
 pytestmark = pytest.mark.integration
 
@@ -123,6 +125,61 @@ async def test_hours_worked_excludes_on_break_time(db_session):
     assert hours == pytest.approx(7.5)
 
 
+async def test_daily_hours_splits_a_span_that_crosses_midnight(db_session):
+    hub_id, driver_id = await _seed_driver(db_session)
+    db_session.add_all(
+        [
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="available", occurred_at=MONDAY + timedelta(hours=22)),
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="off_shift", occurred_at=MONDAY + timedelta(hours=26)),
+        ]
+    )
+    await db_session.commit()
+
+    daily = await payroll_hours.daily_hours_worked_from_shift_events(
+        db_session, str(driver_id), MONDAY, MONDAY + timedelta(days=7)
+    )
+    # 10pm Monday -> 2am Tuesday: 2 hours land on each side of midnight,
+    # not 4 hours attributed to either day.
+    assert daily[MONDAY.date()] == pytest.approx(2.0)
+    assert daily[(MONDAY + timedelta(days=1)).date()] == pytest.approx(2.0)
+    assert sum(daily.values()) == pytest.approx(4.0)
+
+
+async def test_hours_and_overtime_uses_the_hub_state_rule_when_one_is_registered(db_session):
+    """No real state rule exists yet (docs/PAYROLL_STATE_OT_RESEARCH.md) -
+    this confirms hours_and_overtime actually looks one up via the hub's
+    state_code and defers to it, using a fake rule rather than asserting
+    any real state's policy."""
+    hub_id, driver_id = await _seed_driver(db_session)
+    hub = await db_session.get(Hub, hub_id)
+    hub.state_code = "ZZ"
+    await db_session.commit()
+
+    db_session.add_all(
+        [
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="available", occurred_at=MONDAY + timedelta(hours=1)),
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="off_shift", occurred_at=MONDAY + timedelta(hours=9)),
+        ]
+    )
+    await db_session.commit()
+
+    class AllOvertimeRule(OvertimeRule):
+        """A deliberately unrealistic fake rule - every on-duty hour is
+        overtime - just to prove the registry lookup actually changes the
+        result, not to model any real policy."""
+
+        def apply(self, daily_hours):
+            total = sum(daily_hours.values())
+            return 0.0, total
+
+    with patch("app.payroll.overtime_rules.STATE_OVERTIME_RULES", {"ZZ": AllOvertimeRule()}):
+        regular, overtime = await payroll_hours.hours_and_overtime(
+            db_session, str(driver_id), str(hub_id), MONDAY, MONDAY + timedelta(days=7)
+        )
+    assert regular == 0.0
+    assert overtime == pytest.approx(8.0)
+
+
 async def test_hours_and_overtime_applies_time_and_a_half_over_40_in_a_week(db_session):
     hub_id, driver_id = await _seed_driver(db_session)
     # 45 hours online, entirely within the Monday-Sunday week starting at
@@ -136,7 +193,7 @@ async def test_hours_and_overtime_applies_time_and_a_half_over_40_in_a_week(db_s
     await db_session.commit()
 
     regular, overtime = await payroll_hours.hours_and_overtime(
-        db_session, str(driver_id), MONDAY, MONDAY + timedelta(days=7)
+        db_session, str(driver_id), str(hub_id), MONDAY, MONDAY + timedelta(days=7)
     )
     assert regular == pytest.approx(40.0)
     assert overtime == pytest.approx(5.0)
@@ -153,7 +210,7 @@ async def test_hours_and_overtime_stays_zero_under_the_weekly_threshold(db_sessi
     await db_session.commit()
 
     regular, overtime = await payroll_hours.hours_and_overtime(
-        db_session, str(driver_id), MONDAY, MONDAY + timedelta(days=7)
+        db_session, str(driver_id), str(hub_id), MONDAY, MONDAY + timedelta(days=7)
     )
     assert regular == pytest.approx(8.0)
     assert overtime == 0.0
@@ -174,6 +231,7 @@ async def test_hours_and_pay_for_period_skips_overtime_for_non_w2(db_session):
     regular, overtime, pay_cents = await payroll_hours.hours_and_pay_for_period(
         db_session,
         driver_id=str(driver_id),
+        hub_id=str(hub_id),
         employment_type="contractor_1099",
         rate_cents=2_000,
         start=MONDAY,

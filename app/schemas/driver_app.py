@@ -189,6 +189,18 @@ class MessageView(BaseModel):
     stop_id: str | None = None
 
 
+class CallView(BaseModel):
+    """Deliberately has no phone number field anywhere - same masking rule
+    as MessageView. The driver's own phone rings via a real carrier call
+    (app/messaging/voice_client.py); this view is just the resulting log
+    entry, not anything used to actually place the call client-side."""
+
+    call_id: str
+    status: str  # initiated | connected | completed | failed | no-answer
+    created_at: datetime
+    duration_seconds: int | None = None
+
+
 class EarningsView(BaseModel):
     """Screen 1n. Hours now come from the real online/offline/break log
     (app/models/driver_shift_event.py) rather than route-span, and the

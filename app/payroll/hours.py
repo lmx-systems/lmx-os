@@ -8,25 +8,28 @@ never drift on what "hours worked" means.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.driver_shift_event import DriverShiftEvent
+from app.models.hub import Hub
+from app.payroll.overtime_rules import FEDERAL_OVERTIME_MULTIPLIER, overtime_rule_for_state
 
 # Fallback only - used when a driver has no real hourly_rate_cents set yet
 # (app/models/driver.py). Not tuned against any real wage decision - see
 # docs/NEXT_STEPS.md.
 PLACEHOLDER_HOURLY_RATE_CENTS = 1_800  # $18.00/hr
 
-# Federal FLSA overtime only (1.5x past 40hrs in a workweek) - applied to
-# w2 drivers only, since 1099 contractors aren't FLSA overtime-eligible
-# and gig per-delivery pay has no hours-based overtime concept. No
-# state-specific daily-OT rules (e.g. California's 8hr/day threshold) are
-# modeled - a real policy gap, not silently assumed away.
-FEDERAL_OVERTIME_THRESHOLD_HOURS = 40.0
-FEDERAL_OVERTIME_MULTIPLIER = 1.5
+# Which overtime *multiplier* applies to a driver's overtime hours - unlike
+# the *threshold* (now pluggable per state, app/payroll/overtime_rules.py),
+# every rule researched so far still pays 1.5x, not a distinct double-time
+# tier (see docs/PAYROLL_STATE_OT_RESEARCH.md's note on California's 2x
+# past 12hrs/day - not modeled here, since no state rule is registered
+# yet). Applied to w2 drivers only, since 1099 contractors aren't FLSA
+# overtime-eligible and gig per-delivery pay has no hours-based overtime
+# concept.
 
 # On-duty (available/en_route/offered are all "online, on the clock"
 # sub-states an operator never toggles directly - only
@@ -76,17 +79,19 @@ def _calendar_weeks_overlapping(start: datetime, end: datetime) -> list[tuple[da
     return weeks
 
 
-async def hours_worked_from_shift_events(
+async def _on_duty_spans(
     session: AsyncSession, driver_id: str, start: datetime, end: datetime
-) -> float:
-    """
-    Real on-duty time from the shift-event log (app/models/
-    driver_shift_event.py), replacing the old route-span heuristic. Only
-    update_my_availability ever crosses the on-duty/off-duty boundary (see
-    ON_DUTY_STATUSES above), so that endpoint's log is complete for this
-    purpose even though accept_offer/decline_offer also change status
-    (they only move within the already-on-duty sub-states).
-    """
+) -> list[tuple[datetime, datetime]]:
+    """The real [on-duty-start, on-duty-end) spans within [start, end),
+    from the shift-event log (app/models/driver_shift_event.py), replacing
+    the old route-span heuristic. Only update_my_availability ever crosses
+    the on-duty/off-duty boundary (see ON_DUTY_STATUSES above), so that
+    endpoint's log is complete for this purpose even though accept_offer/
+    decline_offer also change status (they only move within the
+    already-on-duty sub-states). Shared by hours_worked_from_shift_events
+    (sums span durations) and daily_hours_worked_from_shift_events (splits
+    them across day boundaries) so the two can never drift on what counts
+    as "on duty"."""
     result = await session.execute(
         select(DriverShiftEvent)
         .where(DriverShiftEvent.driver_id == uuid.UUID(driver_id), DriverShiftEvent.occurred_at < end)
@@ -94,7 +99,7 @@ async def hours_worked_from_shift_events(
     )
     events = list(result.scalars().all())
     if not events:
-        return 0.0
+        return []
 
     # Was the driver already on duty when the window opened? - the most
     # recent event strictly before `start` tells us.
@@ -103,7 +108,7 @@ async def hours_worked_from_shift_events(
     if prior and prior[-1].event_type in ON_DUTY_STATUSES:
         on_duty_since = start
 
-    total_seconds = 0.0
+    spans: list[tuple[datetime, datetime]] = []
     for event in events:
         if event.occurred_at < start:
             continue
@@ -111,46 +116,91 @@ async def hours_worked_from_shift_events(
             if on_duty_since is None:
                 on_duty_since = event.occurred_at
         elif on_duty_since is not None:
-            total_seconds += (event.occurred_at - on_duty_since).total_seconds()
+            spans.append((on_duty_since, event.occurred_at))
             on_duty_since = None
 
     if on_duty_since is not None:
-        total_seconds += (end - on_duty_since).total_seconds()
+        spans.append((on_duty_since, end))
 
+    return spans
+
+
+async def hours_worked_from_shift_events(
+    session: AsyncSession, driver_id: str, start: datetime, end: datetime
+) -> float:
+    spans = await _on_duty_spans(session, driver_id, start, end)
+    total_seconds = sum((span_end - span_start).total_seconds() for span_start, span_end in spans)
     return max(total_seconds / 3600, 0.0)
 
 
-async def hours_and_overtime(
+async def daily_hours_worked_from_shift_events(
     session: AsyncSession, driver_id: str, start: datetime, end: datetime
+) -> dict[date, float]:
+    """Same on-duty reconstruction as hours_worked_from_shift_events, but
+    bucketed per calendar day instead of summed - the mechanism a
+    daily-threshold overtime rule (app/payroll/overtime_rules.py, e.g. a
+    future California-style 8hr/day rule) needs and the federal-only rule
+    doesn't. Built now precisely so adding such a rule later is "write an
+    OvertimeRule.apply()", not "first go build a way to know daily
+    hours" - nothing in this codebase computed per-day totals before this
+    existed. A span that crosses midnight is split at the boundary, so
+    e.g. a 10pm-2am span attributes 2 hours to the first day and 2 to the
+    next, not 4 to either."""
+    spans = await _on_duty_spans(session, driver_id, start, end)
+    daily: dict[date, float] = {}
+    for span_start, span_end in spans:
+        cursor = span_start
+        while cursor < span_end:
+            next_midnight = datetime.combine(cursor.date() + timedelta(days=1), time.min, tzinfo=cursor.tzinfo)
+            day_end = min(next_midnight, span_end)
+            daily[cursor.date()] = daily.get(cursor.date(), 0.0) + (day_end - cursor).total_seconds() / 3600
+            cursor = day_end
+    return daily
+
+
+async def hours_and_overtime(
+    session: AsyncSession, driver_id: str, hub_id: str, start: datetime, end: datetime
 ) -> tuple[float, float]:
     """Regular + overtime hours within [start, end), bucketed into
-    Monday-Sunday federal workweeks. Known limitation: a workweek that
-    straddles two pay periods is only evaluated using the hours visible
-    within THIS period - hours from the adjacent period aren't looked up,
-    so OT could be undercounted right at a pay-period boundary. A real
-    payroll system (app/payroll/, once actually wired to Rippling) should
-    be the system of record for cross-period OT, not this estimate."""
+    Monday-Sunday workweeks and evaluated against whichever OvertimeRule
+    applies to the driver's hub (app/payroll/overtime_rules.py) - the
+    federal-only rule for every hub today, since no state-specific rule is
+    registered yet (see docs/PAYROLL_STATE_OT_RESEARCH.md). Known
+    limitation: a workweek that straddles two pay periods is only
+    evaluated using the hours visible within THIS period - hours from the
+    adjacent period aren't looked up, so OT could be undercounted right at
+    a pay-period boundary. A real payroll system (app/payroll/, once
+    actually wired to Rippling) should be the system of record for
+    cross-period OT, not this estimate."""
+    hub = await session.get(Hub, uuid.UUID(hub_id))
+    rule = overtime_rule_for_state(hub.state_code if hub else None)
+
     total_regular = 0.0
     total_overtime = 0.0
     for week_start, week_end in _calendar_weeks_overlapping(start, end):
         clipped_start, clipped_end = max(week_start, start), min(week_end, end)
-        week_hours = await hours_worked_from_shift_events(session, driver_id, clipped_start, clipped_end)
-        if week_hours > FEDERAL_OVERTIME_THRESHOLD_HOURS:
-            total_regular += FEDERAL_OVERTIME_THRESHOLD_HOURS
-            total_overtime += week_hours - FEDERAL_OVERTIME_THRESHOLD_HOURS
-        else:
-            total_regular += week_hours
+        daily_hours = await daily_hours_worked_from_shift_events(session, driver_id, clipped_start, clipped_end)
+        week_regular, week_overtime = rule.apply(daily_hours)
+        total_regular += week_regular
+        total_overtime += week_overtime
     return total_regular, total_overtime
 
 
 async def hours_and_pay_for_period(
-    session: AsyncSession, *, driver_id: str, employment_type: str, rate_cents: int, start: datetime, end: datetime
+    session: AsyncSession,
+    *,
+    driver_id: str,
+    hub_id: str,
+    employment_type: str,
+    rate_cents: int,
+    start: datetime,
+    end: datetime,
 ) -> tuple[float, float, int]:
     """Returns (regular_hours, overtime_hours, estimated_pay_cents) for
     [start, end) - overtime only applies to w2 (see hours_and_overtime's
     docstring on why 1099/gig don't get it)."""
     if employment_type == "w2":
-        regular_hours, overtime_hours = await hours_and_overtime(session, driver_id, start, end)
+        regular_hours, overtime_hours = await hours_and_overtime(session, driver_id, hub_id, start, end)
     else:
         regular_hours = await hours_worked_from_shift_events(session, driver_id, start, end)
         overtime_hours = 0.0

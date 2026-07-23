@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 
 import type {
   AuthToken,
+  Call,
   DocType,
   DriverDocument,
   DriverProfile,
@@ -168,6 +169,8 @@ export const api = {
     request<Message>('/driver/me/messages', { method: 'POST', body: JSON.stringify({ body }) }),
 
   getSupportMessages: () => request<Message[]>('/driver/me/messages'),
+
+  callCustomer: (stopId: string) => request<Call>(`/driver/stops/${stopId}/call`, { method: 'POST' }),
 };
 
 export { ApiError };

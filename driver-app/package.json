@@ -41,6 +41,7 @@
     "@babel/runtime": "^7.29.7",
     "@react-native-community/cli-server-api": "^13.6.9",
     "@types/react": "~18.2.79",
+    "eas-cli": "^21.1.0",
     "typescript": "~5.3.3"
   }
 }

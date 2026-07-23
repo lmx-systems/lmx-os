@@ -44,11 +44,13 @@ class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     eta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # Proof of delivery (screen 1m). No image/signature upload pipeline
-    # exists yet - these accept whatever string the client sends (a URL, or
-    # a data: URI for a quick v1) and store it verbatim. pod_pin is not
-    # verified against anything server-side yet - there's no PIN-issuance
-    # system - it's recorded for the record but is not a real check in v1.
+    # Proof of delivery (screen 1m). photo_url/signature_url are real,
+    # uploaded S3 URLs (app/storage/photo_upload_client.py, docs/ROADMAP.md
+    # A2/A3) once a real bucket is configured - the stub client still
+    # issues a local-capture:// marker until then, so this column accepts
+    # either shape either way. pod_pin is the driver-submitted value,
+    # checked at complete_stop time against delivery_pin below (the real,
+    # issued PIN) - not just recorded anymore (docs/ROADMAP.md A4).
     pod_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # photo | signature | pin
     pod_photo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -57,6 +59,21 @@ class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Where the driver says they left it (e.g. "front door") - screen 1m's
     # "Left at" field. Free text, not validated against anything.
     pod_left_at: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    # Real delivery-PIN issuance (docs/ROADMAP.md A4) - generated and
+    # texted to Order.delivery_contact_phone the moment this dropoff stop
+    # is created (accept_offer, app/api/driver_routes.py), via
+    # app/messaging/delivery_pin.py. Null when no contact phone was on
+    # file to send one to - complete_stop's method="pin" path refuses a
+    # PIN nobody could have been given, same as everywhere else in this
+    # app that treats "no destination configured" as "can't do this," not
+    # "silently succeed anyway."
+    delivery_pin: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # Caps brute-force guessing of a 4-digit PIN over the API - same
+    # "attempts column, no Redis needed" shape as this table's own
+    # scanned_count, since this is a per-stop, already-authenticated-driver
+    # counter, not a cross-request abuse-rate concern.
+    pin_verification_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # "Flag an issue" (driver-facing incident report, not to be confused
     # with StopFlag below, which is an ops route-planning annotation for a

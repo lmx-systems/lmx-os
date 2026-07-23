@@ -14,6 +14,8 @@ local dev/tests rather than add real security.
 """
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy import func, select
@@ -24,6 +26,7 @@ from app.config import settings
 from app.db import get_db
 from app.logging_config import get_logger
 from app.messaging.twilio_signature import signature_is_valid
+from app.models.call import Call
 from app.models.message import Message
 from app.models.stop import Stop
 
@@ -161,19 +164,22 @@ def warn_if_twilio_webhook_unauthenticated() -> None:
     """Called once from app/main.py's lifespan (docs/ROADMAP.md S6). Unlike
     the driver/client/ops JWT secrets, an unconfigured TWILIO_AUTH_TOKEN
     doesn't just disable a feature - it means /webhooks/twilio/inbound-sms
-    accepts *unsigned* POSTs from anyone (see _assert_valid_twilio_signature
-    above), since this endpoint is exempted from every other auth path.
-    A hard boot-refusal here would break the documented "unconfigured
-    third-party credential -> stub mode" convention this whole codebase
-    otherwise relies on (Twilio SMS sending is legitimately optional), so
-    this is a loud warning, not an assert - the operator needs to know this
-    endpoint is wide open, not be blocked from starting without Twilio."""
+    (and, since masked voice calling landed, /webhooks/twilio/voice-connect
+    and /voice-status) accept *unsigned* POSTs from anyone (see
+    _assert_valid_twilio_signature above), since these endpoints are
+    exempted from every other auth path. A hard boot-refusal here would
+    break the documented "unconfigured third-party credential -> stub
+    mode" convention this whole codebase otherwise relies on (Twilio
+    sending is legitimately optional), so this is a loud warning, not an
+    assert - the operator needs to know these endpoints are wide open, not
+    be blocked from starting without Twilio."""
     if settings.environment != "development" and not settings.twilio_auth_token:
         logger.warning(
             "twilio_webhook_signature_verification_disabled",
             detail=(
                 "TWILIO_AUTH_TOKEN is not configured outside development - "
-                "/webhooks/twilio/inbound-sms accepts unsigned requests from anyone"
+                "/webhooks/twilio/inbound-sms, /voice-connect, and /voice-status "
+                "accept unsigned requests from anyone"
             ),
         )
 
@@ -206,5 +212,66 @@ async def twilio_inbound_sms(
             )
         )
         await session.commit()
+
+    return Response(content=_EMPTY_TWIML, media_type="application/xml")
+
+
+# ---------------------------------------------------------------------------
+# Masked voice calling (docs/ROADMAP.md A7) - app/messaging/voice_client.py
+# places the driver-leg call; these two webhooks are how Twilio calls back
+# once that happens. Same exemption/signature rules as inbound-sms above.
+# ---------------------------------------------------------------------------
+
+
+async def _get_owned_call(session: AsyncSession, call_id: str) -> Call:
+    call = await session.get(Call, uuid.UUID(call_id))
+    if call is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return call
+
+
+@router.post("/twilio/voice-connect/{call_id}")
+async def voice_connect(call_id: str, request: Request, session: AsyncSession = Depends(get_db)) -> Response:
+    """Twilio requests this the moment the driver answers their phone
+    (call_customer's `connect_url`, app/api/driver_routes.py) - the
+    response TwiML is what actually bridges to the customer, with LMX's
+    shared Twilio number as caller ID so the driver's real number never
+    reaches the customer either. Doesn't reuse `message_customer`'s
+    counterparty_phone masking test suite reasoning by accident - it's the
+    exact same non-negotiable, just for a phone call instead of a text."""
+    await _assert_valid_twilio_signature(request)
+
+    call = await _get_owned_call(session, call_id)
+    call.status = "connected"
+    await session.commit()
+
+    caller_id = settings.twilio_from_number or ""
+    twiml = f'<Response><Dial callerId="{caller_id}"><Number>{call.counterparty_phone}</Number></Dial></Response>'
+    return Response(content=twiml, media_type="application/xml")
+
+
+@router.post("/twilio/voice-status/{call_id}")
+async def voice_status(
+    call_id: str,
+    request: Request,
+    CallStatus: str | None = Form(None),
+    CallDuration: str | None = Form(None),
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    """Twilio's StatusCallback (call_customer's `status_callback_url`) -
+    fires once the whole bridged call ends, so this is where Call.status/
+    duration_seconds get their real final value instead of staying
+    "connected" forever. Twilio's own CallStatus vocabulary
+    (completed/busy/no-answer/failed/canceled) is stored as-is rather than
+    remapped, since there's no driver-app surface that reads this field
+    today - it's an audit log, not a UI-facing enum yet."""
+    await _assert_valid_twilio_signature(request)
+
+    call = await _get_owned_call(session, call_id)
+    if CallStatus:
+        call.status = CallStatus
+    if CallDuration is not None:
+        call.duration_seconds = int(CallDuration)
+    await session.commit()
 
     return Response(content=_EMPTY_TWIML, media_type="application/xml")

@@ -160,6 +160,7 @@ async def run_payroll_for_hub(
         regular_hours, overtime_hours, estimated_pay_cents = await payroll_hours.hours_and_pay_for_period(
             session,
             driver_id=str(driver.id),
+            hub_id=str(driver.hub_id),
             employment_type=driver.employment_type,
             rate_cents=rate_cents,
             start=start,

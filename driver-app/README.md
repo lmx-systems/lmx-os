@@ -37,14 +37,20 @@ auth - no extra header needed from this app.
   SMS wired up yet (see `app/driver_auth/otp_store.py`) - the OTP code is
   shown on-screen in dev (`debug_code` in the API response) instead of
   being texted.
-- **Scan parcels (1k)**: no camera/barcode SDK - "Scan next parcel" is a
-  manual tap that increments a count against the same
-  `POST /driver/stops/{id}/scan` endpoint a real scanner would call. Swap
-  in `expo-camera`'s barcode scanning without touching the backend.
-- **Proof of delivery (1m)**: "tap to capture" records a placeholder
-  photo/signature URL rather than actually invoking the camera or a
-  signature pad. The PIN field has no field to verify against yet - there's
-  no PIN-issuance system server-side (see `app/models/stop.py`).
+- **Scan parcels (1k)**: real `expo-camera` barcode scanning
+  (`src/media/BarcodeScannerModal.tsx`), calling the same
+  `POST /driver/stops/{id}/scan` endpoint a manual count always did - the
+  backend contract never changed. A manual "can't scan? confirm
+  manually" fallback stays for a damaged barcode.
+- **Proof of delivery (1m)**: real camera photo capture and a real
+  drawable signature pad (`src/media/PhotoCaptureModal.tsx`,
+  `SignaturePadModal.tsx`), uploaded via a presigned S3 URL
+  (`app/storage/photo_upload_client.py`) - same "unconfigured -> stub"
+  status as Twilio/Rippling until a real bucket is configured. The PIN
+  method is real too now: `app/messaging/delivery_pin.py` issues and
+  texts a real 4-digit PIN to the customer at offer-accept time, and
+  `complete_stop` verifies the driver's submission against it server-side
+  (with a lockout after too many wrong attempts) - not just recorded.
 - **Messaging (1p/1q)**: real masked SMS - sends via
   `app/messaging/sms_client.py`'s `TwilioSmsClient` once a Twilio account
   is provisioned (`TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/
@@ -54,18 +60,55 @@ auth - no extra header needed from this app.
   (`app/api/webhooks.py`) also has no Twilio request-signature
   verification yet - a real gap to close before pointing a live number at
   it, not just a formatting note.
-- **Masked calling** (as opposed to messaging): still not built - would
-  need a separate, heavier Twilio Voice/Proxy integration. The "Call"
-  button on the active-job screen says so explicitly now.
+- **Masked calling** (as opposed to messaging): real now too -
+  `app/messaging/voice_client.py` places a Twilio Voice call to the
+  driver's own phone, then bridges to the customer via TwiML
+  (`app/api/webhooks.py`'s `voice_connect`) with LMX's shared number as
+  caller ID - two real bridged phone calls, not in-app audio. The "Call"
+  button on the stop-detail screen calls it for real instead of showing a
+  dead-stub alert.
 - **Navigation (1h)**: no turn-by-turn/maps SDK integration - screens 1h,
   1i, and 1l are merged into one `ActiveRouteScreen` showing the current
   stop plus the full stops list, without live turn directions.
-- **Earnings (1n/1o)**: real hours-worked data (computed from each
-  completed route's timestamps), run through an explicitly-labeled
-  placeholder hourly rate - not a real pay formula, and not connected to
-  any payroll system (ADP/Gusto - neither is provisioned yet, see
-  `docs/NEXT_STEPS.md` item 15). Every earnings response is marked
-  `is_placeholder: true` and shown that way in the app.
+- **Earnings (1n/1o)**: real hours-worked data (reconstructed from the
+  shift-event log, `app/payroll/hours.py` - not a route-timestamp
+  heuristic), including real federal FLSA overtime and a pluggable
+  per-state overtime rule mechanism (`app/payroll/overtime_rules.py`,
+  see `docs/PAYROLL_STATE_OT_RESEARCH.md` - no state-specific rule is
+  turned on yet, that's a business/legal decision). Pay itself still runs
+  through an explicitly-labeled placeholder hourly rate when a driver has
+  no real `hourly_rate_cents` set, and isn't connected to any payroll
+  system yet (Rippling - not provisioned, see `docs/NEXT_STEPS.md` item
+  15). Every earnings response is marked `is_placeholder: true` and shown
+  that way in the app whenever the rate itself is a placeholder.
+
+## Building for TestFlight / Play Store (EAS)
+
+`eas.json` has real `development`/`preview`/`production` build profiles
+and a `submit.production` block, and `eas-cli` is a devDependency - all
+of it `terraform validate`-equivalent (`eas config` reaches the real
+"log in" step, not a parse error) but not yet exercised against a real
+Expo account, since none exists for this project yet (docs/ROADMAP.md
+A6). One-time setup once one does:
+
+```bash
+cd driver-app
+npx eas-cli login                # or set EXPO_TOKEN for CI - see .github/workflows/eas-build.yml
+npx eas-cli init                 # creates the real project, writes app.json's extra.eas.projectId
+```
+
+That second step is also what closes the one open gap from push
+notifications (docs/ROADMAP.md A1) - `Notifications.getExpoPushTokenAsync()`
+needs a real project id to mint a real token, and
+`src/notifications/registerForPushNotifications.ts` already checks for
+exactly this field and no-ops until it's there. No code change needed
+either way; `eas init` is the whole unlock.
+
+After that, fill in `eas.json`'s `submit.production` placeholders
+(`REPLACE_WITH_REAL_...`) once real Apple/Google developer accounts
+exist, and `.github/workflows/eas-build.yml` (manual dispatch, or push a
+`driver-app-vX` tag) builds a real binary via `EXPO_TOKEN` (a repo
+secret) with no further setup.
 
 ## Structure
 
