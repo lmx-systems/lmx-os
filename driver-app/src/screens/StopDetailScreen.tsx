@@ -17,6 +17,7 @@ import { useOutboxPending } from '../offline/OutboxContext';
 import { outboxManager } from '../offline/outboxManager';
 import { spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
+import { openTurnByTurnNavigation } from '../utils/navigation';
 import { primaryActionForStop, stopLabel } from '../utils/stopStatus';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'StopDetail'>;
@@ -117,6 +118,13 @@ export function StopDetailScreen({ route, navigation }: Props) {
     await outboxManager.enqueue('scan', stopId, { scannedCount: stop.scanned_count + 1 });
   }
 
+  function handleNavigate() {
+    if (!stop) return;
+    openTurnByTurnNavigation(stop.lat, stop.lng).catch(() => {
+      Alert.alert('Could not open navigation', 'No maps app is available on this device.');
+    });
+  }
+
   async function handleCallCustomer() {
     setCallingCustomer(true);
     try {
@@ -196,6 +204,12 @@ export function StopDetailScreen({ route, navigation }: Props) {
 
       <SyncStatusPill stopId={stopId} />
 
+      {action.kind !== 'done' && (
+        <View style={styles.navigateRow}>
+          <Button label="Navigate" variant="outline" onPress={handleNavigate} />
+        </View>
+      )}
+
       {stop.stop_type === 'dropoff' && stop.contact_name && (
         <View style={styles.contactRow}>
           <Button label="Call" variant="outline" onPress={handleCallCustomer} loading={callingCustomer} />
@@ -262,6 +276,7 @@ const makeStyles = (colors: ColorScheme) =>
     stopTypeLabel: { ...typography.label, color: colors.textPrimary },
     title: { ...typography.title, color: colors.textPrimary, marginBottom: spacing.sm },
     notes: { ...typography.small, color: colors.textMuted, marginBottom: spacing.md },
+    navigateRow: { marginBottom: spacing.lg },
     contactRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
     card: { marginBottom: spacing.lg, gap: spacing.sm },
     doneText: { ...typography.body, color: colors.textPrimary, textAlign: 'center' },

@@ -67,9 +67,12 @@ auth - no extra header needed from this app.
   caller ID - two real bridged phone calls, not in-app audio. The "Call"
   button on the stop-detail screen calls it for real instead of showing a
   dead-stub alert.
-- **Navigation (1h)**: no turn-by-turn/maps SDK integration - screens 1h,
-  1i, and 1l are merged into one `ActiveRouteScreen` showing the current
-  stop plus the full stops list, without live turn directions.
+- **Navigation (1h)**: real now - a "Navigate" button on the stop-detail
+  screen (`src/utils/navigation.ts`) hands off to the device's own native
+  maps app for real turn-by-turn, rather than embedding a maps SDK/
+  rendering a route in-app. No API key needed - falls back through
+  Google Maps -> Apple Maps -> a plain web URL, whichever is actually
+  installed.
 - **Earnings (1n/1o)**: real hours-worked data (reconstructed from the
   shift-event log, `app/payroll/hours.py` - not a route-timestamp
   heuristic), including real federal FLSA overtime and a pluggable
