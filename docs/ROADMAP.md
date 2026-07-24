@@ -103,21 +103,34 @@ layer's demand-side adapters (Epicor/flat-file): nothing downstream
 should ever branch on which partner carried an order, the same way
 nothing branches on which POS created it.
 
-**None of this is being built now.** The near-term rule it imposes: when
-fleet/offer models get touched for other reasons, generalize toward a
-"courier" abstraction rather than deepening the human-driver coupling.
-The whole area is gated on a signed autonomy partner (a B-item when it
-becomes real) — but the abstraction debt is named here so it's a design
-constraint today, not a rewrite later.
+**Update, July 2026:** this abstraction now also covers gig-courier
+human capacity (Uber/DoorDash-style), not just AV/drone/bot partners —
+see P7 below. Sourabh's call: there's value in LMX being able to route
+to whichever capacity is cheapest — its own fleet or a gig courier — as
+a standing dispatch option, while unit economics and assumptions get
+worked through, not just as a rare emergency valve. This reverses an
+earlier same-day call to not build this at all (see the "Competitive
+feature gaps" section's F9 history for the full back-and-forth) — worth
+knowing it was a live debate, not a snap decision.
+
+**Most of this is still not being built now.** The near-term rule it
+imposes: when fleet/offer models get touched for other reasons,
+generalize toward a "courier" abstraction rather than deepening the
+human-driver coupling. P1–P6 (the AV/drone/bot side) remain gated on a
+signed autonomy partner (a B-item when it becomes real). P7 (the
+gig-courier side) is different — it doesn't need a signed AV partner,
+gig-marketplace APIs exist today — but it does need real partner pricing
+and the unit-economics numbers before it's built for real, not guessed.
 
 | # | Item | Why it matters |
 |---|---|---|
-| P1 | Courier abstraction over the fleet model | Today's fleet state is human-shaped (`DriverCandidate`, phone/OTP auth, an implicit person behind every route). Generalize to a courier with a `provider_type` (human_driver \| autonomy_partner), service area/geofence, speed profile, payload limits, and capability flags (can batch multi-stop? sidewalk-only? weather-sensitive?). Human drivers become one provider type, not the type system. |
-| P2 | Capacity-provider adapter layer | The supply-side mirror of `app/ingestion/adapters/`: one adapter per partner normalizing (a) capacity in — which vehicles are available, where, with what limits; (b) assignments out — a `RouteOffer` becomes an API call the partner's fleet manager accepts/declines within the same TTL a driver gets; (c) status back — partner webhooks map to our stop-status transitions and PoD. Ships with a stub partner (same unconfigured→stub pattern as Twilio/Rippling) so the whole loop is testable before any real partner exists. |
-| P3 | Mode-aware dispatch | The optimizer gains eligibility filtering (weight, distance, geofence, tier, weather) before candidate generation, and — later — cost-per-drop mode selection: choose the cheapest *eligible* mode per order, which is where autonomy actually pays off economically. Ties directly to the unit-economics work (cost per drop vs. price per drop). |
+| P1 | Courier abstraction over the fleet model | Today's fleet state is human-shaped (`DriverCandidate`, phone/OTP auth, an implicit person behind every route). Generalize to a courier with a `provider_type` (human_lmx_driver \| autonomy_partner \| gig_courier), service area/geofence, speed profile, payload limits, and capability flags (can batch multi-stop? sidewalk-only? weather-sensitive?). Human LMX drivers become one provider type, not the type system. |
+| P2 | Capacity-provider adapter layer | The supply-side mirror of `app/ingestion/adapters/`: one adapter per partner normalizing (a) capacity in — which vehicles/couriers are available, where, with what limits; (b) assignments out — a `RouteOffer` becomes an API call the partner's fleet manager (or gig-marketplace API) accepts/declines within the same TTL a driver gets; (c) status back — partner webhooks map to our stop-status transitions and PoD. Ships with a stub partner (same unconfigured→stub pattern as Twilio/Rippling) so the whole loop is testable before any real partner exists. |
+| P3 | Mode-aware dispatch | The optimizer gains eligibility filtering (weight, distance, geofence, tier, weather) before candidate generation, and — later — cost-per-drop mode selection: choose the cheapest *eligible* mode per order, whether that's an autonomy partner or (per P7) a gig courier. Ties directly to the unit-economics work (cost per drop vs. price per drop). |
 | P4 | Unmanned handoff + proof of delivery | Nobody walks into the shop when a bot arrives: shop SMS grows a "load the bot" flow (compartment id, load-confirmed ack), and the customer side needs PIN-unlock delivery — which is exactly the A4 PIN issuance/verification item already on the driver-app list, making A4 shared infrastructure rather than app polish. |
-| P5 | Partner settlement | Per-delivery payout to the partner — a third money flow next to client billing (in) and driver payroll (out), structurally the same shape as `client_rates`: per-partner, per-mode rates, monthly statements. Reuses C3's statement machinery. |
+| P5 | Partner settlement | Per-delivery payout to the partner — a third money flow next to client billing (in) and driver payroll (out), structurally the same shape as `client_rates`: per-partner, per-mode rates, monthly statements. Reuses C3's statement machinery. Also the payout mechanism for P7's gig couriers. |
 | P6 | Partner portal | A thin reporting surface (delivery history, settlement statements, failed-delivery disputes) like `client-portal/` — explicitly a *later* convenience, not the integration mechanism. Partners integrate through P2's API, full stop. |
+| P7 | Gig-courier cost-optimized dispatch (reinstated F9) | A standing dispatch option — not just an SLA-emergency valve — where the optimizer can route an order to a gig-courier marketplace (Uber/DoorDash-style) when it's the cheaper *eligible* option, per P3. Client never sees or chooses this — same LMX brand, SLA, and billing either way. Three guardrails, non-negotiable: (1) every gig-courier-dispatched order is tagged distinctly in the data model so I1/I4's analytics and the Learning Loop don't treat it as LMX-optimizer ground truth; (2) a volume cap/threshold per hub so this stays an optimization, not a silent shift of capacity away from LMX's own fleet; (3) built against real gig-courier pricing data, not guessed rates — same discipline as P3's existing gating. Gated on unit-economics work, not on a signed AV partner. |
 
 ### Competitive feature gaps
 
@@ -161,23 +174,36 @@ stakes. That's F1/F2 below, and it's the prerequisite for F3.
 | F6 | Real-time mid-route re-optimization | Today's optimizer solves fresh each cycle (E7's scheduler) rather than continuously re-sequencing an in-progress route as conditions change — Wise Systems' and Onfleet's core marketing claim. Depends on E1 (verify the live Google Route Optimization client) being done first. |
 | F7 | Client- and ops-facing analytics dashboards | Reinforces I4 (already on the roadmap) — DPH, on-time %, driver leaderboards, cost-per-drop trend, SLA-breach history, CSV/BI export — but every competitor also exposes a *client-facing* cut of this (their own on-time rate, delivery volume) in the portal, which I4 doesn't currently scope. Directly serves the "market adoption" story for a distributor moving to per-drop pricing — it's the retention/upsell proof, not just an ops nicety. |
 | F8 | White-label / multi-brand portal theming | Bringg, Onfleet (Enterprise tier), and Locus all offer a rebrandable client-facing surface. Relevant if LMX ever resells through a partner or franchise model — not urgent for Hub 1. |
-| ~~F9~~ | ~~Hybrid gig-fleet overflow dispatch~~ → **Decided: not building** (Sourabh, July 2026) | Wise Systems' "DoorDash Dial" auto-routes overflow orders to third-party gig couriers by cost/rules — initially flagged as a nearer-term slice of P1/P2's courier abstraction. On review this is the same multi-carrier aggregator model LMX has deliberately rejected elsewhere ("LMX is the fleet, not a Bringg competitor"), just scoped to overflow rather than every order. Moved to "Deliberately not building" below. |
+| ~~F9~~ | ~~Hybrid gig-fleet overflow dispatch~~ → **Reinstated as P7** (Sourabh, July 2026 — see Autonomy Partners section) | Wise Systems' "DoorDash Dial" auto-routes overflow orders to third-party gig couriers by cost/rules. This item's history in one place, since it flipped twice in one day: (1) first flagged as an unresolved conflict against a companion analysis's "LMX is the fleet, not a Bringg competitor" stance; (2) decided **not** to build it, full stop; (3) revisited same-day and reinstated — with three guardrails (data tagging, a volume cap, real pricing before building) — as a *generalized cost-optimized dispatch option* rather than a narrow overflow valve, folded into P1–P3's courier abstraction as **P7**, gated on unit economics rather than dropped as a permanent no. |
 | F10 | A real path to SOC 2 (or equivalent) certification | Every one of the four competitors leads their security page with SOC 2 Type II (plus ISO 27001, sometimes HIPAA/GDPR audits). Reinforces S6 (security review) and S2 (secrets management) — this raises their urgency from "good hygiene" to "the thing enterprise clients will ask for in a security questionnaire." A companion analysis adds a concrete trigger: enterprise dealer groups (the recommended anchor client type) ask for SOC 2 in diligence, and it's a multi-month audit — start readiness well before it's needed, not when it's blocking a deal. |
 | F11 | SSO/SAML for ops and client logins | S1 built real per-user auth with roles, but not SSO — Bringg, Wise Systems, and Locus all support it for enterprise buyers. |
 | F12 | Network/territory optimization tooling | Wise Systems' "Network Optimization" (depot/zone redesign, distinct from daily routing) — relevant once LMX runs multiple hubs, not for a single Hub 1 pilot. |
 | F13 | Ratings & feedback capture | One-tap post-delivery rating (+ optional comment) prompt to the shop, landing on the order/stop record. Low effort, and it feeds the Learning Loop (I3's broader annotation vocabulary) with a ground-truth satisfaction signal none of the four researched competitors structurally capture the same way. No external dependency. |
 | F14 | Orchestrator route-preview / shadow mode | A view to preview the optimizer's proposed plan before it commits and simulate a manual override, without giving up autonomous dispatch as the default path. Builds operational trust during rollout (an operator watching the system decide, before trusting it fully) — distinct from I2's rule-promotion review, this is a preview/override on route *assignments* themselves. |
 
-**Resolved — F9 vs. the operator-not-aggregator thesis:** a companion
+**Revisited — F9 vs. the operator-not-aggregator thesis:** a companion
 competitive analysis run separately (`docs/LMX_OS_Roadmap_Addendum_Feature_Delta.docx`,
 uploaded by Sourabh) explicitly lists "multi-carrier selection + carrier
 network" under features LMX **deliberately does not build**, reasoning
 that it's the aggregator model LMX rejected — "LMX is the fleet, not a
 Bringg competitor." F9 as originally scoped (auto-routing overflow
 orders to third-party gig couriers) was the same model in a narrower
-form. Sourabh's call, July 2026: **not building it** — LMX stays the
-fleet, full stop, with no gig-courier overflow valve even for capacity
-emergencies. Moved to "Deliberately not building" below.
+form, and was first decided as **not building it** on that basis.
+
+Sourabh revisited this same day: there's value in going this direction
+while unit economics and assumptions get worked through, rather than
+ruling it out permanently. The distinction that matters — this is about
+LMX *sourcing capacity* from a gig marketplace while keeping its own
+brand, SLA, and billing (the client never sees or chooses a carrier),
+not about becoming a multi-carrier marketplace itself (a bigger,
+separate question that would also reopen the "never sell LMX OS as
+SaaS" decision, and would need Matan/Rich). On that narrower reading,
+**reinstated as P7** in the Autonomy Partners section, generalized into
+the same courier-abstraction work already planned for AV/drone/bot
+partners, with three guardrails (data-flywheel tagging, a volume cap,
+real pricing before building — see P7's row above) so a standing
+cost-optimization option doesn't quietly become a bypass around
+confronting LMX's own unit economics.
 
 **Sequencing:** F1/F2 slot into Phase 6 (driver app hardening, alongside
 A1/A5); F3 follows as a fast Phase 8 follow-up once F1 exists; F4/F5/F8
@@ -188,17 +214,18 @@ no-dependency — a good Phase 8 follow-up alongside F3/F4. F14
 (route-preview/shadow mode) fits Phase 9 (Hub 1 pilot) — it's the
 trust-building surface for the pilot itself, not a pre-pilot gate.
 
-**Deliberately not building (validated by the same companion analysis,
-plus the F9 decision above):** hybrid gig-fleet overflow dispatch /
-multi-carrier selection (the aggregator model — LMX is the fleet, full
-stop); checkout/delivery-slot self-scheduling (B2C retail surface — LMX
-orders originate from distributor POS, matching the existing C5 "no
-self-serve signup, by design" decision); a no-code automation/workflow
-builder and a configurable driver toolbox (Bringg needs both because its
-customers self-configure a shared platform; LMX runs one operation and
-the Learning Loop already generates rules — configurability here would
-be anti-differentiation, not a feature); and a manager mobile app (not a
-gap that costs deals at hub scale — revisit post-Series A).
+**Deliberately not building (validated by the same companion analysis):**
+checkout/delivery-slot self-scheduling (B2C retail surface — LMX orders
+originate from distributor POS, matching the existing C5 "no self-serve
+signup, by design" decision); a no-code automation/workflow builder and
+a configurable driver toolbox (Bringg needs both because its customers
+self-configure a shared platform; LMX runs one operation and the
+Learning Loop already generates rules — configurability here would be
+anti-differentiation, not a feature); and a manager mobile app (not a
+gap that costs deals at hub scale — revisit post-Series A). Gig-fleet
+capacity sourcing is **no longer on this list** — see P7 above; a true
+multi-carrier marketplace (clients choosing between carriers) still is,
+and would need a Matan/Rich conversation before it's reconsidered.
 
 ### Intelligence layer
 
@@ -402,35 +429,55 @@ gate on every rule change.
 
 ### Phase 11 — Autonomy partners
 **Goal:** deliveries carried by autonomous vehicles (AV cars, sidewalk
-bots, drones) through their operators, dispatched by the same loop that
-dispatches human drivers. See Part 1's "Autonomy partners" table (P1–P6)
-for the item-by-item detail; the architectural decision (adapter layer,
-not a separate app) is recorded there.
+bots, drones) — and, per P7, gig-courier human capacity — through their
+operators, dispatched by the same loop that dispatches human drivers.
+See Part 1's "Autonomy partners" table (P1–P7) for the item-by-item
+detail; the architectural decision (adapter layer, not a separate app)
+is recorded there.
 
-Sequencing:
-- **Gate:** a signed autonomy partner with API access — this whole phase
-  is a business-development outcome first. Until then the only active
+Two independent tracks in this phase now, gated differently:
+
+**Track A — AV/drone/sidewalk-bot partners (P1, P2, P4–P6):**
+- **Gate:** a signed autonomy partner with API access — this track is a
+  business-development outcome first. Until then the only active
   obligation is the design constraint: touch fleet/offer models in a
   courier-shaped way (P1's abstraction), not a human-driver-shaped way.
 - **First buildable slice once a partner signs:** P1 + P2 with the stub
   partner, proving the offer→accept→status loop end-to-end before any
   real vehicle moves; then P3's eligibility filtering (a drone that gets
   offered a 40lb pallet is a bug, not a learning).
-- **Not in scope, by decision:** a human gig-fleet overflow valve (Wise
-  Systems' "DoorDash Dial" model, formerly tracked as F9) — this would
-  route orders to third-party couriers outside LMX's own fleet, which is
-  the aggregator model LMX has deliberately rejected (Sourabh, July
-  2026). P1/P2's courier abstraction remains scoped to LMX-contracted
-  autonomy partners, not arbitrary third-party gig couriers.
 - **P4 (unmanned handoff/PIN)** is shared with the driver app's A4 —
   building A4 earlier quietly de-risks this phase.
-- **Later:** P3's cost-per-drop mode selection (needs real partner
-  pricing + the unit-economics numbers), P5 settlement, P6 portal.
+- **Later:** P5 settlement, P6 portal.
 
-**Exit criteria (long-horizon):** one real order, ingested from a real
-client POS, delivered by a partner vehicle with no LMX human in the
-loop — dispatched, tracked, PoD'd, and settled through the same pipeline
-as every human-driven delivery that day.
+**Track B — Gig-courier cost-optimized dispatch (P7, reinstated F9):**
+- **Gate:** unit economics and real gig-marketplace pricing data — not a
+  signed partner. This can move independently of, and likely faster
+  than, Track A.
+- **Sourabh's call (July 2026):** worth pursuing as a standing
+  cost-optimization option, not just an SLA-emergency valve, while the
+  economics get worked through — reversing a same-day earlier decision
+  not to build it at all. See the "Competitive feature gaps" section's
+  F9 history for the full reasoning on both sides.
+- **Before writing real dispatch logic:** P7's three guardrails (data
+  tagging so I1/I4 don't treat these as LMX-optimizer ground truth, a
+  volume cap per hub, and real pricing data rather than guessed rates)
+  are not optional polish — they're what keeps this from quietly
+  becoming a bypass around confronting LMX's own unit economics.
+- **Shares P3's cost-per-drop mode-selection logic and P5's settlement
+  machinery** with Track A — one dispatch decision, one settlement
+  system, two kinds of capacity provider.
+
+**Exit criteria (long-horizon), Track A:** one real order, ingested from
+a real client POS, delivered by a partner vehicle with no LMX human in
+the loop — dispatched, tracked, PoD'd, and settled through the same
+pipeline as every human-driven delivery that day.
+
+**Exit criteria, Track B:** the optimizer routes a real order to a gig
+courier because it was the genuinely cheaper eligible option under real
+pricing data — not a guess — with the order correctly tagged so it never
+contaminates I1/I4's ground-truth analytics, and the hub's volume cap
+holding.
 
 ---
 
