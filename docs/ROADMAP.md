@@ -119,6 +119,60 @@ constraint today, not a rewrite later.
 | P5 | Partner settlement | Per-delivery payout to the partner — a third money flow next to client billing (in) and driver payroll (out), structurally the same shape as `client_rates`: per-partner, per-mode rates, monthly statements. Reuses C3's statement machinery. |
 | P6 | Partner portal | A thin reporting surface (delivery history, settlement statements, failed-delivery disputes) like `client-portal/` — explicitly a *later* convenience, not the integration mechanism. Partners integrate through P2's API, full stop. |
 
+### Competitive feature gaps
+
+LMX is positioning LMX OS as the operating system for the whole company,
+not just a dispatch tool — so it's worth checking it against the
+category it's actually competing in. This is a feature-by-feature
+comparison against four delivery/logistics platforms researched in July
+2026: **Bringg** and **Wise Systems** (named directly), plus **Onfleet**
+and **Locus** (added to round out the set — respectively the
+small/mid-market and enterprise-retail-logistics ends of the same
+category). Sourced from each vendor's public site, docs, and G2/Capterra
+where accessible — see `docs/LMX_OS_Competitive_Feature_Analysis.docx`
+for the full category-by-category tables and citations.
+
+**Where LMX OS already holds its own:** the SLA-tier engine's strict
+Hot-Shot non-commingling guarantee is a concrete, enforced rule none of
+the four describe as precisely; the batch-hold queue's 4-question
+decision logic is a more explicit, tunable batching strategy than the
+generic "smart clubbing" language competitors use; the Annotation &
+Learning Loop's human-approval gate (I2) is a more auditable model than
+Locus's "agentic" DiSCO framing or Wise's compounding ML claims, once
+I2 ships; and the autonomy-partner architecture (P1–P6) is already
+designed in at the courier-abstraction level — none of the four have
+live drone/sidewalk-bot/AV integration today, only Bringg lists
+"autonomous" as a network category in concept.
+
+**Where the gap is real** — the biggest single finding: LMX OS has **no
+live GPS tracking at all** today. `Driver` has no location field, the
+driver app never pings a position, and neither the ops dashboard nor any
+customer-facing surface can show where a driver actually is. Every one
+of the four competitors treats live map tracking as baseline table
+stakes. That's F1/F2 below, and it's the prerequisite for F3.
+
+| # | Item | Why it matters |
+|---|---|---|
+| F1 | Live driver location pipeline | Driver app periodically pings lat/lng to the backend; `Driver`/a new `DriverLocation` table stores current position. Prerequisite for F2 and F3 — today this doesn't exist at all, not even for internal ops use. No external dependency. |
+| F2 | Live map view (ops dashboard) | Hub staff can see where every driver on shift actually is, not just their assigned stop list. Depends on F1. |
+| F3 | Customer-facing live tracking page | A public link (sent to the actual delivery recipient, not the shop) showing driver position + ETA — what Bringg/Onfleet/Locus lead with on their marketing sites. Depends on F1; new component, no external dependency beyond a public route. |
+| F4 | Outbound status webhooks + a small integrations surface | Today's ingestion adapters are demand-side *in* (Epicor, flat-file); nothing goes back *out* — no webhook a client system can subscribe to, no Shopify/Zapier-style connector. Bringg, Onfleet, and Wise Systems all name this as a feature. |
+| F5 | Flexible/rate-table billing | `client_rates` today is flat per-drop, per-tier. Onfleet and Locus both support per-piece/per-weight/per-mile rate tables — worth revisiting once C3's statement persistence (already open) is tackled, same billing surface. |
+| F6 | Real-time mid-route re-optimization | Today's optimizer solves fresh each cycle (E7's scheduler) rather than continuously re-sequencing an in-progress route as conditions change — Wise Systems' and Onfleet's core marketing claim. Depends on E1 (verify the live Google Route Optimization client) being done first. |
+| F7 | Client- and ops-facing analytics dashboards | Reinforces I4 (already on the roadmap) — DPH, on-time %, driver leaderboards — but every competitor also exposes a *client-facing* cut of this (their own on-time rate, delivery volume) in the portal, which I4 doesn't currently scope. |
+| F8 | White-label / multi-brand portal theming | Bringg, Onfleet (Enterprise tier), and Locus all offer a rebrandable client-facing surface. Relevant if LMX ever resells through a partner or franchise model — not urgent for Hub 1. |
+| F9 | Hybrid gig-fleet overflow dispatch | Wise Systems' "DoorDash Dial" auto-routes overflow orders to third-party gig couriers by cost/rules. This is a nearer-term slice of P1/P2's courier abstraction — a human gig-fleet partner doesn't need to wait on a signed *autonomous* partner the way Phase 11 is gated; worth building the abstraction so this is possible sooner. |
+| F10 | A real path to SOC 2 (or equivalent) certification | Every one of the four competitors leads their security page with SOC 2 Type II (plus ISO 27001, sometimes HIPAA/GDPR audits). Reinforces S6 (security review) and S2 (secrets management) — this raises their urgency from "good hygiene" to "the thing enterprise clients will ask for in a security questionnaire." |
+| F11 | SSO/SAML for ops and client logins | S1 built real per-user auth with roles, but not SSO — Bringg, Wise Systems, and Locus all support it for enterprise buyers. |
+| F12 | Network/territory optimization tooling | Wise Systems' "Network Optimization" (depot/zone redesign, distinct from daily routing) — relevant once LMX runs multiple hubs, not for a single Hub 1 pilot. |
+
+**Sequencing:** F1/F2 slot into Phase 6 (driver app hardening, alongside
+A1/A5); F3 follows as a fast Phase 8 follow-up once F1 exists; F4/F5/F8
+join C3/C4/C5 as Phase 8 follow-ups; F6 depends on E1 in Phase 4; F7
+folds into Phase 10's I4; F9 is a design refinement to Phase 11's P1/P2,
+buildable independent of Phase 11's autonomy-partner gate; F10/F11
+reinforce Phase 5; F12 is a later, multi-hub-scale item.
+
 ### Intelligence layer
 
 Where LMX OS's "learning" actually stands, and the ladder to make it real
