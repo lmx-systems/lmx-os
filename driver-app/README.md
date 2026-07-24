@@ -84,6 +84,16 @@ auth - no extra header needed from this app.
   system yet (Rippling - not provisioned, see `docs/NEXT_STEPS.md` item
   15). Every earnings response is marked `is_placeholder: true` and shown
   that way in the app whenever the rate itself is a placeholder.
+- **Gig per-delivery pay**: real now for `employment_type: "gig"` drivers
+  (`app/payroll/gig_pricing.py`) - a real dollar amount shows on the job
+  offer itself (`OfferBanner.tsx`), and completing a delivery pays it out
+  through a new `PayoutProvider` interface (Stripe Connect, same
+  "unconfigured -> stub" status as Rippling - no account exists yet).
+  `EarningsScreen.tsx` shows "Per delivery" instead of an hourly rate for
+  these drivers. Real gaps: no self-serve flow exists yet to link a
+  driver's payout account (`Driver.stripe_connect_account_id` stays null
+  until one does - a payout still records as owed, not paid), and no
+  per-trip identity re-verification exists anywhere in this app.
 
 ## Building for TestFlight / Play Store (EAS)
 

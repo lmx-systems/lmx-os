@@ -83,6 +83,11 @@ class JobOfferView(BaseModel):
     hub_id: str
     expires_at: datetime
     stops: list[OfferStopSummary]
+    # Real per-delivery pay estimate (docs/ROADMAP.md A11,
+    # app/payroll/gig_pricing.py) - only populated for a gig-classified
+    # driver; null for w2/1099, who are paid hourly/monthly instead
+    # (app/payroll/hours.py), not per offer.
+    estimated_pay_cents: int | None = None
 
     @property
     def stop_count(self) -> int:
@@ -218,6 +223,11 @@ class EarningsView(BaseModel):
     hourly_rate_cents: int
     estimated_pay_cents: int
     is_placeholder: bool = True
+    # Lets the driver app render gig's real per-delivery pay differently
+    # from w2/1099's hourly rate (docs/ROADMAP.md A11) without a second
+    # round trip - previously missing entirely (see EarningsScreen.tsx's
+    # own comment about inferring the pay period width instead).
+    employment_type: str = "w2"
     note: str = (
         "Estimate only - pay formula and payroll integration are not finalized. "
         "Contact dispatch with pay questions."

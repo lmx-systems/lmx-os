@@ -134,6 +134,14 @@ class Settings(BaseSettings):
     rippling_api_key: str | None = None
     rippling_base_url: str | None = None
 
+    # Instant per-delivery payout for gig-classified drivers
+    # (docs/ROADMAP.md A11, app/payroll/payout_provider.py) - same
+    # "unconfigured -> stub" status as Rippling above. No Stripe account
+    # exists yet, and no driver has a real `Driver.stripe_connect_account_id`
+    # either (no self-serve onboarding flow exists to set one) - unset means
+    # every payout attempt is recorded as owed but not actually sent.
+    stripe_connect_secret_key: str | None = None
+
     # Origins allowed to call the API cross-origin - the orchestrator
     # dashboard (dashboard/) in dev, and whatever the dashboard is actually
     # deployed at in production. NOT a substitute for real authentication -

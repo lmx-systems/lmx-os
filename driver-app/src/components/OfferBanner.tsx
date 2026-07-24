@@ -78,6 +78,13 @@ export function OfferBanner({ offer, onAccept, onDecline }: OfferBannerProps) {
         )}
       </View>
 
+      {/* Real per-delivery pay (docs/ROADMAP.md A11) - only present for a
+          gig-classified driver; w2/1099 never see a dollar amount here,
+          since they're paid hourly/monthly instead. */}
+      {offer.estimated_pay_cents !== null && (
+        <Text style={styles.payText}>${(offer.estimated_pay_cents / 100).toFixed(2)}</Text>
+      )}
+
       <Text style={styles.cardLabel}>Pickup</Text>
       <Text style={styles.cardBody}>{shopName}</Text>
 
@@ -100,6 +107,7 @@ const makeStyles = (colors: ColorScheme) =>
     card: { marginBottom: spacing.lg, gap: spacing.xs },
     headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     headerTitle: { ...typography.title, color: colors.textPrimary, fontSize: 18 },
+    payText: { fontSize: 28, fontWeight: '700', color: colors.primary, marginTop: spacing.xs },
     cardLabel: { ...typography.label, color: colors.textPrimary, marginTop: spacing.sm },
     cardBody: { ...typography.body, color: colors.textPrimary },
     countdownText: { ...typography.small, color: colors.textMuted },

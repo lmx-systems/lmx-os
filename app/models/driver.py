@@ -44,3 +44,12 @@ class Driver(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # actual payout ledger (docs/NEXT_STEPS.md item 12's earnings caveat) is
     # separate, larger work this deliberately doesn't attempt.
     payment_bank_last4: Mapped[str | None] = mapped_column(String(4), nullable=True)
+
+    # Where a real per-delivery payout (docs/ROADMAP.md A11,
+    # app/payroll/payout_provider.py) actually gets sent for a gig-
+    # classified driver. Same "field exists, no real linking flow" status
+    # as payment_bank_last4 above - no self-serve onboarding flow exists
+    # yet to set this, so it's null for every driver today; a payout with
+    # nowhere real to go is still recorded (app/models/gig_payout.py) as
+    # owed, not silently dropped.
+    stripe_connect_account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

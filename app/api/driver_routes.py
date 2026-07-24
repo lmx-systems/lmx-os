@@ -28,6 +28,8 @@ from app.driver_auth.otp_store import OtpRateLimitExceeded, OtpStore
 from app.driver_auth.tokens import issue_token
 from app.fleet_state.manager import FleetStateManager
 import app.payroll.hours as payroll_hours
+from app.payroll import get_payout_provider
+from app.payroll.gig_pricing import estimate_delivery_pay_cents
 from app.redis_client import get_client
 from app.messaging.delivery_pin import MAX_PIN_VERIFICATION_ATTEMPTS, generate_delivery_pin, send_delivery_pin_sms
 from app.messaging.shop_notifications import notify_shop_en_route, notify_shop_picked_up
@@ -38,6 +40,7 @@ from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.driver_document import DriverDocument
 from app.models.driver_shift_event import DriverShiftEvent
+from app.models.gig_payout import GigPayout
 from app.models.message import Message
 from app.models.order import Order, OrderStatus, SLATier
 from app.models.route import Route
@@ -493,6 +496,30 @@ async def _expire_if_lapsed(session: AsyncSession, offer: RouteOffer) -> bool:
     return True
 
 
+async def _estimate_offer_pay_cents(session: AsyncSession, stop_payload: list[dict]) -> int:
+    """Real per-delivery pay estimate for a gig-classified driver's offer
+    (docs/ROADMAP.md A11) - each stop_payload entry's own lat/lng is the
+    pickup (shop) location (see app/optimizer/service.py's offer
+    construction), so only the dropoff side needs a lookup here."""
+    order_ids = [uuid.UUID(s["order_id"]) for s in stop_payload]
+    orders_result = await session.execute(select(Order).where(Order.id.in_(order_ids)))
+    orders_by_id = {o.id: o for o in orders_result.scalars().all()}
+
+    total_cents = 0
+    for stop_summary in stop_payload:
+        order = orders_by_id.get(uuid.UUID(stop_summary["order_id"]))
+        if order is None or order.delivery_lat is None or order.delivery_lng is None:
+            continue
+        total_cents += estimate_delivery_pay_cents(
+            pickup_lat=stop_summary["lat"],
+            pickup_lng=stop_summary["lng"],
+            dropoff_lat=float(order.delivery_lat),
+            dropoff_lng=float(order.delivery_lng),
+            sla_tier=stop_summary.get("sla_tier"),
+        )
+    return total_cents
+
+
 @router.get("/me/offers", response_model=list[JobOfferView])
 async def list_my_offers(
     driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
@@ -504,16 +531,26 @@ async def list_my_offers(
     )
     offers = result.scalars().all()
 
+    # Real per-delivery pay (docs/ROADMAP.md A11) is only shown to
+    # gig-classified drivers - w2/1099 already understand their pay as
+    # hourly/monthly (app/payroll/hours.py), and showing a per-offer dollar
+    # amount there would misrepresent how they're actually paid.
+    driver_row = await _get_driver_row(session, driver)
+
     live: list[JobOfferView] = []
     for offer in offers:
         if await _expire_if_lapsed(session, offer):
             continue
+        estimated_pay_cents = None
+        if driver_row.employment_type == "gig":
+            estimated_pay_cents = await _estimate_offer_pay_cents(session, offer.stop_payload)
         live.append(
             JobOfferView(
                 offer_id=str(offer.id),
                 hub_id=str(offer.hub_id),
                 expires_at=offer.expires_at,
                 stops=[OfferStopSummary(**s) for s in offer.stop_payload],
+                estimated_pay_cents=estimated_pay_cents,
             )
         )
     await session.commit()
@@ -927,6 +964,70 @@ def _assert_stop_not_terminal(stop: Stop, action: str) -> None:
         raise HTTPException(status_code=409, detail=f"Stop is {stop.status}, cannot {action}")
 
 
+async def _pay_out_gig_delivery(
+    session: AsyncSession, *, driver: AuthedDriver, driver_row: Driver, stop: Stop, order_ids: list[uuid.UUID]
+) -> None:
+    """Real per-delivery instant payout for a gig-classified driver
+    (docs/ROADMAP.md A11). GigPayout.stop_id is unique, so this can never
+    double-pay the same stop even on a hypothetical future retry path -
+    complete_stop's own idempotent early-return already keeps a retried
+    request from reaching this far, but this check holds regardless."""
+    existing = await session.execute(select(GigPayout).where(GigPayout.stop_id == stop.id))
+    if existing.scalar_one_or_none() is not None:
+        return
+
+    orders_result = await session.execute(select(Order).where(Order.id.in_(order_ids)))
+    orders = list(orders_result.scalars().all())
+    shop_ids = [o.shop_id for o in orders if o.shop_id is not None]
+    shops_by_id: dict[uuid.UUID, Shop] = {}
+    if shop_ids:
+        shops_result = await session.execute(select(Shop).where(Shop.id.in_(shop_ids)))
+        shops_by_id = {s.id: s for s in shops_result.scalars().all()}
+
+    amount_cents = 0
+    for order in orders:
+        shop = shops_by_id.get(order.shop_id)
+        if shop is None or order.delivery_lat is None or order.delivery_lng is None:
+            continue
+        amount_cents += estimate_delivery_pay_cents(
+            pickup_lat=shop.lat,
+            pickup_lng=shop.lng,
+            dropoff_lat=float(order.delivery_lat),
+            dropoff_lng=float(order.delivery_lng),
+            sla_tier=order.sla_tier,
+        )
+    if amount_cents <= 0:
+        return
+
+    payout = GigPayout(
+        hub_id=uuid.UUID(driver.hub_id),
+        driver_id=uuid.UUID(driver.driver_id),
+        stop_id=stop.id,
+        amount_cents=amount_cents,
+        status="pending",
+    )
+    session.add(payout)
+    await session.flush()
+
+    if not driver_row.stripe_connect_account_id:
+        # Self-serve onboarding (docs/ROADMAP.md A11) doesn't exist yet -
+        # same "field exists, no real linking flow" status as
+        # Driver.payment_bank_last4. Record the payout as owed, not paid,
+        # rather than silently dropping a real dollar amount.
+        payout.status = "skipped_no_payout_account"
+        await session.commit()
+        return
+
+    transfer_id = await get_payout_provider().pay_out(
+        connected_account_id=driver_row.stripe_connect_account_id,
+        amount_cents=amount_cents,
+        description=f"LMX delivery payout - stop {stop.id}",
+    )
+    payout.status = "paid" if transfer_id else "stub"
+    payout.stripe_transfer_id = transfer_id
+    await session.commit()
+
+
 @router.post("/stops/{stop_id}/arrive", response_model=StopView)
 async def arrive_at_stop(
     stop_id: str, driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
@@ -1099,6 +1200,16 @@ async def complete_stop(
         route.status = "completed"
 
     await session.commit()
+
+    # Real per-delivery instant payout for gig-classified drivers
+    # (docs/ROADMAP.md A11) - best-effort, same "commit the delivery
+    # first, pay/notify after" pattern as the shop-SMS/PIN-SMS sends
+    # elsewhere in this file: a payout failure must never roll back or
+    # block a delivery the driver already completed.
+    if stop.stop_type == "dropoff" and order_ids:
+        driver_row = await _get_driver_row(session, driver)
+        if driver_row.employment_type == "gig":
+            await _pay_out_gig_delivery(session, driver=driver, driver_row=driver_row, stop=stop, order_ids=order_ids)
 
     # Real vehicle-load tracking - a pickup's weight enters the vehicle the
     # moment it's completed here, a dropoff's the moment it leaves. This is
@@ -1423,7 +1534,10 @@ async def get_my_earnings(
 ) -> EarningsView:
     row = await _get_driver_row(session, driver)
     rate_cents = row.hourly_rate_cents or payroll_hours.PLACEHOLDER_HOURLY_RATE_CENTS
-    is_placeholder = row.hourly_rate_cents is None
+    # Gig isn't paid hourly at all (docs/ROADMAP.md A11) - "placeholder"
+    # specifically means "an hourly rate stood in for a real one," which
+    # doesn't apply when there's no hourly rate in the pay formula.
+    is_placeholder = row.hourly_rate_cents is None and row.employment_type != "gig"
 
     now = datetime.now(timezone.utc)
     start, end = payroll_hours.pay_period_bounds(row.employment_type, now)
@@ -1444,9 +1558,10 @@ async def get_my_earnings(
         period_end=(end - timedelta(days=1)).date(),
         hours_worked=round(regular_hours + overtime_hours, 2),
         overtime_hours=round(overtime_hours, 2),
-        hourly_rate_cents=rate_cents,
+        hourly_rate_cents=0 if row.employment_type == "gig" else rate_cents,
         estimated_pay_cents=estimated_pay_cents,
         is_placeholder=is_placeholder,
+        employment_type=row.employment_type,
     )
 
 

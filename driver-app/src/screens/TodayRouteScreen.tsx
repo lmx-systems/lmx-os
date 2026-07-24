@@ -125,6 +125,7 @@ export function TodayRouteScreen({ navigation }: Props) {
               <Text style={styles.cardBody}>{offer.stops[0]?.shop_name || 'Pickup'}</Text>
               <Text style={styles.cardSmall}>
                 {offer.stops.length} stop{offer.stops.length > 1 ? 's' : ''}
+                {offer.estimated_pay_cents !== null ? ` · $${(offer.estimated_pay_cents / 100).toFixed(2)}` : ''}
               </Text>
             </Card>
           ))}

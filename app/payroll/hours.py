@@ -10,10 +10,11 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, time, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.driver_shift_event import DriverShiftEvent
+from app.models.gig_payout import GigPayout
 from app.models.hub import Hub
 from app.payroll.overtime_rules import FEDERAL_OVERTIME_MULTIPLIER, overtime_rule_for_state
 
@@ -186,6 +187,25 @@ async def hours_and_overtime(
     return total_regular, total_overtime
 
 
+async def gig_payout_total_cents_for_period(
+    session: AsyncSession, driver_id: str, start: datetime, end: datetime
+) -> int:
+    """Real per-delivery earnings for a gig-classified driver
+    (docs/ROADMAP.md A11) - summed from GigPayout rows
+    (app/api/driver_routes.py's complete_stop, app/payroll/gig_pricing.py),
+    not hours x rate like w2/1099. GigPayout.created_at is a reasonable
+    period-bucketing proxy: a row is created at the exact moment its
+    delivery was completed and paid, not backdated."""
+    result = await session.execute(
+        select(func.coalesce(func.sum(GigPayout.amount_cents), 0)).where(
+            GigPayout.driver_id == uuid.UUID(driver_id),
+            GigPayout.created_at >= start,
+            GigPayout.created_at < end,
+        )
+    )
+    return int(result.scalar_one())
+
+
 async def hours_and_pay_for_period(
     session: AsyncSession,
     *,
@@ -198,13 +218,23 @@ async def hours_and_pay_for_period(
 ) -> tuple[float, float, int]:
     """Returns (regular_hours, overtime_hours, estimated_pay_cents) for
     [start, end) - overtime only applies to w2 (see hours_and_overtime's
-    docstring on why 1099/gig don't get it)."""
+    docstring on why 1099/gig don't get it). `hours_worked` is still
+    reported for gig (a driver's real on-duty time is informational
+    either way), but `estimated_pay_cents` comes from real per-delivery
+    payouts instead of hours x rate - unlike 1099, gig is genuinely not
+    paid by the hour at all (docs/ROADMAP.md A11)."""
     if employment_type == "w2":
         regular_hours, overtime_hours = await hours_and_overtime(session, driver_id, hub_id, start, end)
-    else:
-        regular_hours = await hours_worked_from_shift_events(session, driver_id, start, end)
-        overtime_hours = 0.0
+        regular_pay_cents = round(regular_hours * rate_cents)
+        overtime_pay_cents = round(overtime_hours * rate_cents * FEDERAL_OVERTIME_MULTIPLIER)
+        return regular_hours, overtime_hours, regular_pay_cents + overtime_pay_cents
+
+    regular_hours = await hours_worked_from_shift_events(session, driver_id, start, end)
+    overtime_hours = 0.0
+
+    if employment_type == "gig":
+        pay_cents = await gig_payout_total_cents_for_period(session, driver_id, start, end)
+        return regular_hours, overtime_hours, pay_cents
 
     regular_pay_cents = round(regular_hours * rate_cents)
-    overtime_pay_cents = round(overtime_hours * rate_cents * FEDERAL_OVERTIME_MULTIPLIER)
-    return regular_hours, overtime_hours, regular_pay_cents + overtime_pay_cents
+    return regular_hours, overtime_hours, regular_pay_cents

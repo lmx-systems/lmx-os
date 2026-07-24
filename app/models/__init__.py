@@ -3,6 +3,7 @@ from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
+from app.models.gig_payout import GigPayout
 from app.models.hub import Hub
 from app.models.invoice import Invoice
 from app.models.message import Message
@@ -19,6 +20,7 @@ __all__ = [
     "ClientRate",
     "Driver",
     "DriverDocument",
+    "GigPayout",
     "Hub",
     "Invoice",
     "Message",

@@ -52,6 +52,9 @@ export interface JobOffer {
   hub_id: string;
   expires_at: string;
   stops: OfferStopSummary[];
+  // Real per-delivery pay estimate (docs/ROADMAP.md A11) - only set for a
+  // gig-classified driver; null for w2/1099, paid hourly/monthly instead.
+  estimated_pay_cents: number | null;
 }
 
 export type StopType = 'pickup' | 'dropoff';
@@ -110,6 +113,9 @@ export interface Earnings {
   hourly_rate_cents: number;
   estimated_pay_cents: number;
   is_placeholder: boolean;
+  // Real per-delivery pay for gig, not hourly (docs/ROADMAP.md A11) -
+  // lets EarningsScreen render the two differently.
+  employment_type: string;
   note: string;
 }
 

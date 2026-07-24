@@ -1,7 +1,10 @@
 from app.config import settings
 from app.payroll.base import PayrollProvider
+from app.payroll.payout_provider import PayoutProvider
 from app.payroll.rippling_client import RipplingPayrollProvider
+from app.payroll.stripe_connect_client import StripeConnectPayoutProvider
 from app.payroll.stub_client import StubPayrollProvider
+from app.payroll.stub_payout_client import StubPayoutProvider
 
 import structlog
 
@@ -20,4 +23,16 @@ def get_payroll_provider() -> PayrollProvider:
     return StubPayrollProvider()
 
 
-__all__ = ["PayrollProvider", "get_payroll_provider"]
+def get_payout_provider() -> PayoutProvider:
+    if settings.stripe_connect_secret_key:
+        logger.info("payout_provider_selected", engine="stripe_connect")
+        return StripeConnectPayoutProvider(secret_key=settings.stripe_connect_secret_key)
+    logger.warning(
+        "payout_provider_selected",
+        engine="stub",
+        reason="STRIPE_CONNECT_SECRET_KEY not configured - running in stub mode",
+    )
+    return StubPayoutProvider()
+
+
+__all__ = ["PayrollProvider", "PayoutProvider", "get_payroll_provider", "get_payout_provider"]

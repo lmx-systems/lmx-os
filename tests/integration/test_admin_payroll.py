@@ -67,3 +67,35 @@ async def test_run_payroll_skips_a_driver_with_no_shift_events_last_period(db_se
 
     result = await run_payroll_for_hub(str(hub_id), session=db_session)
     assert result.submissions == []
+
+
+async def test_run_payroll_skips_a_gig_driver_entirely(db_session, real_redis_client):
+    """Gig is already paid instantly, per delivery, at complete_stop time
+    (docs/ROADMAP.md A11, app/models/gig_payout.py) - a payroll-cycle
+    submission here would be a second, bogus hours x rate payment through
+    the wrong rail (Rippling, not Stripe Connect), even if the driver did
+    have real on-duty shift events last period."""
+    hub_id, driver_id = uuid.uuid4(), uuid.uuid4()
+    db_session.add(Hub(id=hub_id, name="Payroll Run Gig Hub", lat=34.05, lng=-118.25))
+    await db_session.commit()
+    db_session.add(
+        Driver(
+            id=driver_id, hub_id=hub_id, name="Gig G.", phone="+15555550312",
+            vehicle_capacity_units=5, employment_type="gig",
+        )
+    )
+    await db_session.commit()
+
+    now = datetime.now(timezone.utc)
+    prev_start, _prev_end = payroll_hours.previous_pay_period_bounds("gig", now)
+    online_at = prev_start + timedelta(hours=9)
+    db_session.add_all(
+        [
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="available", occurred_at=online_at),
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="off_shift", occurred_at=online_at + timedelta(hours=4)),
+        ]
+    )
+    await db_session.commit()
+
+    result = await run_payroll_for_hub(str(hub_id), session=db_session)
+    assert result.submissions == []

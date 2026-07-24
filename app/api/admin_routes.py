@@ -155,6 +155,14 @@ async def run_payroll_for_hub(
     submissions: list[DriverPayrollSubmission] = []
 
     for driver in drivers:
+        if driver.employment_type == "gig":
+            # Already paid instantly, per delivery, at complete_stop time
+            # (docs/ROADMAP.md A11, app/models/gig_payout.py) - a payroll-
+            # cycle submission here would be a second, bogus hours x rate
+            # payment for pay that already went out through Stripe Connect,
+            # not the hourly Rippling rail this endpoint submits to.
+            continue
+
         start, end = payroll_hours.previous_pay_period_bounds(driver.employment_type, now)
         rate_cents = driver.hourly_rate_cents or payroll_hours.PLACEHOLDER_HOURLY_RATE_CENTS
         regular_hours, overtime_hours, estimated_pay_cents = await payroll_hours.hours_and_pay_for_period(

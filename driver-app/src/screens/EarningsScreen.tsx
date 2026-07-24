@@ -68,13 +68,20 @@ export function EarningsScreen({ navigation }: Props) {
 
       <View style={styles.statsRow}>
         <Card style={styles.statCard}>
-          <Text style={styles.statLabel}>Hours worked</Text>
+          <Text style={styles.statLabel}>{earnings.employment_type === 'gig' ? 'Hours online' : 'Hours worked'}</Text>
           <Text style={styles.statValue}>{earnings.hours_worked.toFixed(1)}</Text>
         </Card>
-        <Card style={styles.statCard}>
-          <Text style={styles.statLabel}>Rate{earnings.is_placeholder ? ' (placeholder)' : ''}</Text>
-          <Text style={styles.statValue}>{formatCents(earnings.hourly_rate_cents)}/hr</Text>
-        </Card>
+        {earnings.employment_type === 'gig' ? (
+          <Card style={styles.statCard}>
+            <Text style={styles.statLabel}>Pay model</Text>
+            <Text style={styles.statValue}>Per delivery</Text>
+          </Card>
+        ) : (
+          <Card style={styles.statCard}>
+            <Text style={styles.statLabel}>Rate{earnings.is_placeholder ? ' (placeholder)' : ''}</Text>
+            <Text style={styles.statValue}>{formatCents(earnings.hourly_rate_cents)}/hr</Text>
+          </Card>
+        )}
       </View>
 
       {earnings.overtime_hours > 0 && (
