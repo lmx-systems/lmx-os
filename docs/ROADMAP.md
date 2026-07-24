@@ -236,6 +236,8 @@ constraining the build order.
 - E3 (Epicor payload — needs B2)
 - E4, E5 (batch-hold logic + SLA windows — needs B3)
 - E6, E7 (Learning Loop naming sign-off + real scheduler)
+- F6 (real-time mid-route re-optimization — competitive-parity item,
+  depends on E1 landing first; see "Competitive feature gaps" above)
 
 **Exit criteria:** no remaining "not yet verified against a live X" line
 in `docs/ARCHITECTURE.md`'s core-backend sections.
@@ -248,6 +250,10 @@ money — not just correct in a demo.
   rate limiting, security review, Twilio webhook signing)
 - E8 (event bus — only urgent once this needs to run as more than one
   instance, which a real hosting decision (S3) will likely force)
+- F10, F11 (a real SOC 2-or-equivalent path, and SSO/SAML for ops/client
+  logins — every competitor researched leads with both; raises S6/S2's
+  urgency from internal hygiene to a real sales blocker with enterprise
+  clients)
 
 **Exit criteria:** a documented production runbook and a completed
 security review.
@@ -259,6 +265,9 @@ developer tooling.
 - A1 (push notifications — do this first; everything else in this phase
   is polish by comparison)
 - A2–A5 (camera/barcode, photo/signature capture, PIN system, maps SDK)
+- F1, F2 (live driver location pipeline + the ops dashboard's live map —
+  do these alongside A1/A5; every competitor researched treats live GPS
+  tracking as baseline, and today LMX OS has none at all)
 - A6 (app store deployment — start with TestFlight/Play internal testing,
   not a public release, for the first pilot)
 - A7, A8 (masked voice calling, harden SMS reply matching)
@@ -310,7 +319,11 @@ Shipped:
   (`app/messaging/shop_notifications.py`).
 
 **Follow-ups this phase surfaced, not yet done:** E10, C3, C4, C5 (S8 and S9
-are now both done — see Part 1's tables above).
+are now both done — see Part 1's tables above). Also picked up here from
+the competitive analysis: F3 (customer-facing live tracking page, once
+F1 lands in Phase 6), F4 (outbound status webhooks/integrations), F5
+(flexible rate-table billing, alongside C3), and F8 (white-label portal
+theming, if LMX ever resells through a partner).
 
 ### Phase 9 — Hub 1 pilot
 **Goal:** prove the model live.
@@ -341,7 +354,11 @@ Sequencing relative to the pilot — this is the important part:
   labels we won't have.
 - **During/after the pilot:** I4 (descriptive analytics) as soon as
   there's a couple of weeks of data; I5 (calibration — E2/E5/E9/E10)
-  is the pilot's whole point.
+  is the pilot's whole point. F7 (client- and ops-facing analytics
+  dashboards, from the competitive analysis) folds into I4's build —
+  every competitor exposes a client-facing cut of this that I4 didn't
+  originally scope; add it while I4 is being built, not as a separate
+  pass.
 - **Later, data-gated:** I6 (predictive models feeding the optimizer —
   where learning finally reaches route construction itself) and I7
   (ops copilot; the one row needing an external decision, an LLM
@@ -368,6 +385,10 @@ Sequencing:
   partner, proving the offer→accept→status loop end-to-end before any
   real vehicle moves; then P3's eligibility filtering (a drone that gets
   offered a 40lb pallet is a bug, not a learning).
+- **F9 (hybrid gig-fleet overflow dispatch)** doesn't need to wait on this
+  phase's autonomy-partner gate — a human gig-fleet (Wise Systems' "DoorDash
+  Dial" model) is a nearer-term test of the same P1/P2 courier abstraction
+  and could ship independently, well before a signed AV/drone partner exists.
 - **P4 (unmanned handoff/PIN)** is shared with the driver app's A4 —
   building A4 earlier quietly de-risks this phase.
 - **Later:** P3's cost-per-drop mode selection (needs real partner
