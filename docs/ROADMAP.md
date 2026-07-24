@@ -159,19 +159,45 @@ stakes. That's F1/F2 below, and it's the prerequisite for F3.
 | F4 | Outbound status webhooks + a small integrations surface | Today's ingestion adapters are demand-side *in* (Epicor, flat-file); nothing goes back *out* — no webhook a client system can subscribe to, no Shopify/Zapier-style connector. Bringg, Onfleet, and Wise Systems all name this as a feature. |
 | F5 | Flexible/rate-table billing | `client_rates` today is flat per-drop, per-tier. Onfleet and Locus both support per-piece/per-weight/per-mile rate tables — worth revisiting once C3's statement persistence (already open) is tackled, same billing surface. |
 | F6 | Real-time mid-route re-optimization | Today's optimizer solves fresh each cycle (E7's scheduler) rather than continuously re-sequencing an in-progress route as conditions change — Wise Systems' and Onfleet's core marketing claim. Depends on E1 (verify the live Google Route Optimization client) being done first. |
-| F7 | Client- and ops-facing analytics dashboards | Reinforces I4 (already on the roadmap) — DPH, on-time %, driver leaderboards — but every competitor also exposes a *client-facing* cut of this (their own on-time rate, delivery volume) in the portal, which I4 doesn't currently scope. |
+| F7 | Client- and ops-facing analytics dashboards | Reinforces I4 (already on the roadmap) — DPH, on-time %, driver leaderboards, cost-per-drop trend, SLA-breach history, CSV/BI export — but every competitor also exposes a *client-facing* cut of this (their own on-time rate, delivery volume) in the portal, which I4 doesn't currently scope. Directly serves the "market adoption" story for a distributor moving to per-drop pricing — it's the retention/upsell proof, not just an ops nicety. |
 | F8 | White-label / multi-brand portal theming | Bringg, Onfleet (Enterprise tier), and Locus all offer a rebrandable client-facing surface. Relevant if LMX ever resells through a partner or franchise model — not urgent for Hub 1. |
-| F9 | Hybrid gig-fleet overflow dispatch | Wise Systems' "DoorDash Dial" auto-routes overflow orders to third-party gig couriers by cost/rules. This is a nearer-term slice of P1/P2's courier abstraction — a human gig-fleet partner doesn't need to wait on a signed *autonomous* partner the way Phase 11 is gated; worth building the abstraction so this is possible sooner. |
-| F10 | A real path to SOC 2 (or equivalent) certification | Every one of the four competitors leads their security page with SOC 2 Type II (plus ISO 27001, sometimes HIPAA/GDPR audits). Reinforces S6 (security review) and S2 (secrets management) — this raises their urgency from "good hygiene" to "the thing enterprise clients will ask for in a security questionnaire." |
+| F9 | ⚠️ Hybrid gig-fleet overflow dispatch — **unresolved, see note below** | Wise Systems' "DoorDash Dial" auto-routes overflow orders to third-party gig couriers by cost/rules. Flagged as a possible nearer-term slice of P1/P2's courier abstraction — but see the note below: a companion analysis argues this is exactly the multi-carrier aggregator model LMX has deliberately rejected. Do not build until that tension is resolved. |
+| F10 | A real path to SOC 2 (or equivalent) certification | Every one of the four competitors leads their security page with SOC 2 Type II (plus ISO 27001, sometimes HIPAA/GDPR audits). Reinforces S6 (security review) and S2 (secrets management) — this raises their urgency from "good hygiene" to "the thing enterprise clients will ask for in a security questionnaire." A companion analysis adds a concrete trigger: enterprise dealer groups (the recommended anchor client type) ask for SOC 2 in diligence, and it's a multi-month audit — start readiness well before it's needed, not when it's blocking a deal. |
 | F11 | SSO/SAML for ops and client logins | S1 built real per-user auth with roles, but not SSO — Bringg, Wise Systems, and Locus all support it for enterprise buyers. |
 | F12 | Network/territory optimization tooling | Wise Systems' "Network Optimization" (depot/zone redesign, distinct from daily routing) — relevant once LMX runs multiple hubs, not for a single Hub 1 pilot. |
+| F13 | Ratings & feedback capture | One-tap post-delivery rating (+ optional comment) prompt to the shop, landing on the order/stop record. Low effort, and it feeds the Learning Loop (I3's broader annotation vocabulary) with a ground-truth satisfaction signal none of the four researched competitors structurally capture the same way. No external dependency. |
+| F14 | Orchestrator route-preview / shadow mode | A view to preview the optimizer's proposed plan before it commits and simulate a manual override, without giving up autonomous dispatch as the default path. Builds operational trust during rollout (an operator watching the system decide, before trusting it fully) — distinct from I2's rule-promotion review, this is a preview/override on route *assignments* themselves. |
+
+**Unresolved — F9 vs. the operator-not-aggregator thesis:** a companion
+competitive analysis run separately (`docs/LMX_OS_Roadmap_Addendum_Feature_Delta.docx`,
+uploaded by Sourabh) explicitly lists "multi-carrier selection + carrier
+network" under features LMX **deliberately does not build**, reasoning
+that it's the aggregator model LMX rejected — "LMX is the fleet, not a
+Bringg competitor." F9 as scoped above (auto-routing overflow orders to
+third-party gig couriers) is arguably that same model in a narrower
+form. These two conclusions weren't reconciled before landing in this
+doc; F9 should not be built until that's resolved one way or the other.
 
 **Sequencing:** F1/F2 slot into Phase 6 (driver app hardening, alongside
 A1/A5); F3 follows as a fast Phase 8 follow-up once F1 exists; F4/F5/F8
 join C3/C4/C5 as Phase 8 follow-ups; F6 depends on E1 in Phase 4; F7
-folds into Phase 10's I4; F9 is a design refinement to Phase 11's P1/P2,
-buildable independent of Phase 11's autonomy-partner gate; F10/F11
-reinforce Phase 5; F12 is a later, multi-hub-scale item.
+folds into Phase 10's I4; F9 is on hold pending the operator-vs-aggregator
+question above; F10/F11 reinforce Phase 5; F12 is a later, multi-hub-scale
+item. F13 (ratings/feedback) is low-effort and no-dependency — a good
+Phase 8 follow-up alongside F3/F4. F14 (route-preview/shadow mode) fits
+Phase 9 (Hub 1 pilot) — it's the trust-building surface for the pilot
+itself, not a pre-pilot gate.
+
+**Deliberately not building (validated by the same companion analysis):**
+checkout/delivery-slot self-scheduling (B2C retail surface — LMX orders
+originate from distributor POS, matching the existing C5 "no self-serve
+signup, by design" decision); a no-code automation/workflow builder and a
+configurable driver toolbox (Bringg needs both because its customers
+self-configure a shared platform; LMX runs one operation and the Learning
+Loop already generates rules — configurability here would be
+anti-differentiation, not a feature); and a manager mobile app (not a
+gap that costs deals at hub scale — revisit post-Series A). These
+reinforce decisions already on the record rather than changing anything.
 
 ### Intelligence layer
 
@@ -322,8 +348,9 @@ Shipped:
 are now both done — see Part 1's tables above). Also picked up here from
 the competitive analysis: F3 (customer-facing live tracking page, once
 F1 lands in Phase 6), F4 (outbound status webhooks/integrations), F5
-(flexible rate-table billing, alongside C3), and F8 (white-label portal
-theming, if LMX ever resells through a partner).
+(flexible rate-table billing, alongside C3), F8 (white-label portal
+theming, if LMX ever resells through a partner), and F13 (one-tap
+ratings/feedback capture — low-effort, no dependency).
 
 ### Phase 9 — Hub 1 pilot
 **Goal:** prove the model live.
@@ -333,6 +360,9 @@ theming, if LMX ever resells through a partner).
 - E9 (validate/recalibrate the 2.5 DPH figure and SLA hold windows
   against real data — this is the whole point of a pilot)
 - T1 (load-test against realistic Hub 1 volume before it's live volume)
+- F14 (orchestrator route-preview/shadow mode — lets hub staff watch the
+  optimizer's proposed plan and override it during the pilot, building
+  trust in autonomous dispatch before leaning on it fully)
 
 **Exit criteria:** a week of real Hub 1 operation with the DPH assumption
 either confirmed or replaced by a real number, and hold windows retuned
