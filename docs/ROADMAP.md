@@ -161,43 +161,44 @@ stakes. That's F1/F2 below, and it's the prerequisite for F3.
 | F6 | Real-time mid-route re-optimization | Today's optimizer solves fresh each cycle (E7's scheduler) rather than continuously re-sequencing an in-progress route as conditions change — Wise Systems' and Onfleet's core marketing claim. Depends on E1 (verify the live Google Route Optimization client) being done first. |
 | F7 | Client- and ops-facing analytics dashboards | Reinforces I4 (already on the roadmap) — DPH, on-time %, driver leaderboards, cost-per-drop trend, SLA-breach history, CSV/BI export — but every competitor also exposes a *client-facing* cut of this (their own on-time rate, delivery volume) in the portal, which I4 doesn't currently scope. Directly serves the "market adoption" story for a distributor moving to per-drop pricing — it's the retention/upsell proof, not just an ops nicety. |
 | F8 | White-label / multi-brand portal theming | Bringg, Onfleet (Enterprise tier), and Locus all offer a rebrandable client-facing surface. Relevant if LMX ever resells through a partner or franchise model — not urgent for Hub 1. |
-| F9 | ⚠️ Hybrid gig-fleet overflow dispatch — **unresolved, see note below** | Wise Systems' "DoorDash Dial" auto-routes overflow orders to third-party gig couriers by cost/rules. Flagged as a possible nearer-term slice of P1/P2's courier abstraction — but see the note below: a companion analysis argues this is exactly the multi-carrier aggregator model LMX has deliberately rejected. Do not build until that tension is resolved. |
+| ~~F9~~ | ~~Hybrid gig-fleet overflow dispatch~~ → **Decided: not building** (Sourabh, July 2026) | Wise Systems' "DoorDash Dial" auto-routes overflow orders to third-party gig couriers by cost/rules — initially flagged as a nearer-term slice of P1/P2's courier abstraction. On review this is the same multi-carrier aggregator model LMX has deliberately rejected elsewhere ("LMX is the fleet, not a Bringg competitor"), just scoped to overflow rather than every order. Moved to "Deliberately not building" below. |
 | F10 | A real path to SOC 2 (or equivalent) certification | Every one of the four competitors leads their security page with SOC 2 Type II (plus ISO 27001, sometimes HIPAA/GDPR audits). Reinforces S6 (security review) and S2 (secrets management) — this raises their urgency from "good hygiene" to "the thing enterprise clients will ask for in a security questionnaire." A companion analysis adds a concrete trigger: enterprise dealer groups (the recommended anchor client type) ask for SOC 2 in diligence, and it's a multi-month audit — start readiness well before it's needed, not when it's blocking a deal. |
 | F11 | SSO/SAML for ops and client logins | S1 built real per-user auth with roles, but not SSO — Bringg, Wise Systems, and Locus all support it for enterprise buyers. |
 | F12 | Network/territory optimization tooling | Wise Systems' "Network Optimization" (depot/zone redesign, distinct from daily routing) — relevant once LMX runs multiple hubs, not for a single Hub 1 pilot. |
 | F13 | Ratings & feedback capture | One-tap post-delivery rating (+ optional comment) prompt to the shop, landing on the order/stop record. Low effort, and it feeds the Learning Loop (I3's broader annotation vocabulary) with a ground-truth satisfaction signal none of the four researched competitors structurally capture the same way. No external dependency. |
 | F14 | Orchestrator route-preview / shadow mode | A view to preview the optimizer's proposed plan before it commits and simulate a manual override, without giving up autonomous dispatch as the default path. Builds operational trust during rollout (an operator watching the system decide, before trusting it fully) — distinct from I2's rule-promotion review, this is a preview/override on route *assignments* themselves. |
 
-**Unresolved — F9 vs. the operator-not-aggregator thesis:** a companion
+**Resolved — F9 vs. the operator-not-aggregator thesis:** a companion
 competitive analysis run separately (`docs/LMX_OS_Roadmap_Addendum_Feature_Delta.docx`,
 uploaded by Sourabh) explicitly lists "multi-carrier selection + carrier
 network" under features LMX **deliberately does not build**, reasoning
 that it's the aggregator model LMX rejected — "LMX is the fleet, not a
-Bringg competitor." F9 as scoped above (auto-routing overflow orders to
-third-party gig couriers) is arguably that same model in a narrower
-form. These two conclusions weren't reconciled before landing in this
-doc; F9 should not be built until that's resolved one way or the other.
+Bringg competitor." F9 as originally scoped (auto-routing overflow
+orders to third-party gig couriers) was the same model in a narrower
+form. Sourabh's call, July 2026: **not building it** — LMX stays the
+fleet, full stop, with no gig-courier overflow valve even for capacity
+emergencies. Moved to "Deliberately not building" below.
 
 **Sequencing:** F1/F2 slot into Phase 6 (driver app hardening, alongside
 A1/A5); F3 follows as a fast Phase 8 follow-up once F1 exists; F4/F5/F8
 join C3/C4/C5 as Phase 8 follow-ups; F6 depends on E1 in Phase 4; F7
-folds into Phase 10's I4; F9 is on hold pending the operator-vs-aggregator
-question above; F10/F11 reinforce Phase 5; F12 is a later, multi-hub-scale
-item. F13 (ratings/feedback) is low-effort and no-dependency — a good
-Phase 8 follow-up alongside F3/F4. F14 (route-preview/shadow mode) fits
-Phase 9 (Hub 1 pilot) — it's the trust-building surface for the pilot
-itself, not a pre-pilot gate.
+folds into Phase 10's I4; F10/F11 reinforce Phase 5; F12 is a later,
+multi-hub-scale item. F13 (ratings/feedback) is low-effort and
+no-dependency — a good Phase 8 follow-up alongside F3/F4. F14
+(route-preview/shadow mode) fits Phase 9 (Hub 1 pilot) — it's the
+trust-building surface for the pilot itself, not a pre-pilot gate.
 
-**Deliberately not building (validated by the same companion analysis):**
-checkout/delivery-slot self-scheduling (B2C retail surface — LMX orders
-originate from distributor POS, matching the existing C5 "no self-serve
-signup, by design" decision); a no-code automation/workflow builder and a
-configurable driver toolbox (Bringg needs both because its customers
-self-configure a shared platform; LMX runs one operation and the Learning
-Loop already generates rules — configurability here would be
-anti-differentiation, not a feature); and a manager mobile app (not a
-gap that costs deals at hub scale — revisit post-Series A). These
-reinforce decisions already on the record rather than changing anything.
+**Deliberately not building (validated by the same companion analysis,
+plus the F9 decision above):** hybrid gig-fleet overflow dispatch /
+multi-carrier selection (the aggregator model — LMX is the fleet, full
+stop); checkout/delivery-slot self-scheduling (B2C retail surface — LMX
+orders originate from distributor POS, matching the existing C5 "no
+self-serve signup, by design" decision); a no-code automation/workflow
+builder and a configurable driver toolbox (Bringg needs both because its
+customers self-configure a shared platform; LMX runs one operation and
+the Learning Loop already generates rules — configurability here would
+be anti-differentiation, not a feature); and a manager mobile app (not a
+gap that costs deals at hub scale — revisit post-Series A).
 
 ### Intelligence layer
 
@@ -415,10 +416,12 @@ Sequencing:
   partner, proving the offer→accept→status loop end-to-end before any
   real vehicle moves; then P3's eligibility filtering (a drone that gets
   offered a 40lb pallet is a bug, not a learning).
-- **F9 (hybrid gig-fleet overflow dispatch)** doesn't need to wait on this
-  phase's autonomy-partner gate — a human gig-fleet (Wise Systems' "DoorDash
-  Dial" model) is a nearer-term test of the same P1/P2 courier abstraction
-  and could ship independently, well before a signed AV/drone partner exists.
+- **Not in scope, by decision:** a human gig-fleet overflow valve (Wise
+  Systems' "DoorDash Dial" model, formerly tracked as F9) — this would
+  route orders to third-party couriers outside LMX's own fleet, which is
+  the aggregator model LMX has deliberately rejected (Sourabh, July
+  2026). P1/P2's courier abstraction remains scoped to LMX-contracted
+  autonomy partners, not arbitrary third-party gig couriers.
 - **P4 (unmanned handoff/PIN)** is shared with the driver app's A4 —
   building A4 earlier quietly de-risks this phase.
 - **Later:** P3's cost-per-drop mode selection (needs real partner
