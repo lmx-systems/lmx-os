@@ -11,10 +11,18 @@ backlog; this one is the map of how those rows fit into getting to launch.
 
 ## Part 1 — Every open item, in one place
 
-Nothing below is new work discovered today — all of it was already called
-out somewhere in `docs/ARCHITECTURE.md`, `docs/NEXT_STEPS.md`, or
-`driver-app/README.md` as this got built. This just pulls it into one
-list instead of leaving it scattered across three documents.
+Most of this was already called out somewhere in
+`docs/ARCHITECTURE.md`, `docs/NEXT_STEPS.md`, or `driver-app/README.md`
+as it got built — this pulls it into one list instead of leaving it
+scattered across three documents.
+
+Two later additions are genuinely new rather than consolidated, and are
+flagged as such where they appear: the **Competitive feature gaps**
+(F-items, from benchmarking LMX OS against four industry platforms) and
+**Risk, compliance & real-world operations** (R-items, from deliberately
+looking for what no existing doc mentioned at all). The R-items matter
+most precisely because nothing in the codebase or prior docs was
+tracking them.
 
 ### Business / org (not code, but gates what the code is for)
 
@@ -25,6 +33,38 @@ list instead of leaving it scattered across three documents.
 | B3 | Get access to the Source of Truth Index (Google Drive, LMX OS Brief v1.0–v1.2) | The batch-hold "4-question decision logic" and SLA hold-window minutes were reconstructed from a peer-review summary, not this canonical doc, because it wasn't reachable while building. |
 | B4 | ~~Choose a payroll provider~~ → **Decided: Rippling** (cofounder alignment, July 2026) | Drivers are W2 employees; the earnings screen is placeholder-only until Rippling is provisioned (account + API access) and a pay formula is agreed — see A9. |
 | B5 | Provision a real Twilio account + phone number | Every SMS today (OTP codes, masked customer/support messaging) runs through a stub that logs instead of sending. |
+
+### Risk, compliance & real-world operations
+
+Surfaced July 2026 by deliberately looking *outside* the existing docs —
+these were not in `ARCHITECTURE.md`, `NEXT_STEPS.md`, or this roadmap,
+which is exactly why they're worth naming. Three are business/legal
+items nobody would think to write code for; three are engineering gaps
+that existed only as a passing comment in a source file and had never
+been promoted to a tracked item.
+
+**Why this section exists at all:** every other section here tracks work
+someone already knew about. These are the ones that could quietly become
+the actual Hub 1 blocker precisely because no one is watching them —
+R1–R3 in particular are not things engineering can solve, and they gate
+putting real drivers on real roads with real customer data.
+
+| # | Item | Why it matters |
+|---|---|---|
+| R1 | Insurance & liability plan (commercial auto, cargo, general liability) | If a driver has an accident or a package is lost/damaged, what covers it? Not named anywhere in any doc despite being existential for a delivery company. A business decision like B4/B5, not an engineering task — but unlike those two, nothing in the system even hints it's missing. **Gates Phase 9** (real drivers, real roads). Needs Rich/Matan. |
+| R2 | Driver background checks & MVR (motor-vehicle record) screening | The system tracks license and insurance *documents* with expiry dates (`driver_documents`) and blocks going online when one is expired — but nothing verifies the driver was safe to put behind the wheel in the first place. Document expiry is not a background check. **Gates Phase 9.** Needs Rich. |
+| R3 | Privacy policy & data-handling/retention policy | LMX OS stores customer names, delivery addresses, and phone numbers (orders + shop SMS), plus driver PII. No document says what LMX does with any of it, how long it's kept, or how someone requests deletion. Real legal exposure the moment there are real clients and real drivers; also the first thing an enterprise client's security questionnaire asks about, alongside F10's SOC 2. **Gates Phase 9.** |
+| R4 | Driver document upload pipeline | `app/models/driver_document.py`'s own comment: "No file-upload pipeline exists… `file_url` accepts whatever string the client sends." A driver could submit a fabricated URL as their license scan and the system would treat it as valid. Distinct from A3 (proof-of-delivery photos) — this is *onboarding compliance* evidence, and it's what makes R2 enforceable in software rather than on paper. |
+| R5 | Failed-delivery / redelivery workflow | `Stop.status` has a `failed` value, but nothing handles what happens next: no redelivery attempt, no client notification, no billing adjustment, no defined resolution path. Every real delivery operation gets refused packages, wrong addresses, and closed shops — today those orders would sit in `failed` forever. Also the gap behind Locus's "failed-delivery disputes" and P6's partner-dispute surface. |
+| R6 | Hub closure / holiday calendar | Nothing models a hub not operating. The Learning Loop's nightly scheduler (E7) and the optimizer both assume every active hub runs every day — the first holiday, weather closure, or planned shutdown will either misfire the nightly job or dispatch routes for a hub that isn't open. |
+
+**Sequencing:** R1/R2/R3 are business/legal work that should start *now*
+— they're slow (insurance quotes, policy drafting, screening-vendor
+selection) and they gate Phase 9, so starting them when the pilot is
+imminent is starting them too late. R4 fits Phase 6 alongside A3 (same
+file-upload infrastructure, build once). R5 and R6 fit Phase 4 — both
+are "the system assumes the happy path" gaps of exactly the kind that
+phase exists to close, and both will surface immediately in a real pilot.
 
 ### Core backend — unverified or placeholder logic
 
@@ -292,9 +332,14 @@ constraining the build order.
 - E6, E7 (Learning Loop naming sign-off + real scheduler)
 - F6 (real-time mid-route re-optimization — competitive-parity item,
   depends on E1 landing first; see "Competitive feature gaps" above)
+- R5, R6 (failed-delivery/redelivery workflow, and a hub closure/holiday
+  calendar — both are "the system assumes the happy path" gaps of
+  exactly the kind this phase exists to close, and both surface
+  immediately in a real pilot)
 
 **Exit criteria:** no remaining "not yet verified against a live X" line
-in `docs/ARCHITECTURE.md`'s core-backend sections.
+in `docs/ARCHITECTURE.md`'s core-backend sections, and no core workflow
+that silently dead-ends when the happy path doesn't hold.
 
 ### Phase 5 — Security & production infrastructure
 **Goal:** safe to run with real orders, real drivers, and eventually real
@@ -319,6 +364,9 @@ developer tooling.
 - A1 (push notifications — do this first; everything else in this phase
   is polish by comparison)
 - A2–A5 (camera/barcode, photo/signature capture, PIN system, maps SDK)
+- R4 (driver document upload pipeline — build alongside A3, same
+  file-upload infrastructure; this is what makes R2's background-check
+  policy enforceable in software rather than on paper)
 - F1, F2 (live driver location pipeline + the ops dashboard's live map —
   do these alongside A1/A5; every competitor researched treats live GPS
   tracking as baseline, and today LMX OS has none at all)
@@ -384,6 +432,14 @@ ratings/feedback capture — low-effort, no dependency).
 **Goal:** prove the model live.
 
 - B2 (signed client — this is the actual gate for this phase)
+- **R1, R2, R3 — the other gate for this phase, and the one most likely
+  to be missed.** Insurance/liability coverage, driver background
+  checks, and a privacy/data-retention policy all need to be *in place*
+  before real drivers carry real packages containing real customer data
+  — not started when the pilot is imminent. All three are slow
+  (insurance quotes, screening-vendor selection, policy drafting) and
+  none of them are engineering work: they need Rich/Matan, and they
+  should be moving in parallel with Phases 4–8, not waiting on them.
 - Run real orders through the full pipeline
 - E9 (validate/recalibrate the 2.5 DPH figure and SLA hold windows
   against real data — this is the whole point of a pilot)
@@ -394,7 +450,9 @@ ratings/feedback capture — low-effort, no dependency).
 
 **Exit criteria:** a week of real Hub 1 operation with the DPH assumption
 either confirmed or replaced by a real number, and hold windows retuned
-from actual data instead of the Phase 1 placeholders.
+from actual data instead of the Phase 1 placeholders — with insurance,
+background checks, and a privacy policy (R1–R3) demonstrably in place
+before day one, not retrofitted after.
 
 ### Phase 10 — Intelligence layer
 **Goal:** the system gets measurably better at its job the longer it
