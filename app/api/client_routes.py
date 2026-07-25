@@ -13,6 +13,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.service import invoice_detail_view, invoice_summary_view
@@ -114,11 +115,13 @@ async def create_my_client_user(
             status_code=422, detail=f"Unknown role {body.role!r}. Valid roles: {sorted(CLIENT_USER_ROLES)}"
         )
 
-    # Email is globally unique (app/models/client_user.py) - check before
-    # inserting so a collision is a clean 409, not a raw IntegrityError.
-    # Intentionally not scoped to this client: an admin shouldn't be able
-    # to probe whether an address is in use at *another* client either, so
-    # the message stays generic.
+    # Email is globally unique (app/models/client_user.py). The upfront
+    # check gives the common case a clean 409; the unique constraint is the
+    # real backstop, so two concurrent creates of the same email still
+    # resolve to a 409 (the loser's commit raises IntegrityError) rather
+    # than a 500. Intentionally not scoped to this client: an admin
+    # shouldn't be able to probe whether an address is in use at *another*
+    # client either, so the message stays generic.
     existing = await session.execute(select(ClientUser.id).where(ClientUser.email == body.email))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="A user already exists with this email")
@@ -132,7 +135,11 @@ async def create_my_client_user(
         is_active=True,
     )
     session.add(user)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="A user already exists with this email") from exc
     return _client_user_view(user)
 
 
@@ -173,6 +180,12 @@ async def update_my_client_user(
     # able to manage users, unrecoverable except by ops
     # (scripts/create_client_user.py). Checked against *other* admins, so
     # an admin editing a second admin is fine.
+    # Known limitation: this read-then-write isn't serialized, so two
+    # concurrent PATCHes each removing one of the last two admins could
+    # both pass and strand the client with zero. Acceptable for a
+    # manually-driven admin action with a documented ops recovery path; if
+    # it ever needs to be airtight, take a row lock on the client's admin
+    # rows (SELECT ... FOR UPDATE) around this check.
     demoting = body.role is not None and body.role != CLIENT_ADMIN_ROLE and user.role == CLIENT_ADMIN_ROLE
     deactivating = body.is_active is False and user.is_active
     if (demoting or deactivating) and user.role == CLIENT_ADMIN_ROLE and user.is_active:

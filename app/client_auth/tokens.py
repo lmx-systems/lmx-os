@@ -36,11 +36,13 @@ def assert_client_jwt_secret_configured() -> None:
 @dataclass(frozen=True)
 class ClientTokenClaims:
     # sub is the client *user*, not the client - a portal login is now
-    # per-user (docs/ROADMAP.md C4). client_id/role are carried too so the
-    # common read paths don't need a second lookup just to scope a query,
-    # but is_active is deliberately re-checked against the DB on every
-    # request (app/client_auth/dependencies.py), not trusted from the
-    # token, so a deactivated user loses access immediately.
+    # per-user (docs/ROADMAP.md C4). client_id/role are carried for
+    # debuggability/completeness, but are deliberately NOT trusted for
+    # authorization: app/client_auth/dependencies.py reloads the
+    # ClientUser row on every request and derives client_id, role, and
+    # is_active from it, so a deactivated/demoted/reassigned user loses the
+    # corresponding access immediately rather than at token expiry, and a
+    # tampered claim can't escalate.
     client_user_id: str
     client_id: str
     role: str
