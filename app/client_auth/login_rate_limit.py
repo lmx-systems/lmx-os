@@ -2,7 +2,7 @@
 Login-attempt rate limiting for the client portal (Phase 8).
 
 Same "Redis counter with an NX-guarded TTL" shape as
-app/driver_auth/otp_store.py's issuance limiter - a client's portal_email
+app/driver_auth/otp_store.py's issuance limiter - a client user's email
 is a fixed, guessable target (unlike a driver's rotating 4-digit OTP),
 which makes unthrottled login a more attractive brute-force surface than
 the one that limiter already closes.

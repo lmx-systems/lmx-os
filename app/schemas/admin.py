@@ -28,8 +28,14 @@ class ClientOnboardingBody(BaseModel):
     pos_system: str = "flat_file"
     shops: list[ShopOnboardingInput]
     rates: list[RateOnboardingInput]
+    # The client's first portal login, created as an admin client user
+    # (docs/ROADMAP.md C4) who can then invite the rest of the client's
+    # team themselves. portal_user_name names that person; it defaults to
+    # the company name when omitted (there's often just one contact at
+    # onboarding time, named later).
     portal_email: str
     portal_password: str
+    portal_user_name: str | None = None
 
 
 class ClientOnboardingResult(BaseModel):

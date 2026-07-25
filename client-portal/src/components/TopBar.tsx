@@ -13,7 +13,14 @@ export function TopBar({ profile, onLogout }: TopBarProps) {
         <img src="/lmx-mark.png" alt="LMX" className="h-8 w-8 rounded-[var(--radius)]" />
         <div>
           <div className="text-[14.5px] font-semibold text-[var(--text-primary)]">{profile.name}</div>
-          <div className="text-xs text-[var(--text-muted)]">{profile.portal_email}</div>
+          <div className="text-xs text-[var(--text-muted)]">
+            {profile.email}
+            {profile.role === 'admin' && (
+              <span className="ml-1.5 rounded-full bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+                Admin
+              </span>
+            )}
+          </div>
         </div>
       </div>
       <div className="flex items-center gap-2.5">

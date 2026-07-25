@@ -1,10 +1,9 @@
 """
 An internal LMX ops user (dashboard/) - replaces the shared X-API-Key
 stopgap (docs/ROADMAP.md S1) with a real per-account login, the same
-password+JWT shape app/models/client.py's portal_email/
-portal_password_hash already uses for the client portal. Not scoped to a
-hub - ops staff need cross-hub visibility, matching how the dashboard
-itself already works (paste any hub UUID, no restriction).
+password+JWT shape app/models/client_user.py uses for the client portal.
+Not scoped to a hub - ops staff need cross-hub visibility, matching how
+the dashboard itself already works (paste any hub UUID, no restriction).
 """
 from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column

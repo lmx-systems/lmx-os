@@ -1,6 +1,6 @@
-// Client portal session token (Phase 8) - a JWT issued by POST
-// /client/auth/login (app/api/client_routes.py), one login per client
-// company, not per-user. Stored in localStorage so a page refresh doesn't
+// Client portal session token - a JWT issued by POST /client/auth/login
+// (app/api/client_routes.py), one per signed-in client user (multi-user
+// client accounts, docs/ROADMAP.md C4). Stored in localStorage so a page refresh doesn't
 // log the client out; this is a real deployed web app (not a Claude
 // artifact sandbox), so localStorage is the standard, appropriate choice
 // here, unlike in Claude-authored in-chat artifacts.

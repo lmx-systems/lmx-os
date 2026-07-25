@@ -49,8 +49,13 @@ def test_verify_password_fails_closed_on_malformed_hash():
 
 
 def test_issue_and_decode_token_roundtrip():
-    token = issue_token("client-1")
-    assert decode_token(token) == "client-1"
+    # A portal token is per-user now (docs/ROADMAP.md C4) - it carries the
+    # client user id (sub), plus the client id and role as claims.
+    token = issue_token("user-1", "client-1", "admin")
+    claims = decode_token(token)
+    assert claims.client_user_id == "user-1"
+    assert claims.client_id == "client-1"
+    assert claims.role == "admin"
 
 
 def test_decode_rejects_garbage_token():
@@ -72,7 +77,7 @@ def test_client_and_driver_tokens_are_not_interchangeable_with_distinct_secrets(
     with patch("app.client_auth.tokens.settings") as mock_client_settings:
         mock_client_settings.client_jwt_secret = "real-client-secret"
         mock_client_settings.client_jwt_expiry_hours = 24
-        client_token = issue_token("client-1")
+        client_token = issue_token("user-1", "client-1", "admin")
 
     with patch("app.driver_auth.tokens.settings") as mock_driver_settings:
         mock_driver_settings.driver_jwt_secret = "real-driver-secret"

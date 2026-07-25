@@ -164,7 +164,12 @@ async def test_client_can_list_and_view_only_their_own_invoices(db_session):
     invoice_a = await generate_invoice(db_session, client_a_id, date(2026, 6, 1), date(2026, 7, 1))
     await generate_invoice(db_session, client_b_id, date(2026, 6, 1), date(2026, 7, 1))
 
-    authed_a = AuthedClient(client_id=str(client_a_id))
+    # Only client_id is exercised by the invoice handlers; the other
+    # fields exist since portal logins became per-user (docs/ROADMAP.md C4).
+    authed_a = AuthedClient(
+        client_id=str(client_a_id), client_user_id="test-user", email="a@example.com",
+        name="A", role="admin",
+    )
     invoices = await list_my_invoices(client=authed_a, session=db_session)
     assert len(invoices) == 1
     assert invoices[0].invoice_id == str(invoice_a.id)
@@ -182,7 +187,12 @@ async def test_client_cannot_view_another_clients_invoice(db_session):
 
     invoice_b = await generate_invoice(db_session, client_b_id, date(2026, 6, 1), date(2026, 7, 1))
 
-    authed_a = AuthedClient(client_id=str(client_a_id))
+    # Only client_id is exercised by the invoice handlers; the other
+    # fields exist since portal logins became per-user (docs/ROADMAP.md C4).
+    authed_a = AuthedClient(
+        client_id=str(client_a_id), client_user_id="test-user", email="a@example.com",
+        name="A", role="admin",
+    )
     with pytest.raises(HTTPException) as exc_info:
         await get_my_invoice(str(invoice_b.id), client=authed_a, session=db_session)
     assert exc_info.value.status_code == 404

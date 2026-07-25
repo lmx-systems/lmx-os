@@ -1,5 +1,5 @@
 """
-Password hashing for the client portal (Phase 8) - Client.portal_password_hash.
+Password hashing for the client portal - ClientUser.password_hash.
 
 bcrypt, not a hand-rolled scheme: it's a well-reviewed, purpose-built
 password hash (salted automatically, tunable work factor) rather than a

@@ -14,6 +14,7 @@ import { OrdersTable } from './components/OrdersTable'
 import { OrderDetail } from './components/OrderDetail'
 import { InvoicesTable } from './components/InvoicesTable'
 import { InvoiceDetail } from './components/InvoiceDetail'
+import { UsersPanel } from './components/UsersPanel'
 
 // No client-side routing yet (same call as dashboard/ - see its
 // nginx.conf comment) - a single view-state variable is enough for the
@@ -24,6 +25,7 @@ type View =
   | { name: 'order-detail'; orderId: string }
   | { name: 'invoices' }
   | { name: 'invoice-detail'; invoiceId: string }
+  | { name: 'team' }
 
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(() => getToken() !== null)
@@ -115,6 +117,11 @@ export default function App() {
 
   const onOrdersTab = view.name === 'orders' || view.name === 'order-detail'
   const onInvoicesTab = view.name === 'invoices' || view.name === 'invoice-detail'
+  const onTeamTab = view.name === 'team'
+  // The Team tab (user management, docs/ROADMAP.md C4) is admin-only - the
+  // API 403s a member regardless, but there's no reason to show them a tab
+  // they can't use.
+  const isAdmin = profile.role === 'admin'
 
   return (
     <div className="min-h-screen bg-[var(--bg-page)]">
@@ -141,6 +148,18 @@ export default function App() {
           >
             Invoices
           </button>
+          {isAdmin && (
+            <button
+              onClick={() => setView({ name: 'team' })}
+              className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+                onTeamTab
+                  ? 'border-[var(--accent)] text-[var(--text-primary)]'
+                  : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              Team
+            </button>
+          )}
         </nav>
 
         {view.name === 'orders' && (
@@ -177,6 +196,7 @@ export default function App() {
           ) : (
             <div className="text-sm text-[var(--text-muted)]">Loading invoice…</div>
           ))}
+        {view.name === 'team' && isAdmin && <UsersPanel profile={profile} />}
       </main>
     </div>
   )

@@ -7,8 +7,21 @@ export interface ClientAuthToken {
 
 export interface ClientProfileView {
   client_id: string
+  // The company / account name.
   name: string
-  portal_email: string
+  // The signed-in user (multi-user client accounts, docs/ROADMAP.md C4).
+  email: string
+  user_name: string
+  role: string
+}
+
+export interface ClientUserView {
+  client_user_id: string
+  email: string
+  name: string
+  role: string
+  is_active: boolean
+  created_at: string
 }
 
 export interface ClientOrderSummaryView {
