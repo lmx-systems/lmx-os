@@ -8,7 +8,6 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
 
 from app.api.admin_routes import generate_client_invoice
 from app.api.client_routes import get_my_invoice, list_my_invoices
@@ -16,7 +15,6 @@ from app.billing.service import NoBillableOrdersError, generate_invoice, invoice
 from app.client_auth.dependencies import AuthedClient
 from app.models.client import Client
 from app.models.hub import Hub
-from app.models.invoice import Invoice
 from app.models.order import Order, OrderStatus
 from app.models.shop import Shop
 from app.schemas.billing import InvoiceGenerateBody
