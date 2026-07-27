@@ -170,7 +170,7 @@ class Settings(BaseSettings):
     job_offer_ttl_seconds: int = 120
 
     # Client portal (Phase 8, see docs/ROADMAP.md) - password-based JWT for
-    # Client.portal_email/portal_password_hash logins (app/client_auth/).
+    # per-user client_users logins (app/client_auth/, docs/ROADMAP.md C4).
     # Deliberately a separate secret from driver_jwt_secret: a client token
     # and a driver token must never be interchangeable even if one secret
     # were ever compromised, since they authorize very different things

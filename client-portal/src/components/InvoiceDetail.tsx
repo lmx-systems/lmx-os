@@ -49,7 +49,7 @@ export function InvoiceDetail({ invoice, profile, onBack }: InvoiceDetailProps) 
           </div>
           <div className="text-right text-sm text-[var(--text-secondary)]">
             <div className="font-medium text-[var(--text-primary)]">{profile.name}</div>
-            <div>{profile.portal_email}</div>
+            <div>{profile.email}</div>
           </div>
         </div>
 

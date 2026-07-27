@@ -4,6 +4,7 @@ import type {
   ClientOrderDetailView,
   ClientOrderSummaryView,
   ClientProfileView,
+  ClientUserView,
   InvoiceDetailView,
   InvoiceSummaryView,
 } from './types'
@@ -69,4 +70,16 @@ export const api = {
   myInvoices: () => request<InvoiceSummaryView[]>('/client/invoices'),
 
   myInvoice: (invoiceId: string) => request<InvoiceDetailView>(`/client/invoices/${invoiceId}`),
+
+  // User management (admin only, docs/ROADMAP.md C4) - the API 403s a
+  // member, so the Team tab is only shown to an admin in the first place.
+  listUsers: () => request<ClientUserView[]>('/client/users'),
+
+  createUser: (body: { email: string; name: string; password: string; role: string }) =>
+    request<ClientUserView>('/client/users', { method: 'POST', body: JSON.stringify(body) }),
+
+  updateUser: (
+    userId: string,
+    body: { role?: string; is_active?: boolean; new_password?: string },
+  ) => request<ClientUserView>(`/client/users/${userId}`, { method: 'PATCH', body: JSON.stringify(body) }),
 }

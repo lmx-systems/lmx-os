@@ -1,6 +1,7 @@
 from app.models.call import Call
 from app.models.client import Client
 from app.models.client_rate import ClientRate
+from app.models.client_user import ClientUser
 from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
 from app.models.gig_payout import GigPayout
@@ -18,6 +19,7 @@ __all__ = [
     "Call",
     "Client",
     "ClientRate",
+    "ClientUser",
     "Driver",
     "DriverDocument",
     "GigPayout",

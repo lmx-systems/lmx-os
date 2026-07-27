@@ -22,9 +22,9 @@ class Client(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     pos_system: Mapped[str] = mapped_column(String(32), nullable=False, default="flat_file")
     active: Mapped[bool] = mapped_column(default=True)
 
-    # Client-facing portal login (Phase 8) - one login per client company,
-    # not per-user, per Sourabh's call. Living directly on Client rather
-    # than a separate credentials table since there's exactly one of these
-    # per client today; split out if/when multi-user-per-client happens.
-    portal_email: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
-    portal_password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Client-facing portal logins now live in their own table
+    # (app/models/client_user.py, migration 0019, docs/ROADMAP.md C4) -
+    # many named users per client, not the single inline
+    # portal_email/portal_password_hash this used to carry. That split is
+    # exactly the "if/when multi-user-per-client happens" the previous
+    # version of this docstring anticipated.

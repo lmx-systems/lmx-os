@@ -25,6 +25,7 @@ from app.db import get_db
 from app.driver_auth.dependencies import revoked_devices_key
 from app.models.client import Client
 from app.models.client_rate import ClientRate
+from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.shop import Shop
@@ -54,7 +55,7 @@ VALID_SLA_TIERS = {"HOT_SHOT", "T1", "T2", "T3"}
 async def onboard_client(
     body: ClientOnboardingBody, session: AsyncSession = Depends(get_db), _admin: AuthedOpsUser = Depends(require_admin)
 ) -> ClientOnboardingResult:
-    existing = await session.execute(select(Client.id).where(Client.portal_email == body.portal_email))
+    existing = await session.execute(select(ClientUser.id).where(ClientUser.email == body.portal_email))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=409, detail="A client already uses this portal email")
 
@@ -71,11 +72,23 @@ async def onboard_client(
         hub_id=uuid.UUID(body.hub_id),
         name=body.name,
         pos_system=body.pos_system,
-        portal_email=body.portal_email,
-        portal_password_hash=hash_password(body.portal_password),
     )
     session.add(client)
-    await session.flush()  # need client.id for shops/rates below
+    await session.flush()  # need client.id for the shops/rates/first-user below
+
+    # The client's first portal login is created as an admin (multi-user,
+    # docs/ROADMAP.md C4) - it's the account that can then invite the rest
+    # of the client's users itself, without ops involvement per new user.
+    session.add(
+        ClientUser(
+            client_id=client.id,
+            email=body.portal_email,
+            password_hash=hash_password(body.portal_password),
+            name=body.portal_user_name or body.name,
+            role=CLIENT_ADMIN_ROLE,
+            is_active=True,
+        )
+    )
 
     shop_ids: list[uuid.UUID] = []
     for shop_input in body.shops:
