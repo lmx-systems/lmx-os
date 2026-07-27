@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.billing.invoice_pdf import render_invoice_pdf
 from app.billing.service import invoice_detail_view, invoice_summary_view
 from app.client_auth.dependencies import AuthedClient, get_current_client, require_client_admin
 from app.client_auth.login_rate_limit import LoginRateLimitExceeded, LoginRateLimiter
@@ -292,3 +293,28 @@ async def get_my_invoice(
         raise HTTPException(status_code=404, detail="Invoice not found")
 
     return await invoice_detail_view(session, invoice)
+
+
+@router.get("/invoices/{invoice_id}/pdf")
+async def get_my_invoice_pdf(
+    invoice_id: str,
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    """Server-side PDF of an invoice (docs/ROADMAP.md C3). Same ownership
+    check as get_my_invoice - 404 (not 403) for another client's invoice.
+    Rendered from the same InvoiceDetailView the JSON endpoint returns, so
+    the PDF and the on-screen invoice can never drift apart."""
+    invoice = await session.get(Invoice, uuid.UUID(invoice_id))
+    if invoice is None or str(invoice.client_id) != client.client_id:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    detail = await invoice_detail_view(session, invoice)
+    company = await session.get(Client, uuid.UUID(client.client_id))
+    pdf = render_invoice_pdf(detail, company.name if company else "")
+    filename = f"lmx-invoice-{detail.invoice_number}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

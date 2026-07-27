@@ -71,6 +71,30 @@ export const api = {
 
   myInvoice: (invoiceId: string) => request<InvoiceDetailView>(`/client/invoices/${invoiceId}`),
 
+  // Server-side PDF (docs/ROADMAP.md C3). A plain <a href> can't carry the
+  // Bearer token, so fetch the bytes with auth and trigger a client-side
+  // download from the blob. Returns nothing; throws ApiError on failure.
+  downloadInvoicePdf: async (invoiceId: string, invoiceNumber: number): Promise<void> => {
+    const token = getToken()
+    const response = await fetch(`${API_BASE_URL}/client/invoices/${invoiceId}/pdf`, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    })
+    if (response.status === 401) clearToken()
+    if (!response.ok) {
+      const body = await response.text().catch(() => '')
+      throw new ApiError(response.status, body || response.statusText)
+    }
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `lmx-invoice-${invoiceNumber}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
+
   // User management (admin only, docs/ROADMAP.md C4) - the API 403s a
   // member, so the Team tab is only shown to an admin in the first place.
   listUsers: () => request<ClientUserView[]>('/client/users'),

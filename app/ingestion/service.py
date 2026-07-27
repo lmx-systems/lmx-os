@@ -15,6 +15,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import metrics
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
 from app.ingestion.registry import get_adapter
@@ -142,6 +143,7 @@ async def ingest_order(
     order.fee_cents = await _lookup_fee_cents(session, client_id, classified.sla_tier)
     order.status = OrderStatus.held
     await session.commit()
+    metrics.ORDERS_INGESTED.labels(hub_id=hub_id, source_system=source_system).inc()
 
     await hold_queue.add(
         hub_id,

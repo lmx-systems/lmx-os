@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,7 @@ from app.batch_queue.store import HoldQueueStore
 from app.config import settings
 from app.db import get_db
 from app.fleet_state.manager import FleetStateManager
+from app import metrics
 from app.learning_loop.service import run_nightly_job
 from app.models.driver import Driver
 from app.models.hub import Hub
@@ -36,6 +37,16 @@ router = APIRouter(tags=["ops"])
 @router.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@router.get("/metrics")
+async def prometheus_metrics() -> Response:
+    """Prometheus scrape target (docs/ROADMAP.md S4, app/metrics.py).
+    Exempt from the ops-JWT gate (a scraper has no per-user login) - see
+    OpsUserAuthMiddleware.EXEMPT_PATHS and app/metrics.py's auth note on
+    restricting this to a private scrape network in production."""
+    payload, content_type = metrics.render_latest()
+    return Response(content=payload, media_type=content_type)
 
 
 @router.get("/hubs", response_model=list[HubSummary])

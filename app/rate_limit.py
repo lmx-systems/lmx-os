@@ -28,6 +28,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from app import metrics
 from app.config import settings
 from app.logging_config import get_logger
 from app.redis_client import get_client, timed_operation
@@ -59,6 +60,7 @@ class GeneralRateLimitMiddleware(BaseHTTPMiddleware):
             count, _ = await pipe.execute()
 
         if count > settings.general_rate_limit_max_requests:
+            metrics.RATE_LIMIT_REJECTIONS.inc()
             logger.warning("general_rate_limit_exceeded", client_ip=client_ip, path=request.url.path)
             return JSONResponse(
                 {"detail": "Too many requests - slow down and try again shortly"},

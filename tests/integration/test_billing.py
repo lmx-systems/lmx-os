@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.admin_routes import generate_client_invoice
-from app.api.client_routes import get_my_invoice, list_my_invoices
+from app.api.client_routes import get_my_invoice, get_my_invoice_pdf, list_my_invoices
 from app.billing.service import NoBillableOrdersError, generate_invoice, invoice_detail_view
 from app.client_auth.dependencies import AuthedClient
 from app.models.client import Client
@@ -193,6 +193,39 @@ async def test_client_cannot_view_another_clients_invoice(db_session):
     )
     with pytest.raises(HTTPException) as exc_info:
         await get_my_invoice(str(invoice_b.id), client=authed_a, session=db_session)
+    assert exc_info.value.status_code == 404
+
+
+async def test_client_can_download_their_invoice_as_pdf(db_session):
+    client_id, shop_id, hub_id = await _seed_client_with_shop(db_session, name="PDF Co")
+    db_session.add_all([
+        _delivered_order(client_id, shop_id, hub_id, fee_cents=4_500, delivered_on=date(2026, 6, 3), ref="P-1"),
+        _delivered_order(client_id, shop_id, hub_id, fee_cents=900, delivered_on=date(2026, 6, 4), ref="P-2"),
+    ])
+    await db_session.commit()
+    invoice = await generate_invoice(db_session, client_id, date(2026, 6, 1), date(2026, 7, 1))
+
+    authed = AuthedClient(
+        client_id=str(client_id), client_user_id="u", email="pdf@example.com", name="PDF Co", role="admin",
+    )
+    resp = await get_my_invoice_pdf(str(invoice.id), client=authed, session=db_session)
+    assert resp.media_type == "application/pdf"
+    assert resp.body[:4] == b"%PDF"  # a real PDF, not an error page
+    assert f"lmx-invoice-{invoice.invoice_number}.pdf" in resp.headers["Content-Disposition"]
+
+
+async def test_client_cannot_download_another_clients_invoice_pdf(db_session):
+    client_a_id, _sa, _ha = await _seed_client_with_shop(db_session, name="A")
+    client_b_id, shop_b_id, hub_b_id = await _seed_client_with_shop(db_session, name="B")
+    db_session.add(_delivered_order(client_b_id, shop_b_id, hub_b_id, fee_cents=1_800, delivered_on=date(2026, 6, 5), ref="B-1"))
+    await db_session.commit()
+    invoice_b = await generate_invoice(db_session, client_b_id, date(2026, 6, 1), date(2026, 7, 1))
+
+    authed_a = AuthedClient(
+        client_id=str(client_a_id), client_user_id="u", email="a@example.com", name="A", role="admin",
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await get_my_invoice_pdf(str(invoice_b.id), client=authed_a, session=db_session)
     assert exc_info.value.status_code == 404
 
 

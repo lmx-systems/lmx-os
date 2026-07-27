@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { api, ApiError } from '../lib/api'
 import type { ClientProfileView, InvoiceDetailView } from '../lib/types'
 import { formatCents, formatDate, parseCalendarDate } from '../lib/format'
 import { TierBadge } from './TierBadge'
@@ -22,6 +24,21 @@ function periodEndInclusive(periodEnd: string): string {
 }
 
 export function InvoiceDetail({ invoice, profile, onBack }: InvoiceDetailProps) {
+  const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+
+  async function handleDownloadPdf() {
+    setDownloading(true)
+    setDownloadError(null)
+    try {
+      await api.downloadInvoicePdf(invoice.invoice_id, invoice.invoice_number)
+    } catch (err) {
+      setDownloadError(err instanceof ApiError ? 'Could not generate the PDF.' : 'Download failed.')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between print:hidden">
@@ -31,12 +48,22 @@ export function InvoiceDetail({ invoice, profile, onBack }: InvoiceDetailProps) 
         >
           ← Back to invoices
         </button>
-        <button
-          onClick={() => window.print()}
-          className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)]"
-        >
-          Print / Save as PDF
-        </button>
+        <div className="flex items-center gap-2">
+          {downloadError && <span className="text-xs text-[var(--text-muted)]">{downloadError}</span>}
+          <button
+            onClick={handleDownloadPdf}
+            disabled={downloading}
+            className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-60"
+          >
+            {downloading ? 'Preparing…' : 'Download PDF'}
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)]"
+          >
+            Print
+          </button>
+        </div>
       </div>
 
       <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-8 print:rounded-none print:border-0 print:p-0">
