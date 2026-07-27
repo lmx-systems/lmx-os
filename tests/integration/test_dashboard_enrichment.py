@@ -20,7 +20,7 @@ from app.fleet_state.manager import FleetStateManager
 from app.models.driver import Driver
 from app.models.hub import Hub
 from app.optimizer.last_cycle_store import LastCycleStore
-from app.schemas.fleet import DriverLocation, DriverState
+from app.schemas.fleet import DriverState
 from app.schemas.optimizer import LastCycleSnapshot
 
 pytestmark = pytest.mark.integration

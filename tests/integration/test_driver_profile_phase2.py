@@ -25,7 +25,6 @@ from app.models.driver import Driver
 from app.models.hub import Hub
 from app.models.route import Route
 from app.schemas.driver_app import DriverAvailabilityUpdate, DriverDocumentUpdate, PaymentMethodUpdate
-from app.schemas.fleet import DriverState
 
 pytestmark = pytest.mark.integration
 

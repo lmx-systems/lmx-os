@@ -2,6 +2,10 @@
 pytest>=8.2.0
 pytest-asyncio>=0.23.6
 pytest-cov>=5.0.0
-ruff>=0.4.4
+# Pinned exactly (not >=) so CI's lint gate is reproducible locally: an
+# unbounded floor let CI install a newer ruff whose default ruleset had
+# drifted from what developers saw, turning the gate red on rules no local
+# run surfaced. Bump deliberately, re-running `ruff check app tests` first.
+ruff==0.15.22
 mypy>=1.10.0
 fakeredis>=2.23.2
