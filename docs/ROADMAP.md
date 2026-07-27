@@ -75,6 +75,32 @@ missing in week one.
 | W7 | Training-data rights in the customer contract | Session closing note: model-training rights, cross-customer aggregation rights, and anonymization terms "belong in customer #1's contract before the first delivery, not in a future amendment." Distinct from R3 (privacy policy — what LMX does with personal data); this is about the right to train models on a customer's operational data. **Legal work, gates B2, not engineering.** |
 | W8 | Epicor staging-module qualification check | Session D6. Whether a prospect's Epicor runs a warehouse/staging module is now a sales-qualification checklist question asked before signing, because it determines whether real-time ingestion is even possible for that customer. Not code — a sales-process artifact that gates which prospects are viable. |
 
+**Open design decision — W10, who owns the barcode:** two materially
+different products, and picking wrong is expensive to undo once labels
+are in the field.
+
+| | LMX generates and applies its own label | Scan the distributor's existing pick-ticket barcode |
+|---|---|---|
+| Control | Full — LMX owns the ID space and its meaning | None — depends on their Epicor configuration |
+| Works regardless of customer setup | Yes | **No** — only where their Epicor prints one |
+| Hardware | Label printer at each warehouse; capex nobody has budgeted. Co-location makes it practical | None |
+| Sales impact | Neutral | Becomes a hard qualification requirement, tightening the funnel — **directly compounds W8** |
+| Driver step | One extra action per package at pickup | None — scan what's already there |
+| Ties to | Nothing existing | W8 (a distributor running a warehouse/staging module very likely already prints barcoded pick tickets) |
+
+**A second, smaller decision underneath it:** does the identifier
+describe an *order* or a *package*? `parcel_count` already implies one
+order can be several boxes (a caliper plus a box of pads), so these are
+different data models — order-level is simpler, package-level is what
+makes "3 of 5 collected" auditable rather than self-reported.
+
+**Recommendation if it helps:** resolve W8 first. If the first signed
+customer's Epicor already prints barcoded pick tickets, the
+scan-existing-label path is dramatically cheaper and gets the WRONG_PART
+win immediately; the LMX-label path only becomes necessary when a
+customer without that setup has to be onboarded. That sequencing keeps
+the decision reversible instead of committing to printers now.
+
 **Sequencing:** W1 and W2 are Phase 6/8 work and both need a day-one
 written playbook before the first delivery regardless of whether the
 software exists (session decision D5 names `WRONG_PART`, `COD_DISPUTE`,
@@ -83,7 +109,9 @@ note that all four are exactly the exceptions where LMX touches someone
 else's money or customer). W3 joins C3/F5 as Phase 8 billing work. W4
 folds into Phase 10's I4. W5 reopens C4 in Phase 8. W6 is small and
 no-dependency. W7 and W8 are business/legal items gating B2 and should
-be moving now.
+be moving now. W10 sits in Phase 6 alongside A2 — build them together,
+since A2 without W10 is a scanner with nothing to scan; but resolve
+W10's open decision (and ideally W8) before either is scheduled.
 
 ### Risk, compliance & real-world operations
 
@@ -158,7 +186,7 @@ phase exists to close, and both will surface immediately in a real pilot.
 | # | Item | Why it matters |
 |---|---|---|
 | A1 | Push notifications | Biggest real gap for daily use — a driver has to have the app open and polling to see a new job offer. No push infrastructure exists at all. |
-| A2 | Real camera/barcode scanning | "Scan next parcel" is a manual tap that increments a count — no camera/barcode SDK wired in. |
+| A2 | Real camera/barcode scanning | "Scan next parcel" is a manual tap that increments a count — no camera/barcode SDK wired in. **Mis-scoped as written (corrected July 2026):** this reads as a hardware task, but wiring in a camera SDK alone would leave nothing to scan — no package identifier exists anywhere in the system. A2 is the *reader*; **W10** is the *thing being read*. Build them together; W10's design decision has to land first. |
 | A3 | Real photo/signature capture + upload pipeline | Proof-of-delivery "tap to capture" records a placeholder URL — no actual camera/signature-pad integration or image storage. |
 | A4 | A real PIN-issuance/verification system | The PIN field on proof-of-delivery is recorded but never checked against anything — there's no system that issues a real PIN to verify against. |
 | A5 | Maps SDK / turn-by-turn navigation | Screens 1h/1i/1l are merged into one stops-list view with no live turn directions. |
@@ -271,6 +299,7 @@ stakes. That's F1/F2 below, and it's the prerequisite for F3.
 | F12 | Network/territory optimization tooling | Wise Systems' "Network Optimization" (depot/zone redesign, distinct from daily routing) — relevant once LMX runs multiple hubs, not for a single Hub 1 pilot. |
 | F13 | Ratings & feedback capture | One-tap post-delivery rating (+ optional comment) prompt to the shop, landing on the order/stop record. Low effort, and it feeds the Learning Loop (I3's broader annotation vocabulary) with a ground-truth satisfaction signal none of the four researched competitors structurally capture the same way. No external dependency. |
 | F14 | Orchestrator route-preview / shadow mode | **Substantially upgraded July 2026 — see W9 below.** Originally scoped as a view to preview the optimizer's proposed plan before it commits. The workflow session's decision D3 makes shadow mode far larger: the standard onboarding gate for *every* customer engagement, not a one-time pilot tool. The preview/override surface described here is still wanted, but it is now the small half of this item. |
+| W10 | Package identity & scan-at-pickup verification | **Nothing in this system gives a package a unique identity.** `Stop.parcel_count`/`scanned_count` are two integers, and `POST /driver/stops/{id}/scan` takes `{scanned_count: int}` — a *number*, never a scanned value. There is no `Parcel` model and no barcode field anywhere; `Order.external_order_ref` is the distributor's order number, per order rather than per package. Note this makes **A2 mis-scoped**: A2 reads as "wire in a camera SDK," but wiring one in today would leave nothing to scan, because no barcode is ever generated, printed, or recorded. Neither the session doc (39 stories, 36 training situations) nor any prior doc mentions barcodes or chain of custody at all. **The payoff that justifies it:** `WRONG_PART` is currently caught at the door and the session calls it "the most expensive recoverable error"; a scan-at-pickup check against the order catches it in the warehouse before the driver leaves. Also unlocks real chain of custody (all four benchmarked competitors advertise it), gives W1's returns/cores an identity to track, and makes DR-6's batched multi-order handoffs verifiable. Raised by Sourabh, July 2026. **Design decision open — see below.** |
 | W9 | Shadow-mode comparison engine & cutover scorecard | The real shape of shadow mode per session decision D3: every initial customer engagement runs live on the Elite EXTRA scaffold while LMX OS **decides in parallel on the same orders**, and the two are compared until a scorecard passes and that engagement cuts over. Needs: a parallel decision path that records what LMX OS *would* have done without acting; per-order divergence capture (the session is explicit that aggregate metrics look fine while the two systems agree — the divergent orders are the entire point); and a nine-metric scorecard — drops per driver-hour, T1 on-time rate, batch rate, hold-release integrity, miles per drop, re-plan speed (<5s at real volume), human touches, decision divergence with outcome delta, and data completeness. Also a **sales asset**: "we transition only when our OS beats the baseline on your own orders." Open decisions for D3: the thresholds, the minimum consecutive passing weeks, and the weekly review owner. |
 
 **Revisited — F9 vs. the operator-not-aggregator thesis:** a companion
@@ -467,6 +496,10 @@ developer tooling.
   escalation flow — both are driver-app surfaces and both need their
   day-one written playbook before the first delivery regardless of
   whether the software has shipped)
+- W10 (package identity) **paired with A2** — A2 is the scanner, W10 is
+  the thing being scanned; neither is useful alone. Resolve W10's
+  LMX-label-vs-distributor-label decision before scheduling either, and
+  ideally resolve W8 first since it likely answers it
 - F1, F2 (live driver location pipeline + the ops dashboard's live map —
   do these alongside A1/A5; every competitor researched treats live GPS
   tracking as baseline, and today LMX OS has none at all)
