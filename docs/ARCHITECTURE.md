@@ -4,6 +4,23 @@ Written for whoever picks this up next — a future Sourabh, the senior
 backend hire, or an outside contractor. Assumes you've read
 `LMX_OS_Technical_Design_2.md` and `LMX_OS_Peer_Review.md`.
 
+> **Before you trust any "before Hub 1" language below.** This file was
+> written when the plan was for LMX OS to run Hub 1 directly. It isn't
+> anymore. Per the cofounder workflow session (July 2026,
+> `LMX_Workflow_Review_Session.docx`), **Hub 1 launches on a third-party
+> scaffold — Elite EXTRA — with LMX vans, LMX W-2 drivers, and human
+> dispatch judgment.** LMX OS runs in shadow on the same real orders and
+> replaces the scaffold per customer engagement, once a nine-metric
+> scorecard passes.
+>
+> What that changes for this document: the verification and calibration
+> work described below no longer happens "before Hub 1 goes live" — Hub 1
+> goes live without LMX OS in the dispatch path at all. It happens
+> **before cutover**, and the calibration inputs come from the shadow
+> period rather than from Hub 1's own operation. Each affected passage is
+> marked inline. See `ROADMAP.md`'s Phase 3.5 (the scaffold era) and the
+> rewritten Phase 9 (shadow → prove → cut over) for the current plan.
+
 ## Scope of this build
 
 The full LMX OS design has 7 components plus an OS Shell and a Learning
@@ -363,16 +380,30 @@ swapping in the real thing is a contained change:
   **Not yet verified against a live Google Cloud project** — no
   `cloudoptimization.user`-scoped service account was available while
   building this, so the request/response shape is unverified against a
-  real `optimizeTours` call. Before Hub 1: provision a service account,
+  real `optimizeTours` call. Before **cutover** (not before Hub 1 —
+  see the note at the top of this file): provision a service account,
   confirm a real request round-trips, and sanity-check the per-tier
   `SLA_TIER_SKIP_PENALTY` values (currently a placeholder ordering, not
-  tuned against real route economics).
+  tuned against real route economics). Worth pulling earlier than that
+  anyway: the shadow period can't produce a credible comparison against
+  the scaffold if the optimizer underneath it has never made a real call.
 - **Epicor payload shape** (`app/ingestion/adapters/epicor.py`): field names
   (`OrderNum`, `ShipToNum`, etc.) are a placeholder shape, not verified
   against a real Epicor tenant. The peer review calls Epicor client-config
   drift "the most common cause of Phase 1 slippage" — confirm against the
   actual client's webhook payload before go-live, and expect to adjust this
   one file.
+- **Elite EXTRA — not stubbed, entirely absent.** Called out separately
+  because it is a different kind of gap from everything else in this
+  section: the others are built-but-unconfigured (a stub swaps in until
+  credentials land). This one has no interface, no adapter, no stub, and
+  no mention anywhere in the codebase — yet as of July 2026 it is the
+  platform Hub 1 actually runs on. At minimum LMX OS needs to see the
+  same order stream and the same delivery outcomes the scaffold sees, or
+  the shadow comparison that gates cutover has nothing to compare
+  against. Nobody has scoped what that integration looks like (API? file
+  export? database read?), which makes it the largest unknown between
+  here and a cutover date. Tracked as Phase 3.5 in `ROADMAP.md`.
 - **Twilio**: the client interface now exists (`app/messaging/sms_client.py`,
   used by driver app Phase 3's messaging) and will send for real once
   `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM_NUMBER` are set -
@@ -391,7 +422,9 @@ swapping in the real thing is a contained change:
 The canonical decision logic lives in the Google Drive "Source of Truth
 Index" (LMX OS Brief v1.0–v1.2), which is outside this local project cache
 and wasn't available while building this. Two things in particular should
-be checked against it before Hub 1 goes live:
+be checked before **cutover** (not before Hub 1 goes live — Hub 1 runs on
+the scaffold, so neither of these is in the dispatch path at launch; see
+the note at the top of this file):
 
 1. **The batch-hold queue's "4-question decision logic."** The peer review
    names this mechanism but the four questions themselves weren't in the
@@ -407,9 +440,18 @@ be checked against it before Hub 1 goes live:
    T3=120min). The peer review flags the 2.5 DPH figure itself as
    unvalidated ("in our model, proving it live at Hub 1" rather than
    established fact) — these hold windows are a direct input to that
-   number and are the first thing to recalibrate against real Hub 1 data.
+   number and are the first thing to recalibrate once real data exists.
    Per-shop/per-hub overrides already exist via `active_rules` so this
    doesn't require a code change to retune, just data.
+   **Where that data now comes from (July 2026):** not from Hub 1's own
+   operation. Hub 1 runs on the scaffold, which dispatches as fast as
+   possible and does no batching at all — by design, since paying Elite
+   EXTRA to build hold logic would hand LMX's core differentiator to a
+   competitor. So the scaffold exercises these hold windows exactly zero
+   times. They get calibrated during the **shadow period**, where LMX OS
+   plans against the same real orders in parallel; the comparison metric
+   is shadow-planned DPH vs. scaffold actual on identical orders, which
+   is a stronger proof than a standalone pilot number would have been.
 3. **Learning Loop flag-type naming convention** (`app/learning_loop/detection.py`,
    `HOLD_TOO_SHORT_FLAG` / `HOLD_TOO_LONG_FLAG`). The nightly job detects
    repeated driver annotations and proposes shop-specific SLA hold-window
@@ -451,8 +493,15 @@ dashboard."** The rest is still roughly priority order.
    offset-naive and offset-aware datetimes" — invisible to the fakeredis/
    pure-function suite. Fixed in `app/models/order.py` and
    `app/models/stop.py`.
-2. Confirm the real Epicor payload shape with the first design-partner
-   client and update `EpicorAdapter` before relying on it.
+2. Confirm the real Epicor payload shape with the first **signed
+   customer** and update `EpicorAdapter` before relying on it. (July 2026:
+   there is no design partner — this waits on customer #1. Two additions
+   from the workflow session: whether a prospect's Epicor runs a
+   warehouse/staging module is now a pre-signature qualification
+   question, and the interim path into the scaffold is a 15-minute file
+   drop rather than a direct connection — which eats a third of a
+   45-minute T1 promise before anyone sees the order. That latency
+   tradeoff is an open decision, tracked as D6.)
 3. Get the Source of Truth Index docs (or equivalent) checked against
    `app/batch_queue/queue.py` and `app/sla/engine.py` — see above.
 4. Provision a Google Cloud project + service account
