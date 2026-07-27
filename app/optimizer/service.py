@@ -21,6 +21,7 @@ import structlog
 from sqlalchemy import func, select, update
 
 from app.batch_queue.queue import run_hold_cycle
+from app import metrics
 from app.batch_queue.store import HoldQueueStore
 from app.config import settings
 from app.db import session_scope
@@ -58,6 +59,7 @@ class DispatchOptimizerService:
 
         fleet_snapshot = await self._fleet_state.get_fleet_snapshot(hub_id)
         held_orders = await self._hold_queue.get_all(hub_id)
+        metrics.HOLD_QUEUE_DEPTH.labels(hub_id=hub_id).set(len(held_orders))
 
         decisions = run_hold_cycle(
             held_orders,
@@ -213,7 +215,11 @@ class DispatchOptimizerService:
 
         duration = time.perf_counter() - cycle_start
         over_budget = duration > settings.optimizer_cycle_budget_seconds
+        metrics.OPTIMIZER_CYCLE_SECONDS.labels(
+            hub_id=hub_id, engine=self._route_client.engine_name
+        ).observe(duration)
         if over_budget:
+            metrics.OPTIMIZER_CYCLES_OVER_BUDGET.labels(hub_id=hub_id).inc()
             logger.warning(
                 "optimizer_cycle_over_budget",
                 hub_id=hub_id,

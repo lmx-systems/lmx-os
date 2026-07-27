@@ -17,7 +17,9 @@ logger = get_logger(__name__)
 
 # Health checks and API introspection aren't the surface this protects,
 # and gating them just breaks docker healthchecks/tooling.
-EXEMPT_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json", "/ops/auth/login"})
+EXEMPT_PATHS = frozenset(
+    {"/health", "/docs", "/redoc", "/openapi.json", "/ops/auth/login", "/metrics"}
+)
 
 # Matched as whole path segments (see _is_exempt), not a bare string
 # prefix - a future route that merely starts with these characters (e.g.
