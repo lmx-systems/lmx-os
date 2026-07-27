@@ -99,6 +99,270 @@ category:
 | ~~C4~~ | ~~Multi-user client accounts~~ | **Done** — the single inline login (`Client.portal_email`/`portal_password_hash`) is split into a real `client_users` table (migration `0019`: create + backfill every existing login into an `admin` row + drop the two inline columns), many named users per client, each with a role. Two roles (`admin`/`member`), same minimal line as ops's admin/viewer: an `admin` can manage the other users at their own client (invite/deactivate/change-role/reset-password via `GET`/`POST`/`PATCH /client/users`, own-client-scoped, with a last-active-admin lockout guard), a `member` is read-only on orders/invoices. Portal JWTs are now per-user (`sub`=client_user_id, plus `client_id`/`role` claims); `is_active` is re-checked every request (`app/client_auth/dependencies.py`), so deactivating someone revokes their session immediately, not at token expiry — same tradeoff `app/ops_auth/`. Onboarding (`POST /admin/clients`) creates the client's first admin user; the client's own admin adds the rest with no ops involvement. `scripts/create_client_user.py` mirrors `create_ops_user.py` for out-of-band seeding/lockout recovery. Client portal gained an admin-only "Team" tab (`client-portal/`). Live-verified: 342 backend tests passing, `tsc --noEmit` clean. Known scope boundary, deliberately not built: no data-scoped sub-roles (e.g. an AP contact who sees only invoices) — admin vs member is user-management-vs-not, not a per-view permission matrix; revisit if a real need shows up. Still no self-service client *company* signup (that's C5, by design). |
 | C5 | Self-service client signup | New clients are onboarded only via the internal `POST /admin/clients` form (dashboard) — there's no client-initiated signup flow, by design (this is a B2B onboarding relationship, not self-serve SaaS), but worth naming explicitly so it isn't assumed to exist. |
 
+### Operational workflow gaps
+
+From the cofounder workflow review session (July 2026). That session
+walked the order-to-delivery operation four ways and produced 39
+persona-voiced user stories; cross-checking those stories against this
+roadmap and the codebase surfaced seven whole workflows that **nothing
+here or in the code was tracking**. These are not polish — several are
+daily realities of the auto-parts trade that a distributor would notice
+missing in week one.
+
+| # | Item | Why it matters |
+|---|---|---|
+| W1 | Returns & core pickups as first-class work | Stories GS-7, CP-6, DR-9, exception `RETURNS_NOT_READY`, training case E6. Cores are, in the session's words, "half the economics of the parts trade." Today there is **no model, no endpoint, no route-stop type** for a pickup — the system can only deliver. Needs: pickup stops with an item manifest, per-shop pickup-readiness patterns, a counter-facing "awaiting pickup by shop, with age" list, and a reschedule workflow when a core isn't ready. |
+| W2 | COD collection & payment disputes | Exception `COD_DISPUTE`, stories DO-8, training case E3. Nothing in code. The driver rule is unambiguous and must be enforced by the UI, not by training alone: *never negotiate, one tap escalates to the distributor, keep moving.* Needs a dispute flag, an escalation path to the distributor, and a repeat-dispute count per account feeding a monthly owner report. |
+| W3 | SLA-breach invoice credits | Story DO-3: contractual credits when SLA thresholds are breached. C3's billing computes fees from delivered orders but has **no credit mechanism** — a breach costs nothing today. Needs the credit schedule as contract data, computed from order-level SLA outcomes, appearing as a line on the statement. Ties to F5 (rate tables) — same billing surface, build together. |
+| W4 | Driver-visible scorecard | Story DR-10: the driver sees *the identical metrics and definitions* the orchestrator sees. Explicitly framed as a trust decision, not a feature — "a shared standard, not a camera pointed at me." Folds into I4/F7's analytics work; the requirement is that the driver view is the same computation, not a separate reduced one. |
+| W5 | Counter-person order status lookup | Story CP-3: search any order by shop name or order number, get live status and ETA in ten seconds. The client portal today is distributor-owner-facing with one login per company (C4). The counter person is a **distinct persona** with a distinct need — and CP-4 (wrong-part flag reaching the counter mid-route) is a second counter-facing surface. Reopens C4's "one login per client" decision on real grounds rather than as an oversight. |
+| W6 | Orchestrator-editable urgency configuration | Story OR-6: "body panels are never urgent" should not require a developer. Distinct from I2 (which promotes *machine-proposed* rules) — this is direct human authoring of part-type tier rules, editable without a code deploy. The `active_rules` table can likely carry it; the gap is the editing surface and validation. |
+| W7 | Training-data rights in the customer contract | Session closing note: model-training rights, cross-customer aggregation rights, and anonymization terms "belong in customer #1's contract before the first delivery, not in a future amendment." Distinct from R3 (privacy policy — what LMX does with personal data); this is about the right to train models on a customer's operational data. **Legal work, gates B2, not engineering.** |
+| W8 | Epicor staging-module qualification check | Session D6. Whether a prospect's Epicor runs a warehouse/staging module is now a sales-qualification checklist question asked before signing, because it determines whether real-time ingestion is even possible for that customer. Not code — a sales-process artifact that gates which prospects are viable. |
+
+**Open design decision — W10, who owns the barcode:** two materially
+different products, and picking wrong is expensive to undo once labels
+are in the field.
+
+| | LMX generates and applies its own label | Scan the distributor's existing pick-ticket barcode |
+|---|---|---|
+| Control | Full — LMX owns the ID space and its meaning | None — depends on their Epicor configuration |
+| Works regardless of customer setup | Yes | **No** — only where their Epicor prints one |
+| Hardware | Label printer at each warehouse; capex nobody has budgeted. Co-location makes it practical | None |
+| Sales impact | Neutral | Becomes a hard qualification requirement, tightening the funnel — **directly compounds W8** |
+| Driver step | One extra action per package at pickup | None — scan what's already there |
+| Ties to | Nothing existing | W8 (a distributor running a warehouse/staging module very likely already prints barcoded pick tickets) |
+
+**A second, smaller decision underneath it:** does the identifier
+describe an *order* or a *package*? `parcel_count` already implies one
+order can be several boxes (a caliper plus a box of pads), so these are
+different data models — order-level is simpler, package-level is what
+makes "3 of 5 collected" auditable rather than self-reported.
+
+**Recommendation if it helps:** resolve W8 first. If the first signed
+customer's Epicor already prints barcoded pick tickets, the
+scan-existing-label path is dramatically cheaper and gets the WRONG_PART
+win immediately; the LMX-label path only becomes necessary when a
+customer without that setup has to be onboarded. That sequencing keeps
+the decision reversible instead of committing to printers now.
+
+**Sequencing:** W1 and W2 are Phase 6/8 work and both need a day-one
+written playbook before the first delivery regardless of whether the
+software exists (session decision D5 names `WRONG_PART`, `COD_DISPUTE`,
+`SHOP_CLOSED`, and `RETURNS_NOT_READY` as the four day-one playbooks —
+note that all four are exactly the exceptions where LMX touches someone
+else's money or customer). W3 joins C3/F5 as Phase 8 billing work. W4
+folds into Phase 10's I4. W5 reopens C4 in Phase 8. W6 is small and
+no-dependency. W7 and W8 are business/legal items gating B2 and should
+be moving now. W10 sits in Phase 6 alongside A2 — build them together,
+since A2 without W10 is a scanner with nothing to scan; but resolve
+W10's open decision (and ideally W8) before either is scheduled.
+
+### Risk, compliance & real-world operations
+
+Surfaced July 2026 by deliberately looking *outside* the existing docs —
+these were not in `ARCHITECTURE.md`, `NEXT_STEPS.md`, or this roadmap,
+which is exactly why they're worth naming. Three are business/legal
+items nobody would think to write code for; three are engineering gaps
+that existed only as a passing comment in a source file and had never
+been promoted to a tracked item.
+
+**Why this section exists at all:** every other section here tracks work
+someone already knew about. These are the ones that could quietly become
+the actual Hub 1 blocker precisely because no one is watching them —
+R1–R3 in particular are not things engineering can solve, and they gate
+putting real drivers on real roads with real customer data.
+
+| # | Item | Why it matters |
+|---|---|---|
+| R1 | Insurance & liability plan (commercial auto, cargo, general liability) | If a driver has an accident or a package is lost/damaged, what covers it? Not named anywhere in any doc despite being existential for a delivery company. A business decision like B4/B5, not an engineering task — but unlike those two, nothing in the system even hints it's missing. **Gates Phase 9** (real drivers, real roads). Needs Rich/Matan. |
+| R2 | Driver background checks & MVR (motor-vehicle record) screening | The system tracks license and insurance *documents* with expiry dates (`driver_documents`) and blocks going online when one is expired — but nothing verifies the driver was safe to put behind the wheel in the first place. Document expiry is not a background check. **Gates Phase 9.** Needs Rich. |
+| R3 | Privacy policy & data-handling/retention policy | LMX OS stores customer names, delivery addresses, and phone numbers (orders + shop SMS), plus driver PII. No document says what LMX does with any of it, how long it's kept, or how someone requests deletion. Real legal exposure the moment there are real clients and real drivers; also the first thing an enterprise client's security questionnaire asks about, alongside F10's SOC 2. **Gates Phase 9.** |
+| R4 | Driver document upload pipeline | `app/models/driver_document.py`'s own comment: "No file-upload pipeline exists… `file_url` accepts whatever string the client sends." A driver could submit a fabricated URL as their license scan and the system would treat it as valid. Distinct from A3 (proof-of-delivery photos) — this is *onboarding compliance* evidence, and it's what makes R2 enforceable in software rather than on paper. |
+| R5 | Failed-delivery / redelivery workflow | `Stop.status` has a `failed` value, but nothing handles what happens next: no redelivery attempt, no client notification, no billing adjustment, no defined resolution path. Every real delivery operation gets refused packages, wrong addresses, and closed shops — today those orders would sit in `failed` forever. Also the gap behind Locus's "failed-delivery disputes" and P6's partner-dispute surface. |
+| R6 | Hub closure / holiday calendar | Nothing models a hub not operating. The Learning Loop's nightly scheduler (E7) and the optimizer both assume every active hub runs every day — the first holiday, weather closure, or planned shutdown will either misfire the nightly job or dispatch routes for a hub that isn't open. |
+
+**Sequencing:** R1/R2/R3 are business/legal work that should start *now*
+— they're slow (insurance quotes, policy drafting, screening-vendor
+selection) and they gate Phase 9, so starting them when the pilot is
+imminent is starting them too late. R4 fits Phase 6 alongside A3 (same
+file-upload infrastructure, build once). R5 and R6 fit Phase 4 — both
+are "the system assumes the happy path" gaps of exactly the kind that
+phase exists to close, and both will surface immediately in a real pilot.
+
+### Autonomy partners
+
+How autonomous delivery — AV cars, sidewalk bots, drones, each run by
+their operator — plugs in (cofounder conversation, July 2026). The
+decision: **no separate app; autonomy partners integrate into the same
+dispatch loop the driver app uses, via a capacity-provider adapter
+layer.** The driver app is the *human* interface to LMX's
+offer→accept→track→deliver loop; a partner's fleet API is a *machine*
+interface to the identical loop. Their operators supervise vehicles in
+the partner's own console — LMX owns the delivery lifecycle, the partner
+owns the vehicle. This is the supply-side mirror of the ingestion
+layer's demand-side adapters (Epicor/flat-file): nothing downstream
+should ever branch on which partner carried an order, the same way
+nothing branches on which POS created it.
+
+**Update, July 2026:** this abstraction now also covers gig-courier
+human capacity (Uber/DoorDash-style), not just AV/drone/bot partners —
+see P7 below. Sourabh's call: there's value in LMX being able to route
+to whichever capacity is cheapest — its own fleet or a gig courier — as
+a standing dispatch option, while unit economics and assumptions get
+worked through, not just as a rare emergency valve. This reverses an
+earlier same-day call to not build this at all (see the "Competitive
+feature gaps" section's F9 history for the full back-and-forth) — worth
+knowing it was a live debate, not a snap decision.
+
+**Most of this is still not being built now.** The near-term rule it
+imposes: when fleet/offer models get touched for other reasons,
+generalize toward a "courier" abstraction rather than deepening the
+human-driver coupling. P1–P6 (the AV/drone/bot side) remain gated on a
+signed autonomy partner (a B-item when it becomes real). P7 (the
+gig-courier side) is different — it doesn't need a signed AV partner,
+gig-marketplace APIs exist today — but it does need real partner pricing
+and the unit-economics numbers before it's built for real, not guessed.
+
+| # | Item | Why it matters |
+|---|---|---|
+| P1 | Courier abstraction over the fleet model | Today's fleet state is human-shaped (`DriverCandidate`, phone/OTP auth, an implicit person behind every route). Generalize to a courier with a `provider_type` (human_lmx_driver \| autonomy_partner \| gig_courier), service area/geofence, speed profile, payload limits, and capability flags (can batch multi-stop? sidewalk-only? weather-sensitive?). Human LMX drivers become one provider type, not the type system. |
+| P2 | Capacity-provider adapter layer | The supply-side mirror of `app/ingestion/adapters/`: one adapter per partner normalizing (a) capacity in — which vehicles/couriers are available, where, with what limits; (b) assignments out — a `RouteOffer` becomes an API call the partner's fleet manager (or gig-marketplace API) accepts/declines within the same TTL a driver gets; (c) status back — partner webhooks map to our stop-status transitions and PoD. Ships with a stub partner (same unconfigured→stub pattern as Twilio/Rippling) so the whole loop is testable before any real partner exists. |
+| P3 | Mode-aware dispatch | The optimizer gains eligibility filtering (weight, distance, geofence, tier, weather) before candidate generation, and — later — cost-per-drop mode selection: choose the cheapest *eligible* mode per order, whether that's an autonomy partner or (per P7) a gig courier. Ties directly to the unit-economics work (cost per drop vs. price per drop). |
+| P4 | Unmanned handoff + proof of delivery | Nobody walks into the shop when a bot arrives: shop SMS grows a "load the bot" flow (compartment id, load-confirmed ack), and the customer side needs PIN-unlock delivery — which is exactly the A4 PIN issuance/verification item already on the driver-app list, making A4 shared infrastructure rather than app polish. |
+| P5 | Partner settlement | Per-delivery payout to the partner — a third money flow next to client billing (in) and driver payroll (out), structurally the same shape as `client_rates`: per-partner, per-mode rates, monthly statements. Reuses C3's statement machinery. Also the payout mechanism for P7's gig couriers. |
+| P6 | Partner portal | A thin reporting surface (delivery history, settlement statements, failed-delivery disputes) like `client-portal/` — explicitly a *later* convenience, not the integration mechanism. Partners integrate through P2's API, full stop. |
+| P7 | Gig-courier cost-optimized dispatch (reinstated F9) | A standing dispatch option — not just an SLA-emergency valve — where the optimizer can route an order to a gig-courier marketplace (Uber/DoorDash-style) when it's the cheaper *eligible* option, per P3. Client never sees or chooses this — same LMX brand, SLA, and billing either way. Three guardrails, non-negotiable: (1) every gig-courier-dispatched order is tagged distinctly in the data model so I1/I4's analytics and the Learning Loop don't treat it as LMX-optimizer ground truth; (2) a volume cap/threshold per hub so this stays an optimization, not a silent shift of capacity away from LMX's own fleet; (3) built against real gig-courier pricing data, not guessed rates — same discipline as P3's existing gating. Gated on unit-economics work, not on a signed AV partner. |
+
+### Competitive feature gaps
+
+LMX is positioning LMX OS as the operating system for the whole company,
+not just a dispatch tool — so it's worth checking it against the
+category it's actually competing in. This is a feature-by-feature
+comparison against four delivery/logistics platforms researched in July
+2026: **Bringg** and **Wise Systems** (named directly), plus **Onfleet**
+and **Locus** (added to round out the set — respectively the
+small/mid-market and enterprise-retail-logistics ends of the same
+category). Sourced from each vendor's public site, docs, and G2/Capterra
+where accessible — see `docs/LMX_OS_Competitive_Feature_Analysis.docx`
+for the full category-by-category tables and citations.
+
+**Where LMX OS already holds its own:** the SLA-tier engine's strict
+Hot-Shot non-commingling guarantee is a concrete, enforced rule none of
+the four describe as precisely; the batch-hold queue's 4-question
+decision logic is a more explicit, tunable batching strategy than the
+generic "smart clubbing" language competitors use; the Annotation &
+Learning Loop's human-approval gate (I2) is a more auditable model than
+Locus's "agentic" DiSCO framing or Wise's compounding ML claims, once
+I2 ships; and the autonomy-partner architecture (P1–P6) is already
+designed in at the courier-abstraction level — none of the four have
+live drone/sidewalk-bot/AV integration today, only Bringg lists
+"autonomous" as a network category in concept.
+
+**Where the gap is real** — the biggest single finding: LMX OS has **no
+live GPS tracking at all** today. `Driver` has no location field, the
+driver app never pings a position, and neither the ops dashboard nor any
+customer-facing surface can show where a driver actually is. Every one
+of the four competitors treats live map tracking as baseline table
+stakes. That's F1/F2 below, and it's the prerequisite for F3.
+
+| # | Item | Why it matters |
+|---|---|---|
+| F1 | Live driver location pipeline | Driver app periodically pings lat/lng to the backend; `Driver`/a new `DriverLocation` table stores current position. Prerequisite for F2 and F3 — today this doesn't exist at all, not even for internal ops use. No external dependency. |
+| F2 | Live map view (ops dashboard) | Hub staff can see where every driver on shift actually is, not just their assigned stop list. Depends on F1. |
+| F3 | Customer-facing live tracking page | A public link (sent to the actual delivery recipient, not the shop) showing driver position + ETA — what Bringg/Onfleet/Locus lead with on their marketing sites. Depends on F1; new component, no external dependency beyond a public route. |
+| F4 | Outbound status webhooks + a small integrations surface | Today's ingestion adapters are demand-side *in* (Epicor, flat-file); nothing goes back *out* — no webhook a client system can subscribe to, no Shopify/Zapier-style connector. Bringg, Onfleet, and Wise Systems all name this as a feature. |
+| F5 | Flexible/rate-table billing | `client_rates` today is flat per-drop, per-tier. Onfleet and Locus both support per-piece/per-weight/per-mile rate tables — worth revisiting once C3's statement persistence (already open) is tackled, same billing surface. |
+| F6 | Real-time mid-route re-optimization | Today's optimizer solves fresh each cycle (E7's scheduler) rather than continuously re-sequencing an in-progress route as conditions change — Wise Systems' and Onfleet's core marketing claim. Depends on E1 (verify the live Google Route Optimization client) being done first. |
+| F7 | Client- and ops-facing analytics dashboards | Reinforces I4 (already on the roadmap) — DPH, on-time %, driver leaderboards, cost-per-drop trend, SLA-breach history, CSV/BI export — but every competitor also exposes a *client-facing* cut of this (their own on-time rate, delivery volume) in the portal, which I4 doesn't currently scope. Directly serves the "market adoption" story for a distributor moving to per-drop pricing — it's the retention/upsell proof, not just an ops nicety. |
+| F8 | White-label / multi-brand portal theming | Bringg, Onfleet (Enterprise tier), and Locus all offer a rebrandable client-facing surface. Relevant if LMX ever resells through a partner or franchise model — not urgent for Hub 1. |
+| ~~F9~~ | ~~Hybrid gig-fleet overflow dispatch~~ → **Reinstated as P7** (Sourabh, July 2026 — see Autonomy Partners section) | Wise Systems' "DoorDash Dial" auto-routes overflow orders to third-party gig couriers by cost/rules. This item's history in one place, since it flipped twice in one day: (1) first flagged as an unresolved conflict against a companion analysis's "LMX is the fleet, not a Bringg competitor" stance; (2) decided **not** to build it, full stop; (3) revisited same-day and reinstated — with three guardrails (data tagging, a volume cap, real pricing before building) — as a *generalized cost-optimized dispatch option* rather than a narrow overflow valve, folded into P1–P3's courier abstraction as **P7**, gated on unit economics rather than dropped as a permanent no. |
+| F10 | A real path to SOC 2 (or equivalent) certification | Every one of the four competitors leads their security page with SOC 2 Type II (plus ISO 27001, sometimes HIPAA/GDPR audits). Reinforces S6 (security review) and S2 (secrets management) — this raises their urgency from "good hygiene" to "the thing enterprise clients will ask for in a security questionnaire." A companion analysis adds a concrete trigger: enterprise dealer groups (the recommended anchor client type) ask for SOC 2 in diligence, and it's a multi-month audit — start readiness well before it's needed, not when it's blocking a deal. |
+| F11 | SSO/SAML for ops and client logins | S1 built real per-user auth with roles, but not SSO — Bringg, Wise Systems, and Locus all support it for enterprise buyers. |
+| F12 | Network/territory optimization tooling | Wise Systems' "Network Optimization" (depot/zone redesign, distinct from daily routing) — relevant once LMX runs multiple hubs, not for a single Hub 1 pilot. |
+| F13 | Ratings & feedback capture | One-tap post-delivery rating (+ optional comment) prompt to the shop, landing on the order/stop record. Low effort, and it feeds the Learning Loop (I3's broader annotation vocabulary) with a ground-truth satisfaction signal none of the four researched competitors structurally capture the same way. No external dependency. |
+| F14 | Orchestrator route-preview / shadow mode | **Substantially upgraded July 2026 — see W9 below.** Originally scoped as a view to preview the optimizer's proposed plan before it commits. The workflow session's decision D3 makes shadow mode far larger: the standard onboarding gate for *every* customer engagement, not a one-time pilot tool. The preview/override surface described here is still wanted, but it is now the small half of this item. |
+| W10 | Package identity & scan-at-pickup verification | **Nothing in this system gives a package a unique identity.** `Stop.parcel_count`/`scanned_count` are two integers, and `POST /driver/stops/{id}/scan` takes `{scanned_count: int}` — a *number*, never a scanned value. There is no `Parcel` model and no barcode field anywhere; `Order.external_order_ref` is the distributor's order number, per order rather than per package. Note this makes **A2 mis-scoped**: A2 reads as "wire in a camera SDK," but wiring one in today would leave nothing to scan, because no barcode is ever generated, printed, or recorded. Neither the session doc (39 stories, 36 training situations) nor any prior doc mentions barcodes or chain of custody at all. **The payoff that justifies it:** `WRONG_PART` is currently caught at the door and the session calls it "the most expensive recoverable error"; a scan-at-pickup check against the order catches it in the warehouse before the driver leaves. Also unlocks real chain of custody (all four benchmarked competitors advertise it), gives W1's returns/cores an identity to track, and makes DR-6's batched multi-order handoffs verifiable. Raised by Sourabh, July 2026. **Design decision open — see below.** |
+| W9 | Shadow-mode comparison engine & cutover scorecard | The real shape of shadow mode per session decision D3: every initial customer engagement runs live on the Elite EXTRA scaffold while LMX OS **decides in parallel on the same orders**, and the two are compared until a scorecard passes and that engagement cuts over. Needs: a parallel decision path that records what LMX OS *would* have done without acting; per-order divergence capture (the session is explicit that aggregate metrics look fine while the two systems agree — the divergent orders are the entire point); and a nine-metric scorecard — drops per driver-hour, T1 on-time rate, batch rate, hold-release integrity, miles per drop, re-plan speed (<5s at real volume), human touches, decision divergence with outcome delta, and data completeness. Also a **sales asset**: "we transition only when our OS beats the baseline on your own orders." Open decisions for D3: the thresholds, the minimum consecutive passing weeks, and the weekly review owner. |
+
+**Revisited — F9 vs. the operator-not-aggregator thesis:** a companion
+competitive analysis run separately (`docs/LMX_OS_Roadmap_Addendum_Feature_Delta.docx`,
+uploaded by Sourabh) explicitly lists "multi-carrier selection + carrier
+network" under features LMX **deliberately does not build**, reasoning
+that it's the aggregator model LMX rejected — "LMX is the fleet, not a
+Bringg competitor." F9 as originally scoped (auto-routing overflow
+orders to third-party gig couriers) was the same model in a narrower
+form, and was first decided as **not building it** on that basis.
+
+Sourabh revisited this same day: there's value in going this direction
+while unit economics and assumptions get worked through, rather than
+ruling it out permanently. The distinction that matters — this is about
+LMX *sourcing capacity* from a gig marketplace while keeping its own
+brand, SLA, and billing (the client never sees or chooses a carrier),
+not about becoming a multi-carrier marketplace itself (a bigger,
+separate question that would also reopen the "never sell LMX OS as
+SaaS" decision, and would need Matan/Rich). On that narrower reading,
+**reinstated as P7** in the Autonomy Partners section, generalized into
+the same courier-abstraction work already planned for AV/drone/bot
+partners, with three guardrails (data-flywheel tagging, a volume cap,
+real pricing before building — see P7's row above) so a standing
+cost-optimization option doesn't quietly become a bypass around
+confronting LMX's own unit economics.
+
+**Sequencing:** F1/F2 slot into Phase 6 (driver app hardening, alongside
+A1/A5); F3 follows as a fast Phase 8 follow-up once F1 exists; F4/F5/F8
+join C3/C4/C5 as Phase 8 follow-ups; F6 depends on E1 in Phase 4; F7
+folds into Phase 10's I4; F10/F11 reinforce Phase 5; F12 is a later,
+multi-hub-scale item. F13 (ratings/feedback) is low-effort and
+no-dependency — a good Phase 8 follow-up alongside F3/F4. F14
+(route-preview/shadow mode) fits Phase 9 (Hub 1 pilot) — it's the
+trust-building surface for the pilot itself, not a pre-pilot gate.
+
+**Deliberately not building (validated by the same companion analysis):**
+checkout/delivery-slot self-scheduling (B2C retail surface — LMX orders
+originate from distributor POS, matching the existing C5 "no self-serve
+signup, by design" decision); a no-code automation/workflow builder and
+a configurable driver toolbox (Bringg needs both because its customers
+self-configure a shared platform; LMX runs one operation and the
+Learning Loop already generates rules — configurability here would be
+anti-differentiation, not a feature); and a manager mobile app (not a
+gap that costs deals at hub scale — revisit post-Series A). Gig-fleet
+capacity sourcing is **no longer on this list** — see P7 above; a true
+multi-carrier marketplace (clients choosing between carriers) still is,
+and would need a Matan/Rich conversation before it's reconsidered.
+
+### Intelligence layer
+
+Where LMX OS's "learning" actually stands, and the ladder to make it real
+(cofounder conversation, July 2026). Honest baseline: the Dispatch
+Optimizer optimizes but does not learn (every cycle solves from scratch);
+the SLA engine and batch-hold queue are hand-written rules with
+placeholder numbers; the one genuine seed is the Annotation & Learning
+Loop — driver annotations (`stop_flags`, written from the driver app) ARE
+labeled data, and the loop's shape (capture → detect → propose → human
+approves → per-shop override) is right — but detection is frequency
+counting (3+ repeated flags per shop → propose a fixed ±10min T2
+hold-window change), it covers only hold windows, the learning influences
+*when orders release* (indirectly shaping batches), never route
+construction itself, and the human-approval step has no tool (I2).
+
+**The governing constraint: this layer is data-gated, not code-gated.**
+Every day Hub 1 runs before ground-truth capture (I1) exists is training
+data lost forever — drive times we never recorded can't be backfilled.
+Models can wait; instrumentation can't. I1 and I2 are therefore the only
+urgent rows below, and both have zero external dependencies.
+
+| # | Item | Why it matters |
+|---|---|---|
+| I1 | Ground-truth event capture | The prerequisite for every stage above it. Concretely: `Order.delivered_at` (real timestamp, replacing the `updated_at` proxy billing/portal use today); `Stop.arrived_at` (so time-at-stop = arrived→completed becomes measurable, per shop); per-leg actual drive time vs. the optimizer's implied estimate; offer decline/expiry reasons; hold-queue release timing (held→released delta per order, vs. its window). All buildable now with no external dependency. **Superseded in scope, July 2026:** the workflow session's 36-item training coverage matrix is a far richer specification of exactly this item — organized as urgency/tiering (4 situations), hold-and-batch (5), fleet dynamics (4), exceptions (8), communication (3), human-vs-system (4), edge cases and economics (6), and the learning loop itself (2). Build I1 against that matrix, not against the five fields listed here. Two things in the matrix matter disproportionately: **negative examples** (a batch declined because pairing would breach a window; an insertion rejected to protect a driver — "when not to batch is half the skill") and **paired counterfactuals** (the same shop visited before and after an access note exists; the same order decided by LMX OS and by the scaffold). |
+| I8 | Manual capture of the non-default training situations | The session's own operating note: roughly a third of the 36 matrix situations **are not captured by default** — the paired access-note comparison, the interim dispatcher's gut-call log, the scaffold-era "where's my part" call tally, and the shadow divergence pairs all require someone deciding in week one that they are worth writing down, on a shared sheet if no app exists yet. Two of these are only capturable *during* the scaffold era and are gone forever after cutover: the call tally (C2) and the human dispatcher's tacit expertise, right and wrong (H1/H2). This is an ops checklist assignment, not a build — but it is on the critical path for I6 and belongs to whoever runs Hub 1 operations. |
+| I2 | Rule review & promotion flow | The missing rung of the existing loop: `proposed_rules` accumulate nightly with nowhere to go — no endpoint or dashboard UI promotes them to `active_rules` (today it would be a manual SQL insert). Endpoint + a dashboard review card (proposal, evidence count, confidence, approve/dismiss) completes component 6's core loop. No external dependency. |
+| I3 | Broaden the annotation vocabulary | Two flag types exist (`hold_window_too_short`/`_too_long`). Real per-shop knowledge drivers accumulate — parking difficulty, gate/access codes, shop prep slowness, receiving-dock quirks — should become structured flags too, so the labeled dataset covers more than hold timing. Coordinates with E6's naming sign-off; the schema (`stop_flags.flag_type` is a free string) already allows it. |
+| I4 | Descriptive analytics on the captured truth | DPH per driver/hub/day, SLA hit rates by tier, hold-window effectiveness (release timing vs. driver flags), ETA vs. actual. First consumer of I1's data; feeds the E9 DPH validation. Needs a few weeks of pilot data to be meaningful, not to be built. |
+| I5 | Calibration from data | Already tracked as E2/E5/E9/E10 — retune skip penalties, hold windows, the 2.5 DPH figure from real Hub 1 data instead of placeholders. The intelligence-layer framing just makes explicit that I1+I4 are what make these possible. |
+| I6 | Predictive models | ETA prediction per leg/stop; per-shop order-volume forecasting (staffing/positioning); offer-acceptance likelihood (feed the optimizer a probability, not a hope); learned per-shop service times as optimizer inputs — this is where "the next route incorporates the learning" becomes literally true, closing the loop from annotations/ground truth into route construction. Gated on months of I1 data, not on code. |
+| I7 | Ops copilot | LLM layer over the (by then rich) structured ops data: daily hub summaries, "why was yesterday slow?", anomaly explanations, natural-language queries over the dashboard. Unlike I6 it needs no training data — just good structured data (I1/I4) and an LLM API key (the one external dependency in this table). |
+
 ### Testing / process
 
 | # | Item | Why it matters |
@@ -122,6 +386,43 @@ screen redesign/offline queue/biometric auth/live push) and part of Phase
 7 (W2 payroll's engineering) have already shipped, ahead of the
 sequencing below — Sourabh's calls, since none of these had committed
 dates constraining the build order.
+
+### Phase 3.5 — The Elite EXTRA scaffold (NEW, July 2026)
+**Goal:** Hub 1 generates revenue on a scaffold while LMX OS is still
+being built. This phase did not exist in earlier versions of this plan,
+which assumed LMX OS ran Hub 1 from day one.
+
+The scaffold, per the workflow session: **Elite EXTRA** as the operating
+platform, LMX-owned vans, LMX W-2 drivers (recruited per signed customer,
+hiring qualified incumbents from that customer's crew where possible),
+co-located at the customer's warehouse, with human dispatch judgment in
+place of the SLA engine and batch-hold queue.
+
+- **The integration that does not exist yet:** "Elite EXTRA" appears
+  nowhere in the codebase. At minimum LMX OS needs to read the same
+  order stream and the same delivery outcomes the scaffold sees, or the
+  shadow comparison (W9) has nothing to compare against. Scope this
+  before committing to a cutover date.
+- **Interim ingestion latency (session decision D6):** Epicor drops a
+  file every 15 minutes into Elite EXTRA. Worst case an order sits 15
+  minutes before anyone sees it — against a 45-minute T1 promise, that
+  is a third of the window gone before dispatch. Three options on the
+  table: tighten the drop interval, narrow the interim T1 promise, or
+  accept the risk. **Unresolved — needs a decision.**
+- W8 (Epicor staging-module qualification) gates which prospects this
+  scaffold can even work for.
+- I8's scaffold-era-only captures (the "where's my part" call tally, the
+  human dispatcher's gut-call log) can **only** be collected during this
+  phase. After cutover they are gone permanently.
+- **Deliberately not built:** hold/batch logic inside Elite EXTRA. The
+  session is explicit that paying Elite EXTRA to build hold logic would
+  hand LMX's core differentiator to a competitor. The scaffold dispatches
+  as fast as possible and lives with ~1.75 drops/driver-hour; the batching
+  advantage arrives with LMX OS, not before.
+
+**Exit criteria:** Hub 1 delivering real orders on the scaffold, with
+enough instrumentation that Phase 9's shadow comparison has a baseline
+to measure against.
 
 ### Phase 4 — Make the placeholders real
 **Goal:** every "unverified" or "reconstructed from a summary" caveat in
@@ -230,18 +531,147 @@ Shipped:
 **Follow-ups this phase surfaced, not yet done:** E10, C3, C4, C5 (S8 and S9
 are now both done — see Part 1's tables above).
 
-### Phase 9 — Hub 1 pilot
-**Goal:** prove the model live.
+### Phase 9 — Shadow, prove, cut over
+**Goal:** earn the cutover from the scaffold to LMX OS on the customer's
+own orders. **Rewritten July 2026** — this phase previously read "Hub 1
+pilot: run real orders through the full pipeline," which assumed LMX OS
+ran Hub 1 directly. Under the scaffold model, Hub 1 is already live and
+generating revenue on Elite EXTRA (Phase 3.5); what this phase proves is
+that LMX OS should replace it.
 
-- B2 (signed client — this is the actual gate for this phase)
-- Run real orders through the full pipeline
-- E9 (validate/recalibrate the 2.5 DPH figure and SLA hold windows
-  against real data — this is the whole point of a pilot)
-- T1 (load-test against realistic Hub 1 volume before it's live volume)
+**Gates:**
+- B2 (signed customer #1 — still the actual gate for everything)
+- **R1, R2, R3 — the other gate, and the one most likely to be missed.**
+  Insurance/liability coverage, driver background checks, and a
+  privacy/data-retention policy all need to be *in place* before real
+  drivers carry real packages containing real customer data — not started
+  when launch is imminent. The workflow session independently reached the
+  same conclusion (decision D4: fleet insurance and workers-comp lead
+  times "now gate launch"). All three are slow, none are engineering
+  work, and they need Rich/Matan moving in parallel with Phases 4–8.
+- W7 (training-data rights in the contract) — the shadow comparison
+  generates training data on a customer's orders at their customers'
+  doors. Those rights belong in the contract before the first delivery.
 
-**Exit criteria:** a week of real Hub 1 operation with the DPH assumption
-either confirmed or replaced by a real number, and hold windows retuned
-from actual data instead of the Phase 1 placeholders.
+**The work:**
+- W9 (shadow-mode comparison engine + the nine-metric scorecard) — this
+  is the phase's centerpiece, not a side feature
+- F14 (route preview/override for the orchestrator during shadow running)
+- E9 (validate or replace the 2.5 DPH figure — now measurable as
+  *shadow-planned DPH vs. scaffold actual on identical orders*, which is
+  a far stronger proof than a standalone pilot number)
+- T1 (load-test against realistic volume before it's live volume — the
+  scorecard's re-plan-speed metric asserts <5s at actual hub volume)
+- I8's scaffold-era-only captures, before the window closes
+
+**Cutover decision (session D3):** per customer engagement, not once
+globally. Agree the thresholds, the minimum consecutive passing weeks,
+and the weekly review owner — all three are still open.
+
+**Exit criteria:** for the first engagement, a scorecard passing for the
+agreed number of consecutive weeks on that customer's real orders, with
+the divergent-order analysis (not just the aggregates) reviewed and
+signed off — and insurance, background checks, and a privacy policy
+(R1–R3) demonstrably in place before day one, not retrofitted after.
+
+**Also worth running as its own goal (session D7):** "excellent on the
+scaffold" defined in numbers — on-time rate, drops per hour, exception
+rate — reviewed in the same weekly session as the shadow scorecard. The
+scaffold funds the end-state; it shouldn't be treated as a holding
+pattern.
+
+### Phase 10 — Intelligence layer
+**Goal:** the system gets measurably better at its job the longer it
+runs — the annotations-and-ground-truth flywheel the design doc's
+component 6 gestures at, made real. See Part 1's "Intelligence layer"
+table for the item-by-item detail.
+
+Sequencing relative to the pilot — this is the important part:
+- **Before Phase 9 goes live:** I1 (ground-truth capture) and I2 (rule
+  review/promotion flow). I1 because pilot days without instrumentation
+  are training data lost forever; I2 because the pilot will generate
+  driver annotations from day one, and proposals with no approval tool
+  just pile up. I3 (broader annotation vocabulary) is strongly
+  preferred pre-pilot too — the flags drivers can't write are the
+  labels we won't have.
+- **During/after the pilot:** I4 (descriptive analytics) as soon as
+  there's a couple of weeks of data; I5 (calibration — E2/E5/E9/E10)
+  is the pilot's whole point. F7 (client- and ops-facing analytics
+  dashboards, from the competitive analysis) folds into I4's build —
+  every competitor exposes a client-facing cut of this that I4 didn't
+  originally scope; add it while I4 is being built, not as a separate
+  pass. W4 (the driver-visible scorecard) folds in here too — same
+  computation, shown to the driver, which the workflow session frames as
+  a trust decision rather than a feature.
+- **Later, data-gated:** I6 (predictive models feeding the optimizer —
+  where learning finally reaches route construction itself) and I7
+  (ops copilot; the one row needing an external decision, an LLM
+  provider/API key).
+
+**Exit criteria (long-horizon):** at least one learned quantity (per-shop
+service time or hold window) flows into dispatch decisions automatically
+from data rather than from a hand-set placeholder, with a human approval
+gate on every rule change.
+
+### Phase 11 — Autonomy partners
+**Goal:** deliveries carried by autonomous vehicles (AV cars, sidewalk
+bots, drones) — and, per P7, gig-courier human capacity — through their
+operators, dispatched by the same loop that dispatches human drivers.
+See Part 1's "Autonomy partners" table (P1–P7) for the item-by-item
+detail; the architectural decision (adapter layer, not a separate app)
+is recorded there.
+
+Two independent tracks in this phase now, gated differently:
+
+**Track A — AV/drone/sidewalk-bot partners (P1, P2, P4–P6):**
+- **Gate:** a signed autonomy partner with API access — this track is a
+  business-development outcome first. Until then the only active
+  obligation is the design constraint: touch fleet/offer models in a
+  courier-shaped way (P1's abstraction), not a human-driver-shaped way.
+- **One exception to that gate, added July 2026:** the workflow session
+  puts **autonomy-eligibility scoring on every delivery from van one**
+  (Stage 9; training case X6 — weight, dimensions, corridor, and an
+  eligible/ineligible label captured per drop). That is data capture,
+  not integration, and it starts at Hub 1 launch rather than waiting on
+  a signed partner. It builds the addressability dataset that makes the
+  first partner conversation quantitative instead of speculative — so
+  fold the fields into I1's capture work, not into this phase.
+- **First buildable slice once a partner signs:** P1 + P2 with the stub
+  partner, proving the offer→accept→status loop end-to-end before any
+  real vehicle moves; then P3's eligibility filtering (a drone that gets
+  offered a 40lb pallet is a bug, not a learning).
+- **P4 (unmanned handoff/PIN)** is shared with the driver app's A4 —
+  building A4 earlier quietly de-risks this phase.
+- **Later:** P5 settlement, P6 portal.
+
+**Track B — Gig-courier cost-optimized dispatch (P7, reinstated F9):**
+- **Gate:** unit economics and real gig-marketplace pricing data — not a
+  signed partner. This can move independently of, and likely faster
+  than, Track A.
+- **Sourabh's call (July 2026):** worth pursuing as a standing
+  cost-optimization option, not just an SLA-emergency valve, while the
+  economics get worked through — reversing a same-day earlier decision
+  not to build it at all. See the "Competitive feature gaps" section's
+  F9 history for the full reasoning on both sides.
+- **Before writing real dispatch logic:** P7's three guardrails (data
+  tagging so I1/I4 don't treat these as LMX-optimizer ground truth, a
+  volume cap per hub, and real pricing data rather than guessed rates)
+  are not optional polish — they're what keeps this from quietly
+  becoming a bypass around confronting LMX's own unit economics.
+- **Shares P3's cost-per-drop mode-selection logic and P5's settlement
+  machinery** with Track A — one dispatch decision, one settlement
+  system, two kinds of capacity provider.
+
+**Exit criteria (long-horizon), Track A:** one real order, ingested from
+a real client POS, delivered by a partner vehicle with no LMX human in
+the loop — dispatched, tracked, PoD'd, and settled through the same
+pipeline as every human-driven delivery that day.
+
+**Exit criteria, Track B:** the optimizer routes a real order to a gig
+courier because it was the genuinely cheaper eligible option under real
+pricing data — not a guess — with the order correctly tagged so it never
+contaminates I1/I4's ground-truth analytics, and the hub's volume cap
+holding.
 
 ---
 
