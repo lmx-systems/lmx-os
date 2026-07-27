@@ -182,7 +182,7 @@ async def test_insert_skips_routes_with_no_fleet_state_on_file(db_session, real_
 
 
 async def test_insert_returns_empty_when_no_active_routes_exist(db_session, real_redis_client):
-    hub_id, client_id, shop_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    hub_id, client_id = uuid.uuid4(), uuid.uuid4()
     db_session.add(Hub(id=hub_id, name="No Routes Hub", lat=34.05, lng=-118.25))
     await db_session.commit()
     db_session.add(Client(id=client_id, hub_id=hub_id, name="C", pos_system="flat_file"))
