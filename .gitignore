@@ -22,3 +22,19 @@ build/
 *.tfstate.backup
 *.tfplan
 
+# Local tool settings (sandbox/IDE artifacts, never repo content)
+.claude/
+
+# Business documents & brand source creatives live in docs/ for convenience
+# but are deliberately NOT versioned with the code (Sourabh's call, July
+# 2026) - the shared drive is their source of truth. Product-embedded brand
+# assets (dashboard/public/, client-portal/public/, driver-app/assets/) ARE
+# committed. The roadmap user-story spreadsheet (docs/*.xlsx) is tracked on
+# purpose, so it is deliberately NOT excluded here.
+docs/*.pptx
+docs/*.docx
+docs/*.pdf
+docs/*.zip
+docs/LMX branding */
+docs/~$*
+
