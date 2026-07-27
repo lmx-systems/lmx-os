@@ -101,7 +101,7 @@ async def test_notification_copy_mentions_stop_count_and_response_window(db_sess
 
     _, kwargs = fake_client.send.await_args
     args = fake_client.send.await_args.args
-    title, body = args[1], args[2]
+    body = args[2]
     assert "3 stops" in body
     assert "2 min" in body
     assert kwargs["data"] == {"type": "job_offer"}
