@@ -16,23 +16,74 @@ Most of this was already called out somewhere in
 as it got built — this pulls it into one list instead of leaving it
 scattered across three documents.
 
-Two later additions are genuinely new rather than consolidated, and are
+Three later additions are genuinely new rather than consolidated, and are
 flagged as such where they appear: the **Competitive feature gaps**
-(F-items, from benchmarking LMX OS against four industry platforms) and
+(F-items, from benchmarking LMX OS against four industry platforms),
 **Risk, compliance & real-world operations** (R-items, from deliberately
-looking for what no existing doc mentioned at all). The R-items matter
-most precisely because nothing in the codebase or prior docs was
-tracking them.
+looking for what no existing doc mentioned at all), and **Operational
+workflow gaps** (W-items, from the cofounder workflow review session,
+July 2026). The R- and W-items matter most precisely because nothing in
+the codebase or prior docs was tracking them.
+
+> ### ⚠️ Read this first — the Hub 1 operating model changed
+>
+> The cofounder workflow review session (July 2026,
+> `LMX_Workflow_Review_Session.docx`) establishes a materially different
+> Hub 1 model than the one Part 2's phases were originally written
+> against. **Hub 1 does not launch on LMX OS.** It launches on a
+> scaffold — **Elite EXTRA** as the operating platform, with LMX vans
+> and LMX W-2 drivers and human dispatch judgment — and LMX OS replaces
+> that spine at a later cutover, per customer engagement, gated on a
+> shadow-mode scorecard.
+>
+> Consequences already folded into this document: Phase 9 is rewritten
+> (it previously assumed LMX OS ran Hub 1 directly), F14 is upgraded from
+> a thin preview feature into the real shadow-mode comparison system, B2
+> is reframed, and a new Phase 3.5 covers the scaffold-era integration
+> work that nothing here previously tracked. **"Elite EXTRA" appears
+> nowhere in the codebase** — that is the single largest unbuilt
+> dependency this session surfaced.
 
 ### Business / org (not code, but gates what the code is for)
 
 | # | Item | Why it matters |
 |---|---|---|
 | B1 | Hire the senior backend engineer | Peer review names this the critical path — "do not hire down." Nothing below scales past one person without this. |
-| B2 | Sign the first client contract | Unlocks real Epicor payload verification and the only real test of the 2.5 DPH assumption. Doesn't block most engineering work below, which can proceed on demo data. |
+| B2 | Sign customer #1 (workflow session D1) | **Reframed July 2026 — this is now the single gating item for the whole plan, not just a data unlock.** The workflow session records that there is no design partner: no signed customer means no orders, no shadow data, no revenue. Beyond the signature itself, three things are now contract terms rather than favors: co-location at the customer's warehouse, an Epicor warehouse/staging-module check (a sales-qualification question asked *before* signing — see W8), and **training-data rights** (model-training, cross-customer aggregation, and anonymization terms — see W7). Still unlocks real Epicor payload verification (E3) and the 2.5 DPH test (E9). |
 | B3 | Get access to the Source of Truth Index (Google Drive, LMX OS Brief v1.0–v1.2) | The batch-hold "4-question decision logic" and SLA hold-window minutes were reconstructed from a peer-review summary, not this canonical doc, because it wasn't reachable while building. |
 | B4 | ~~Choose a payroll provider~~ → **Decided: Rippling** (cofounder alignment, July 2026) | Drivers are W2 employees; the earnings screen is placeholder-only until Rippling is provisioned (account + API access) and a pay formula is agreed — see A9. |
 | B5 | Provision a real Twilio account + phone number | Every SMS today (OTP codes, masked customer/support messaging) runs through a stub that logs instead of sending. |
+
+### Operational workflow gaps
+
+From the cofounder workflow review session (July 2026). That session
+walked the order-to-delivery operation four ways and produced 39
+persona-voiced user stories; cross-checking those stories against this
+roadmap and the codebase surfaced seven whole workflows that **nothing
+here or in the code was tracking**. These are not polish — several are
+daily realities of the auto-parts trade that a distributor would notice
+missing in week one.
+
+| # | Item | Why it matters |
+|---|---|---|
+| W1 | Returns & core pickups as first-class work | Stories GS-7, CP-6, DR-9, exception `RETURNS_NOT_READY`, training case E6. Cores are, in the session's words, "half the economics of the parts trade." Today there is **no model, no endpoint, no route-stop type** for a pickup — the system can only deliver. Needs: pickup stops with an item manifest, per-shop pickup-readiness patterns, a counter-facing "awaiting pickup by shop, with age" list, and a reschedule workflow when a core isn't ready. |
+| W2 | COD collection & payment disputes | Exception `COD_DISPUTE`, stories DO-8, training case E3. Nothing in code. The driver rule is unambiguous and must be enforced by the UI, not by training alone: *never negotiate, one tap escalates to the distributor, keep moving.* Needs a dispute flag, an escalation path to the distributor, and a repeat-dispute count per account feeding a monthly owner report. |
+| W3 | SLA-breach invoice credits | Story DO-3: contractual credits when SLA thresholds are breached. C3's billing computes fees from delivered orders but has **no credit mechanism** — a breach costs nothing today. Needs the credit schedule as contract data, computed from order-level SLA outcomes, appearing as a line on the statement. Ties to F5 (rate tables) — same billing surface, build together. |
+| W4 | Driver-visible scorecard | Story DR-10: the driver sees *the identical metrics and definitions* the orchestrator sees. Explicitly framed as a trust decision, not a feature — "a shared standard, not a camera pointed at me." Folds into I4/F7's analytics work; the requirement is that the driver view is the same computation, not a separate reduced one. |
+| W5 | Counter-person order status lookup | Story CP-3: search any order by shop name or order number, get live status and ETA in ten seconds. The client portal today is distributor-owner-facing with one login per company (C4). The counter person is a **distinct persona** with a distinct need — and CP-4 (wrong-part flag reaching the counter mid-route) is a second counter-facing surface. Reopens C4's "one login per client" decision on real grounds rather than as an oversight. |
+| W6 | Orchestrator-editable urgency configuration | Story OR-6: "body panels are never urgent" should not require a developer. Distinct from I2 (which promotes *machine-proposed* rules) — this is direct human authoring of part-type tier rules, editable without a code deploy. The `active_rules` table can likely carry it; the gap is the editing surface and validation. |
+| W7 | Training-data rights in the customer contract | Session closing note: model-training rights, cross-customer aggregation rights, and anonymization terms "belong in customer #1's contract before the first delivery, not in a future amendment." Distinct from R3 (privacy policy — what LMX does with personal data); this is about the right to train models on a customer's operational data. **Legal work, gates B2, not engineering.** |
+| W8 | Epicor staging-module qualification check | Session D6. Whether a prospect's Epicor runs a warehouse/staging module is now a sales-qualification checklist question asked before signing, because it determines whether real-time ingestion is even possible for that customer. Not code — a sales-process artifact that gates which prospects are viable. |
+
+**Sequencing:** W1 and W2 are Phase 6/8 work and both need a day-one
+written playbook before the first delivery regardless of whether the
+software exists (session decision D5 names `WRONG_PART`, `COD_DISPUTE`,
+`SHOP_CLOSED`, and `RETURNS_NOT_READY` as the four day-one playbooks —
+note that all four are exactly the exceptions where LMX touches someone
+else's money or customer). W3 joins C3/F5 as Phase 8 billing work. W4
+folds into Phase 10's I4. W5 reopens C4 in Phase 8. W6 is small and
+no-dependency. W7 and W8 are business/legal items gating B2 and should
+be moving now.
 
 ### Risk, compliance & real-world operations
 
@@ -219,7 +270,8 @@ stakes. That's F1/F2 below, and it's the prerequisite for F3.
 | F11 | SSO/SAML for ops and client logins | S1 built real per-user auth with roles, but not SSO — Bringg, Wise Systems, and Locus all support it for enterprise buyers. |
 | F12 | Network/territory optimization tooling | Wise Systems' "Network Optimization" (depot/zone redesign, distinct from daily routing) — relevant once LMX runs multiple hubs, not for a single Hub 1 pilot. |
 | F13 | Ratings & feedback capture | One-tap post-delivery rating (+ optional comment) prompt to the shop, landing on the order/stop record. Low effort, and it feeds the Learning Loop (I3's broader annotation vocabulary) with a ground-truth satisfaction signal none of the four researched competitors structurally capture the same way. No external dependency. |
-| F14 | Orchestrator route-preview / shadow mode | A view to preview the optimizer's proposed plan before it commits and simulate a manual override, without giving up autonomous dispatch as the default path. Builds operational trust during rollout (an operator watching the system decide, before trusting it fully) — distinct from I2's rule-promotion review, this is a preview/override on route *assignments* themselves. |
+| F14 | Orchestrator route-preview / shadow mode | **Substantially upgraded July 2026 — see W9 below.** Originally scoped as a view to preview the optimizer's proposed plan before it commits. The workflow session's decision D3 makes shadow mode far larger: the standard onboarding gate for *every* customer engagement, not a one-time pilot tool. The preview/override surface described here is still wanted, but it is now the small half of this item. |
+| W9 | Shadow-mode comparison engine & cutover scorecard | The real shape of shadow mode per session decision D3: every initial customer engagement runs live on the Elite EXTRA scaffold while LMX OS **decides in parallel on the same orders**, and the two are compared until a scorecard passes and that engagement cuts over. Needs: a parallel decision path that records what LMX OS *would* have done without acting; per-order divergence capture (the session is explicit that aggregate metrics look fine while the two systems agree — the divergent orders are the entire point); and a nine-metric scorecard — drops per driver-hour, T1 on-time rate, batch rate, hold-release integrity, miles per drop, re-plan speed (<5s at real volume), human touches, decision divergence with outcome delta, and data completeness. Also a **sales asset**: "we transition only when our OS beats the baseline on your own orders." Open decisions for D3: the thresholds, the minimum consecutive passing weeks, and the weekly review owner. |
 
 **Revisited — F9 vs. the operator-not-aggregator thesis:** a companion
 competitive analysis run separately (`docs/LMX_OS_Roadmap_Addendum_Feature_Delta.docx`,
@@ -290,7 +342,8 @@ urgent rows below, and both have zero external dependencies.
 
 | # | Item | Why it matters |
 |---|---|---|
-| I1 | Ground-truth event capture | The prerequisite for every stage above it. Concretely: `Order.delivered_at` (real timestamp, replacing the `updated_at` proxy billing/portal use today); `Stop.arrived_at` (so time-at-stop = arrived→completed becomes measurable, per shop); per-leg actual drive time vs. the optimizer's implied estimate; offer decline/expiry reasons; hold-queue release timing (held→released delta per order, vs. its window). All buildable now with no external dependency. |
+| I1 | Ground-truth event capture | The prerequisite for every stage above it. Concretely: `Order.delivered_at` (real timestamp, replacing the `updated_at` proxy billing/portal use today); `Stop.arrived_at` (so time-at-stop = arrived→completed becomes measurable, per shop); per-leg actual drive time vs. the optimizer's implied estimate; offer decline/expiry reasons; hold-queue release timing (held→released delta per order, vs. its window). All buildable now with no external dependency. **Superseded in scope, July 2026:** the workflow session's 36-item training coverage matrix is a far richer specification of exactly this item — organized as urgency/tiering (4 situations), hold-and-batch (5), fleet dynamics (4), exceptions (8), communication (3), human-vs-system (4), edge cases and economics (6), and the learning loop itself (2). Build I1 against that matrix, not against the five fields listed here. Two things in the matrix matter disproportionately: **negative examples** (a batch declined because pairing would breach a window; an insertion rejected to protect a driver — "when not to batch is half the skill") and **paired counterfactuals** (the same shop visited before and after an access note exists; the same order decided by LMX OS and by the scaffold). |
+| I8 | Manual capture of the non-default training situations | The session's own operating note: roughly a third of the 36 matrix situations **are not captured by default** — the paired access-note comparison, the interim dispatcher's gut-call log, the scaffold-era "where's my part" call tally, and the shadow divergence pairs all require someone deciding in week one that they are worth writing down, on a shared sheet if no app exists yet. Two of these are only capturable *during* the scaffold era and are gone forever after cutover: the call tally (C2) and the human dispatcher's tacit expertise, right and wrong (H1/H2). This is an ops checklist assignment, not a build — but it is on the critical path for I6 and belongs to whoever runs Hub 1 operations. |
 | I2 | Rule review & promotion flow | The missing rung of the existing loop: `proposed_rules` accumulate nightly with nowhere to go — no endpoint or dashboard UI promotes them to `active_rules` (today it would be a manual SQL insert). Endpoint + a dashboard review card (proposal, evidence count, confidence, approve/dismiss) completes component 6's core loop. No external dependency. |
 | I3 | Broaden the annotation vocabulary | Two flag types exist (`hold_window_too_short`/`_too_long`). Real per-shop knowledge drivers accumulate — parking difficulty, gate/access codes, shop prep slowness, receiving-dock quirks — should become structured flags too, so the labeled dataset covers more than hold timing. Coordinates with E6's naming sign-off; the schema (`stop_flags.flag_type` is a free string) already allows it. |
 | I4 | Descriptive analytics on the captured truth | DPH per driver/hub/day, SLA hit rates by tier, hold-window effectiveness (release timing vs. driver flags), ETA vs. actual. First consumer of I1's data; feeds the E9 DPH validation. Needs a few weeks of pilot data to be meaningful, not to be built. |
@@ -313,6 +366,12 @@ Phases 1–3 (driver app: core delivery loop, profile, earnings/messaging)
 and the Phase 1 core backend + internal dashboard are done. What follows
 is the path from there to a real, running Hub 1.
 
+**The Hub 1 model changed in July 2026 — see the callout at the top of
+Part 1.** Hub 1 launches on the Elite EXTRA scaffold, not on LMX OS. The
+new Phase 3.5 below covers the scaffold-era work; Phase 9 has been
+rewritten from "run Hub 1 on LMX OS" to "run Hub 1 on the scaffold,
+shadow with LMX OS, cut over when the scorecard passes."
+
 **These phases are not strictly sequential.** Once there's more than one
 engineer (B1), 4/5/6/7 can mostly run in parallel — they touch different
 parts of the system. Phase 8 (client dashboard, Hot Shot tier, tiered
@@ -320,6 +379,43 @@ billing, shop SMS, minimal client onboarding) has already shipped, ahead
 of the sequencing below — Sourabh's call, since the first client wanted
 these at MVP rather than deferred, and LMX had no committed dates
 constraining the build order.
+
+### Phase 3.5 — The Elite EXTRA scaffold (NEW, July 2026)
+**Goal:** Hub 1 generates revenue on a scaffold while LMX OS is still
+being built. This phase did not exist in earlier versions of this plan,
+which assumed LMX OS ran Hub 1 from day one.
+
+The scaffold, per the workflow session: **Elite EXTRA** as the operating
+platform, LMX-owned vans, LMX W-2 drivers (recruited per signed customer,
+hiring qualified incumbents from that customer's crew where possible),
+co-located at the customer's warehouse, with human dispatch judgment in
+place of the SLA engine and batch-hold queue.
+
+- **The integration that does not exist yet:** "Elite EXTRA" appears
+  nowhere in the codebase. At minimum LMX OS needs to read the same
+  order stream and the same delivery outcomes the scaffold sees, or the
+  shadow comparison (W9) has nothing to compare against. Scope this
+  before committing to a cutover date.
+- **Interim ingestion latency (session decision D6):** Epicor drops a
+  file every 15 minutes into Elite EXTRA. Worst case an order sits 15
+  minutes before anyone sees it — against a 45-minute T1 promise, that
+  is a third of the window gone before dispatch. Three options on the
+  table: tighten the drop interval, narrow the interim T1 promise, or
+  accept the risk. **Unresolved — needs a decision.**
+- W8 (Epicor staging-module qualification) gates which prospects this
+  scaffold can even work for.
+- I8's scaffold-era-only captures (the "where's my part" call tally, the
+  human dispatcher's gut-call log) can **only** be collected during this
+  phase. After cutover they are gone permanently.
+- **Deliberately not built:** hold/batch logic inside Elite EXTRA. The
+  session is explicit that paying Elite EXTRA to build hold logic would
+  hand LMX's core differentiator to a competitor. The scaffold dispatches
+  as fast as possible and lives with ~1.75 drops/driver-hour; the batching
+  advantage arrives with LMX OS, not before.
+
+**Exit criteria:** Hub 1 delivering real orders on the scaffold, with
+enough instrumentation that Phase 9's shadow comparison has a baseline
+to measure against.
 
 ### Phase 4 — Make the placeholders real
 **Goal:** every "unverified" or "reconstructed from a summary" caveat in
@@ -367,6 +463,10 @@ developer tooling.
 - R4 (driver document upload pipeline — build alongside A3, same
   file-upload infrastructure; this is what makes R2's background-check
   policy enforceable in software rather than on paper)
+- W1, W2 (returns/core pickups as real route stops, and the COD-dispute
+  escalation flow — both are driver-app surfaces and both need their
+  day-one written playbook before the first delivery regardless of
+  whether the software has shipped)
 - F1, F2 (live driver location pipeline + the ops dashboard's live map —
   do these alongside A1/A5; every competitor researched treats live GPS
   tracking as baseline, and today LMX OS has none at all)
@@ -426,33 +526,59 @@ the competitive analysis: F3 (customer-facing live tracking page, once
 F1 lands in Phase 6), F4 (outbound status webhooks/integrations), F5
 (flexible rate-table billing, alongside C3), F8 (white-label portal
 theming, if LMX ever resells through a partner), and F13 (one-tap
-ratings/feedback capture — low-effort, no dependency).
+ratings/feedback capture — low-effort, no dependency). And from the
+workflow session: W3 (SLA-breach invoice credits — build alongside C3
+and F5, same billing surface) and W5 (counter-person status lookup,
+which reopens C4's one-login-per-client decision on real grounds).
 
-### Phase 9 — Hub 1 pilot
-**Goal:** prove the model live.
+### Phase 9 — Shadow, prove, cut over
+**Goal:** earn the cutover from the scaffold to LMX OS on the customer's
+own orders. **Rewritten July 2026** — this phase previously read "Hub 1
+pilot: run real orders through the full pipeline," which assumed LMX OS
+ran Hub 1 directly. Under the scaffold model, Hub 1 is already live and
+generating revenue on Elite EXTRA (Phase 3.5); what this phase proves is
+that LMX OS should replace it.
 
-- B2 (signed client — this is the actual gate for this phase)
-- **R1, R2, R3 — the other gate for this phase, and the one most likely
-  to be missed.** Insurance/liability coverage, driver background
-  checks, and a privacy/data-retention policy all need to be *in place*
-  before real drivers carry real packages containing real customer data
-  — not started when the pilot is imminent. All three are slow
-  (insurance quotes, screening-vendor selection, policy drafting) and
-  none of them are engineering work: they need Rich/Matan, and they
-  should be moving in parallel with Phases 4–8, not waiting on them.
-- Run real orders through the full pipeline
-- E9 (validate/recalibrate the 2.5 DPH figure and SLA hold windows
-  against real data — this is the whole point of a pilot)
-- T1 (load-test against realistic Hub 1 volume before it's live volume)
-- F14 (orchestrator route-preview/shadow mode — lets hub staff watch the
-  optimizer's proposed plan and override it during the pilot, building
-  trust in autonomous dispatch before leaning on it fully)
+**Gates:**
+- B2 (signed customer #1 — still the actual gate for everything)
+- **R1, R2, R3 — the other gate, and the one most likely to be missed.**
+  Insurance/liability coverage, driver background checks, and a
+  privacy/data-retention policy all need to be *in place* before real
+  drivers carry real packages containing real customer data — not started
+  when launch is imminent. The workflow session independently reached the
+  same conclusion (decision D4: fleet insurance and workers-comp lead
+  times "now gate launch"). All three are slow, none are engineering
+  work, and they need Rich/Matan moving in parallel with Phases 4–8.
+- W7 (training-data rights in the contract) — the shadow comparison
+  generates training data on a customer's orders at their customers'
+  doors. Those rights belong in the contract before the first delivery.
 
-**Exit criteria:** a week of real Hub 1 operation with the DPH assumption
-either confirmed or replaced by a real number, and hold windows retuned
-from actual data instead of the Phase 1 placeholders — with insurance,
-background checks, and a privacy policy (R1–R3) demonstrably in place
-before day one, not retrofitted after.
+**The work:**
+- W9 (shadow-mode comparison engine + the nine-metric scorecard) — this
+  is the phase's centerpiece, not a side feature
+- F14 (route preview/override for the orchestrator during shadow running)
+- E9 (validate or replace the 2.5 DPH figure — now measurable as
+  *shadow-planned DPH vs. scaffold actual on identical orders*, which is
+  a far stronger proof than a standalone pilot number)
+- T1 (load-test against realistic volume before it's live volume — the
+  scorecard's re-plan-speed metric asserts <5s at actual hub volume)
+- I8's scaffold-era-only captures, before the window closes
+
+**Cutover decision (session D3):** per customer engagement, not once
+globally. Agree the thresholds, the minimum consecutive passing weeks,
+and the weekly review owner — all three are still open.
+
+**Exit criteria:** for the first engagement, a scorecard passing for the
+agreed number of consecutive weeks on that customer's real orders, with
+the divergent-order analysis (not just the aggregates) reviewed and
+signed off — and insurance, background checks, and a privacy policy
+(R1–R3) demonstrably in place before day one, not retrofitted after.
+
+**Also worth running as its own goal (session D7):** "excellent on the
+scaffold" defined in numbers — on-time rate, drops per hour, exception
+rate — reviewed in the same weekly session as the shadow scorecard. The
+scaffold funds the end-state; it shouldn't be treated as a holding
+pattern.
 
 ### Phase 10 — Intelligence layer
 **Goal:** the system gets measurably better at its job the longer it
@@ -474,7 +600,9 @@ Sequencing relative to the pilot — this is the important part:
   dashboards, from the competitive analysis) folds into I4's build —
   every competitor exposes a client-facing cut of this that I4 didn't
   originally scope; add it while I4 is being built, not as a separate
-  pass.
+  pass. W4 (the driver-visible scorecard) folds in here too — same
+  computation, shown to the driver, which the workflow session frames as
+  a trust decision rather than a feature.
 - **Later, data-gated:** I6 (predictive models feeding the optimizer —
   where learning finally reaches route construction itself) and I7
   (ops copilot; the one row needing an external decision, an LLM
@@ -500,6 +628,14 @@ Two independent tracks in this phase now, gated differently:
   business-development outcome first. Until then the only active
   obligation is the design constraint: touch fleet/offer models in a
   courier-shaped way (P1's abstraction), not a human-driver-shaped way.
+- **One exception to that gate, added July 2026:** the workflow session
+  puts **autonomy-eligibility scoring on every delivery from van one**
+  (Stage 9; training case X6 — weight, dimensions, corridor, and an
+  eligible/ineligible label captured per drop). That is data capture,
+  not integration, and it starts at Hub 1 launch rather than waiting on
+  a signed partner. It builds the addressability dataset that makes the
+  first partner conversation quantitative instead of speculative — so
+  fold the fields into I1's capture work, not into this phase.
 - **First buildable slice once a partner signs:** P1 + P2 with the stub
   partner, proving the offer→accept→status loop end-to-end before any
   real vehicle moves; then P3's eligibility filtering (a drone that gets
