@@ -43,6 +43,22 @@ class ClientOnboardingResult(BaseModel):
     shop_ids: list[str]
 
 
+class ResolveFailedOrderBody(BaseModel):
+    """How ops resolves a delivery_failed order (docs/ROADMAP.md R5).
+    action is validated against app/delivery/resolution.RESOLUTION_ACTIONS
+    at the route layer (same convention as VALID_SLA_TIERS)."""
+
+    action: str  # redeliver | return_to_shop | cancel
+    note: str | None = None
+
+
+class OrderResolutionResult(BaseModel):
+    order_id: str
+    status: str
+    delivery_attempts: int
+    action: str
+
+
 class DriverPayrollSubmission(BaseModel):
     driver_id: str
     driver_name: str

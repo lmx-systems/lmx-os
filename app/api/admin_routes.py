@@ -19,15 +19,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.payroll.hours as payroll_hours
+from app.batch_queue.store import HoldQueueStore
 from app.billing.service import NoBillableOrdersError, generate_invoice, invoice_detail_view
 from app.client_auth.passwords import hash_password
 from app.db import get_db
+from app.delivery.resolution import RESOLUTION_ACTIONS, OrderNotFailedError, resolve_failed_order
 from app.driver_auth.dependencies import revoked_devices_key
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
+from app.models.order import Order
 from app.models.shop import Shop
 from app.ops_auth.dependencies import AuthedOpsUser, require_admin
 from app.payroll import get_payroll_provider
@@ -36,7 +39,9 @@ from app.schemas.admin import (
     ClientOnboardingBody,
     ClientOnboardingResult,
     DriverPayrollSubmission,
+    OrderResolutionResult,
     PayrollRunResult,
+    ResolveFailedOrderBody,
 )
 from app.schemas.billing import InvoiceDetailView, InvoiceGenerateBody
 
@@ -241,3 +246,39 @@ async def generate_client_invoice(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return await invoice_detail_view(session, invoice)
+
+
+@router.post("/orders/{order_id}/resolve", response_model=OrderResolutionResult)
+async def resolve_order(
+    order_id: str,
+    body: ResolveFailedOrderBody,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> OrderResolutionResult:
+    """
+    The defined next step for a delivery_failed order (docs/ROADMAP.md R5,
+    app/delivery/resolution.py): `redeliver` reattempts it (re-enters the
+    dispatch pipeline, bumping delivery_attempts), `return_to_shop` sends
+    the parts back, `cancel` closes it out. 409 if the order isn't actually
+    failed - only a failure can be resolved.
+    """
+    if body.action not in RESOLUTION_ACTIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown action {body.action!r}. Valid actions: {sorted(RESOLUTION_ACTIONS)}",
+        )
+    order = await session.get(Order, uuid.UUID(order_id))
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    try:
+        resolved = await resolve_failed_order(session, HoldQueueStore(), order, body.action)
+    except OrderNotFailedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return OrderResolutionResult(
+        order_id=str(resolved.id),
+        status=resolved.status.value,
+        delivery_attempts=resolved.delivery_attempts,
+        action=body.action,
+    )

@@ -32,8 +32,13 @@ class OrderStatus(str, enum.Enum):
     # blocked, a dispute, etc. - app/api/driver_routes.py's flag_stop_issue).
     # Distinct from cancelled: this order was actually attempted, not
     # cancelled pre-dispatch - ops needs to decide on redelivery/refund,
-    # not just close it out.
+    # not just close it out (app/delivery/resolution.py, docs/ROADMAP.md R5).
     delivery_failed = "delivery_failed"
+    # A failed order resolved by sending the parts back to the originating
+    # shop rather than reattempting or cancelling (R5). Terminal, and
+    # distinct from cancelled (which never physically moved) - the shop is
+    # notified to expect the return.
+    returned = "returned"
 
 
 class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -74,6 +79,20 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    # How many delivery attempts this order has had (R5). 1 = the original
+    # dispatch; incremented each time a failed order is redelivered
+    # (app/delivery/resolution.py). Lets ops and the client see "2nd
+    # attempt" rather than a silent re-queue, and gives a natural cap point
+    # if a redelivery-attempt limit is ever wanted.
+    delivery_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    # Why the current/most-recent delivery attempt failed, denormalized off
+    # the flagged Stop.failure_reason (R5) so client/ops order views can
+    # show a reason without joining through StopOrder to a specific stop -
+    # ambiguous once an order has several stops across redelivery attempts.
+    # Set when the covering stop is flagged (driver_routes.flag_stop_issue),
+    # cleared when the order is redelivered (resolution._redeliver).
+    failure_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # Delivery (customer/drop-off) side of the order - added for the driver
     # app's active-job flow (screens 1i/1l/1m). Everything ingested before

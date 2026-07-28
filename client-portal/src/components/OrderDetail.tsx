@@ -1,5 +1,5 @@
 import type { ClientOrderDetailView } from '../lib/types'
-import { formatCents, formatDate, formatStatus } from '../lib/format'
+import { formatCents, formatDate, formatFailureReason, formatStatus, isFailedStatus } from '../lib/format'
 import { TierBadge } from './TierBadge'
 
 interface OrderDetailProps {
@@ -25,6 +25,20 @@ export function OrderDetail({ order, onBack }: OrderDetailProps) {
           </div>
           <TierBadge tier={order.sla_tier} />
         </div>
+
+        {isFailedStatus(order.status) && (
+          <div className="mt-4 rounded-[var(--radius)] border border-[var(--danger,#b4231f)] bg-[var(--surface-2)] px-3 py-2 text-sm">
+            <div className="font-medium text-[var(--danger,#b4231f)]">
+              {order.status === 'returned' ? 'Returned to shop' : 'Delivery could not be completed'}
+            </div>
+            {order.failure_reason && (
+              <div className="text-[var(--text-secondary)]">Reason: {formatFailureReason(order.failure_reason)}</div>
+            )}
+            {order.delivery_attempts > 1 && (
+              <div className="text-[var(--text-muted)]">{order.delivery_attempts} delivery attempts</div>
+            )}
+          </div>
+        )}
 
         <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
           <div>

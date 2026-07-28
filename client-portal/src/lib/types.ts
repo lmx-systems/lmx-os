@@ -33,6 +33,9 @@ export interface ClientOrderSummaryView {
   requested_at: string
   delivered_at: string | null
   fee_cents: number | null
+  // Failed-delivery visibility (docs/ROADMAP.md R5).
+  failure_reason: string | null
+  delivery_attempts: number
 }
 
 export interface ClientOrderDetailView extends ClientOrderSummaryView {

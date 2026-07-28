@@ -64,6 +64,7 @@ async def test_upgrade_head_creates_expected_enums(db_engine):
         "delivered",
         "cancelled",
         "delivery_failed",
+        "returned",
     ]
 
 

@@ -32,7 +32,11 @@ from app.payroll import get_payout_provider
 from app.payroll.gig_pricing import estimate_delivery_pay_cents
 from app.redis_client import get_client
 from app.messaging.delivery_pin import MAX_PIN_VERIFICATION_ATTEMPTS, generate_delivery_pin, send_delivery_pin_sms
-from app.messaging.shop_notifications import notify_shop_en_route, notify_shop_picked_up
+from app.messaging.shop_notifications import (
+    notify_shop_delivery_failed,
+    notify_shop_en_route,
+    notify_shop_picked_up,
+)
 from app.messaging.sms_client import get_sms_client
 from app.messaging.voice_client import get_voice_client
 from app.models.call import Call
@@ -1302,7 +1306,9 @@ async def flag_stop_issue(
     order_ids = [row[0] for row in order_ids_result.all()]
     if order_ids:
         await session.execute(
-            update(Order).where(Order.id.in_(order_ids)).values(status=OrderStatus.delivery_failed)
+            update(Order)
+            .where(Order.id.in_(order_ids))
+            .values(status=OrderStatus.delivery_failed, failure_reason=body.reason.value)
         )
 
     remaining_result = await session.execute(
@@ -1330,6 +1336,24 @@ async def flag_stop_issue(
             if state:
                 state.load_units = max(0.0, state.load_units - total_weight)
                 await fleet_state_manager.upsert_driver_state(state)
+
+    # Tell each affected shop their customer's delivery failed (R5) - a
+    # failed *dropoff*, unlike a pickup, is a delivery the shop's customer
+    # never received. One SMS per distinct shop. Shop-facing and best-effort;
+    # ops still gets the event-bus signal below regardless.
+    if stop.stop_type == "dropoff" and order_ids:
+        shop_result = await session.execute(
+            select(Shop).join(Order, Order.shop_id == Shop.id).where(Order.id.in_(order_ids))
+        )
+        for shop in {s.id: s for s in shop_result.scalars().all()}.values():
+            await notify_shop_delivery_failed(
+                session,
+                hub_id=uuid.UUID(driver.hub_id),
+                driver_id=uuid.UUID(driver.driver_id),
+                stop_id=stop.id,
+                shop=shop,
+            )
+        await session.commit()
 
     # Ops notification reuses the existing in-process event bus, same
     # pattern as complete_stop's "stop_completed" - no new SSE/pubsub here,

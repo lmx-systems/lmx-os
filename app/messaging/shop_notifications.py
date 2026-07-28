@@ -46,6 +46,14 @@ _EN_ROUTE_TEMPLATE = (
 _EN_ROUTE_HOT_SHOT_TEMPLATE = (
     "Hi {shop_name}, heads up - a driver is en route now for a priority Hot Shot pickup. " + SIGN_OFF
 )
+# Delivery failed (docs/ROADMAP.md R5). Deliberately generic - the specific
+# failure_reason (e.g. a COD dispute or a refusal) is ops/driver context,
+# not something to surface to the shop over one-way SMS; they just need to
+# know it didn't land and that a resolution is coming.
+_DELIVERY_FAILED_TEMPLATE = (
+    "Hi {shop_name}, we weren't able to complete the delivery of one of your orders this time. "
+    "LMX ops will follow up shortly on next steps (redelivery or return). " + SIGN_OFF
+)
 
 
 def _picked_up_body(shop_name: str, is_hot_shot: bool) -> str:
@@ -98,4 +106,16 @@ async def notify_shop_en_route(
     await _send_shop_sms(
         session, hub_id=hub_id, driver_id=driver_id, stop_id=stop_id, shop=shop,
         body=_en_route_body(shop.name, is_hot_shot),
+    )
+
+
+async def notify_shop_delivery_failed(
+    session: AsyncSession, *, hub_id: uuid.UUID, driver_id: uuid.UUID, stop_id: uuid.UUID, shop: Shop
+) -> None:
+    """Tell the originating shop their customer's delivery couldn't be
+    completed (docs/ROADMAP.md R5) - so a failed delivery isn't invisible to
+    the party whose parts they are."""
+    await _send_shop_sms(
+        session, hub_id=hub_id, driver_id=driver_id, stop_id=stop_id, shop=shop,
+        body=_DELIVERY_FAILED_TEMPLATE.format(shop_name=shop.name),
     )

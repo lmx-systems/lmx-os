@@ -33,6 +33,27 @@ const STATUS_LABEL: Record<string, string> = {
   assigned: 'Out for delivery',
   delivered: 'Delivered',
   cancelled: 'Cancelled',
+  delivery_failed: 'Delivery failed',
+  returned: 'Returned to shop',
+}
+
+// Human-readable delivery-failure reasons (docs/ROADMAP.md R5). Maps the
+// Stop.failure_reason codes surfaced on the order to client-friendly text.
+const FAILURE_REASON_LABEL: Record<string, string> = {
+  SHOP_CLOSED: 'Shop closed',
+  ACCESS_ISSUE: 'Could not access delivery location',
+  COD_DISPUTE: 'Payment issue at the door',
+  PARTS_MISSING: 'Parts missing',
+  REFUSED: 'Delivery refused',
+}
+
+export function formatFailureReason(reason: string | null): string | null {
+  if (!reason) return null
+  return FAILURE_REASON_LABEL[reason] ?? reason
+}
+
+export function isFailedStatus(status: string): boolean {
+  return status === 'delivery_failed' || status === 'returned'
 }
 
 export function formatStatus(status: string): string {
