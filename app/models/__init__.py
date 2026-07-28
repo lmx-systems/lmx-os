@@ -6,6 +6,7 @@ from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
 from app.models.gig_payout import GigPayout
 from app.models.hub import Hub
+from app.models.hub_closure import HubClosure
 from app.models.invoice import Invoice
 from app.models.message import Message
 from app.models.order import Order
@@ -24,6 +25,7 @@ __all__ = [
     "DriverDocument",
     "GigPayout",
     "Hub",
+    "HubClosure",
     "Invoice",
     "Message",
     "Order",

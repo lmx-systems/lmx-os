@@ -25,6 +25,7 @@ import structlog
 from sqlalchemy import select
 
 from app.db import session_scope
+from app.hub_calendar import is_hub_closed_on
 from app.learning_loop.service import run_nightly_job
 from app.models.hub import Hub
 from app.redis_client import get_client
@@ -115,7 +116,15 @@ class LearningLoopScheduler:
 
         try:
             async with session_scope() as session:
-                created = await run_nightly_job(session, hub_id=hub_id)
+                # Skip the nightly job on a day the hub wasn't operating (R6)
+                # - a closed day has no delivery activity for the pattern
+                # detector to learn from. Still marked as "run" below so the
+                # scheduler doesn't retry it all day.
+                if await is_hub_closed_on(session, hub_id, local_now.date()):
+                    logger.info("learning_loop_skipped_hub_closed", hub_id=hub_id)
+                    created = []
+                else:
+                    created = await run_nightly_job(session, hub_id=hub_id)
             await redis.set(_last_run_date_key(hub_id), today)
             logger.info(
                 "learning_loop_scheduled_run_completed", hub_id=hub_id, proposed_rules_created=len(created)
