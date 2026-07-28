@@ -8,6 +8,7 @@ behavior can be reasoned about from one file.
 """
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import datetime, timezone
 
@@ -21,6 +22,7 @@ from app.batch_queue.store import HoldQueueStore
 from app.ingestion.registry import get_adapter
 from app.models.client_rate import ClientRate
 from app.models.order import Order, OrderStatus
+from app.models.parcel import Parcel
 from app.models.rules import ActiveRule
 from app.models.shop import Shop
 from app.sla.engine import HoldWindowOverride, TierOverride, classify_order
@@ -30,6 +32,33 @@ logger = structlog.get_logger(__name__)
 
 class ShopNotFoundError(Exception):
     pass
+
+
+def _parcel_barcodes(payload: dict) -> list[str]:
+    """Ownership-agnostic package barcodes for an order (docs/ROADMAP.md W10).
+    If the source payload carries the distributor's own pick-ticket barcodes
+    (`parcels`: a list), use those (the scan-existing path); otherwise mint
+    `parcel_count` (or 1) LMX codes (the LMX-label path). Either way the
+    scan-at-pickup verification is identical - this only decides where the
+    value comes from, which is the reversible half of W10's open decision."""
+    raw = payload.get("parcels")
+    if isinstance(raw, list) and raw:
+        seen: set[str] = set()
+        provided: list[str] = []
+        for item in raw:
+            bc = str(item).strip()
+            if bc and bc not in seen:
+                seen.add(bc)
+                provided.append(bc)
+        if provided:
+            return provided
+
+    count = payload.get("parcel_count")
+    try:
+        n = max(1, int(count)) if count is not None else 1
+    except (TypeError, ValueError):
+        n = 1
+    return [f"LMX-{secrets.token_hex(5)}" for _ in range(n)]
 
 
 async def _resolve_shop(session: AsyncSession, client_id: str, shop_external_ref: str) -> Shop:
@@ -158,6 +187,11 @@ async def ingest_order(
     )
     session.add(order)
     await session.flush()  # assigns order.id without committing
+
+    # Package identity (docs/ROADMAP.md W10): one Parcel per physical box,
+    # so scan-at-pickup can verify against the expected order later.
+    for barcode in _parcel_barcodes(payload):
+        session.add(Parcel(hub_id=order.hub_id, order_id=order.id, barcode=barcode))
 
     overrides = await _load_sla_overrides(session, hub_id, str(shop.id))
     tier_overrides = await _load_tier_overrides(session, hub_id)

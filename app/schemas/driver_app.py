@@ -127,6 +127,18 @@ class ScanParcelsBody(BaseModel):
     scanned_count: int
 
 
+class ScanParcelBody(BaseModel):
+    # A real scanned barcode (docs/ROADMAP.md W10), verified against the
+    # order at the pickup stop - unlike ScanParcelsBody's bare count, which
+    # stays as the manual "can't scan? confirm manually" fallback.
+    barcode: str = Field(min_length=1, max_length=128)
+
+
+class ParcelView(BaseModel):
+    barcode: str
+    scanned: bool
+
+
 class UploadUrlRequestBody(BaseModel):
     kind: Literal["photo", "signature", "scan"]
     # An explicit, closed allowlist - not an arbitrary string - since a

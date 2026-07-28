@@ -47,6 +47,7 @@ from app.models.driver_shift_event import DriverShiftEvent
 from app.models.gig_payout import GigPayout
 from app.models.message import Message
 from app.models.order import Order, OrderStatus, SLATier
+from app.models.parcel import Parcel
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
@@ -65,9 +66,11 @@ from app.schemas.driver_app import (
     FlagStopBody,
     JobOfferView,
     MessageView,
+    ParcelView,
     OfferStopSummary,
     PaymentMethodUpdate,
     RouteView,
+    ScanParcelBody,
     ScanParcelsBody,
     SendMessageBody,
     StopView,
@@ -590,6 +593,17 @@ async def decline_offer(
     return {"ok": True}
 
 
+async def _parcel_count_for_orders(session: AsyncSession, order_ids: list[uuid.UUID]) -> int:
+    """Total Parcel rows across these orders (docs/ROADMAP.md W10). 0 when
+    none exist - callers fall back to the pre-W10 one-per-order count."""
+    if not order_ids:
+        return 0
+    result = await session.execute(
+        select(func.count()).select_from(Parcel).where(Parcel.order_id.in_(order_ids))
+    )
+    return int(result.scalar_one())
+
+
 @router.post("/offers/{offer_id}/accept", response_model=RouteView)
 async def accept_offer(
     offer_id: str,
@@ -649,8 +663,11 @@ async def accept_offer(
             route_id=route.id,
             shop_id=order.shop_id,
             sequence=sequence,
+            # Real parcel count (docs/ROADMAP.md W10), falling back to 1 for
+            # an order with no Parcel rows (e.g. seeded directly in a test,
+            # or ingested before W10) so scan progress still works.
+            parcel_count=(await _parcel_count_for_orders(session, [oid])) or 1,
             stop_type="pickup",
-            parcel_count=1,
         )
         session.add(pickup)
         await session.flush()
@@ -665,7 +682,9 @@ async def accept_offer(
             shop_id=shop_id,
             sequence=sequence,
             stop_type="pickup",
-            parcel_count=len(shop_order_ids),
+            # Real parcel count across this pickup's commingled orders (W10),
+            # falling back to one-per-order when no Parcel rows exist.
+            parcel_count=(await _parcel_count_for_orders(session, shop_order_ids)) or len(shop_order_ids),
         )
         session.add(pickup)
         await session.flush()
@@ -1067,6 +1086,79 @@ async def scan_parcels(
     stop.scanned_count = max(0, min(body.scanned_count, stop.parcel_count))
     await session.commit()
     return await _stop_view_after_reload(session, stop)
+
+
+async def _stop_order_ids(session: AsyncSession, stop_id: uuid.UUID) -> list[uuid.UUID]:
+    result = await session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == stop_id))
+    return [row[0] for row in result.all()]
+
+
+@router.post("/stops/{stop_id}/scan-parcel", response_model=StopView)
+async def scan_parcel(
+    stop_id: str,
+    body: ScanParcelBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> StopView:
+    """Scan one real barcode at a pickup and verify it against the stop's
+    order(s) (docs/ROADMAP.md W10) - the check that catches WRONG_PART in
+    the warehouse instead of at the customer's door. The manual /scan
+    (count-only) endpoint above stays as the can't-scan fallback.
+
+    for_update serializes the derived scanned_count against concurrent
+    scans; the parcel's own scanned_at is the source of truth, so a
+    re-scan of the same barcode is an idempotent no-op, not a double count."""
+    stop = await _get_owned_stop(session, stop_id, driver, for_update=True)
+    _assert_stop_not_terminal(stop, "scan a parcel")
+    if stop.status == "pending":
+        raise HTTPException(status_code=409, detail="Arrive at this stop before scanning parcels")
+    if stop.stop_type != "pickup":
+        raise HTTPException(status_code=409, detail="Parcels are scanned at the pickup stop")
+
+    order_ids = await _stop_order_ids(session, stop.id)
+    parcel_result = await session.execute(
+        select(Parcel).where(
+            Parcel.hub_id == uuid.UUID(driver.hub_id), Parcel.barcode == body.barcode
+        )
+    )
+    parcel = parcel_result.scalar_one_or_none()
+    if parcel is None or parcel.order_id not in order_ids:
+        # Unknown barcode, or a barcode for an order that isn't on this
+        # pickup - either way, not a parcel this driver should be loading.
+        raise HTTPException(
+            status_code=422,
+            detail="This barcode isn't for an order on this pickup - possible wrong part; do not load it",
+        )
+
+    if parcel.scanned_at is None:
+        parcel.scanned_at = datetime.now(timezone.utc)
+
+    scanned_result = await session.execute(
+        select(func.count())
+        .select_from(Parcel)
+        .where(Parcel.order_id.in_(order_ids), Parcel.scanned_at.is_not(None))
+    )
+    stop.scanned_count = int(scanned_result.scalar_one())
+    await session.commit()
+    return await _stop_view_after_reload(session, stop)
+
+
+@router.get("/stops/{stop_id}/parcels", response_model=list[ParcelView])
+async def list_stop_parcels(
+    stop_id: str,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> list[ParcelView]:
+    """The parcels expected at this stop and whether each has been scanned -
+    what the driver app renders as "3 of 5 collected" (W10)."""
+    stop = await _get_owned_stop(session, stop_id, driver)
+    order_ids = await _stop_order_ids(session, stop.id)
+    if not order_ids:
+        return []
+    result = await session.execute(
+        select(Parcel).where(Parcel.order_id.in_(order_ids)).order_by(Parcel.barcode)
+    )
+    return [ParcelView(barcode=p.barcode, scanned=p.scanned_at is not None) for p in result.scalars().all()]
 
 
 _CONTENT_TYPE_EXTENSION = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
