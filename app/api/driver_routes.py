@@ -48,11 +48,14 @@ from app.models.gig_payout import GigPayout
 from app.models.message import Message
 from app.models.order import Order, OrderStatus, SLATier
 from app.models.parcel import Parcel
+from app.models.return_item import ReturnItem
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 from app.optimizer.event_trigger import dispatch_event_bus
+from app.returns.service import return_views
+from app.schemas.returns import CollectReturnBody, ReturnItemView
 from app.schemas.driver_app import (
     CallView,
     CompleteStopBody,
@@ -1159,6 +1162,83 @@ async def list_stop_parcels(
         select(Parcel).where(Parcel.order_id.in_(order_ids)).order_by(Parcel.barcode)
     )
     return [ParcelView(barcode=p.barcode, scanned=p.scanned_at is not None) for p in result.scalars().all()]
+
+
+async def _expected_returns_for_stop(session: AsyncSession, stop_id: uuid.UUID) -> list[ReturnItem]:
+    order_ids = await _stop_order_ids(session, stop_id)
+    if not order_ids:
+        return []
+    result = await session.execute(
+        select(ReturnItem).where(
+            ReturnItem.origin_order_id.in_(order_ids), ReturnItem.status == "expected"
+        )
+    )
+    return list(result.scalars().all())
+
+
+@router.post("/stops/{stop_id}/collect-return", response_model=list[ReturnItemView])
+async def collect_return(
+    stop_id: str,
+    body: CollectReturnBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> list[ReturnItemView]:
+    """Record a core/return collected on the delivery visit (docs/ROADMAP.md
+    W1, piggyback). Confirms whatever was expected on this dropoff's order(s);
+    if nothing was expected, a `manifest` records an ad-hoc core the driver
+    found on the spot."""
+    stop = await _get_owned_stop(session, stop_id, driver)
+    if stop.stop_type != "dropoff":
+        raise HTTPException(status_code=409, detail="Returns are collected at the delivery (dropoff) stop")
+    if stop.status == "pending":
+        raise HTTPException(status_code=409, detail="Arrive at this stop before collecting a return")
+
+    now = datetime.now(timezone.utc)
+    expected = await _expected_returns_for_stop(session, stop.id)
+    if expected:
+        for item in expected:
+            item.status = "collected"
+            item.collected_at = now
+        collected = expected
+    elif body.manifest:
+        order_ids = await _stop_order_ids(session, stop.id)
+        if not order_ids:
+            raise HTTPException(status_code=409, detail="This stop has no order to attach a return to")
+        order = await session.get(Order, order_ids[0])
+        adhoc = ReturnItem(
+            hub_id=order.hub_id, origin_order_id=order.id, shop_id=order.shop_id,
+            manifest=body.manifest, status="collected", collected_at=now,
+        )
+        session.add(adhoc)
+        collected = [adhoc]
+    else:
+        raise HTTPException(
+            status_code=409,
+            detail="No return expected on this stop - include a manifest to record an ad-hoc core",
+        )
+    await session.commit()
+    return await return_views(session, collected)
+
+
+@router.post("/stops/{stop_id}/return-not-ready", response_model=list[ReturnItemView])
+async def return_not_ready(
+    stop_id: str,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> list[ReturnItemView]:
+    """The expected core wasn't available to collect (docs/ROADMAP.md W1) -
+    mark it not_ready so it drops off this delivery and into the reschedule
+    workflow (a later slice) rather than silently staying 'expected'."""
+    stop = await _get_owned_stop(session, stop_id, driver)
+    if stop.stop_type != "dropoff":
+        raise HTTPException(status_code=409, detail="Returns are handled at the delivery (dropoff) stop")
+    expected = await _expected_returns_for_stop(session, stop.id)
+    if not expected:
+        raise HTTPException(status_code=409, detail="No expected return on this stop to mark not-ready")
+    for item in expected:
+        item.status = "not_ready"
+    await session.commit()
+    return await return_views(session, expected)
 
 
 _CONTENT_TYPE_EXTENSION = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}

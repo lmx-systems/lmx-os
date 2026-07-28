@@ -11,6 +11,7 @@ from app.models.invoice import Invoice
 from app.models.message import Message
 from app.models.order import Order
 from app.models.parcel import Parcel
+from app.models.return_item import ReturnItem
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.models.rules import ActiveRule, ProposedRule
@@ -31,6 +32,7 @@ __all__ = [
     "Message",
     "Order",
     "Parcel",
+    "ReturnItem",
     "Route",
     "RouteOffer",
     "ActiveRule",
