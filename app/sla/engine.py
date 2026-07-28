@@ -60,6 +60,35 @@ class HoldWindowOverride:
     tier_minutes: dict[str, int]
 
 
+@dataclass(frozen=True)
+class TierOverride:
+    """An orchestrator-authored urgency rule (docs/ROADMAP.md W6) sourced
+    from active_rules (rule_type='tier_override'): "when this order attribute
+    has this value, force this tier" - e.g. part_category=body_panel -> T3
+    ("body panels are never urgent"). Direct human authoring, editable
+    without a code deploy; distinct from the Learning Loop's machine-proposed
+    rules. A match wins over classify_tier's payload-flag heuristic, since
+    it's a deliberate ops decision."""
+
+    match_key: str
+    match_value: str
+    tier: str
+
+
+def match_tier_override(order: NormalizedOrder, overrides: list[TierOverride]) -> tuple[str, str] | None:
+    """First matching override -> (tier, reason), else None. Matches the
+    order's raw_payload[match_key] against match_value case-insensitively (POS
+    payloads are inconsistent about casing), so an ops rule doesn't silently
+    miss because the source sent 'Body Panel' vs 'body_panel'."""
+    for ov in overrides:
+        raw = order.raw_payload.get(ov.match_key)
+        if raw is None:
+            continue
+        if str(raw).strip().casefold() == ov.match_value.strip().casefold():
+            return ov.tier, f"orchestrator urgency rule: {ov.match_key}={ov.match_value} -> {ov.tier}"
+    return None
+
+
 def _payload_flag_true(payload: dict, keys: tuple[str, ...]) -> bool:
     return any(bool(payload.get(k)) for k in keys)
 
@@ -104,13 +133,20 @@ def classify_order(
     *,
     now: datetime | None = None,
     overrides: list[HoldWindowOverride] | None = None,
+    tier_overrides: list[TierOverride] | None = None,
 ) -> ClassifiedOrder:
     """
     Pure function: no I/O. Callers (the ingestion service) are responsible
-    for loading `overrides` from active_rules and persisting the result.
+    for loading `overrides`/`tier_overrides` from active_rules and persisting
+    the result. An orchestrator-authored tier_override (W6) that matches wins
+    over the payload-flag heuristic below.
     """
     reference_time = now or order.requested_at
-    tier, reason = classify_tier(order)
+    forced = match_tier_override(order, tier_overrides or [])
+    if forced is not None:
+        tier, reason = forced
+    else:
+        tier, reason = classify_tier(order)
     hold_minutes = resolve_hold_window_minutes(tier, overrides)
     hold_deadline = reference_time + timedelta(minutes=hold_minutes)
 

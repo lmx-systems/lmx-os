@@ -4,6 +4,7 @@ from app.schemas.order import NormalizedOrder
 from app.sla.engine import (
     DEFAULT_HOLD_WINDOW_MINUTES,
     HoldWindowOverride,
+    TierOverride,
     classify_order,
     classify_tier,
     resolve_hold_window_minutes,
@@ -87,3 +88,46 @@ def test_missing_tier_in_overrides_falls_back_to_default():
     override = HoldWindowOverride(scope_shop_id="shop-1", scope_hub_id=None, tier_minutes={"T1": 1})
     minutes = resolve_hold_window_minutes("T2", overrides=[override])
     assert minutes == DEFAULT_HOLD_WINDOW_MINUTES["T2"]
+
+
+# --- Orchestrator-editable urgency rules (docs/ROADMAP.md W6) ---
+
+def test_tier_override_wins_over_the_payload_flag_heuristic():
+    # "body panels are never urgent" - the ops rule downgrades even an order
+    # the heuristic would call T1 (rush flag present).
+    order = make_order(raw_payload={"part_category": "body_panel", "rush": True})
+    overrides = [TierOverride(match_key="part_category", match_value="body_panel", tier="T3")]
+    classified = classify_order(order, tier_overrides=overrides)
+    assert classified.sla_tier == "T3"
+    assert "orchestrator urgency rule" in classified.reason
+    # And the hold window follows the *overridden* tier, not the heuristic one.
+    assert classified.hold_deadline == order.requested_at + timedelta(
+        minutes=DEFAULT_HOLD_WINDOW_MINUTES["T3"]
+    )
+
+
+def test_tier_override_matches_case_insensitively():
+    order = make_order(raw_payload={"part_category": "Body Panel"})
+    overrides = [TierOverride(match_key="part_category", match_value="body panel", tier="T3")]
+    assert classify_order(order, tier_overrides=overrides).sla_tier == "T3"
+
+
+def test_non_matching_tier_override_falls_through_to_the_heuristic():
+    order = make_order(raw_payload={"part_category": "brake_pads", "rush": True})
+    overrides = [TierOverride(match_key="part_category", match_value="body_panel", tier="T3")]
+    assert classify_order(order, tier_overrides=overrides).sla_tier == "T1"  # rush heuristic
+
+
+def test_first_matching_tier_override_wins():
+    order = make_order(raw_payload={"part_category": "body_panel"})
+    overrides = [
+        TierOverride(match_key="part_category", match_value="body_panel", tier="T3"),
+        TierOverride(match_key="part_category", match_value="body_panel", tier="T2"),
+    ]
+    assert classify_order(order, tier_overrides=overrides).sla_tier == "T3"
+
+
+def test_no_tier_overrides_leaves_classification_unchanged():
+    order = make_order(raw_payload={"rush": True})
+    assert classify_order(order, tier_overrides=[]).sla_tier == "T1"
+    assert classify_order(order).sla_tier == "T1"
