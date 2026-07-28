@@ -21,7 +21,14 @@ load_secrets_into_environment()
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    environment: str = "development"
+    # Fail closed (docs/ROADMAP.md Decision log, July 2026): the default is
+    # `production`, the strict setting, so an operator who forgets to set
+    # ENVIRONMENT in a real deploy still gets the boot-time secret/webhook
+    # guards - a forgotten env var can only make things *stricter*, never
+    # ship forgeable default secrets silently. Every non-prod context sets
+    # this explicitly: `.env` -> development (local + `docker compose up`
+    # via the app service's env_file), tests/conftest.py -> test.
+    environment: str = "production"
     log_level: str = "INFO"
 
     # Postgres
