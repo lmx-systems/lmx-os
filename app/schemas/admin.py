@@ -1,7 +1,7 @@
 """Schemas for internal/admin-only endpoints (app/api/admin_routes.py)."""
 from datetime import date
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ShopOnboardingInput(BaseModel):
@@ -73,6 +73,29 @@ class HubClosureView(BaseModel):
     closure_date: date
     reason: str | None
     created_at: str
+
+
+class UrgencyRuleBody(BaseModel):
+    """An orchestrator-authored urgency rule (docs/ROADMAP.md W6): when an
+    order's raw_payload[match_key] equals match_value (case-insensitive),
+    force `tier`. tier is validated against the real tiers at the route
+    layer (VALID_SLA_TIERS)."""
+
+    match_key: str = Field(min_length=1, max_length=64)
+    match_value: str = Field(min_length=1, max_length=120)
+    tier: str
+
+
+class UrgencyRuleUpdateBody(BaseModel):
+    enabled: bool
+
+
+class UrgencyRuleView(BaseModel):
+    rule_id: str
+    match_key: str
+    match_value: str
+    tier: str
+    enabled: bool
 
 
 class DriverPayrollSubmission(BaseModel):

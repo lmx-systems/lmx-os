@@ -11,6 +11,8 @@ import type {
   OpsProfileView,
   OptimizationResult,
   OrderStatusSummary,
+  UrgencyRuleBody,
+  UrgencyRuleView,
 } from './types'
 
 // Real per-account ops auth (docs/ROADMAP.md S1), replacing the old
@@ -59,6 +61,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+// Same as request() but for 204 No Content responses (e.g. DELETE), which
+// have no body to parse.
+async function requestVoid(path: string, init?: RequestInit): Promise<void> {
+  const token = getToken()
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...init,
+  })
+  if (response.status === 401) clearToken()
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new ApiError(response.status, body || response.statusText)
+  }
+}
+
 export const api = {
   login: (email: string, password: string) =>
     request<OpsAuthToken>('/ops/auth/login', {
@@ -93,4 +113,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  // Orchestrator-editable urgency rules (docs/ROADMAP.md W6).
+  listUrgencyRules: (hubId: string) =>
+    request<UrgencyRuleView[]>(`/admin/hubs/${hubId}/urgency-rules`),
+
+  addUrgencyRule: (hubId: string, body: UrgencyRuleBody) =>
+    request<UrgencyRuleView>(`/admin/hubs/${hubId}/urgency-rules`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  setUrgencyRuleEnabled: (hubId: string, ruleId: string, enabled: boolean) =>
+    request<UrgencyRuleView>(`/admin/hubs/${hubId}/urgency-rules/${ruleId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+
+  removeUrgencyRule: (hubId: string, ruleId: string) =>
+    requestVoid(`/admin/hubs/${hubId}/urgency-rules/${ruleId}`, { method: 'DELETE' }),
 }

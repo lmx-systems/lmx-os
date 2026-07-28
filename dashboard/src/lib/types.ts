@@ -134,3 +134,19 @@ export interface RunLogEntry {
   kind: 'optimizer' | 'learning_loop'
   summary: string
 }
+
+// Orchestrator-editable urgency rules (docs/ROADMAP.md W6) - mirrors
+// app/schemas/admin.py's UrgencyRuleView / UrgencyRuleBody.
+export interface UrgencyRuleView {
+  rule_id: string
+  match_key: string
+  match_value: string
+  tier: string
+  enabled: boolean
+}
+
+export interface UrgencyRuleBody {
+  match_key: string
+  match_value: string
+  tier: string
+}

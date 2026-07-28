@@ -23,7 +23,7 @@ from app.models.client_rate import ClientRate
 from app.models.order import Order, OrderStatus
 from app.models.rules import ActiveRule
 from app.models.shop import Shop
-from app.sla.engine import HoldWindowOverride, classify_order
+from app.sla.engine import HoldWindowOverride, TierOverride, classify_order
 
 logger = structlog.get_logger(__name__)
 
@@ -75,6 +75,31 @@ async def _load_sla_overrides(
     # Most specific first: shop-level overrides checked before hub-level.
     overrides.extend(shop_scoped)
     overrides.extend(hub_scoped)
+    return overrides
+
+
+async def _load_tier_overrides(session: AsyncSession, hub_id: str) -> list[TierOverride]:
+    """Orchestrator-authored urgency rules for this hub (docs/ROADMAP.md W6),
+    ordered oldest-first so the first-created matching rule wins deterministically."""
+    result = await session.execute(
+        select(ActiveRule)
+        .where(
+            ActiveRule.rule_type == "tier_override",
+            ActiveRule.enabled.is_(True),
+            ActiveRule.hub_id == uuid.UUID(hub_id),
+        )
+        .order_by(ActiveRule.created_at)
+    )
+    overrides: list[TierOverride] = []
+    for rule in result.scalars():
+        match_key = rule.value.get("match_key")
+        match_value = rule.value.get("match_value")
+        tier = rule.value.get("tier")
+        # Skip a malformed rule rather than crash ingestion - the authoring
+        # endpoint validates shape, but a hand-edited/legacy row shouldn't be
+        # able to take the pipeline down.
+        if match_key and match_value and tier:
+            overrides.append(TierOverride(match_key=match_key, match_value=match_value, tier=tier))
     return overrides
 
 
@@ -135,8 +160,9 @@ async def ingest_order(
     await session.flush()  # assigns order.id without committing
 
     overrides = await _load_sla_overrides(session, hub_id, str(shop.id))
+    tier_overrides = await _load_tier_overrides(session, hub_id)
     now = datetime.now(timezone.utc)
-    classified = classify_order(normalized, now=now, overrides=overrides)
+    classified = classify_order(normalized, now=now, overrides=overrides, tier_overrides=tier_overrides)
 
     order.sla_tier = classified.sla_tier
     order.hold_deadline = classified.hold_deadline

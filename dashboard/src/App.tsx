@@ -6,6 +6,7 @@ import { HoldQueueTable } from './components/HoldQueueTable'
 import { FleetRoster } from './components/FleetRoster'
 import { OperationsPanel } from './components/OperationsPanel'
 import { OnboardClientForm } from './components/OnboardClientForm'
+import { UrgencyRulesPanel } from './components/UrgencyRulesPanel'
 import { LoginPage } from './components/LoginPage'
 import { Toast } from './components/ui/Toast'
 import { usePolling } from './hooks/usePolling'
@@ -151,6 +152,7 @@ function App() {
                       onToast={showToast}
                     />
                     <OnboardClientForm hubId={hubId} onToast={showToast} />
+                    <UrgencyRulesPanel key={`urgency-${hubId}`} hubId={hubId} onToast={showToast} />
                   </>
                 )}
               </div>

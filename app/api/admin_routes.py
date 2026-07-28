@@ -34,6 +34,7 @@ from app.models.driver_device import DriverDevice
 from app.models.hub import Hub
 from app.models.hub_closure import HubClosure
 from app.models.order import Order
+from app.models.rules import ActiveRule
 from app.models.shop import Shop
 from app.ops_auth.dependencies import AuthedOpsUser, require_admin
 from app.payroll import get_payroll_provider
@@ -47,6 +48,9 @@ from app.schemas.admin import (
     OrderResolutionResult,
     PayrollRunResult,
     ResolveFailedOrderBody,
+    UrgencyRuleBody,
+    UrgencyRuleUpdateBody,
+    UrgencyRuleView,
 )
 from app.schemas.billing import InvoiceDetailView, InvoiceGenerateBody
 
@@ -355,4 +359,99 @@ async def remove_hub_closure(
     if closure is None:
         raise HTTPException(status_code=404, detail="No closure on that date for this hub")
     await session.delete(closure)
+    await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator-editable urgency rules (docs/ROADMAP.md W6) - direct human
+# authoring of part-type -> tier rules ("body panels are never urgent"),
+# stored as active_rules(rule_type='tier_override') and applied at ingestion
+# (app/ingestion/service.py's _load_tier_overrides, app/sla/engine.py). Ops
+# can add/disable a rule without a code deploy; distinct from the Learning
+# Loop's machine-proposed rules.
+# ---------------------------------------------------------------------------
+def _urgency_rule_view(rule: ActiveRule) -> UrgencyRuleView:
+    return UrgencyRuleView(
+        rule_id=str(rule.id),
+        match_key=rule.value.get("match_key", ""),
+        match_value=rule.value.get("match_value", ""),
+        tier=rule.value.get("tier", ""),
+        enabled=rule.enabled,
+    )
+
+
+async def _get_owned_urgency_rule(session: AsyncSession, hub_id: str, rule_id: str) -> ActiveRule:
+    rule = await session.get(ActiveRule, uuid.UUID(rule_id))
+    if rule is None or str(rule.hub_id) != hub_id or rule.rule_type != "tier_override":
+        raise HTTPException(status_code=404, detail="Urgency rule not found")
+    return rule
+
+
+@router.post("/hubs/{hub_id}/urgency-rules", response_model=UrgencyRuleView, status_code=201)
+async def add_urgency_rule(
+    hub_id: str,
+    body: UrgencyRuleBody,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> UrgencyRuleView:
+    if body.tier not in VALID_SLA_TIERS:
+        raise HTTPException(
+            status_code=422, detail=f"Unknown tier {body.tier!r}. Valid tiers: {sorted(VALID_SLA_TIERS)}"
+        )
+    hub = await session.get(Hub, uuid.UUID(hub_id))
+    if hub is None:
+        raise HTTPException(status_code=404, detail="Hub not found")
+
+    rule = ActiveRule(
+        hub_id=hub.id,
+        rule_type="tier_override",
+        scope={},
+        value={"match_key": body.match_key, "match_value": body.match_value, "tier": body.tier},
+        enabled=True,
+    )
+    session.add(rule)
+    await session.commit()
+    return _urgency_rule_view(rule)
+
+
+@router.get("/hubs/{hub_id}/urgency-rules", response_model=list[UrgencyRuleView])
+async def list_urgency_rules(
+    hub_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[UrgencyRuleView]:
+    result = await session.execute(
+        select(ActiveRule)
+        .where(ActiveRule.hub_id == uuid.UUID(hub_id), ActiveRule.rule_type == "tier_override")
+        .order_by(ActiveRule.created_at)
+    )
+    return [_urgency_rule_view(r) for r in result.scalars().all()]
+
+
+@router.patch("/hubs/{hub_id}/urgency-rules/{rule_id}", response_model=UrgencyRuleView)
+async def update_urgency_rule(
+    hub_id: str,
+    rule_id: str,
+    body: UrgencyRuleUpdateBody,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> UrgencyRuleView:
+    """Enable/disable a rule without deleting it - a disabled rule stops
+    affecting classification (ingestion only loads enabled ones) but stays
+    on file to re-enable."""
+    rule = await _get_owned_urgency_rule(session, hub_id, rule_id)
+    rule.enabled = body.enabled
+    await session.commit()
+    return _urgency_rule_view(rule)
+
+
+@router.delete("/hubs/{hub_id}/urgency-rules/{rule_id}", status_code=204)
+async def remove_urgency_rule(
+    hub_id: str,
+    rule_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> None:
+    rule = await _get_owned_urgency_rule(session, hub_id, rule_id)
+    await session.delete(rule)
     await session.commit()
