@@ -9,6 +9,24 @@ This supersedes the "Recommended next steps" list at the bottom of
 `docs/NEXT_STEPS.md`'s row-by-row punch list — that file is the detailed
 backlog; this one is the map of how those rows fit into getting to launch.
 
+## Decision log — cofounder alignment, July 28 2026
+
+Design/strategy calls made and aligned in a decision-review session. These
+resolve the "open decision" flags scattered below; where an item still
+reads "open"/"unresolved" inline, this log is the authority.
+
+| Item | Decision |
+|---|---|
+| **W1** (returns/cores trigger) | **Piggyback core pickups on the delivery visit to that shop + a counter-person "cores ready" flag for standalone returns.** Each core pickup references its originating delivery order and carries an item manifest. Per-shop readiness *prediction* is a later intelligence-layer follow-on (uses I1 data), not v1. |
+| **W10** (package identity path) | **LMX prints and applies its own labels** (universal, LMX owns the ID space) rather than scanning distributors' pick-ticket barcodes. Accepts label-printer capex + an on-site labeling step + co-location. No code change (the `Parcel` model already defaults to LMX-generated barcodes); W8's barcode-printing qualification is dropped. |
+| **D6** (interim Epicor latency) | **Tighten the Epicor export interval as the primary onboarding ask, AND fast-path HOT_SHOT/T1 off the 15-min batch drop** (per-order push/webhook/phoned trigger during the scaffold). The 15-min latency then only ever touches T2/T3, where it's noise. |
+| **D3** (shadow→cutover bar) | Relative to the scaffold's own actuals on identical orders: **LMX OS must strictly beat drops/driver-hour** (the differentiator), **be no-worse on T1 on-time + hold-release integrity + <5s re-plan**, and drive negative-outcome divergence toward zero — for **2 consecutive weeks that each clear a minimum order volume**. **Founder-owned** weekly review initially; absolute numbers calibrate once shadow data exists. |
+| **Security fail-safe** | **Fail closed:** default `ENVIRONMENT` to `production` so a forgotten env var can never ship forgeable default secrets; dev/test/CI set `ENVIRONMENT=development` explicitly. |
+| **E6** (flag-type naming) | **Signed off as-is** (`hold_window_too_short` / `hold_window_too_long`). Broadening the annotation vocabulary stays as I3. |
+| **B2 contract terms (W7/W8)** | **Co-location is a structural term** (required by the W10 label process). **Training-data rights (W7) required broad and upfront** — model-training, cross-customer aggregation, anonymization — before the first delivery. **Epicor export cadence (W8) is a preference, not a disqualifier** (D6 covers the latency). Owner: Rich/Matan on the contract; founder on the data-rights posture. |
+| **R1–R3** (insurance / driver screening / privacy) | **Start all three now, in parallel** with the engineering — not when the pilot is imminent. Owners: Rich/Matan (insurance), Rich (screening vendor), legal/Rich (privacy policy). R4 (driver-document upload) is the buildable software counterpart, slotted alongside A3's upload infra. |
+| **A10 / state OT** | **Defer 1099 employment counsel to the 1099 phase** (rollout is W2→1099→gig); when engaging, bring the single-offer-vs-multi-offer question as the precise item — no speculative multi-offer build meanwhile. **State-specific OT** waits on the launch location: populate `Hub.state_code` and research that one state's daily-OT rules once the site is set. |
+
 ## Part 1 — Every open item, in one place
 
 Nothing below is new work discovered today — all of it was already called
@@ -52,7 +70,7 @@ list instead of leaving it scattered across three documents.
 | ~~S3~~ | ~~A real production hosting decision~~ | **Partially done** — `infra/` (AWS, Terraform): managed Postgres (RDS, automated backups, storage autoscaling) and Redis (ElastiCache), the app/dashboard/client-portal each as autoscaled ECS Fargate services behind one ALB, secrets in AWS Secrets Manager (the real account `app/secrets_provider.py`'s `AWSSecretsManagerProvider` was built for), a GitHub Actions deploy pipeline via OIDC (no stored AWS keys). `terraform validate`-clean but not yet applied against a real AWS account — same "real code, unexercised against a live account" status as Google Route Optimization/Rippling/Twilio. See `infra/README.md` for the real named gaps (no staging environment, no NAT Gateway, HTTPS needs a real owned domain first). |
 | ~~S4~~ | ~~Observability~~ | **Partially done** — error tracking via Sentry (`app/logging_config.py`), same "unconfigured credential -> no-op" status as Twilio/Rippling until a real account/DSN exists. A structlog processor forwards warning/error/critical/exception-level events straight to Sentry, since this codebase's structlog setup never touches stdlib logging (Sentry's default `LoggingIntegration` hook would otherwise miss every "caught, logged, and intentionally swallowed" exception, e.g. `HubEventBus`'s handler-failure path) - so both unhandled exceptions (via the FastAPI/Starlette integrations) and deliberately-caught-and-logged ones reach Sentry. Metrics dashboards/alerting still not started. |
 | ~~S5~~ | ~~General API rate limiting~~ | **Done** — `app/rate_limit.py`'s `GeneralRateLimitMiddleware`, a Redis counter+NX-TTL per client IP (deliberately generous - this system leans on client-side polling, see the module's own docstring), 429 + `Retry-After` once tripped, `/health`/docs paths exempt. Known limitation: keyed by the direct TCP peer, not `X-Forwarded-For` - correct only until a real reverse proxy sits in front (Phase 5's hosting decision). |
-| ~~S6~~ | ~~A real security review~~ | **Partially done** — a self-review pass across auth, authorization, injection/input-validation, and secrets/CORS/infra. Fixed: driver OTP codes were unconditionally echoed in the API response regardless of Twilio configuration (`app/driver_auth/otp_store.py` — a hardcoded `sent_via_sms=False` meant this would have kept leaking even with real Twilio creds configured, since no real send was ever wired up either; now actually sends via `TwilioSmsClient` and only omits the code when that succeeds), the phone-number-existence check on `request-otp` was an unthrottled enumeration oracle (rate limit now charged before the DB lookup), two fleet-state-mutation endpoints were missing `require_admin` (a viewer could overwrite any driver's status/location), `docker-compose.yml`'s Postgres/Redis ports were published on every interface with a well-known default password, the app container ran as root, a few request bodies took unconstrained strings where a `Literal`/length bound was cheap and correct, and the Twilio webhook now warns loudly at boot if signature verification would be silently disabled in production. Real gap still open: the JWT-secret/webhook boot-time checks all key off `ENVIRONMENT != "development"`, so an operator who simply forgets to set `ENVIRONMENT` in production gets zero protection instead of the most — a cross-cutting fail-safe-default question worth a deliberate decision, not a change made unilaterally in this pass. No one outside this build has reviewed it yet either. |
+| ~~S6~~ | ~~A real security review~~ | **Partially done** — a self-review pass across auth, authorization, injection/input-validation, and secrets/CORS/infra. Fixed: driver OTP codes were unconditionally echoed in the API response regardless of Twilio configuration (`app/driver_auth/otp_store.py` — a hardcoded `sent_via_sms=False` meant this would have kept leaking even with real Twilio creds configured, since no real send was ever wired up either; now actually sends via `TwilioSmsClient` and only omits the code when that succeeds), the phone-number-existence check on `request-otp` was an unthrottled enumeration oracle (rate limit now charged before the DB lookup), two fleet-state-mutation endpoints were missing `require_admin` (a viewer could overwrite any driver's status/location), `docker-compose.yml`'s Postgres/Redis ports were published on every interface with a well-known default password, the app container ran as root, a few request bodies took unconstrained strings where a `Literal`/length bound was cheap and correct, and the Twilio webhook now warns loudly at boot if signature verification would be silently disabled in production. Real gap still open: the JWT-secret/webhook boot-time checks all key off `ENVIRONMENT != "development"`, so an operator who simply forgets to set `ENVIRONMENT` in production gets zero protection instead of the most — a cross-cutting fail-safe-default question worth a deliberate decision, not a change made unilaterally in this pass. **Decided July 2026 (see Decision log): fail closed — default `ENVIRONMENT` to `production`, with dev/test/CI setting `development` explicitly.** No one outside this build has reviewed the rest of the pass yet either. |
 | ~~S7~~ | ~~Twilio inbound-webhook signature verification~~ | **Done** — `app/messaging/twilio_signature.py` verifies `X-Twilio-Signature` (HMAC-SHA1 over the full URL + sorted POST params, keyed by `TWILIO_AUTH_TOKEN`), enforced only once that token is configured; `TWILIO_WEBHOOK_BASE_URL` overrides scheme+host for the eventual reverse-proxy case. |
 | ~~S8~~ | ~~Rate-limit `POST /client/auth/login`~~ | **Done** — `app/client_auth/login_rate_limit.py`, same "counter + NX-guarded TTL" shape as driver OTP issuance; resets on a successful login. |
 | ~~S9~~ | ~~Enforce `CLIENT_JWT_SECRET` ≠ `DRIVER_JWT_SECRET` at startup~~ | **Done** — `app/config.py`'s `assert_jwt_secrets_are_distinct()`, called from `app/main.py`'s lifespan alongside the two existing per-secret checks; refuses to start outside `development` if both are ever set to the same real value. |
@@ -120,7 +138,9 @@ missing in week one.
 | W7 | Training-data rights in the customer contract | Session closing note: model-training rights, cross-customer aggregation rights, and anonymization terms "belong in customer #1's contract before the first delivery, not in a future amendment." Distinct from R3 (privacy policy — what LMX does with personal data); this is about the right to train models on a customer's operational data. **Legal work, gates B2, not engineering.** |
 | W8 | Epicor staging-module qualification check | Session D6. Whether a prospect's Epicor runs a warehouse/staging module is now a sales-qualification checklist question asked before signing, because it determines whether real-time ingestion is even possible for that customer. Not code — a sales-process artifact that gates which prospects are viable. |
 
-**Open design decision — W10, who owns the barcode:** two materially
+**W10, who owns the barcode — DECIDED July 2026: LMX prints and applies
+its own labels** (see the Decision log at the top of this file). The
+table below is kept for the reasoning behind the call. Two materially
 different products, and picking wrong is expensive to undo once labels
 are in the field.
 
@@ -420,7 +440,9 @@ place of the SLA engine and batch-hold queue.
   minutes before anyone sees it — against a 45-minute T1 promise, that
   is a third of the window gone before dispatch. Three options on the
   table: tighten the drop interval, narrow the interim T1 promise, or
-  accept the risk. **Unresolved — needs a decision.**
+  accept the risk. **Decided July 2026 (see Decision log): tighten the
+  drop as the primary onboarding ask, and fast-path HOT_SHOT/T1 off the
+  batch so the 15-min latency only touches T2/T3.**
 - W8 (Epicor staging-module qualification) gates which prospects this
   scaffold can even work for.
 - I8's scaffold-era-only captures (the "where's my part" call tally, the
@@ -578,7 +600,10 @@ that LMX OS should replace it.
 
 **Cutover decision (session D3):** per customer engagement, not once
 globally. Agree the thresholds, the minimum consecutive passing weeks,
-and the weekly review owner — all three are still open.
+and the weekly review owner — **decided July 2026 (see Decision log):
+beat drops/driver-hour, parity on the safety metrics, 2 consecutive
+qualifying weeks, founder-owned review; absolute numbers calibrate once
+shadow data exists.**
 
 **Exit criteria:** for the first engagement, a scorecard passing for the
 agreed number of consecutive weeks on that customer's real orders, with
