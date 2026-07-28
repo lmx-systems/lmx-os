@@ -521,6 +521,30 @@ async def test_flag_stop_sets_failed_and_order_delivery_failed(db_session, real_
     db_session.expire_all()
     refreshed_order = await db_session.get(Order, order_id)
     assert refreshed_order.status == OrderStatus.delivery_failed
+    # R5: the reason is denormalized onto the order so client/ops views can
+    # show it without joining back through StopOrder to a specific stop.
+    assert refreshed_order.failure_reason == "SHOP_CLOSED"
+
+
+async def test_flagging_a_dropoff_notifies_the_shop(db_session, real_redis_client):
+    # R5: a failed *dropoff* is a delivery the shop's customer never got, so
+    # the originating shop gets a one-way SMS. (A flagged pickup doesn't -
+    # nothing was delivered to anyone's customer.)
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, _pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await flag_stop_issue(
+        dropoff.stop_id,
+        FlagStopBody(reason=StopFailureReason.REFUSED, note="Customer refused at door"),
+        driver=authed,
+        session=db_session,
+    )
+
+    shop_msgs = await db_session.execute(
+        select(Message).where(Message.channel == "shop", Message.stop_id == uuid.UUID(dropoff.stop_id))
+    )
+    bodies = [m.body for m in shop_msgs.scalars().all()]
+    assert any("weren't able to complete the delivery" in b for b in bodies), bodies
 
 
 async def test_flag_stop_rejects_an_already_terminal_stop(db_session, real_redis_client):

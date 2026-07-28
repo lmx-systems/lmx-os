@@ -222,6 +222,8 @@ def _order_summary_view(order: Order, shop_name: str | None) -> ClientOrderSumma
         requested_at=order.requested_at.isoformat(),
         delivered_at=delivered_at,
         fee_cents=order.fee_cents,
+        failure_reason=order.failure_reason,
+        delivery_attempts=order.delivery_attempts,
     )
 
 

@@ -1,5 +1,5 @@
 import type { ClientOrderSummaryView } from '../lib/types'
-import { formatCents, formatDate, formatStatus } from '../lib/format'
+import { formatCents, formatDate, formatFailureReason, formatStatus, isFailedStatus } from '../lib/format'
 import { TierBadge } from './TierBadge'
 
 interface OrdersTableProps {
@@ -42,7 +42,17 @@ export function OrdersTable({ orders, onSelect }: OrdersTableProps) {
                 <TierBadge tier={order.sla_tier} />
               </td>
               <td className="px-4 py-2.5 text-[var(--text-secondary)]">{order.shop_name ?? '—'}</td>
-              <td className="px-4 py-2.5 text-[var(--text-secondary)]">{formatStatus(order.status)}</td>
+              <td className="px-4 py-2.5">
+                <span className={isFailedStatus(order.status) ? 'text-[var(--danger,#b4231f)]' : 'text-[var(--text-secondary)]'}>
+                  {formatStatus(order.status)}
+                </span>
+                {order.status === 'delivery_failed' && order.failure_reason && (
+                  <div className="text-xs text-[var(--text-muted)]">{formatFailureReason(order.failure_reason)}</div>
+                )}
+                {order.delivery_attempts > 1 && (
+                  <div className="text-xs text-[var(--text-muted)]">Attempt {order.delivery_attempts}</div>
+                )}
+              </td>
               <td className="px-4 py-2.5 text-[var(--text-secondary)]">{formatDate(order.requested_at)}</td>
               <td className="px-4 py-2.5 text-[var(--text-secondary)]">{formatDate(order.delivered_at)}</td>
               <td className="px-4 py-2.5 text-right font-medium text-[var(--text-primary)]">

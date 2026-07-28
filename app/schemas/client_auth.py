@@ -68,6 +68,12 @@ class ClientOrderSummaryView(BaseModel):
     requested_at: str
     delivered_at: str | None
     fee_cents: int | None
+    # Failed-delivery visibility (docs/ROADMAP.md R5) - so a client can see
+    # a delivery failed, why, and that a retry is under way, rather than an
+    # order silently stuck in `delivery_failed`. failure_reason is null
+    # unless the current status reflects a failure.
+    failure_reason: str | None = None
+    delivery_attempts: int = 1
 
 
 class ClientOrderDetailView(ClientOrderSummaryView):
