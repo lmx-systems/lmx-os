@@ -116,7 +116,7 @@ missing in week one.
 | W3 | SLA-breach invoice credits | Story DO-3: contractual credits when SLA thresholds are breached. C3's billing computes fees from delivered orders but has **no credit mechanism** — a breach costs nothing today. Needs the credit schedule as contract data, computed from order-level SLA outcomes, appearing as a line on the statement. Ties to F5 (rate tables) — same billing surface, build together. |
 | W4 | Driver-visible scorecard | Story DR-10: the driver sees *the identical metrics and definitions* the orchestrator sees. Explicitly framed as a trust decision, not a feature — "a shared standard, not a camera pointed at me." Folds into I4/F7's analytics work; the requirement is that the driver view is the same computation, not a separate reduced one. |
 | W5 | Counter-person order status lookup | Story CP-3: search any order by shop name or order number, get live status and ETA in ten seconds. The client portal today is distributor-owner-facing with one login per company (C4). The counter person is a **distinct persona** with a distinct need — and CP-4 (wrong-part flag reaching the counter mid-route) is a second counter-facing surface. Reopens C4's "one login per client" decision on real grounds rather than as an oversight. |
-| W6 | Orchestrator-editable urgency configuration | Story OR-6: "body panels are never urgent" should not require a developer. Distinct from I2 (which promotes *machine-proposed* rules) — this is direct human authoring of part-type tier rules, editable without a code deploy. The `active_rules` table can likely carry it; the gap is the editing surface and validation. |
+| ~~W6~~ | ~~Orchestrator-editable urgency configuration~~ | **Done** (PR #8) — per-hub urgency rules with full CRUD (`POST`/`GET`/`PATCH`/`DELETE /admin/hubs/{hub_id}/urgency-rules`), consumed by `app/sla/engine.py` at classification time and `app/ingestion/service.py` at ingestion; `dashboard/src/components/UrgencyRulesPanel.tsx` is the editing surface. "Body panels are never urgent" (story OR-6) is now a dashboard change, not a code deploy. Distinct from I2, which promotes *machine-proposed* rules — this is direct human authoring. |
 | W7 | Training-data rights in the customer contract | Session closing note: model-training rights, cross-customer aggregation rights, and anonymization terms "belong in customer #1's contract before the first delivery, not in a future amendment." Distinct from R3 (privacy policy — what LMX does with personal data); this is about the right to train models on a customer's operational data. **Legal work, gates B2, not engineering.** |
 | W8 | Epicor staging-module qualification check | Session D6. Whether a prospect's Epicor runs a warehouse/staging module is now a sales-qualification checklist question asked before signing, because it determines whether real-time ingestion is even possible for that customer. Not code — a sales-process artifact that gates which prospects are viable. |
 
@@ -154,9 +154,12 @@ note that all four are exactly the exceptions where LMX touches someone
 else's money or customer). W3 joins C3/F5 as Phase 8 billing work. W4
 folds into Phase 10's I4. W5 reopens C4 in Phase 8. W6 is small and
 no-dependency. W7 and W8 are business/legal items gating B2 and should
-be moving now. W10 sits in Phase 6 alongside A2 — build them together,
-since A2 without W10 is a scanner with nothing to scan; but resolve
-W10's open decision (and ideally W8) before either is scheduled.
+be moving now. ~~W6~~ and ~~W10~~ are **done** (PRs #8 and #11). W10
+shipped ownership-agnostic — `Parcel.barcode` carries either an
+LMX-generated code or the distributor's own pick-ticket value, and the
+verification path is identical either way — so the printer-vs-scan-existing
+hardware decision is still open but no longer blocking anything. It rides
+on W8's answer whenever that lands.
 
 ### Risk, compliance & real-world operations
 
@@ -179,16 +182,15 @@ putting real drivers on real roads with real customer data.
 | R2 | Driver background checks & MVR (motor-vehicle record) screening | The system tracks license and insurance *documents* with expiry dates (`driver_documents`) and blocks going online when one is expired — but nothing verifies the driver was safe to put behind the wheel in the first place. Document expiry is not a background check. **Gates Phase 9.** Needs Rich. |
 | R3 | Privacy policy & data-handling/retention policy | LMX OS stores customer names, delivery addresses, and phone numbers (orders + shop SMS), plus driver PII. No document says what LMX does with any of it, how long it's kept, or how someone requests deletion. Real legal exposure the moment there are real clients and real drivers; also the first thing an enterprise client's security questionnaire asks about, alongside F10's SOC 2. **Gates Phase 9.** |
 | R4 | Driver document upload pipeline | `app/models/driver_document.py`'s own comment: "No file-upload pipeline exists… `file_url` accepts whatever string the client sends." A driver could submit a fabricated URL as their license scan and the system would treat it as valid. Distinct from A3 (proof-of-delivery photos) — this is *onboarding compliance* evidence, and it's what makes R2 enforceable in software rather than on paper. |
-| R5 | Failed-delivery / redelivery workflow | `Stop.status` has a `failed` value, but nothing handles what happens next: no redelivery attempt, no client notification, no billing adjustment, no defined resolution path. Every real delivery operation gets refused packages, wrong addresses, and closed shops — today those orders would sit in `failed` forever. Also the gap behind Locus's "failed-delivery disputes" and P6's partner-dispute surface. |
-| R6 | Hub closure / holiday calendar | Nothing models a hub not operating. The Learning Loop's nightly scheduler (E7) and the optimizer both assume every active hub runs every day — the first holiday, weather closure, or planned shutdown will either misfire the nightly job or dispatch routes for a hub that isn't open. |
-
+| ~~R5~~ | ~~Failed-delivery / redelivery workflow~~ | **Done** (PR #6) — `app/delivery/resolution.py` plus `POST /admin/orders/{order_id}/resolve`. `Order` gained `delivery_attempts` (1 = the original), `failure_reason`, and a `returned` status, so a `failed` stop now has a defined next step instead of dead-ending: redelivery, return-to-distributor, or cancel, with shop notification wired through `app/messaging/shop_notifications.py`. The `SHOP_CLOSED` day-one playbook (session D5) now has software behind it rather than only a phone call. |
+| ~~R6~~ | ~~Hub closure / holiday calendar~~ | **Done** (PR #7, `migrations/0021_hub_closures.py`) — `app/models/hub_closure.py` + `app/hub_calendar.py`, with admin create/list/delete endpoints. Wired into both places that previously assumed every hub runs every day: `app/learning_loop/scheduler.py` (the nightly job skips a closed hub) and `app/optimizer/service.py` (no dispatch cycles for a hub that isn't open). The first holiday or weather closure no longer misfires the scheduler or plans routes into a closed warehouse. |
 **Sequencing:** R1/R2/R3 are business/legal work that should start *now*
 — they're slow (insurance quotes, policy drafting, screening-vendor
 selection) and they gate Phase 9, so starting them when the pilot is
 imminent is starting them too late. R4 fits Phase 6 alongside A3 (same
-file-upload infrastructure, build once). R5 and R6 fit Phase 4 — both
-are "the system assumes the happy path" gaps of exactly the kind that
-phase exists to close, and both will surface immediately in a real pilot.
+file-upload infrastructure, build once). ~~R5~~ and ~~R6~~ are **done**
+(PRs #6 and #7) — both were "the system assumes the happy path" gaps, and
+both are now closed before a real pilot could surface them the hard way.
 
 ### Autonomy partners
 
@@ -282,7 +284,7 @@ stakes. That's F1/F2 below, and it's the prerequisite for F3.
 | F12 | Network/territory optimization tooling | Wise Systems' "Network Optimization" (depot/zone redesign, distinct from daily routing) — relevant once LMX runs multiple hubs, not for a single Hub 1 pilot. |
 | F13 | Ratings & feedback capture | One-tap post-delivery rating (+ optional comment) prompt to the shop, landing on the order/stop record. Low effort, and it feeds the Learning Loop (I3's broader annotation vocabulary) with a ground-truth satisfaction signal none of the four researched competitors structurally capture the same way. No external dependency. |
 | F14 | Orchestrator route-preview / shadow mode | **Substantially upgraded July 2026 — see W9 below.** Originally scoped as a view to preview the optimizer's proposed plan before it commits. The workflow session's decision D3 makes shadow mode far larger: the standard onboarding gate for *every* customer engagement, not a one-time pilot tool. The preview/override surface described here is still wanted, but it is now the small half of this item. |
-| W10 | Package identity & scan-at-pickup verification | **Nothing in this system gives a package a unique identity.** `Stop.parcel_count`/`scanned_count` are two integers, and `POST /driver/stops/{id}/scan` takes `{scanned_count: int}` — a *number*, never a scanned value. There is no `Parcel` model and no barcode field anywhere; `Order.external_order_ref` is the distributor's order number, per order rather than per package. Note this makes **A2 mis-scoped**: A2 reads as "wire in a camera SDK," but wiring one in today would leave nothing to scan, because no barcode is ever generated, printed, or recorded. Neither the session doc (39 stories, 36 training situations) nor any prior doc mentions barcodes or chain of custody at all. **The payoff that justifies it:** `WRONG_PART` is currently caught at the door and the session calls it "the most expensive recoverable error"; a scan-at-pickup check against the order catches it in the warehouse before the driver leaves. Also unlocks real chain of custody (all four benchmarked competitors advertise it), gives W1's returns/cores an identity to track, and makes DR-6's batched multi-order handoffs verifiable. Raised by Sourabh, July 2026. **Design decision open — see below.** |
+| ~~W10~~ | ~~Package identity & scan-at-pickup verification~~ | **Done** (PR #11, `migrations/0023_parcels.py`) — a real `app/models/parcel.py` with a uniqueness constraint, and `ScanParcelBody{barcode: str}` verified against the order at the pickup stop (`app/api/driver_routes.py`); the old bare-count `ScanParcelsBody` survives only as the manual "can't scan, confirm by hand" fallback. `tests/integration/test_parcel_scanning.py` covers it. **The open label decision was handled well rather than forced:** the model is ownership-agnostic — `barcode` holds either an LMX-generated code or the distributor's own pick-ticket value (`app/ingestion/service.py` takes it from the payload when present, generates one otherwise), and the verification path is identical either way. So the printer-vs-scan-existing hardware call stays deferred and reversible, which is what W8 should decide. A2's scanner now has something to read, and `WRONG_PART` is catchable at pickup rather than at the customer's door. |
 | W9 | Shadow-mode comparison engine & cutover scorecard | The real shape of shadow mode per session decision D3: every initial customer engagement runs live on the Elite EXTRA scaffold while LMX OS **decides in parallel on the same orders**, and the two are compared until a scorecard passes and that engagement cuts over. Needs: a parallel decision path that records what LMX OS *would* have done without acting; per-order divergence capture (the session is explicit that aggregate metrics look fine while the two systems agree — the divergent orders are the entire point); and a nine-metric scorecard — drops per driver-hour, T1 on-time rate, batch rate, hold-release integrity, miles per drop, re-plan speed (<5s at real volume), human touches, decision divergence with outcome delta, and data completeness. Also a **sales asset**: "we transition only when our OS beats the baseline on your own orders." Open decisions for D3: the thresholds, the minimum consecutive passing weeks, and the weekly review owner. |
 
 **Revisited — F9 vs. the operator-not-aggregator thesis:** a companion
@@ -347,16 +349,26 @@ hold-window change), it covers only hold windows, the learning influences
 construction itself, and the human-approval step has no tool (I2).
 
 **The governing constraint: this layer is data-gated, not code-gated.**
-Every day Hub 1 runs before ground-truth capture (I1) exists is training
-data lost forever — drive times we never recorded can't be backfilled.
-Models can wait; instrumentation can't. I1 and I2 are therefore the only
-urgent rows below, and both have zero external dependencies.
+Every day Hub 1 runs before ground-truth capture exists is training data
+lost forever — drive times we never recorded can't be backfilled. Models
+can wait; instrumentation can't.
+
+**Status, July 2026: the two urgent rows are done.** I1 (ground-truth
+capture) shipped in PR #9 and I2 (rule review & promotion) in PR #10 —
+both landed *before* Hub 1 goes live, which was the whole point. The
+remaining rows below are genuinely data-gated rather than code-gated: I3
+is still worth doing pre-pilot (the flags drivers can't write are the
+labels we won't have), I8 is an ops assignment rather than a build, and
+I4–I7 need weeks-to-months of real data before they mean anything. Note
+that under the scaffold model the data now accrues during the **shadow
+period**, not from Hub 1's own operation — the scaffold does no batching,
+so it never exercises the hold windows.
 
 | # | Item | Why it matters |
 |---|---|---|
-| I1 | Ground-truth event capture | The prerequisite for every stage above it. Concretely: `Order.delivered_at` (real timestamp, replacing the `updated_at` proxy billing/portal use today); `Stop.arrived_at` (so time-at-stop = arrived→completed becomes measurable, per shop); per-leg actual drive time vs. the optimizer's implied estimate; offer decline/expiry reasons; hold-queue release timing (held→released delta per order, vs. its window). All buildable now with no external dependency. **Superseded in scope, July 2026:** the workflow session's 36-item training coverage matrix is a far richer specification of exactly this item — organized as urgency/tiering (4 situations), hold-and-batch (5), fleet dynamics (4), exceptions (8), communication (3), human-vs-system (4), edge cases and economics (6), and the learning loop itself (2). Build I1 against that matrix, not against the five fields listed here. Two things in the matrix matter disproportionately: **negative examples** (a batch declined because pairing would breach a window; an insertion rejected to protect a driver — "when not to batch is half the skill") and **paired counterfactuals** (the same shop visited before and after an access note exists; the same order decided by LMX OS and by the scaffold). |
+| ~~I1~~ | ~~Ground-truth event capture~~ | **Done** (PR #9, `migrations/0022_ground_truth_capture.py`) — `Order.delivered_at` written once at dropoff completion and never on update, retiring the `updated_at`-as-delivered-at proxy billing and the portal relied on (`updated_at` moved on *any* later mutation, e.g. attaching an invoice id — exactly the corruption the proxy needed guarding against). Also `Stop.arrived_at`, per-leg drive-time capture, and `RouteOffer.decline_reason` — a decline is only a usable training label for I6's offer-acceptance signal if the reason is known, so expiry (no response) and declined-without-reason stay distinguishable as NULL. |
 | I8 | Manual capture of the non-default training situations | The session's own operating note: roughly a third of the 36 matrix situations **are not captured by default** — the paired access-note comparison, the interim dispatcher's gut-call log, the scaffold-era "where's my part" call tally, and the shadow divergence pairs all require someone deciding in week one that they are worth writing down, on a shared sheet if no app exists yet. Two of these are only capturable *during* the scaffold era and are gone forever after cutover: the call tally (C2) and the human dispatcher's tacit expertise, right and wrong (H1/H2). This is an ops checklist assignment, not a build — but it is on the critical path for I6 and belongs to whoever runs Hub 1 operations. |
-| I2 | Rule review & promotion flow | The missing rung of the existing loop: `proposed_rules` accumulate nightly with nowhere to go — no endpoint or dashboard UI promotes them to `active_rules` (today it would be a manual SQL insert). Endpoint + a dashboard review card (proposal, evidence count, confidence, approve/dismiss) completes component 6's core loop. No external dependency. |
+| ~~I2~~ | ~~Rule review & promotion flow~~ | **Done** (PR #10) — `app/learning_loop/promotion.py` plus `GET /admin/hubs/{hub_id}/proposed-rules` and the promote/dismiss endpoints; `dashboard/src/components/ProposedRulesPanel.tsx` is the review card (proposal, evidence count, confidence, approve/dismiss). Covered by `tests/integration/test_rule_promotion.py`. This closes the Learning Loop's missing rung — nightly proposals no longer accumulate with nowhere to go, and promotion is a click rather than a manual SQL insert. |
 | I3 | Broaden the annotation vocabulary | Two flag types exist (`hold_window_too_short`/`_too_long`). Real per-shop knowledge drivers accumulate — parking difficulty, gate/access codes, shop prep slowness, receiving-dock quirks — should become structured flags too, so the labeled dataset covers more than hold timing. Coordinates with E6's naming sign-off; the schema (`stop_flags.flag_type` is a free string) already allows it. |
 | I4 | Descriptive analytics on the captured truth | DPH per driver/hub/day, SLA hit rates by tier, hold-window effectiveness (release timing vs. driver flags), ETA vs. actual. First consumer of I1's data; feeds the E9 DPH validation. Needs a few weeks of pilot data to be meaningful, not to be built. |
 | I5 | Calibration from data | Already tracked as E2/E5/E9/E10 — retune skip penalties, hold windows, the 2.5 DPH figure from real Hub 1 data instead of placeholders. The intelligence-layer framing just makes explicit that I1+I4 are what make these possible. |
@@ -587,13 +599,13 @@ component 6 gestures at, made real. See Part 1's "Intelligence layer"
 table for the item-by-item detail.
 
 Sequencing relative to the pilot — this is the important part:
-- **Before Phase 9 goes live:** I1 (ground-truth capture) and I2 (rule
-  review/promotion flow). I1 because pilot days without instrumentation
-  are training data lost forever; I2 because the pilot will generate
-  driver annotations from day one, and proposals with no approval tool
-  just pile up. I3 (broader annotation vocabulary) is strongly
-  preferred pre-pilot too — the flags drivers can't write are the
-  labels we won't have.
+- **Before Phase 9 goes live — done.** ~~I1~~ (ground-truth capture, PR
+  #9) and ~~I2~~ (rule review/promotion, PR #10) both shipped ahead of
+  the pilot, which is exactly the sequencing this section argued for:
+  instrumentation before the first real order, and an approval tool
+  before proposals start accumulating. **I3 (broader annotation
+  vocabulary) is now the one remaining pre-pilot item here** — the flags
+  drivers can't write are the labels we won't have.
 - **During/after the pilot:** I4 (descriptive analytics) as soon as
   there's a couple of weeks of data; I5 (calibration — E2/E5/E9/E10)
   is the pilot's whole point. F7 (client- and ops-facing analytics
