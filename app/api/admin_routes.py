@@ -33,8 +33,14 @@ from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.hub import Hub
 from app.models.hub_closure import HubClosure
+from app.learning_loop.promotion import (
+    PENDING,
+    ProposedRuleNotPendingError,
+    dismiss_proposed_rule,
+    promote_proposed_rule,
+)
 from app.models.order import Order
-from app.models.rules import ActiveRule
+from app.models.rules import ActiveRule, ProposedRule
 from app.models.shop import Shop
 from app.ops_auth.dependencies import AuthedOpsUser, require_admin
 from app.payroll import get_payroll_provider
@@ -47,6 +53,8 @@ from app.schemas.admin import (
     HubClosureView,
     OrderResolutionResult,
     PayrollRunResult,
+    ProposedRuleApprovalResult,
+    ProposedRuleView,
     ResolveFailedOrderBody,
     UrgencyRuleBody,
     UrgencyRuleUpdateBody,
@@ -455,3 +463,77 @@ async def remove_urgency_rule(
     rule = await _get_owned_urgency_rule(session, hub_id, rule_id)
     await session.delete(rule)
     await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Learning-Loop rule review & promotion (docs/ROADMAP.md I2) - the human
+# approval step that turns nightly ProposedRule rows into ActiveRule rows
+# the SLA engine / ingestion actually read. Completes component 6's loop.
+# ---------------------------------------------------------------------------
+def _proposed_rule_view(rule: ProposedRule) -> ProposedRuleView:
+    return ProposedRuleView(
+        rule_id=str(rule.id),
+        rule_type=rule.rule_type,
+        scope=rule.scope,
+        proposed_change=rule.proposed_change,
+        confidence=float(rule.confidence),
+        supporting_annotation_count=rule.supporting_annotation_count,
+        status=rule.status,
+        created_at=rule.created_at.isoformat(),
+    )
+
+
+@router.get("/hubs/{hub_id}/proposed-rules", response_model=list[ProposedRuleView])
+async def list_proposed_rules(
+    hub_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[ProposedRuleView]:
+    """Proposals still awaiting review for this hub, oldest first - the
+    review queue the dashboard card renders."""
+    result = await session.execute(
+        select(ProposedRule)
+        .where(ProposedRule.hub_id == uuid.UUID(hub_id), ProposedRule.status == PENDING)
+        .order_by(ProposedRule.created_at)
+    )
+    return [_proposed_rule_view(r) for r in result.scalars().all()]
+
+
+async def _get_pending_proposed_rule(session: AsyncSession, rule_id: str) -> ProposedRule:
+    rule = await session.get(ProposedRule, uuid.UUID(rule_id))
+    if rule is None:
+        raise HTTPException(status_code=404, detail="Proposed rule not found")
+    return rule
+
+
+@router.post("/proposed-rules/{rule_id}/approve", response_model=ProposedRuleApprovalResult)
+async def approve_proposed_rule(
+    rule_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> ProposedRuleApprovalResult:
+    """Promote a proposal into active_rules, where it starts affecting
+    dispatch. 409 if it isn't still pending (already decided)."""
+    rule = await _get_pending_proposed_rule(session, rule_id)
+    try:
+        active = await promote_proposed_rule(session, rule)
+    except ProposedRuleNotPendingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ProposedRuleApprovalResult(
+        proposed_rule_id=str(rule.id), status=rule.status, active_rule_id=str(active.id)
+    )
+
+
+@router.post("/proposed-rules/{rule_id}/dismiss", response_model=ProposedRuleApprovalResult)
+async def dismiss_proposed_rule_endpoint(
+    rule_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> ProposedRuleApprovalResult:
+    """Reject a proposal - it stays on file as rejected, never promoted."""
+    rule = await _get_pending_proposed_rule(session, rule_id)
+    try:
+        await dismiss_proposed_rule(session, rule)
+    except ProposedRuleNotPendingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ProposedRuleApprovalResult(proposed_rule_id=str(rule.id), status=rule.status)

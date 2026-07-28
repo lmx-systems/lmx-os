@@ -11,6 +11,8 @@ import type {
   OpsProfileView,
   OptimizationResult,
   OrderStatusSummary,
+  ProposedRuleApprovalResult,
+  ProposedRuleView,
   UrgencyRuleBody,
   UrgencyRuleView,
 } from './types'
@@ -132,4 +134,14 @@ export const api = {
 
   removeUrgencyRule: (hubId: string, ruleId: string) =>
     requestVoid(`/admin/hubs/${hubId}/urgency-rules/${ruleId}`, { method: 'DELETE' }),
+
+  // Learning-Loop rule review & promotion (docs/ROADMAP.md I2).
+  listProposedRules: (hubId: string) =>
+    request<ProposedRuleView[]>(`/admin/hubs/${hubId}/proposed-rules`),
+
+  approveProposedRule: (ruleId: string) =>
+    request<ProposedRuleApprovalResult>(`/admin/proposed-rules/${ruleId}/approve`, { method: 'POST' }),
+
+  dismissProposedRule: (ruleId: string) =>
+    request<ProposedRuleApprovalResult>(`/admin/proposed-rules/${ruleId}/dismiss`, { method: 'POST' }),
 }

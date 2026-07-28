@@ -150,3 +150,22 @@ export interface UrgencyRuleBody {
   match_value: string
   tier: string
 }
+
+// Learning-Loop proposals awaiting review (docs/ROADMAP.md I2) - mirrors
+// app/schemas/admin.py's ProposedRuleView / ProposedRuleApprovalResult.
+export interface ProposedRuleView {
+  rule_id: string
+  rule_type: string
+  scope: Record<string, unknown>
+  proposed_change: Record<string, unknown>
+  confidence: number
+  supporting_annotation_count: number
+  status: string
+  created_at: string
+}
+
+export interface ProposedRuleApprovalResult {
+  proposed_rule_id: string
+  status: string
+  active_rule_id: string | null
+}
