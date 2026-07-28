@@ -55,6 +55,7 @@ from app.optimizer.event_trigger import dispatch_event_bus
 from app.schemas.driver_app import (
     CallView,
     CompleteStopBody,
+    DeclineOfferBody,
     DriverAvailabilityUpdate,
     DriverDocumentUpdate,
     DriverDocumentView,
@@ -566,6 +567,7 @@ async def decline_offer(
     offer_id: str,
     driver: AuthedDriver = Depends(get_current_driver),
     session: AsyncSession = Depends(get_db),
+    body: DeclineOfferBody | None = None,
 ) -> dict:
     # for_update: locks the row so a concurrent accept/decline on the same
     # offer can't both read "offered" before either commits (see accept_offer).
@@ -579,6 +581,10 @@ async def decline_offer(
 
     offer.status = "declined"
     offer.responded_at = datetime.now(timezone.utc)
+    # Ground-truth capture (docs/ROADMAP.md I1) - null when the caller gave
+    # no reason, which is fine; a reason is a bonus signal, not required.
+    if body is not None:
+        offer.decline_reason = body.reason
     await _requeue_orders_from_offer(session, str(offer.hub_id), str(offer.driver_id), offer.stop_payload)
     await session.commit()
     return {"ok": True}
@@ -1039,6 +1045,10 @@ async def arrive_at_stop(
     stop = await _get_owned_stop(session, stop_id, driver)
     _assert_stop_not_terminal(stop, "mark arrived")
     stop.status = "arrived"
+    # Ground-truth capture (docs/ROADMAP.md I1): stamp the first arrival only,
+    # so a re-marked arrival can't overwrite the real one.
+    if stop.arrived_at is None:
+        stop.arrived_at = datetime.now(timezone.utc)
     await session.commit()
     return await _stop_view_after_reload(session, stop)
 
@@ -1189,8 +1199,13 @@ async def complete_stop(
     # "picked up" OrderStatus value in v1; the route/stop status already
     # captures that detail more precisely than Order.status does).
     if stop.stop_type == "dropoff" and order_ids:
+        # `now` is this stop's completed_at (set above) - the delivery
+        # moment. delivered_at is a real, stable ground-truth column (I1),
+        # not the updated_at proxy billing/portal used to read.
         await session.execute(
-            update(Order).where(Order.id.in_(order_ids)).values(status=OrderStatus.delivered)
+            update(Order)
+            .where(Order.id.in_(order_ids))
+            .values(status=OrderStatus.delivered, delivered_at=now)
         )
 
     remaining_result = await session.execute(

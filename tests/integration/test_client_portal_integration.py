@@ -255,7 +255,7 @@ async def test_list_and_get_my_orders_scoped_to_this_client(db_session):
         hub_id=client_row.hub_id,
         client_id=client_id, shop_id=shop_id,
         external_order_ref="ORD-CLIENT-1", source_system="flat_file", raw_payload={},
-        sla_tier="T2", status=OrderStatus.delivered, requested_at=now,
+        sla_tier="T2", status=OrderStatus.delivered, requested_at=now, delivered_at=now,
         delivery_address="500 Client St", delivery_contact_name="R. Ortiz",
         fee_cents=1_800,
     )

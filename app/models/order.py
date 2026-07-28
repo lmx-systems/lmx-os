@@ -80,6 +80,15 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
+    # Real delivery timestamp (docs/ROADMAP.md I1 - ground-truth capture),
+    # set once when the dropoff completes (app/api/driver_routes.py's
+    # complete_stop). Replaces the `updated_at`-as-delivered-at proxy that
+    # billing and the client portal used to rely on - `updated_at` gets
+    # bumped by *any* later mutation (e.g. attaching an invoice_id), which
+    # is exactly the corruption that proxy needed careful guarding against.
+    # This column is stable: written once at delivery, never on update.
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # How many delivery attempts this order has had (R5). 1 = the original
     # dispatch; incremented each time a failed order is redelivered
     # (app/delivery/resolution.py). Lets ops and the client see "2nd
