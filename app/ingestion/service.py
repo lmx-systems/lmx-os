@@ -23,6 +23,7 @@ from app.ingestion.registry import get_adapter
 from app.models.client_rate import ClientRate
 from app.models.order import Order, OrderStatus
 from app.models.parcel import Parcel
+from app.models.return_item import ReturnItem
 from app.models.rules import ActiveRule
 from app.models.shop import Shop
 from app.sla.engine import HoldWindowOverride, TierOverride, classify_order
@@ -59,6 +60,19 @@ def _parcel_barcodes(payload: dict) -> list[str]:
     except (TypeError, ValueError):
         n = 1
     return [f"LMX-{secrets.token_hex(5)}" for _ in range(n)]
+
+
+def _expected_return_manifest(payload: dict) -> str | None:
+    """The manifest for a core/return expected back with this order
+    (docs/ROADMAP.md W1), or None if the payload flags no return. A
+    `return_manifest` string wins; a truthy `core_return` falls back to a
+    generic label."""
+    manifest = payload.get("return_manifest")
+    if isinstance(manifest, str) and manifest.strip():
+        return manifest.strip()
+    if payload.get("core_return"):
+        return "core exchange"
+    return None
 
 
 async def _resolve_shop(session: AsyncSession, client_id: str, shop_external_ref: str) -> Shop:
@@ -192,6 +206,18 @@ async def ingest_order(
     # so scan-at-pickup can verify against the expected order later.
     for barcode in _parcel_barcodes(payload):
         session.add(Parcel(hub_id=order.hub_id, order_id=order.id, barcode=barcode))
+
+    # Core/return expected back with this delivery (docs/ROADMAP.md W1): the
+    # driver collects it on the delivery visit (piggyback). Flagged either
+    # by a boolean core_return or by a return_manifest string in the payload.
+    return_manifest = _expected_return_manifest(payload)
+    if return_manifest is not None:
+        session.add(
+            ReturnItem(
+                hub_id=order.hub_id, origin_order_id=order.id, shop_id=order.shop_id,
+                manifest=return_manifest, status="expected",
+            )
+        )
 
     overrides = await _load_sla_overrides(session, hub_id, str(shop.id))
     tier_overrides = await _load_tier_overrides(session, hub_id)

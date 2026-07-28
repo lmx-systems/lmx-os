@@ -40,6 +40,7 @@ from app.learning_loop.promotion import (
     promote_proposed_rule,
 )
 from app.models.order import Order
+from app.models.return_item import ReturnItem
 from app.models.rules import ActiveRule, ProposedRule
 from app.models.shop import Shop
 from app.ops_auth.dependencies import AuthedOpsUser, require_admin
@@ -61,6 +62,8 @@ from app.schemas.admin import (
     UrgencyRuleView,
 )
 from app.schemas.billing import InvoiceDetailView, InvoiceGenerateBody
+from app.returns.service import return_views
+from app.schemas.returns import ReturnItemView
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -537,3 +540,22 @@ async def dismiss_proposed_rule_endpoint(
     except ProposedRuleNotPendingError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return ProposedRuleApprovalResult(proposed_rule_id=str(rule.id), status=rule.status)
+
+
+@router.get("/hubs/{hub_id}/returns", response_model=list[ReturnItemView])
+async def list_returns(
+    hub_id: str,
+    status: str | None = None,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[ReturnItemView]:
+    """Returns/cores for this hub (docs/ROADMAP.md W1), optionally filtered
+    by status (expected | collected | returned_to_shop | not_ready |
+    cancelled) - the ops view over the reverse leg. A counter-facing
+    'awaiting pickup, with age' cut is a later slice."""
+    query = select(ReturnItem).where(ReturnItem.hub_id == uuid.UUID(hub_id))
+    if status is not None:
+        query = query.where(ReturnItem.status == status)
+    query = query.order_by(ReturnItem.created_at)
+    rows = (await session.execute(query)).scalars().all()
+    return await return_views(session, list(rows))
