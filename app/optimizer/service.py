@@ -23,6 +23,7 @@ from sqlalchemy import func, select, update
 from app.batch_queue.queue import run_hold_cycle
 from app import metrics
 from app.batch_queue.store import HoldQueueStore
+from app.hub_calendar import is_hub_closed_at
 from app.config import settings
 from app.db import session_scope
 from app.fleet_state.manager import FleetStateManager
@@ -56,6 +57,21 @@ class DispatchOptimizerService:
     async def run_cycle(self, hub_id: str) -> OptimizationResult:
         cycle_start = time.perf_counter()
         now = datetime.now(timezone.utc)
+
+        # Don't dispatch for a hub that isn't operating today (R6). Return
+        # before touching the hold queue so held orders simply wait for the
+        # next open day rather than being dropped or assigned to no one.
+        async with session_scope() as session:
+            if await is_hub_closed_at(session, hub_id, now):
+                logger.info("optimizer_cycle_skipped_hub_closed", hub_id=hub_id)
+                return OptimizationResult(
+                    hub_id=hub_id,
+                    assignments=[],
+                    unassigned_stop_ids=[],
+                    engine=self._route_client.engine_name,
+                    duration_seconds=round(time.perf_counter() - cycle_start, 3),
+                    over_budget=False,
+                )
 
         fleet_snapshot = await self._fleet_state.get_fleet_snapshot(hub_id)
         held_orders = await self._hold_queue.get_all(hub_id)

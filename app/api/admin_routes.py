@@ -12,10 +12,11 @@ app/schemas/admin.py's ClientOnboardingBody docstring.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.payroll.hours as payroll_hours
@@ -30,6 +31,8 @@ from app.models.client_rate import ClientRate
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
+from app.models.hub import Hub
+from app.models.hub_closure import HubClosure
 from app.models.order import Order
 from app.models.shop import Shop
 from app.ops_auth.dependencies import AuthedOpsUser, require_admin
@@ -39,6 +42,8 @@ from app.schemas.admin import (
     ClientOnboardingBody,
     ClientOnboardingResult,
     DriverPayrollSubmission,
+    HubClosureBody,
+    HubClosureView,
     OrderResolutionResult,
     PayrollRunResult,
     ResolveFailedOrderBody,
@@ -282,3 +287,72 @@ async def resolve_order(
         delivery_attempts=resolved.delivery_attempts,
         action=body.action,
     )
+
+
+def _closure_view(closure: HubClosure) -> HubClosureView:
+    return HubClosureView(
+        closure_date=closure.closure_date,
+        reason=closure.reason,
+        created_at=closure.created_at.isoformat(),
+    )
+
+
+@router.post("/hubs/{hub_id}/closures", response_model=HubClosureView, status_code=201)
+async def add_hub_closure(
+    hub_id: str,
+    body: HubClosureBody,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> HubClosureView:
+    """Mark a local calendar day the hub isn't operating (docs/ROADMAP.md
+    R6) - the optimizer then skips dispatch and the nightly job skips that
+    day. 409 if the day is already marked closed."""
+    hub = await session.get(Hub, uuid.UUID(hub_id))
+    if hub is None:
+        raise HTTPException(status_code=404, detail="Hub not found")
+
+    closure = HubClosure(hub_id=hub.id, closure_date=body.closure_date, reason=body.reason)
+    session.add(closure)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409, detail=f"{body.closure_date.isoformat()} is already marked closed for this hub"
+        ) from exc
+    return _closure_view(closure)
+
+
+@router.get("/hubs/{hub_id}/closures", response_model=list[HubClosureView])
+async def list_hub_closures(
+    hub_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[HubClosureView]:
+    result = await session.execute(
+        select(HubClosure)
+        .where(HubClosure.hub_id == uuid.UUID(hub_id))
+        .order_by(HubClosure.closure_date)
+    )
+    return [_closure_view(c) for c in result.scalars().all()]
+
+
+@router.delete("/hubs/{hub_id}/closures/{closure_date}", status_code=204)
+async def remove_hub_closure(
+    hub_id: str,
+    closure_date: date,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> None:
+    """Remove a closure - e.g. a planned shutdown that got cancelled."""
+    result = await session.execute(
+        select(HubClosure).where(
+            HubClosure.hub_id == uuid.UUID(hub_id),
+            HubClosure.closure_date == closure_date,
+        )
+    )
+    closure = result.scalar_one_or_none()
+    if closure is None:
+        raise HTTPException(status_code=404, detail="No closure on that date for this hub")
+    await session.delete(closure)
+    await session.commit()

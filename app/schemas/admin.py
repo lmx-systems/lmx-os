@@ -1,4 +1,6 @@
 """Schemas for internal/admin-only endpoints (app/api/admin_routes.py)."""
+from datetime import date
+
 from pydantic import BaseModel
 
 
@@ -57,6 +59,20 @@ class OrderResolutionResult(BaseModel):
     status: str
     delivery_attempts: int
     action: str
+
+
+class HubClosureBody(BaseModel):
+    """A day a hub is closed (docs/ROADMAP.md R6) - a local calendar date in
+    the hub's own timezone."""
+
+    closure_date: date
+    reason: str | None = None
+
+
+class HubClosureView(BaseModel):
+    closure_date: date
+    reason: str | None
+    created_at: str
 
 
 class DriverPayrollSubmission(BaseModel):

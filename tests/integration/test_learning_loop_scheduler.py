@@ -4,13 +4,14 @@ Redis. The real wall clock is replaced with a fixed instant so "is it 2am
 in this hub's timezone yet" is deterministic - see _FixedDatetime.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 
 import app.learning_loop.scheduler as scheduler_module
 from app.learning_loop.scheduler import LearningLoopScheduler, _last_run_date_key, _lock_key
 from app.models.hub import Hub
+from app.models.hub_closure import HubClosure
 
 pytestmark = pytest.mark.integration
 
@@ -60,6 +61,47 @@ async def test_does_not_run_outside_the_nightly_hour(db_session, real_redis_clie
 
     last_run = await real_redis_client.get(_last_run_date_key(str(hub.id)))
     assert last_run is None
+
+
+async def test_skips_the_nightly_job_on_a_closed_day(db_session, real_redis_client, monkeypatch):
+    # R6: the fixed instant is 2026-07-22 02:00 UTC; with tz="UTC" that's the
+    # hub's local nightly hour on 2026-07-22, and the hub is closed that day.
+    hub = await _seed_hub(db_session, tz="UTC")
+    db_session.add(HubClosure(hub_id=hub.id, closure_date=date(2026, 7, 22)))
+    await db_session.commit()
+    _set_fixed_utc_hour(monkeypatch, scheduler_module.NIGHTLY_RUN_LOCAL_HOUR)
+
+    called = []
+
+    async def _spy(session, *, hub_id):
+        called.append(hub_id)
+        return []
+
+    monkeypatch.setattr(scheduler_module, "run_nightly_job", _spy)
+    await LearningLoopScheduler().maybe_run_for_hub(hub)
+
+    assert called == []  # the job never ran on a closed day
+    # ...but the day is still marked handled so the scheduler doesn't retry
+    # it every poll until midnight.
+    assert await real_redis_client.get(_last_run_date_key(str(hub.id))) == "2026-07-22"
+
+
+async def test_runs_the_nightly_job_on_an_open_day(db_session, real_redis_client, monkeypatch):
+    # Same setup, no closure - the job runs, confirming the skip above is the
+    # closure's doing and not the harness.
+    hub = await _seed_hub(db_session, tz="UTC")
+    _set_fixed_utc_hour(monkeypatch, scheduler_module.NIGHTLY_RUN_LOCAL_HOUR)
+
+    called = []
+
+    async def _spy(session, *, hub_id):
+        called.append(hub_id)
+        return []
+
+    monkeypatch.setattr(scheduler_module, "run_nightly_job", _spy)
+    await LearningLoopScheduler().maybe_run_for_hub(hub)
+
+    assert called == [str(hub.id)]
 
 
 async def test_does_not_run_twice_in_the_same_local_day(db_session, real_redis_client, monkeypatch):
