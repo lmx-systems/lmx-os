@@ -43,6 +43,13 @@ class RouteOffer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Why the driver declined (docs/ROADMAP.md I1 - ground-truth capture),
+    # optional free text/enum from the decline call. Feeds the eventual
+    # offer-acceptance-likelihood signal (I6): a decline is only useful as a
+    # training label if we know *why*. Null for an expiry (no response at
+    # all) or a decline that gave no reason.
+    decline_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Set once accept_offer() creates the real Route - lets the driver app
     # go straight from "I accepted" to "here's my route" with one id.
     route_id: Mapped[UUID | None] = mapped_column(ForeignKey("routes.id"), nullable=True)

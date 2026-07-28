@@ -26,7 +26,7 @@ from app.db import get_db
 from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, CLIENT_USER_ROLES, ClientUser
 from app.models.invoice import Invoice
-from app.models.order import Order, OrderStatus
+from app.models.order import Order
 from app.models.shop import Shop
 from app.schemas.billing import InvoiceDetailView, InvoiceSummaryView
 from app.schemas.client_auth import (
@@ -208,11 +208,10 @@ async def update_my_client_user(
 
 
 def _order_summary_view(order: Order, shop_name: str | None) -> ClientOrderSummaryView:
-    # No dedicated "delivered at" timestamp exists on Order yet (see
-    # docs/NEXT_STEPS.md's gap list) - updated_at is a reasonable proxy
-    # once status is actually "delivered", same pattern
-    # app/api/driver_routes.py's _route_hours already uses for Route.
-    delivered_at = order.updated_at.isoformat() if order.status == OrderStatus.delivered else None
+    # Real delivery timestamp now (docs/ROADMAP.md I1) - was an updated_at
+    # proxy until Order.delivered_at existed. Historical delivered orders
+    # were backfilled (migration 0022), so this is populated for them too.
+    delivered_at = order.delivered_at.isoformat() if order.delivered_at else None
     return ClientOrderSummaryView(
         order_id=str(order.id),
         external_order_ref=order.external_order_ref,

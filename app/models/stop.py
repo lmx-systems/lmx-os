@@ -42,6 +42,11 @@ class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # app/models/order.py for why (a real bug this exact mismatch caused,
     # caught by tests/integration/).
     eta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Ground-truth capture (docs/ROADMAP.md I1): when the driver actually
+    # arrived. time-at-stop = completed_at - arrived_at (measurable per
+    # shop), and arrived_at vs `eta` is direct ETA-accuracy ground truth.
+    # Set on the first arrive_at_stop transition, never overwritten.
+    arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Proof of delivery (screen 1m). photo_url/signature_url are real,

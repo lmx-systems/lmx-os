@@ -39,6 +39,7 @@ async def _seed_order(db_session, *, status=OrderStatus.delivery_failed, tier="T
         sla_tier=tier, status=status,
         failure_reason="REFUSED" if status == OrderStatus.delivery_failed else None,
         requested_at=now, updated_at=now, fee_cents=fee_cents, delivery_attempts=delivery_attempts,
+        delivered_at=now if status == OrderStatus.delivered else None,
     )
     db_session.add(order)
     await db_session.commit()

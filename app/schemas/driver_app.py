@@ -169,6 +169,13 @@ class FlagStopBody(BaseModel):
     note: str | None = None
 
 
+class DeclineOfferBody(BaseModel):
+    # Optional ground-truth capture (docs/ROADMAP.md I1) - why the driver
+    # declined, for the eventual offer-acceptance model. Optional so the
+    # existing "decline with no body" call keeps working.
+    reason: str | None = Field(default=None, max_length=64)
+
+
 # ---------------------------------------------------------------------------
 # Messaging (screens 1p/1q) and earnings (screens 1n/1o) - Phase 3.
 # ---------------------------------------------------------------------------

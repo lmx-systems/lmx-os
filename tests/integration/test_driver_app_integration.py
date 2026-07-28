@@ -51,6 +51,7 @@ from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.driver_app import (
     CompleteStopBody,
+    DeclineOfferBody,
     DriverAvailabilityUpdate,
     DriverProfileUpdate,
     FlagStopBody,
@@ -175,6 +176,9 @@ async def test_full_driver_app_core_loop(db_session, real_redis_client):
 
     # 6. Pickup: arrive, scan, complete (screens 1h-1k).
     await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
+    # I1 ground-truth capture: arriving stamps arrived_at on the stop.
+    pickup_stop_row = await db_session.get(Stop, uuid.UUID(pickup.stop_id))
+    assert pickup_stop_row.arrived_at is not None
     scanned = await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
     assert scanned.scanned_count == 1
     await complete_stop(
@@ -196,6 +200,12 @@ async def test_full_driver_app_core_loop(db_session, real_redis_client):
 
     await db_session.refresh(order)
     assert order.status == OrderStatus.delivered
+    # I1 ground-truth capture: completing the dropoff stamps a real
+    # delivered_at (the timestamp billing + the portal now read), and it
+    # matches the dropoff stop's completed_at.
+    dropoff_stop_row = await db_session.get(Stop, uuid.UUID(dropoff.stop_id))
+    assert order.delivered_at is not None
+    assert order.delivered_at == dropoff_stop_row.completed_at
 
     # 8. Whole route wraps up, driver is freed back to available.
     assert await get_my_route(driver=authed, session=db_session) is None
@@ -225,8 +235,15 @@ async def test_declined_offer_requeues_order_for_reassignment(db_session, real_r
     state.status = "on_break"
     await fleet_state.upsert_driver_state(state)
 
-    await decline_offer(offers[0].offer_id, driver=authed, session=db_session)
+    await decline_offer(
+        offers[0].offer_id, driver=authed, session=db_session, body=DeclineOfferBody(reason="too_far")
+    )
     await dispatch_event_bus.wait_idle()  # let the job_offer_lapsed-triggered cycle finish
+
+    # I1 ground-truth capture: the decline reason is recorded on the offer.
+    declined = await db_session.get(RouteOffer, uuid.UUID(offers[0].offer_id))
+    assert declined.status == "declined"
+    assert declined.decline_reason == "too_far"
 
     # The order goes back to the hold queue instead of being stuck showing
     # "assigned" with no driver actually working it.

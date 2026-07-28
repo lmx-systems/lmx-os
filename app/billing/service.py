@@ -18,7 +18,6 @@ from datetime import date, datetime, timezone
 
 import structlog
 from sqlalchemy import select
-from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice
@@ -42,16 +41,18 @@ async def generate_invoice(
     period_start_dt = datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc)
     period_end_dt = datetime.combine(period_end, datetime.min.time(), tzinfo=timezone.utc)
 
-    # updated_at as a "delivered at" proxy - no dedicated column exists yet,
-    # same convention app/api/client_routes.py's _order_summary_view already
-    # uses for the same reason (docs/NEXT_STEPS.md's gap list).
+    # Filter on the real delivery timestamp (docs/ROADMAP.md I1) - this used
+    # to proxy through updated_at (which any later mutation bumps), which is
+    # exactly the fragility that proxy needed guarding against. delivered_at
+    # is set once at delivery and never moves. Historical delivered orders
+    # were backfilled (migration 0022), so this sees them too.
     candidates_result = await session.execute(
         select(Order).where(
             Order.client_id == client_id,
             Order.status == OrderStatus.delivered,
             Order.invoice_id.is_(None),
-            Order.updated_at >= period_start_dt,
-            Order.updated_at < period_end_dt,
+            Order.delivered_at >= period_start_dt,
+            Order.delivered_at < period_end_dt,
         )
     )
     candidates = list(candidates_result.scalars().all())
@@ -88,20 +89,11 @@ async def generate_invoice(
     session.add(invoice)
     await session.flush()  # need invoice.id to attach orders below
 
-    # A plain ORM attribute assignment (order.invoice_id = invoice.id) won't
-    # do here: re-asserting order.updated_at to its own already-loaded value
-    # in the same flush doesn't count as a "real" change to SQLAlchemy's
-    # dirty-tracking (old == new), so it gets left out of the UPDATE's SET
-    # clause and the column's onupdate=func.now() default fires anyway -
-    # silently replacing this order's real delivered-at proxy with
-    # "whenever this invoice happened to be generated." A Core-level
-    # update() has no such dirty-tracking - every value passed to .values()
-    # is included in the SET clause unconditionally, which is exactly what's
-    # needed to keep updated_at pinned to what it already was.
+    # Attaching the invoice no longer has to guard a timestamp: delivered_at
+    # (what billing now filters on) is stable and never touched here, so a
+    # plain invoice_id update is safe even if it bumps updated_at.
     for order in billable:
-        await session.execute(
-            sa_update(Order).where(Order.id == order.id).values(invoice_id=invoice.id, updated_at=order.updated_at)
-        )
+        order.invoice_id = invoice.id
 
     await session.commit()
     await session.refresh(invoice)
@@ -153,7 +145,7 @@ async def invoice_detail_view(session: AsyncSession, invoice: Invoice) -> Invoic
                 external_order_ref=order.external_order_ref,
                 shop_name=shop_name,
                 sla_tier=order.sla_tier,
-                delivered_at=order.updated_at.isoformat(),
+                delivered_at=order.delivered_at.isoformat() if order.delivered_at else None,
                 fee_cents=order.fee_cents,
             )
             for order, shop_name in items

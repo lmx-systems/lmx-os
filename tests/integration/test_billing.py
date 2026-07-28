@@ -43,7 +43,7 @@ def _delivered_order(client_id, shop_id, hub_id, *, fee_cents, delivered_on: dat
         hub_id=hub_id, client_id=client_id, shop_id=shop_id,
         external_order_ref=ref, source_system="flat_file", raw_payload={},
         sla_tier="T2", status=OrderStatus.delivered, requested_at=delivered_at,
-        fee_cents=fee_cents, updated_at=delivered_at,
+        fee_cents=fee_cents, updated_at=delivered_at, delivered_at=delivered_at,
     )
 
 
@@ -229,26 +229,26 @@ async def test_client_cannot_download_another_clients_invoice_pdf(db_session):
     assert exc_info.value.status_code == 404
 
 
-async def test_generate_invoice_preserves_each_orders_true_delivered_at(db_session):
-    """Regression test: setting order.invoice_id used to silently bump
-    Order.updated_at to "whenever this invoice was generated" via that
-    column's onupdate=func.now() default, destroying the delivered-at
-    proxy every other view relies on (app/api/client_routes.py's
-    _order_summary_view, this module's own invoice_detail_view)."""
+async def test_generate_invoice_preserves_each_orders_delivered_at(db_session):
+    """delivered_at is the real delivery timestamp every view now reads
+    (docs/ROADMAP.md I1). Attaching an invoice must not disturb it - and
+    unlike the old updated_at proxy this replaced, delivered_at is never
+    written after delivery, so no pinning workaround is needed to protect it."""
     client_id, shop_id, hub_id = await _seed_client_with_shop(db_session)
     delivered_on = date(2026, 6, 5)
     order = _delivered_order(client_id, shop_id, hub_id, fee_cents=1_800, delivered_on=delivered_on, ref="DATED")
     db_session.add(order)
     await db_session.commit()
-    original_updated_at = order.updated_at
+    original_delivered_at = order.delivered_at
 
     invoice = await generate_invoice(db_session, client_id, date(2026, 6, 1), date(2026, 7, 1))
 
     await db_session.refresh(order)
-    assert order.updated_at == original_updated_at
+    assert invoice.total_cents == 1_800
+    assert order.delivered_at == original_delivered_at
 
     detail = await invoice_detail_view(db_session, invoice)
-    assert detail.line_items[0].delivered_at == original_updated_at.isoformat()
+    assert detail.line_items[0].delivered_at == original_delivered_at.isoformat()
 
 
 async def test_invoice_numbers_are_sequential_and_unique(db_session):
