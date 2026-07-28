@@ -7,6 +7,7 @@ import { FleetRoster } from './components/FleetRoster'
 import { OperationsPanel } from './components/OperationsPanel'
 import { OnboardClientForm } from './components/OnboardClientForm'
 import { UrgencyRulesPanel } from './components/UrgencyRulesPanel'
+import { ProposedRulesPanel } from './components/ProposedRulesPanel'
 import { LoginPage } from './components/LoginPage'
 import { Toast } from './components/ui/Toast'
 import { usePolling } from './hooks/usePolling'
@@ -153,6 +154,7 @@ function App() {
                     />
                     <OnboardClientForm hubId={hubId} onToast={showToast} />
                     <UrgencyRulesPanel key={`urgency-${hubId}`} hubId={hubId} onToast={showToast} />
+                    <ProposedRulesPanel key={`proposed-${hubId}`} hubId={hubId} onToast={showToast} />
                   </>
                 )}
               </div>

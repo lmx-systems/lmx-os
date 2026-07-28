@@ -98,6 +98,26 @@ class UrgencyRuleView(BaseModel):
     enabled: bool
 
 
+class ProposedRuleView(BaseModel):
+    """A Learning-Loop proposal awaiting human review (docs/ROADMAP.md I2)."""
+
+    rule_id: str
+    rule_type: str
+    scope: dict
+    proposed_change: dict
+    confidence: float
+    supporting_annotation_count: int
+    status: str
+    created_at: str
+
+
+class ProposedRuleApprovalResult(BaseModel):
+    proposed_rule_id: str
+    status: str
+    # Set only on approval - the active_rules row the proposal became.
+    active_rule_id: str | None = None
+
+
 class DriverPayrollSubmission(BaseModel):
     driver_id: str
     driver_name: str
