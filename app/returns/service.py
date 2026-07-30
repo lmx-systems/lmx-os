@@ -10,23 +10,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.order import Order
 from app.models.return_item import ReturnItem
+from app.models.shop import Shop
 from app.schemas.returns import ReturnItemView
 
 
 async def return_views(session: AsyncSession, items: list[ReturnItem]) -> list[ReturnItemView]:
-    """Build views, resolving each return's originating order reference in a
-    single lookup rather than one query per item."""
+    """Build views, resolving each return's originating order ref (blank for a
+    standalone return) and shop name in one lookup each rather than per item."""
     if not items:
         return []
-    order_ids = {item.origin_order_id for item in items}
-    refs_result = await session.execute(
-        select(Order.id, Order.external_order_ref).where(Order.id.in_(order_ids))
-    )
-    ref_by_id = {row[0]: row[1] for row in refs_result.all()}
+    order_ids = {item.origin_order_id for item in items if item.origin_order_id is not None}
+    ref_by_id: dict = {}
+    if order_ids:
+        refs_result = await session.execute(
+            select(Order.id, Order.external_order_ref).where(Order.id.in_(order_ids))
+        )
+        ref_by_id = {row[0]: row[1] for row in refs_result.all()}
+
+    shop_ids = {item.shop_id for item in items}
+    shops_result = await session.execute(select(Shop.id, Shop.name).where(Shop.id.in_(shop_ids)))
+    shop_by_id = {row[0]: row[1] for row in shops_result.all()}
+
     return [
         ReturnItemView(
             return_id=str(item.id),
-            origin_order_ref=ref_by_id.get(item.origin_order_id, ""),
+            origin_order_ref=ref_by_id.get(item.origin_order_id, "") if item.origin_order_id else "",
+            shop_name=shop_by_id.get(item.shop_id),
             manifest=item.manifest,
             status=item.status,
             collected_at=item.collected_at.isoformat() if item.collected_at else None,

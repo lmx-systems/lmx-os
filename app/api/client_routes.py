@@ -27,8 +27,11 @@ from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, CLIENT_USER_ROLES, ClientUser
 from app.models.invoice import Invoice
 from app.models.order import Order
+from app.models.return_item import ReturnItem
 from app.models.shop import Shop
+from app.returns.service import return_views
 from app.schemas.billing import InvoiceDetailView, InvoiceSummaryView
+from app.schemas.returns import ReturnFlagBody, ReturnItemView
 from app.schemas.client_auth import (
     ClientAuthToken,
     ClientLoginBody,
@@ -319,3 +322,47 @@ async def get_my_invoice_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Returns & core pickups (docs/ROADMAP.md W1 slice 2) - the shop-flag half of
+# the model: a client flags accumulated cores at one of their shops as ready
+# for a standalone pickup (no delivery to piggyback on), and sees their
+# returns' status. Any client-user can flag (it's operational, not account
+# management); the dedicated counter-person surface is W5.
+# ---------------------------------------------------------------------------
+@router.post("/shops/{shop_id}/returns", response_model=ReturnItemView, status_code=201)
+async def flag_shop_returns_ready(
+    shop_id: str,
+    body: ReturnFlagBody,
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> ReturnItemView:
+    shop = await session.get(Shop, uuid.UUID(shop_id))
+    # 404 (not 403) for a shop that isn't this client's - same
+    # don't-confirm-existence convention as get_my_order.
+    if shop is None or str(shop.client_id) != client.client_id:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    company = await session.get(Client, uuid.UUID(client.client_id))
+    item = ReturnItem(
+        hub_id=company.hub_id, shop_id=shop.id, origin_order_id=None,
+        manifest=body.manifest, status="ready_for_pickup",
+    )
+    session.add(item)
+    await session.commit()
+    return (await return_views(session, [item]))[0]
+
+
+@router.get("/returns", response_model=list[ReturnItemView])
+async def list_my_returns(
+    client: AuthedClient = Depends(get_current_client), session: AsyncSession = Depends(get_db)
+) -> list[ReturnItemView]:
+    """Every return across this client's shops, newest first."""
+    result = await session.execute(
+        select(ReturnItem)
+        .join(Shop, ReturnItem.shop_id == Shop.id)
+        .where(Shop.client_id == uuid.UUID(client.client_id))
+        .order_by(ReturnItem.created_at.desc())
+    )
+    return await return_views(session, list(result.scalars().all()))
