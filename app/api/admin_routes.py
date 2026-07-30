@@ -62,7 +62,7 @@ from app.schemas.admin import (
     UrgencyRuleView,
 )
 from app.schemas.billing import InvoiceDetailView, InvoiceGenerateBody
-from app.returns.service import return_views
+from app.returns.service import AWAITING_STATUSES, return_views
 from app.schemas.returns import ReturnItemView
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -546,14 +546,19 @@ async def dismiss_proposed_rule_endpoint(
 async def list_returns(
     hub_id: str,
     status: str | None = None,
+    awaiting: bool = False,
     session: AsyncSession = Depends(get_db),
     _admin: AuthedOpsUser = Depends(require_admin),
 ) -> list[ReturnItemView]:
     """Returns/cores for this hub (docs/ROADMAP.md W1), optionally filtered
-    by status (expected | collected | returned_to_shop | not_ready |
-    cancelled) - the ops view over the reverse leg. A counter-facing
-    'awaiting pickup, with age' cut is a later slice."""
+    by status (expected | ready_for_pickup | collected | returned_to_shop |
+    not_ready | cancelled) - the ops view over the reverse leg. Pass
+    `awaiting=true` for the counter-facing 'awaiting pickup, with age' cut
+    (everything still waiting on a pickup), oldest first so the stalest sits
+    on top; each row carries `age_hours`."""
     query = select(ReturnItem).where(ReturnItem.hub_id == uuid.UUID(hub_id))
+    if awaiting:
+        query = query.where(ReturnItem.status.in_(AWAITING_STATUSES))
     if status is not None:
         query = query.where(ReturnItem.status == status)
     query = query.order_by(ReturnItem.created_at)
@@ -578,5 +583,27 @@ async def mark_return_returned(
         raise HTTPException(status_code=409, detail=f"Return is already '{item.status}'")
     item.status = "returned_to_shop"
     item.returned_at = datetime.now(timezone.utc)
+    await session.commit()
+    return (await return_views(session, [item]))[0]
+
+
+@router.post("/returns/{return_id}/reschedule", response_model=ReturnItemView)
+async def reschedule_return(
+    return_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> ReturnItemView:
+    """Requeue a core that wasn't ready at the delivery visit (docs/ROADMAP.md
+    W1 slice 4). `not_ready` -> `ready_for_pickup`: it drops off the piggyback
+    path and becomes a standalone pickup to schedule. 409 unless it's
+    currently `not_ready` - there's nothing to reschedule otherwise."""
+    item = await session.get(ReturnItem, uuid.UUID(return_id))
+    if item is None:
+        raise HTTPException(status_code=404, detail="Return not found")
+    if item.status != "not_ready":
+        raise HTTPException(
+            status_code=409, detail=f"Only a 'not_ready' return can be rescheduled; this is '{item.status}'"
+        )
+    item.status = "ready_for_pickup"
     await session.commit()
     return (await return_views(session, [item]))[0]

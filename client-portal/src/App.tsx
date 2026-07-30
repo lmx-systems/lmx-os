@@ -15,6 +15,7 @@ import { OrderDetail } from './components/OrderDetail'
 import { InvoicesTable } from './components/InvoicesTable'
 import { InvoiceDetail } from './components/InvoiceDetail'
 import { UsersPanel } from './components/UsersPanel'
+import { ReturnsPanel } from './components/ReturnsPanel'
 
 // No client-side routing yet (same call as dashboard/ - see its
 // nginx.conf comment) - a single view-state variable is enough for the
@@ -25,6 +26,7 @@ type View =
   | { name: 'order-detail'; orderId: string }
   | { name: 'invoices' }
   | { name: 'invoice-detail'; invoiceId: string }
+  | { name: 'returns' }
   | { name: 'team' }
 
 export default function App() {
@@ -117,6 +119,7 @@ export default function App() {
 
   const onOrdersTab = view.name === 'orders' || view.name === 'order-detail'
   const onInvoicesTab = view.name === 'invoices' || view.name === 'invoice-detail'
+  const onReturnsTab = view.name === 'returns'
   const onTeamTab = view.name === 'team'
   // The Team tab (user management, docs/ROADMAP.md C4) is admin-only - the
   // API 403s a member regardless, but there's no reason to show them a tab
@@ -147,6 +150,16 @@ export default function App() {
             }`}
           >
             Invoices
+          </button>
+          <button
+            onClick={() => setView({ name: 'returns' })}
+            className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+              onReturnsTab
+                ? 'border-[var(--accent)] text-[var(--text-primary)]'
+                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            Returns
           </button>
           {isAdmin && (
             <button
@@ -196,6 +209,7 @@ export default function App() {
           ) : (
             <div className="text-sm text-[var(--text-muted)]">Loading invoice…</div>
           ))}
+        {view.name === 'returns' && <ReturnsPanel />}
         {view.name === 'team' && isAdmin && <UsersPanel profile={profile} />}
       </main>
     </div>

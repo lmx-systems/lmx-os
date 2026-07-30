@@ -25,6 +25,15 @@ class ClientProfileView(BaseModel):
     role: str
 
 
+class ClientShopView(BaseModel):
+    """One of the caller company's shops - drives the portal's flag-cores-ready
+    picker (docs/ROADMAP.md W1 slice 4)."""
+
+    shop_id: str
+    name: str
+    external_ref: str | None
+
+
 class ClientUserView(BaseModel):
     """One user at the caller's client - the shape /client/users returns.
     Never includes the password hash."""

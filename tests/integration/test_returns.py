@@ -10,8 +10,8 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.api.admin_routes import list_returns, mark_return_returned
-from app.api.client_routes import flag_shop_returns_ready, list_my_returns
+from app.api.admin_routes import list_returns, mark_return_returned, reschedule_return
+from app.api.client_routes import flag_shop_returns_ready, list_my_returns, list_my_shops
 from app.api.driver_routes import collect_return, return_cores_to_shop, return_not_ready
 from app.batch_queue.store import HoldQueueStore
 from app.client_auth.dependencies import AuthedClient
@@ -278,3 +278,70 @@ async def test_admin_mark_returned_409_if_already_terminal_and_404_unknown(db_se
     with pytest.raises(HTTPException) as exc:
         await mark_return_returned(str(uuid.uuid4()), session=db_session)
     assert exc.value.status_code == 404
+
+
+# --- slice 4: awaiting-with-age list, not_ready reschedule, portal shops ---
+
+async def test_view_carries_created_at_and_age(db_session, real_redis_client):
+    hub_id, client_id, _shop = await _seed_hcs(db_session)
+    await _ingest(db_session, hub_id, client_id, return_manifest="core")
+    (view,) = await list_returns(str(hub_id), session=db_session)
+    assert view.created_at  # iso string present
+    assert view.age_hours >= 0.0  # freshly created -> ~0h
+
+
+async def test_admin_awaiting_filter_excludes_collected_and_terminal(db_session, real_redis_client):
+    hub_id, client_id, shop_id = await _seed_hcs(db_session)
+    # one collected (in the driver's hands), one still expected, one returned
+    o1 = await _ingest(db_session, hub_id, client_id, ref="ORD-A", return_manifest="A")
+    await _ingest(db_session, hub_id, client_id, ref="ORD-B", return_manifest="B")  # stays expected
+    authed, stop = await _arrived_dropoff(db_session, hub_id, o1)
+    await collect_return(str(stop.id), CollectReturnBody(), driver=authed, session=db_session)  # -> collected
+    done = await _collected_return(db_session, hub_id, shop_id, manifest="C")
+    await mark_return_returned(str(done.id), session=db_session)  # -> returned_to_shop
+
+    awaiting = await list_returns(str(hub_id), awaiting=True, session=db_session)
+    assert {v.manifest for v in awaiting} == {"B"}  # only the still-expected one
+
+
+async def test_admin_reschedule_not_ready_to_ready_for_pickup(db_session, real_redis_client):
+    hub_id, client_id, _shop = await _seed_hcs(db_session)
+    order = await _ingest(db_session, hub_id, client_id, return_manifest="core")
+    authed, stop = await _arrived_dropoff(db_session, hub_id, order)
+    await return_not_ready(str(stop.id), driver=authed, session=db_session)  # -> not_ready
+    ret = (await _returns_for(db_session, order.id))[0]
+
+    view = await reschedule_return(str(ret.id), session=db_session)
+    assert view.status == "ready_for_pickup"
+
+
+async def test_admin_reschedule_409_unless_not_ready_and_404_unknown(db_session, real_redis_client):
+    hub_id, client_id, shop_id = await _seed_hcs(db_session)
+    ret = await _collected_return(db_session, hub_id, shop_id)  # 'collected', not 'not_ready'
+    with pytest.raises(HTTPException) as exc:
+        await reschedule_return(str(ret.id), session=db_session)
+    assert exc.value.status_code == 409
+
+    with pytest.raises(HTTPException) as exc:
+        await reschedule_return(str(uuid.uuid4()), session=db_session)
+    assert exc.value.status_code == 404
+
+
+async def test_client_awaiting_filter_scopes_and_excludes_collected(db_session, real_redis_client):
+    hub_id, client_id, shop_id = await _seed_hcs(db_session)
+    await flag_shop_returns_ready(
+        str(shop_id), ReturnFlagBody(manifest="waiting cores"),
+        client=_authed_client(client_id), session=db_session,
+    )  # ready_for_pickup
+    await _collected_return(db_session, hub_id, shop_id, manifest="already collected")
+
+    awaiting = await list_my_returns(awaiting=True, client=_authed_client(client_id), session=db_session)
+    assert [r.manifest for r in awaiting] == ["waiting cores"]
+
+
+async def test_list_my_shops_is_scoped_to_the_client(db_session):
+    _hub_a, client_a, shop_a = await _seed_hcs(db_session, external_ref="SHOP-A")
+    await _seed_hcs(db_session, external_ref="SHOP-B")  # a different client's shop
+    shops = await list_my_shops(client=_authed_client(client_a), session=db_session)
+    assert [s.shop_id for s in shops] == [str(shop_a)]
+    assert shops[0].external_ref == "SHOP-A"

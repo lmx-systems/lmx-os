@@ -4,9 +4,11 @@ import type {
   ClientOrderDetailView,
   ClientOrderSummaryView,
   ClientProfileView,
+  ClientShopView,
   ClientUserView,
   InvoiceDetailView,
   InvoiceSummaryView,
+  ReturnItemView,
 } from './types'
 
 // /client/* is exempt from the ops-dashboard auth gate
@@ -106,4 +108,17 @@ export const api = {
     userId: string,
     body: { role?: string; is_active?: boolean; new_password?: string },
   ) => request<ClientUserView>(`/client/users/${userId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  // Returns & core pickups (docs/ROADMAP.md W1). `awaiting` narrows to the
+  // cores still waiting on a pickup - the counter's working list.
+  myReturns: (awaiting = false) =>
+    request<ReturnItemView[]>(`/client/returns${awaiting ? '?awaiting=true' : ''}`),
+
+  myShops: () => request<ClientShopView[]>('/client/shops'),
+
+  flagShopReturns: (shopId: string, manifest: string) =>
+    request<ReturnItemView>(`/client/shops/${shopId}/returns`, {
+      method: 'POST',
+      body: JSON.stringify({ manifest }),
+    }),
 }
