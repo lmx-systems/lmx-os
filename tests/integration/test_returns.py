@@ -11,8 +11,10 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.api.admin_routes import list_returns
+from app.api.client_routes import flag_shop_returns_ready, list_my_returns
 from app.api.driver_routes import collect_return, return_not_ready
 from app.batch_queue.store import HoldQueueStore
+from app.client_auth.dependencies import AuthedClient
 from app.driver_auth.dependencies import AuthedDriver
 from app.ingestion.service import ingest_order
 from app.models.client import Client
@@ -22,7 +24,7 @@ from app.models.return_item import ReturnItem
 from app.models.route import Route
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
-from app.schemas.returns import CollectReturnBody
+from app.schemas.returns import CollectReturnBody, ReturnFlagBody
 
 pytestmark = pytest.mark.integration
 
@@ -160,3 +162,44 @@ async def test_admin_list_returns_filters_by_status(db_session, real_redis_clien
     assert len(all_returns) == 2
     expected_only = await list_returns(str(hub_id), status="expected", session=db_session)
     assert [r.origin_order_ref for r in expected_only] == ["ORD-B"]
+
+
+# --- slice 2: shop-flagged standalone returns (client portal) ---
+
+def _authed_client(client_id):
+    return AuthedClient(client_id=str(client_id), client_user_id="u", email="u@x.example", name="U", role="admin")
+
+
+async def test_flag_shop_returns_ready_creates_a_standalone_return(db_session):
+    hub_id, client_id, shop_id = await _seed_hcs(db_session)
+    view = await flag_shop_returns_ready(
+        str(shop_id), ReturnFlagBody(manifest="5 cores accumulated"),
+        client=_authed_client(client_id), session=db_session,
+    )
+    assert view.status == "ready_for_pickup"
+    assert view.origin_order_ref == ""  # standalone - no originating delivery
+    assert view.shop_name == "Returns Shop"
+
+    result = await db_session.execute(select(ReturnItem).where(ReturnItem.shop_id == shop_id))
+    item = result.scalar_one()
+    assert item.origin_order_id is None and item.status == "ready_for_pickup"
+
+
+async def test_flag_rejects_a_shop_that_isnt_the_clients(db_session):
+    _hub_a, client_a, _shop_a = await _seed_hcs(db_session, external_ref="SHOP-A")
+    _hub_b, _client_b, shop_b = await _seed_hcs(db_session, external_ref="SHOP-B")
+    with pytest.raises(HTTPException) as exc:
+        await flag_shop_returns_ready(
+            str(shop_b), ReturnFlagBody(manifest="x"), client=_authed_client(client_a), session=db_session
+        )
+    assert exc.value.status_code == 404
+
+
+async def test_list_my_returns_is_scoped_to_the_client(db_session):
+    hub_a, client_a, shop_a = await _seed_hcs(db_session, external_ref="SHOP-A")
+    _hub_b, client_b, shop_b = await _seed_hcs(db_session, external_ref="SHOP-B")
+    await flag_shop_returns_ready(str(shop_a), ReturnFlagBody(manifest="A cores"), client=_authed_client(client_a), session=db_session)
+    await flag_shop_returns_ready(str(shop_b), ReturnFlagBody(manifest="B cores"), client=_authed_client(client_b), session=db_session)
+
+    mine = await list_my_returns(client=_authed_client(client_a), session=db_session)
+    assert [r.manifest for r in mine] == ["A cores"]

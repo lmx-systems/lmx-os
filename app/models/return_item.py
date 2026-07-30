@@ -33,8 +33,10 @@ class ReturnItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
     # The forward delivery this core came off - keeps the deposit/exchange
     # traceable back to the order that generated it (W1's "links to its
-    # originating delivery").
-    origin_order_id: Mapped[UUID] = mapped_column(ForeignKey("orders.id"), nullable=False, index=True)
+    # originating delivery"). Nullable (slice 2): a *standalone* return a
+    # shop flags for pickup - cores it accumulated rather than handed back
+    # at a specific delivery - has no single originating order.
+    origin_order_id: Mapped[UUID | None] = mapped_column(ForeignKey("orders.id"), nullable=True, index=True)
     # Where the core goes back to - the originating order's shop.
     shop_id: Mapped[UUID] = mapped_column(ForeignKey("shop_profiles.id"), nullable=False)
     # What's being returned - free text for v1 ("core: alternator"); a
@@ -43,7 +45,9 @@ class ReturnItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     manifest: Mapped[str] = mapped_column(String(500), nullable=False)
 
     status: Mapped[str] = mapped_column(String(24), default="expected", nullable=False)
-    # expected | collected | returned_to_shop | not_ready | cancelled
+    # expected | ready_for_pickup | collected | returned_to_shop | not_ready | cancelled
+    # `ready_for_pickup` (slice 2): a shop flagged accumulated cores as ready
+    # to collect, independent of any delivery to piggyback on.
 
     collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     returned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
