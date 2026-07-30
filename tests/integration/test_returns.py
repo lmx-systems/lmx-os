@@ -10,9 +10,9 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.api.admin_routes import list_returns
+from app.api.admin_routes import list_returns, mark_return_returned
 from app.api.client_routes import flag_shop_returns_ready, list_my_returns
-from app.api.driver_routes import collect_return, return_not_ready
+from app.api.driver_routes import collect_return, return_cores_to_shop, return_not_ready
 from app.batch_queue.store import HoldQueueStore
 from app.client_auth.dependencies import AuthedClient
 from app.driver_auth.dependencies import AuthedDriver
@@ -203,3 +203,78 @@ async def test_list_my_returns_is_scoped_to_the_client(db_session):
 
     mine = await list_my_returns(client=_authed_client(client_a), session=db_session)
     assert [r.manifest for r in mine] == ["A cores"]
+
+
+# --- slice 3: the return leg back to the shop ---
+
+async def _pickup_at_shop(db_session, hub_id, shop_id):
+    driver_id = uuid.uuid4()
+    db_session.add(Driver(id=driver_id, hub_id=hub_id, name="Dep D.", phone="+15555550801", vehicle_capacity_units=5))
+    await db_session.commit()
+    route = Route(hub_id=hub_id, driver_id=driver_id, status="active", plan_version=1)
+    db_session.add(route)
+    await db_session.flush()
+    stop = Stop(route_id=route.id, shop_id=shop_id, sequence=0, stop_type="pickup", status="arrived", parcel_count=1)
+    db_session.add(stop)
+    await db_session.commit()
+    return AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="d"), stop
+
+
+async def _collected_return(db_session, hub_id, shop_id, manifest="core: x"):
+    item = ReturnItem(
+        hub_id=hub_id, shop_id=shop_id, origin_order_id=None, manifest=manifest,
+        status="collected", collected_at=datetime.now(timezone.utc),
+    )
+    db_session.add(item)
+    await db_session.commit()
+    return item
+
+
+async def test_return_to_shop_marks_collected_cores_returned(db_session):
+    hub_id, _client, shop_id = await _seed_hcs(db_session)
+    ret = await _collected_return(db_session, hub_id, shop_id)
+    authed, stop = await _pickup_at_shop(db_session, hub_id, shop_id)
+
+    views = await return_cores_to_shop(str(stop.id), driver=authed, session=db_session)
+    assert [v.status for v in views] == ["returned_to_shop"]
+
+    await db_session.refresh(ret)
+    assert ret.status == "returned_to_shop" and ret.returned_at is not None
+
+
+async def test_return_to_shop_409_when_no_collected_cores(db_session):
+    hub_id, _client, shop_id = await _seed_hcs(db_session)
+    authed, stop = await _pickup_at_shop(db_session, hub_id, shop_id)
+    with pytest.raises(HTTPException) as exc:
+        await return_cores_to_shop(str(stop.id), driver=authed, session=db_session)
+    assert exc.value.status_code == 409
+
+
+async def test_return_to_shop_rejects_a_dropoff_stop(db_session, real_redis_client):
+    hub_id, client_id, shop_id = await _seed_hcs(db_session)
+    await _collected_return(db_session, hub_id, shop_id)
+    order = await _ingest(db_session, hub_id, client_id)
+    authed, stop = await _arrived_dropoff(db_session, hub_id, order)  # dropoff
+    with pytest.raises(HTTPException) as exc:
+        await return_cores_to_shop(str(stop.id), driver=authed, session=db_session)
+    assert exc.value.status_code == 409
+
+
+async def test_admin_mark_return_returned(db_session):
+    hub_id, _client, shop_id = await _seed_hcs(db_session)
+    ret = await _collected_return(db_session, hub_id, shop_id)
+    view = await mark_return_returned(str(ret.id), session=db_session)
+    assert view.status == "returned_to_shop"
+
+
+async def test_admin_mark_returned_409_if_already_terminal_and_404_unknown(db_session):
+    hub_id, _client, shop_id = await _seed_hcs(db_session)
+    ret = await _collected_return(db_session, hub_id, shop_id)
+    await mark_return_returned(str(ret.id), session=db_session)  # -> returned_to_shop
+    with pytest.raises(HTTPException) as exc:
+        await mark_return_returned(str(ret.id), session=db_session)
+    assert exc.value.status_code == 409
+
+    with pytest.raises(HTTPException) as exc:
+        await mark_return_returned(str(uuid.uuid4()), session=db_session)
+    assert exc.value.status_code == 404

@@ -1241,6 +1241,39 @@ async def return_not_ready(
     return await return_views(session, expected)
 
 
+@router.post("/stops/{stop_id}/return-to-shop", response_model=list[ReturnItemView])
+async def return_cores_to_shop(
+    stop_id: str,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> list[ReturnItemView]:
+    """Close the reverse loop (docs/ROADMAP.md W1 slice 3): the driver drops
+    the cores they collected earlier back at their destination shop, while
+    at that shop for a (forward) pickup. Marks every `collected` return
+    bound for this shop as returned_to_shop.
+
+    v1 scopes by destination shop, not by which driver is physically
+    holding which core (ReturnItem carries no driver_id) - fine while one
+    driver covers a shop; revisit if cores routinely change hands mid-transit."""
+    stop = await _get_owned_stop(session, stop_id, driver)
+    if stop.stop_type != "pickup" or stop.shop_id is None:
+        raise HTTPException(status_code=409, detail="Cores are returned at a shop pickup stop")
+
+    result = await session.execute(
+        select(ReturnItem).where(ReturnItem.shop_id == stop.shop_id, ReturnItem.status == "collected")
+    )
+    items = list(result.scalars().all())
+    if not items:
+        raise HTTPException(status_code=409, detail="No collected cores are destined for this shop")
+
+    now = datetime.now(timezone.utc)
+    for item in items:
+        item.status = "returned_to_shop"
+        item.returned_at = now
+    await session.commit()
+    return await return_views(session, items)
+
+
 _CONTENT_TYPE_EXTENSION = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 
 
