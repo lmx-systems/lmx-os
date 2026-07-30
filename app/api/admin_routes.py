@@ -559,3 +559,24 @@ async def list_returns(
     query = query.order_by(ReturnItem.created_at)
     rows = (await session.execute(query)).scalars().all()
     return await return_views(session, list(rows))
+
+
+@router.post("/returns/{return_id}/mark-returned", response_model=ReturnItemView)
+async def mark_return_returned(
+    return_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> ReturnItemView:
+    """Manually mark a return as delivered back (docs/ROADMAP.md W1 slice 3) -
+    an ops correction, and the path for standalone shop-flagged returns that
+    reach the warehouse outside the driver return-to-shop flow. 409 if it's
+    already terminal (returned_to_shop / cancelled)."""
+    item = await session.get(ReturnItem, uuid.UUID(return_id))
+    if item is None:
+        raise HTTPException(status_code=404, detail="Return not found")
+    if item.status in ("returned_to_shop", "cancelled"):
+        raise HTTPException(status_code=409, detail=f"Return is already '{item.status}'")
+    item.status = "returned_to_shop"
+    item.returned_at = datetime.now(timezone.utc)
+    await session.commit()
+    return (await return_views(session, [item]))[0]
