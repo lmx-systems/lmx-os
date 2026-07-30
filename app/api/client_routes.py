@@ -29,7 +29,7 @@ from app.models.invoice import Invoice
 from app.models.order import Order
 from app.models.return_item import ReturnItem
 from app.models.shop import Shop
-from app.returns.service import return_views
+from app.returns.service import AWAITING_STATUSES, return_views
 from app.schemas.billing import InvoiceDetailView, InvoiceSummaryView
 from app.schemas.returns import ReturnFlagBody, ReturnItemView
 from app.schemas.client_auth import (
@@ -38,6 +38,7 @@ from app.schemas.client_auth import (
     ClientOrderDetailView,
     ClientOrderSummaryView,
     ClientProfileView,
+    ClientShopView,
     ClientUserCreateBody,
     ClientUserUpdateBody,
     ClientUserView,
@@ -354,15 +355,38 @@ async def flag_shop_returns_ready(
     return (await return_views(session, [item]))[0]
 
 
+@router.get("/shops", response_model=list[ClientShopView])
+async def list_my_shops(
+    client: AuthedClient = Depends(get_current_client), session: AsyncSession = Depends(get_db)
+) -> list[ClientShopView]:
+    """The caller company's shops (docs/ROADMAP.md W1 slice 4) - drives the
+    portal's flag-cores-ready shop picker."""
+    result = await session.execute(
+        select(Shop).where(Shop.client_id == uuid.UUID(client.client_id)).order_by(Shop.name)
+    )
+    return [
+        ClientShopView(shop_id=str(s.id), name=s.name, external_ref=s.external_ref)
+        for s in result.scalars().all()
+    ]
+
+
 @router.get("/returns", response_model=list[ReturnItemView])
 async def list_my_returns(
-    client: AuthedClient = Depends(get_current_client), session: AsyncSession = Depends(get_db)
+    awaiting: bool = False,
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
 ) -> list[ReturnItemView]:
-    """Every return across this client's shops, newest first."""
-    result = await session.execute(
+    """Every return across this client's shops, newest first. Pass
+    `awaiting=true` for just the ones still waiting on a pickup - the
+    counter-facing cut (docs/ROADMAP.md W1 slice 4); each row carries
+    `age_hours` so a stale core is obvious."""
+    query = (
         select(ReturnItem)
         .join(Shop, ReturnItem.shop_id == Shop.id)
         .where(Shop.client_id == uuid.UUID(client.client_id))
-        .order_by(ReturnItem.created_at.desc())
     )
+    if awaiting:
+        query = query.where(ReturnItem.status.in_(AWAITING_STATUSES))
+    query = query.order_by(ReturnItem.created_at.desc())
+    result = await session.execute(query)
     return await return_views(session, list(result.scalars().all()))

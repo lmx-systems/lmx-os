@@ -68,3 +68,27 @@ export interface InvoiceLineItem {
 export interface InvoiceDetailView extends InvoiceSummaryView {
   line_items: InvoiceLineItem[]
 }
+
+// Mirrors app/schemas/returns.py's ReturnItemView (docs/ROADMAP.md W1).
+export interface ReturnItemView {
+  return_id: string
+  // Empty for a standalone (shop-flagged) return with no originating order.
+  origin_order_ref: string
+  shop_name: string | null
+  manifest: string
+  status: string
+  created_at: string
+  // Hours since the return appeared - drives the "age" column so a stale
+  // core is obvious on the counter (docs/ROADMAP.md W1 slice 4).
+  age_hours: number
+  collected_at: string | null
+  returned_at: string | null
+}
+
+// Mirrors app/schemas/client_auth.py's ClientShopView - the flag-cores
+// picker's options.
+export interface ClientShopView {
+  shop_id: string
+  name: string
+  external_ref: string | null
+}

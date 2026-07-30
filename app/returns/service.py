@@ -5,6 +5,8 @@ list build the same ReturnItemView the same way.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +14,12 @@ from app.models.order import Order
 from app.models.return_item import ReturnItem
 from app.models.shop import Shop
 from app.schemas.returns import ReturnItemView
+
+# Statuses still waiting on a pickup - the counter-facing "awaiting pickup"
+# cut (docs/ROADMAP.md W1 slice 4). `collected` is already in the driver's
+# hands and `returned_to_shop`/`cancelled` are terminal, so none of them are
+# awaiting.
+AWAITING_STATUSES = ("expected", "ready_for_pickup", "not_ready")
 
 
 async def return_views(session: AsyncSession, items: list[ReturnItem]) -> list[ReturnItemView]:
@@ -31,6 +39,7 @@ async def return_views(session: AsyncSession, items: list[ReturnItem]) -> list[R
     shops_result = await session.execute(select(Shop.id, Shop.name).where(Shop.id.in_(shop_ids)))
     shop_by_id = {row[0]: row[1] for row in shops_result.all()}
 
+    now = datetime.now(timezone.utc)
     return [
         ReturnItemView(
             return_id=str(item.id),
@@ -38,6 +47,8 @@ async def return_views(session: AsyncSession, items: list[ReturnItem]) -> list[R
             shop_name=shop_by_id.get(item.shop_id),
             manifest=item.manifest,
             status=item.status,
+            created_at=item.created_at.isoformat(),
+            age_hours=round((now - item.created_at).total_seconds() / 3600, 1),
             collected_at=item.collected_at.isoformat() if item.collected_at else None,
             returned_at=item.returned_at.isoformat() if item.returned_at else None,
         )

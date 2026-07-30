@@ -22,5 +22,10 @@ class ReturnItemView(BaseModel):
     shop_name: str | None
     manifest: str
     status: str
+    created_at: str
+    # Hours since the return first appeared - the "age" on the counter-facing
+    # awaiting-pickup list (docs/ROADMAP.md W1 slice 4), so nothing sits
+    # forgotten. Rounded to one decimal.
+    age_hours: float
     collected_at: str | None
     returned_at: str | None

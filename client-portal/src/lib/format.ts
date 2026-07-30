@@ -59,3 +59,26 @@ export function isFailedStatus(status: string): boolean {
 export function formatStatus(status: string): string {
   return STATUS_LABEL[status] ?? status
 }
+
+// Return/core statuses (docs/ROADMAP.md W1) - distinct from delivery
+// statuses above; a core moves expected -> collected -> returned to shop.
+const RETURN_STATUS_LABEL: Record<string, string> = {
+  expected: 'Expected',
+  ready_for_pickup: 'Ready for pickup',
+  collected: 'Collected',
+  returned_to_shop: 'Returned to shop',
+  not_ready: 'Not ready',
+  cancelled: 'Cancelled',
+}
+
+export function formatReturnStatus(status: string): string {
+  return RETURN_STATUS_LABEL[status] ?? status
+}
+
+// The "age" on the awaiting-pickup list (docs/ROADMAP.md W1 slice 4):
+// sub-hour shows minutes, under a day shows hours, otherwise days.
+export function formatAge(hours: number): string {
+  if (hours < 1) return `${Math.max(0, Math.round(hours * 60))}m`
+  if (hours < 24) return `${Math.round(hours)}h`
+  return `${Math.round(hours / 24)}d`
+}
