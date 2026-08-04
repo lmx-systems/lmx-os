@@ -9,6 +9,24 @@ This supersedes the "Recommended next steps" list at the bottom of
 `docs/NEXT_STEPS.md`'s row-by-row punch list — that file is the detailed
 backlog; this one is the map of how those rows fit into getting to launch.
 
+## Decision log — founders offsite, August 3 2026
+
+**A second demand path.** The offsite adopted gig-platform demand sourcing
+(Curri, Dispatch, Roadie) as a way to get real paid order flow — and real
+training data — without waiting on a signed distributor. Source:
+`LMX Gig-Platform Demand Sourcing & LMXOS Training Strategy`, plus a
+two-week live pilot on Dispatch (Austin, 7/22–8/1/26, Rich: 23 commercial
+jobs, $578.86, $25.17/job, $1.75/mi, $70.74/hr engaged).
+
+| Item | Decision |
+|---|---|
+| **Demand source** | **Gig platforms become a parallel demand path**, not a replacement for the distributor thesis. LMX drivers hold individual accounts on Curri, Dispatch and Roadie; accepted jobs are relayed into LMX OS, which sequences the day. Tracked as the **G-items** below. **Open cofounder question: does G replace the distributor path, run beside it, or bridge to it?** Nothing below assumes an answer. |
+| **Onboarding track** | **Both tracks are legal** (Sourabh, Aug 2026) — the gig-driver track (individual, no DOT) and the carrier track (LMX as FMCSA-authorised motor carrier). Choose on merit, not legality. The gig track starts immediately; the carrier track additionally permits cross-driver pooling, likely yields a real API, and removes dual completion. |
+| **Assignment scope** | **A per-job property, not a system mode.** Both tracks will run simultaneously during any migration, so a job carries its own scope: gig-sourced → pinned to the accepting driver (`allowedVehicleIndices`); carrier-sourced → assignable to any driver. One optimizer run handles both. Getting this wrong means a rewrite. |
+| **Driver fleet hardware** | **Android only.** iOS has no notification-listener API, so zero-touch intake is impossible there. Cheap to standardise at 3 drivers, expensive at 30. Device choice must include "notification reliability under aggressive battery management" — the pilot phone is a Samsung, the worst offender. |
+| **Personal service (§4.2.3)** | Expressed in the optimizer as a per-job constraint rather than treated as a blocker, so the design honours it on the gig track without depending on either legal reading. **Additionally: a collected parcel is a hard pin on any track** — reassignment after pickup needs a physical handoff, so pooling only buys anything between accept and pickup. |
+| **Intake automation** | **Deferred deliberately.** At 3 drivers (~6–12 offers/day) manual entry costs minutes a day, while G1+G2 are 9–16 days of the highest-risk work in the section. Automated intake is a 30-driver problem. Test the notification payload now; build it later. |
+
 ## Decision log — cofounder alignment, July 28 2026
 
 Design/strategy calls made and aligned in a decision-review session. These
@@ -33,6 +51,81 @@ Nothing below is new work discovered today — all of it was already called
 out somewhere in `docs/ARCHITECTURE.md`, `docs/NEXT_STEPS.md`, or
 `driver-app/README.md` as this got built. This just pulls it into one
 list instead of leaving it scattered across three documents.
+
+### Gig-platform demand path
+
+From the August 2026 founders offsite. LMX drivers hold individual accounts
+on Curri, Dispatch and Roadie; they accept offers in each platform's own
+app; the job is relayed into LMX OS, which sequences their day across all
+three. Execution outcomes train the dispatch logic. See the decision log
+above for the track and hardware calls.
+
+**Three things to be honest about before reading the table.**
+
+**(1) This path cannot validate the batching thesis, and not because of
+engineering.** 2.5 DPH rests on two mechanisms: *holding* an order to pair
+it with a nearby one, and *assigning* across the whole fleet. A gig job's
+delivery window is committed the moment it is accepted, so it can never be
+held; and on the gig track it cannot leave the account that accepted it.
+What survives is opportunistic sequencing of jobs a driver already holds —
+real, valuable, and not the same claim. The carrier track restores
+cross-driver assignment but still not holding.
+
+**(2) Three drivers will not produce batchable density.** The pilot ran
+~1.8 jobs/driver/day. Three drivers across three platforms is perhaps 6–12
+offers/day across a metro the size of Austin, where two jobs rarely overlap
+in both time and space. So the near-term value of this section is *not*
+batching — it is accept/decline discipline and data accumulation. Pairing
+opportunities plausibly need 10–15 drivers. Do not let this section be
+pitched internally as proof of commingling until the density supports it.
+
+**(3) The optimizer cannot express these constraints today.**
+`app/optimizer/google_routes_client.py`'s `_build_request` sends shipments
+with a `deliveries` leg only — no `pickups`, no `timeWindows`, no
+`allowedVehicleIndices`; only `globalStartTime`/`globalEndTime` bound the
+model. That is correct for the distributor design, where the batch-hold
+queue enforces SLAs upstream by choosing *when to release*. Under gig it
+inverts: windows are hard, external, and unholdable, so the solver itself
+must enforce them. Google's Route Optimization API supports all three
+natively, so this is a request-builder change, not a solver to write — but
+it extends an integration that has still never made one real call (E1).
+
+| # | Item | Why it matters |
+|---|---|---|
+| G1 | Notification-listener intake (Android) | `NotificationListenerService` reads Curri/Dispatch/Roadie order alerts and creates the job with zero taps. Also fixes the pilot's worst friction — *"alerts unreliable, buried behind a status banner; one near-miss where an accepted order vanished for about an hour."* The screenshotted Dispatch offer surfaced with **4 minutes left of a 70-minute pickup window**; if that is typical, intake latency is the whole game. **Gated on an empirical payload check** — if the notification body is just "New delivery request", this is an alert aggregator (still worth it) rather than intake. iOS has no equivalent API at all. Must be tested on the real Samsung device with the screen off for an hour, because Samsung's battery manager silently kills listener services. |
+| G2 | Share-sheet intake + vision extraction | Driver screenshots the offer → Share → LMX; a vision model extracts the fields. Two taps, works anywhere. Note from the real screenshot: **the collapsed card hides the dropoff address behind a chevron**, so a collapsed-card capture gives windows/pay/distance/pickup/ref but not precise dropoff geocoding — enough to *reject* most offers, not to plan one. Automatic screenshot detection is impossible (iOS fires the event only when your own app is foreground; camera-roll watching is fragile and battery-hostile). |
+| G3 | `GigJob` model + multi-platform store | Distinct from `Order`: no client, no SLA tier, no per-drop fee. Carries source platform, pickup window, dropoff window, pay, distance, platform order ref, and **assignment scope**. Sits upstream of every intake path, so building it first keeps the G1-vs-G2-vs-manual decision swappable rather than architectural. |
+| G4 | Accept-gate service | The commercially interesting one. Given the driver's committed itinerary and a new offer, answer take-it-or-skip-it **inside a 45-second window** (so a <10s budget). Ordered cheapest-first: reachability (`now + ETA(→pickup) ≤ pickup_close`) → self-consistency (`drive(pickup→dropoff) ≤ dropoff_close − pickup_close`) → placement (does insertion break any committed window) → capacity → marginal economics → sibling bonus. The first two kill most offers using only the collapsed card. On the screenshotted offer, step 1 alone rejects it. |
+| G5 | Optimizer: pickup legs, time windows, per-job vehicle restriction | Extend `_build_request` with `pickups[].timeWindows`, `deliveries[].timeWindows`, and `allowedVehicleIndices` for gig-scoped jobs. Also: **a collected parcel is pinned** regardless of track. Formally this is a Pickup-and-Delivery Problem with Time Windows — a *harder* shape than the distributor case (many-to-many pickups, hard windows on both legs, no holding), not an easier one. **Do E1 first**; extending an unverified integration means debugging two unknowns at once. |
+| G6 | Unified cross-platform itinerary in the driver app | One ordered day spanning three platforms, with each stop showing **which app to close it in** — see G11. |
+| G7 | Deadhead / reposition cost model | The pilot's $1.75/mi and $70.74/hr **exclude drive-to-pickup and repositioning**. An accept advisor using headline rate will recommend money-losing jobs. Marginal cost must include deadhead in, engaged time, and reposition out. |
+| G8 | Sibling-ref detector | The pilot screenshot's ref is `S4588150.002-HOU1` — implying `.001`, `.003` exist. Same base ref, or a shared pickup location, means the marginal cost of the second job collapses. This is the cheapest real batching signal available under these contracts, and it works at any density. |
+| G9 | Retention firewall | Enforce the confidentiality boundary in code: train on own execution telemetry and aggregate patterns; do **not** warehouse a standing, identifiable record of a platform's senders, their order frequency, or their pricing. Counsel review before the pipeline is finalised. |
+| G10 | Non-circumvention register | Track which sender was served via which platform and when, so any direct-MSA target can be screened against the 6-month lookback. The pilot's largest repeat account (6 of 23 jobs) is the live watch-item. |
+| G11 | Dual-completion handling | Under the gig track the driver must mark delivered **in the platform's app to get paid**, so LMX OS tells them where to go and they close the job elsewhere — double entry on every stop. This is the friction most likely to make drivers quietly abandon the app, and it needs a deliberate design answer. The carrier track removes it. |
+| G12 | Density & volume instrumentation | Track offers/day, jobs/driver/day, and the share of jobs delivered as part of a multi-job sequence — so "when does batching become possible" is answered by data rather than argued. Also the trigger for revisiting G1/G2. |
+| G13 | Platform-standing risk management | An LMX OS route that causes a miss is a Service Failure on an individual driver's account, affecting their acceptance/on-time standing and deactivation risk. With three drivers, one deactivation is a third of capacity. Needs a hard-stop rule (never accept into an infeasible plan) and per-driver standing monitoring. |
+
+**Open questions to settle empirically — cheap, and they gate real
+decisions:**
+
+| Question | How | Gates |
+|---|---|---|
+| What is in the Android notification payload for each platform? | Android Settings → Notifications → Notification history for a first look; then a throwaway `NotificationListenerService` dumping `extras` to logcat, because the history UI shows only *displayed* text and can give a false negative when the detail sits in `bigText` or a custom extra | G1's scope: full intake, partial pre-fill, or alert-only |
+| How late do offers typically surface, relative to the pickup window? | Log notification timestamp vs. window start over a week of real driving | Whether intake latency is the binding constraint |
+| Does Dispatch's own **Route** tab conflict with LMX OS's sequence, and does the platform penalise deviation? | Observe during the pilot | G6's design, and G13's risk model |
+| Whose account absorbs a Service Failure, and what is the standing penalty? | Platform terms + observation | G13 |
+| Do sibling refs (`.001`/`.002`) actually surface as separate offers? | Watch the offer feed | G8's value, and the earliest batching evidence available |
+
+**Baseline for measuring anything here:** Rich's pilot — **$25.17/job,
+$1.75/mi, $70.74/hr engaged, B2B ~2× B2C per job, field-service the
+best repeatable pattern at $2.03/mi.** That is the control group. Any
+claim that LMX OS improved things is measured against those numbers.
+
+**Deliberately not built for this path:** automated intake before volume
+justifies it (see the decision log); auto-accepting offers via an
+accessibility service — Play Store rejects non-accessibility use of that
+API and it is almost certainly a platform ToS breach.
 
 ### Business / org (not code, but gates what the code is for)
 
@@ -419,10 +512,55 @@ screen redesign/offline queue/biometric auth/live push) and part of Phase
 sequencing below — Sourabh's calls, since none of these had committed
 dates constraining the build order.
 
-### Phase 3.5 — The Elite EXTRA scaffold (NEW, July 2026)
+### Phase 3.4 — Gig-platform demand path (NEW, August 2026)
+**Goal:** real paid order flow and real training data without waiting on a
+signed distributor. See Part 1's "Gig-platform demand path" for the
+item-by-item detail and the three honest caveats.
+
+**This phase and Phase 3.5 are alternatives, not a sequence.** Both exist
+to generate revenue and learning before LMX OS runs a real operation, but
+they source demand from opposite directions — gig platforms versus a signed
+distributor on a scaffold. **Whether G replaces the distributor path, runs
+beside it, or bridges to it is an open cofounder question** (see the August
+decision log). Nothing here assumes an answer, and the phases are numbered
+3.4/3.5 rather than sequentially to avoid implying one.
+
+Build order, revised deliberately so the highest-risk work comes last:
+
+| Stage | Items | Effort | Gets you |
+|---|---|---|---|
+| 1 | **E1** (verify Google API), **G3** (job model), manual entry, **G7** (deadhead cost), **G8** (sibling detector) | 8–12 days | Jobs logged, real marginal economics, sibling detection. The data flywheel starts |
+| 2 | **G5** (pickup legs + time windows + per-job vehicle restriction), **G4** (accept gate) | 8–12 days | Windowed optimization and real accept/decline advice — the actual product at this size |
+| 3 | **G6** (unified itinerary), **G11** (dual completion), **G12** (density instrumentation) | 7–10 days | A route worth showing a driver, and the data to know when batching becomes possible |
+| 4 | **G1** or **G2** (automated intake) | 5–10 days | Only once manual entry genuinely hurts — a 30-driver problem, not a 3-driver one |
+| — | **G9**, **G10**, **G13** | 5–7 days | On counsel's timeline, before any scale-up |
+
+**Stages 1–2 are about four to five weeks** and deliver the thing that
+actually matters at three drivers: knowing which offers to take. Total
+section G is **~32–48 engineer-days ≈ 7–10 focused weeks**, which at a
+realistic share of one founder's time is **3–5 calendar months** — and it
+would be *displacing* Phase 3.5 work, not adding to it.
+
+**Exit criteria:** three drivers running live across all three platforms,
+every accepted job in LMX OS, an accept/decline recommendation produced
+inside the platform's acceptance window, and $/engaged-hour measurable
+against the pilot's $70.74 baseline.
+
+**Do not claim from this phase:** validated batching economics. Density at
+three drivers will not support it (Part 1 explains why). Claim accept
+discipline, marginal-economics visibility, and training data.
+
+### Phase 3.5 — The Elite EXTRA scaffold (distributor path, July 2026)
 **Goal:** Hub 1 generates revenue on a scaffold while LMX OS is still
 being built. This phase did not exist in earlier versions of this plan,
 which assumed LMX OS ran Hub 1 from day one.
+
+**Status note, August 2026:** the offsite's gig-platform path (Phase 3.4)
+is an alternative source of early revenue and learning that does not
+require a signed distributor. This phase remains the plan of record for
+the distributor thesis, and everything below still stands — but it is no
+longer the *only* way to get to real orders, and it should not be assumed
+to be the one being pursued.
 
 The scaffold, per the workflow session: **Elite EXTRA** as the operating
 platform, LMX-owned vans, LMX W-2 drivers (recruited per signed customer,
@@ -572,6 +710,14 @@ pilot: run real orders through the full pipeline," which assumed LMX OS
 ran Hub 1 directly. Under the scaffold model, Hub 1 is already live and
 generating revenue on Elite EXTRA (Phase 3.5); what this phase proves is
 that LMX OS should replace it.
+
+**This phase belongs to the distributor path only.** The gig-platform path
+(Phase 3.4) has no competing human dispatcher to shadow and no scaffold to
+cut over from — LMX OS is in the loop from day one there, just constrained
+to sequencing rather than deciding what to dispatch. So if the offsite's
+path becomes the primary one, this phase does not apply as written and the
+2.5 DPH claim needs a different proof (the gig path cannot supply one — see
+Part 1's caveat (1)).
 
 **Gates:**
 - B2 (signed customer #1 — still the actual gate for everything)
