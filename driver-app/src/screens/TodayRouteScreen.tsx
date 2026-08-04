@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Switch, Text, View, StyleSheet } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -10,6 +10,7 @@ import { OfferBanner } from '../components/OfferBanner';
 import { RouteChangeBanner } from '../components/RouteChangeBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
 import type { HomeStackParamList } from '../navigation/types';
+import { startReportingLocation, stopReportingLocation } from '../location/reportDriverLocation';
 import type { RouteChangeEvent } from '../realtime/routeEventsClient';
 import { useRouteEvents } from '../realtime/useRouteEvents';
 import { spacing, typography, useThemeColors } from '../theme';
@@ -34,6 +35,20 @@ export function TodayRouteScreen({ navigation }: Props) {
   const [routeChangeEvent, setRouteChangeEvent] = useState<RouteChangeEvent | null>(null);
 
   useRouteEvents(route?.route_id ?? null, useCallback((event) => setRouteChangeEvent(event), []));
+
+  // Report position only while on duty (docs/ROADMAP.md F1). Keyed off
+  // isOnline rather than the toggle handler below so that relaunching the app
+  // mid-shift resumes reporting - otherwise a driver who force-quit would
+  // stay invisible to the optimizer for the rest of their shift while
+  // appearing perfectly online to themselves.
+  useEffect(() => {
+    if (!isOnline) {
+      stopReportingLocation();
+      return;
+    }
+    startReportingLocation().catch(() => {});
+    return stopReportingLocation;
+  }, [isOnline]);
 
   async function handleToggle(value: boolean) {
     setTogglingOnline(true);

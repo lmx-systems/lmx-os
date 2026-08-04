@@ -96,6 +96,14 @@ export const api = {
       body: JSON.stringify({ device_id: deviceId, expo_push_token: expoPushToken }),
     }),
 
+  // Position report from the device itself (docs/ROADMAP.md F1). Deliberately
+  // NOT routed through the offline outbox: a stale position flushed on
+  // reconnect is worse than no position at all, since the optimizer would
+  // route against where the driver was twenty minutes ago. The durable trail
+  // (app/models/driver_location_ping.py) accepts gaps for exactly this reason.
+  reportLocation: (body: { lat: number; lng: number; recorded_at: string; accuracy_m?: number | null }) =>
+    request<void>('/driver/me/location', { method: 'POST', body: JSON.stringify(body) }),
+
   getMyProfile: () => request<DriverProfile>('/driver/me'),
 
   updateMyProfile: (body: { vehicle_type: string; plate_number: string; delivery_zone: string }) =>

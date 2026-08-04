@@ -43,6 +43,7 @@ from app.models.call import Call
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.driver_document import DriverDocument
+from app.models.driver_location_ping import DriverLocationPing
 from app.models.driver_shift_event import DriverShiftEvent
 from app.models.gig_payout import GigPayout
 from app.models.message import Message
@@ -63,6 +64,7 @@ from app.schemas.driver_app import (
     DriverAvailabilityUpdate,
     DriverDocumentUpdate,
     DriverDocumentView,
+    DriverLocationPingBody,
     DriverProfileUpdate,
     DriverProfileView,
     EarningsView,
@@ -89,7 +91,7 @@ from app.schemas.driver_auth import (
     RequestOtpResult,
     VerifyOtpBody,
 )
-from app.schemas.fleet import DriverState
+from app.schemas.fleet import DriverLocation, DriverState
 from app.storage.photo_upload_client import generate_object_key, get_photo_upload_client
 
 router = APIRouter(prefix="/driver", tags=["driver"])
@@ -246,6 +248,62 @@ async def register_push_token(
 
     device.expo_push_token = body.expo_push_token
     device.push_token_registered_at = datetime.now(timezone.utc)
+    await session.commit()
+
+
+@router.post("/me/location", status_code=204)
+async def report_my_location(
+    body: DriverLocationPingBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    """The driver's own device reporting where it is (docs/ROADMAP.md F1).
+
+    Before this endpoint the *only* way a driver's position could be set was
+    POST /fleet/{hub_id}/drivers/location, which requires an ops admin
+    (app/api/routes.py) - so in production nothing would ever have
+    populated it, and app/optimizer/service.py skips any driver whose
+    location is None. That made this the difference between the optimizer
+    assigning work and silently assigning none.
+
+    Writes twice, deliberately:
+
+    - Redis, via FleetStateManager, is the optimizer's hot path and holds
+      only the current position.
+    - Postgres (app/models/driver_location_ping.py) is the durable trail,
+      because Redis overwrites and miles-per-drop (W9's scorecard) needs
+      the path travelled.
+
+    The hub comes from the driver's own JWT, never from the request body -
+    a driver cannot report a position into another hub's fleet state.
+
+    Deliberately does NOT publish a dispatch event. app/api/routes.py's
+    upsert_driver_state already documents the rule: a status change alters
+    what the optimizer can assign, a raw location ping does not. Publishing
+    here would re-run a hub's whole optimization cycle every 30 seconds per
+    on-duty driver.
+    """
+    manager = FleetStateManager()
+    await manager.update_driver_location(
+        DriverLocation(
+            driver_id=driver.driver_id,
+            lat=body.lat,
+            lng=body.lng,
+            recorded_at=body.recorded_at.isoformat(),
+        ),
+        driver.hub_id,
+    )
+
+    session.add(
+        DriverLocationPing(
+            driver_id=uuid.UUID(driver.driver_id),
+            hub_id=uuid.UUID(driver.hub_id),
+            lat=body.lat,
+            lng=body.lng,
+            recorded_at=body.recorded_at,
+            accuracy_m=body.accuracy_m,
+        )
+    )
     await session.commit()
 
 

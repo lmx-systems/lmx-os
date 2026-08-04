@@ -4,6 +4,7 @@ and the Learning Loop's nightly job.
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, Response
@@ -88,8 +89,16 @@ async def list_fleet_overview(hub_id: str, session: AsyncSession = Depends(get_d
     off_shift alike. Built for the orchestrator dashboard; the optimizer
     itself only ever reads the narrower available-drivers view
     (FleetStateManager.get_fleet_snapshot), which is why the display name
-    join below lives here and not in FleetStateManager/DriverState's Redis
-    round-trip - the hot path has no reason to pay for it.
+    join and the location fetch below live here and not in
+    FleetStateManager/DriverState's Redis round-trip - the hot path has no
+    reason to pay for either.
+
+    Last reported position is included (docs/ROADMAP.md F1) so the
+    dashboard can place drivers on a map (F2) rather than only listing
+    their assigned stops. A driver who has never reported one comes back
+    with lat/lng null, which is also precisely why the optimizer would skip
+    them - so this view doubles as the diagnostic for "why is nobody being
+    assigned work."
     """
     manager = FleetStateManager()
     roster = await manager.get_fleet_overview(hub_id)
@@ -100,8 +109,20 @@ async def list_fleet_overview(hub_id: str, session: AsyncSession = Depends(get_d
     result = await session.execute(select(Driver.id, Driver.name).where(Driver.id.in_(driver_ids)))
     names = {str(driver_id): name for driver_id, name in result.all()}
 
-    for driver in roster:
+    # One Redis read per driver: location lives under its own per-driver key,
+    # not in the state hash get_fleet_overview already bulk-read. Gathered
+    # concurrently so a full roster costs one round-trip's latency rather
+    # than one per driver.
+    locations = await asyncio.gather(
+        *(manager.get_driver_location(hub_id, d.driver_id) for d in roster)
+    )
+
+    for driver, location in zip(roster, locations):
         driver.name = names.get(driver.driver_id)
+        if location is not None:
+            driver.lat = location.lat
+            driver.lng = location.lng
+            driver.location_recorded_at = location.recorded_at
     return roster
 
 

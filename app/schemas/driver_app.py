@@ -70,6 +70,27 @@ class DriverAvailabilityUpdate(BaseModel):
     status: Literal["available", "off_shift", "on_break", "en_route"]
 
 
+class DriverLocationPingBody(BaseModel):
+    """One position report from the driver's own device (docs/ROADMAP.md F1).
+
+    `recorded_at` is supplied by the client rather than stamped server-side
+    on purpose: the app reports its own observation time, so a ping that
+    was queued through a dead zone still lands at the moment it actually
+    happened instead of collapsing an entire offline stretch onto the
+    reconnect instant.
+
+    Bounds are enforced here rather than trusted: lat/lng outside real
+    coordinate ranges is a malformed client, and a negative accuracy is
+    meaningless - both are cheap to reject at the edge (same reasoning as
+    the Literal/length bounds the S6 security pass added elsewhere).
+    """
+
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    recorded_at: datetime
+    accuracy_m: float | None = Field(default=None, ge=0)
+
+
 class OfferStopSummary(BaseModel):
     order_id: str
     lat: float

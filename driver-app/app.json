@@ -24,7 +24,8 @@
       "bundleIdentifier": "com.lmx.driver",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Unlock LMX Driver with Face ID instead of re-entering a verification code every shift.",
-        "NSCameraUsageDescription": "LMX Driver uses the camera to scan parcel barcodes and capture proof-of-delivery photos."
+        "NSCameraUsageDescription": "LMX Driver uses the camera to scan parcel barcodes and capture proof-of-delivery photos.",
+        "NSLocationWhenInUseUsageDescription": "LMX Driver shares your location with dispatch while you're on duty, so you get offered the deliveries nearest to you. Location is not shared when you're off duty."
       }
     },
     "android": {
@@ -34,7 +35,9 @@
         "backgroundColor": "#0c0c0b"
       },
       "permissions": [
-        "CAMERA"
+        "CAMERA",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
       ]
     },
     "extra": {
@@ -53,6 +56,14 @@
         "expo-camera",
         {
           "cameraPermission": "LMX Driver uses the camera to scan parcel barcodes and capture proof-of-delivery photos."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "LMX Driver shares your location with dispatch while you're on duty, so you get offered the deliveries nearest to you. Location is not shared when you're off duty.",
+          "isAndroidBackgroundLocationEnabled": false,
+          "isIosBackgroundLocationEnabled": false
         }
       ]
     ]

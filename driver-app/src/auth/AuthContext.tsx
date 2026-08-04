@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 
 import { api, setAuthToken } from '../api/client';
 import type { DriverProfile } from '../api/types';
+import { stopReportingLocation } from '../location/reportDriverLocation';
 import { registerForPushNotifications } from '../notifications/registerForPushNotifications';
 
 // SecureStore (Keychain on iOS, EncryptedSharedPreferences on Android), not
@@ -114,6 +115,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
+    // Before clearing the token, not after: the location watcher fires on its
+    // own timer, and a ping that lands between clearing auth and tearing the
+    // watcher down would go out unauthenticated (docs/ROADMAP.md F1).
+    stopReportingLocation();
     await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
     setAuthToken(null);
     setProfileState(null);
