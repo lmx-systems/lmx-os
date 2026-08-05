@@ -43,6 +43,7 @@ from app.models.call import Call
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.gig_platform import service as gig_store
+from app.gig_platform.accept_gate import evaluate_offer
 from app.models.driver_document import DriverDocument
 from app.models.driver_location_ping import DriverLocationPing
 from app.models.gig_job import GigJob
@@ -94,7 +95,13 @@ from app.schemas.driver_auth import (
     VerifyOtpBody,
 )
 from app.schemas.fleet import DriverLocation, DriverState
-from app.schemas.gig import GigJobIntake, GigJobStatusUpdate, GigJobView
+from app.schemas.gig import (
+    AcceptVerdictView,
+    GigJobIntake,
+    GigJobStatusUpdate,
+    GigJobView,
+    MarginalEconomicsView,
+)
 from app.storage.photo_upload_client import generate_object_key, get_photo_upload_client
 
 router = APIRouter(prefix="/driver", tags=["driver"])
@@ -353,6 +360,93 @@ async def record_my_gig_job(
             detail=f"{body.source_platform} job {body.platform_job_ref} is already recorded",
         ) from exc
     return gig_store.gig_job_view(job)
+
+
+@router.post("/me/gig-jobs/evaluate", response_model=AcceptVerdictView)
+async def evaluate_gig_offer(
+    body: GigJobIntake,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> AcceptVerdictView:
+    """Take it or skip it (docs/ROADMAP.md G4).
+
+    Evaluates an offer WITHOUT recording it - a platform offer lives about
+    45 seconds and most get declined, so the common path shouldn't write a
+    row. Recording is a separate call the driver makes if they take it.
+
+    Judged against the driver's live position and everything they've already
+    promised. A driver whose app has never reported a position can't be
+    evaluated at all, which is a 409 rather than a guess: assuming a
+    location would produce a confident answer about the wrong starting
+    point, and the reachability check is the one doing most of the work.
+    """
+    location = await FleetStateManager().get_driver_location(driver.hub_id, driver.driver_id)
+    if location is None:
+        raise HTTPException(
+            status_code=409,
+            detail="No current location for this driver - go on duty so the app reports position.",
+        )
+
+    row = await _get_driver_row(session, driver)
+    committed = [
+        job
+        for job in await gig_store.list_for_driver(session, driver.driver_id)
+        if job.status in ("offered", "accepted", "picked_up")
+    ]
+
+    # Evaluated as a transient GigJob rather than a dict so the gate works on
+    # exactly the same shape whether an offer has been recorded or not.
+    candidate = GigJob(
+        hub_id=uuid.UUID(driver.hub_id),
+        driver_id=uuid.UUID(driver.driver_id),
+        source_platform=body.source_platform,
+        intake_source=body.intake_source,
+        platform_job_ref=body.platform_job_ref,
+        pickup_address=body.pickup_address,
+        pickup_lat=body.pickup_lat,
+        pickup_lng=body.pickup_lng,
+        dropoff_address=body.dropoff_address,
+        dropoff_lat=body.dropoff_lat,
+        dropoff_lng=body.dropoff_lng,
+        pickup_window_open=body.pickup_window_open,
+        pickup_window_close=body.pickup_window_close,
+        dropoff_window_open=body.dropoff_window_open,
+        dropoff_window_close=body.dropoff_window_close,
+        pay_cents=body.pay_cents,
+        distance_miles=body.distance_miles,
+        assignment_scope=body.assignment_scope,
+        status="offered",
+    )
+
+    verdict = evaluate_offer(
+        offer=candidate,
+        driver_lat=location.lat,
+        driver_lng=location.lng,
+        committed=committed,
+        capacity_units=row.vehicle_capacity_units,
+    )
+
+    return AcceptVerdictView(
+        accept=verdict.accept,
+        reason=verdict.reason,
+        detail=verdict.detail,
+        economics=(
+            MarginalEconomicsView(
+                pay_cents=verdict.economics.pay_cents,
+                deadhead_miles=verdict.economics.deadhead_miles,
+                engaged_miles=verdict.economics.engaged_miles,
+                reposition_miles=verdict.economics.reposition_miles,
+                vehicle_cost_cents=verdict.economics.vehicle_cost_cents,
+                time_cost_cents=verdict.economics.time_cost_cents,
+                total_cost_cents=verdict.economics.total_cost_cents,
+                margin_cents=verdict.economics.margin_cents,
+                total_minutes=verdict.economics.total_minutes,
+                effective_hourly_cents=verdict.economics.effective_hourly_cents,
+            )
+            if verdict.economics is not None
+            else None
+        ),
+    )
 
 
 @router.get("/me/gig-jobs", response_model=list[GigJobView])

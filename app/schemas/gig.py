@@ -114,3 +114,71 @@ class GigJobView(BaseModel):
 
 class GigJobStatusUpdate(BaseModel):
     status: GigJobStatus
+
+
+class MarginalEconomicsView(BaseModel):
+    """What a job is really worth once the unpaid legs are counted (G7)."""
+
+    pay_cents: int
+    deadhead_miles: float
+    engaged_miles: float
+    reposition_miles: float
+    vehicle_cost_cents: int
+    time_cost_cents: int
+    total_cost_cents: int
+    margin_cents: int
+    total_minutes: float
+    # Pay per hour across the whole job including deadhead. Expect this to
+    # sit well below the pilot's $70.74/hr engaged figure, which counts only
+    # pickup-to-dropoff. The gap is the point.
+    effective_hourly_cents: int | None
+
+
+class AcceptVerdictView(BaseModel):
+    """The accept-gate's answer (G4)."""
+
+    accept: bool
+    # Stable code, not prose - why we passed is training data and needs to
+    # be queryable. One of: unreachable | impossible_windows |
+    # breaks_commitment | over_capacity | unprofitable | not_sequenceable |
+    # acceptable.
+    reason: str
+    detail: str
+    # Absent when the offer was rejected before it was worth costing - the
+    # cheap checks short-circuit precisely so this never gets computed for
+    # an offer that was never feasible.
+    economics: MarginalEconomicsView | None = None
+
+
+class GigDensityReport(BaseModel):
+    """Volume and pairing figures for a hub (docs/ROADMAP.md G12).
+
+    Exists to answer "when does batching become possible" with a
+    measurement. `sequenced_share` is the one that matters: the fraction of
+    delivered jobs the driver was holding concurrently with another. If it
+    stays near zero as drivers are added, that is the finding.
+    """
+
+    hub_id: str
+    window_days: int
+
+    total_offers: int
+    offers_per_day: float
+    accepted_count: int
+    declined_count: int
+    delivered_count: int
+    # Null rather than 0.0 when there were no offers at all - "we accepted
+    # none of nothing" is not a 0% acceptance rate.
+    acceptance_rate: float | None
+
+    active_driver_count: int
+    jobs_per_driver_per_day: float | None
+    # Rich's Austin pilot, so every reading renders against the control group.
+    pilot_jobs_per_driver_per_day: float
+
+    # Denominator and numerator exposed alongside the ratio: with volumes
+    # this small, "1 of 3" and "33%" are very different things to read, and
+    # only one of them invites over-interpretation.
+    measurable_delivered_count: int
+    sequenced_delivered_count: int
+    sequenced_share: float | None

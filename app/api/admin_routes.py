@@ -63,8 +63,9 @@ from app.schemas.admin import (
 )
 from app.schemas.billing import InvoiceDetailView, InvoiceGenerateBody
 from app.gig_platform import service as gig_store
+from app.gig_platform.density import hub_density_report
 from app.returns.service import AWAITING_STATUSES, return_views
-from app.schemas.gig import GigJobView
+from app.schemas.gig import GigDensityReport, GigJobView
 from app.schemas.returns import ReturnItemView
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -636,3 +637,25 @@ async def list_gig_jobs(
         session, hub_id, statuses=(status,) if status else None
     )
     return [gig_store.gig_job_view(job) for job in jobs]
+
+
+@router.get("/hubs/{hub_id}/gig-density", response_model=GigDensityReport)
+async def get_gig_density(
+    hub_id: str,
+    days: int = 14,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> GigDensityReport:
+    """Volume and pairing figures for the gig path (docs/ROADMAP.md G12).
+
+    The number to watch is `sequenced_share` - the fraction of delivered
+    jobs the driver was holding concurrently with another. It is the
+    difference between "we are sequencing work" and "we are doing jobs one
+    at a time, faster." The roadmap expects it to stay near zero until
+    roughly 10-15 drivers, and this endpoint exists so that expectation gets
+    confirmed or overturned by data rather than argued.
+
+    `offers_per_day` is separately the trigger for revisiting automated
+    intake (G1/G2), which was deferred as a 30-driver problem.
+    """
+    return await hub_density_report(session, hub_id, days=days)
