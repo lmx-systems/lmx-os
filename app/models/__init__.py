@@ -5,6 +5,7 @@ from app.models.client_user import ClientUser
 from app.models.driver import Driver
 from app.models.driver_document import DriverDocument
 from app.models.driver_location_ping import DriverLocationPing
+from app.models.gig_job import GigJob
 from app.models.gig_payout import GigPayout
 from app.models.hub import Hub
 from app.models.hub_closure import HubClosure
@@ -27,6 +28,7 @@ __all__ = [
     "Driver",
     "DriverDocument",
     "DriverLocationPing",
+    "GigJob",
     "GigPayout",
     "Hub",
     "HubClosure",

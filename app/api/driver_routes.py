@@ -42,8 +42,10 @@ from app.messaging.voice_client import get_voice_client
 from app.models.call import Call
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
+from app.gig_platform import service as gig_store
 from app.models.driver_document import DriverDocument
 from app.models.driver_location_ping import DriverLocationPing
+from app.models.gig_job import GigJob
 from app.models.driver_shift_event import DriverShiftEvent
 from app.models.gig_payout import GigPayout
 from app.models.message import Message
@@ -92,6 +94,7 @@ from app.schemas.driver_auth import (
     VerifyOtpBody,
 )
 from app.schemas.fleet import DriverLocation, DriverState
+from app.schemas.gig import GigJobIntake, GigJobStatusUpdate, GigJobView
 from app.storage.photo_upload_client import generate_object_key, get_photo_upload_client
 
 router = APIRouter(prefix="/driver", tags=["driver"])
@@ -305,6 +308,96 @@ async def report_my_location(
         )
     )
     await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Gig-platform jobs (docs/ROADMAP.md G3)
+#
+# Unrelated to this file's gig *payout* code below (A11), which is about how
+# a gig-classified LMX driver gets paid. These endpoints are about work
+# sourced from Curri/Dispatch/Roadie.
+#
+# Manual entry is the intended v1 path and these endpoints are it: at three
+# drivers, typing an offer in costs minutes a day, while automated intake is
+# the riskiest work in the section and a 30-driver problem. G1's notification
+# listener and G2's share-sheet extraction will call the same store with the
+# same shape, so adding them changes nothing here.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/me/gig-jobs", response_model=GigJobView, status_code=201)
+async def record_my_gig_job(
+    body: GigJobIntake,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> GigJobView:
+    """Record a gig-platform offer that surfaced on this driver's account.
+
+    Hub and driver both come from the JWT, never the body - the offer
+    arrived on this driver's own platform account, and on the gig track that
+    is precisely what pins the job to them.
+
+    A repeat of the same platform ref is a 409 rather than a second row.
+    Once G1/G2 exist this stops being an edge case: a notification and a
+    manual entry can easily capture the same offer, and silently keeping
+    both would corrupt the density figures (G12) that decide when batching
+    becomes possible.
+    """
+    try:
+        job = await gig_store.record_job(
+            session, body, hub_id=driver.hub_id, driver_id=driver.driver_id
+        )
+    except gig_store.DuplicateGigJob as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{body.source_platform} job {body.platform_job_ref} is already recorded",
+        ) from exc
+    return gig_store.gig_job_view(job)
+
+
+@router.get("/me/gig-jobs", response_model=list[GigJobView])
+async def list_my_gig_jobs(
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> list[GigJobView]:
+    """This driver's gig jobs across every platform, pickup-window order.
+
+    One ordered day spanning three platforms is the point of the store being
+    multi-platform - today a driver reconciles Curri, Dispatch and Roadie in
+    their head. G6 builds the real itinerary surface on this.
+    """
+    jobs = await gig_store.list_for_driver(session, driver.driver_id)
+    return [gig_store.gig_job_view(job) for job in jobs]
+
+
+@router.patch("/me/gig-jobs/{gig_job_id}", response_model=GigJobView)
+async def update_my_gig_job_status(
+    gig_job_id: str,
+    body: GigJobStatusUpdate,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> GigJobView:
+    """Move one of this driver's gig jobs along its lifecycle.
+
+    Note what this does NOT do: it does not mark the job delivered on the
+    platform. Under the gig track the driver still has to close it in the
+    platform's own app to get paid, so this records our view of reality
+    rather than driving it. That double entry is the friction most likely to
+    make drivers quietly abandon the app, and it needs a real design answer
+    (G11) rather than being papered over here.
+    """
+    job = await session.get(GigJob, uuid.UUID(gig_job_id))
+    if job is None or str(job.driver_id) != driver.driver_id:
+        # Same 404 for "doesn't exist" and "belongs to someone else" - a
+        # distinct 403 would confirm the id is real to a driver who has no
+        # business knowing that.
+        raise HTTPException(status_code=404, detail="Gig job not found")
+
+    try:
+        job = await gig_store.transition(session, job, body.status)
+    except gig_store.InvalidGigJobTransition as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return gig_store.gig_job_view(job)
 
 
 # ---------------------------------------------------------------------------

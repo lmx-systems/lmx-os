@@ -62,7 +62,9 @@ from app.schemas.admin import (
     UrgencyRuleView,
 )
 from app.schemas.billing import InvoiceDetailView, InvoiceGenerateBody
+from app.gig_platform import service as gig_store
 from app.returns.service import AWAITING_STATUSES, return_views
+from app.schemas.gig import GigJobView
 from app.schemas.returns import ReturnItemView
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -607,3 +609,30 @@ async def reschedule_return(
     item.status = "ready_for_pickup"
     await session.commit()
     return (await return_views(session, [item]))[0]
+
+
+@router.get("/hubs/{hub_id}/gig-jobs", response_model=list[GigJobView])
+async def list_gig_jobs(
+    hub_id: str,
+    status: str | None = None,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[GigJobView]:
+    """Gig-platform jobs for this hub (docs/ROADMAP.md G3), newest offer
+    first, optionally filtered by status (offered | accepted | picked_up |
+    delivered | declined | cancelled).
+
+    Distinct from every other list on this router: these are not orders. No
+    client, no SLA tier we assigned, no rate-table fee - the platform set the
+    windows and the pay, and we cannot hold one for a cluster-mate.
+
+    This is the read the density instrumentation (G12) will build on: offers
+    per day, jobs per driver per day, and the share delivered as part of a
+    multi-job sequence. Those numbers are what turn "when does batching
+    become possible" from an argument into a measurement - the pilot ran at
+    roughly 1.8 jobs/driver/day, and pairing plausibly needs 10-15 drivers.
+    """
+    jobs = await gig_store.list_for_hub(
+        session, hub_id, statuses=(status,) if status else None
+    )
+    return [gig_store.gig_job_view(job) for job in jobs]
