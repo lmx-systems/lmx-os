@@ -133,7 +133,14 @@ class LMXOrder(BaseModel):
     pickup_window_end: datetime | None = None
 
     # --- Destination ----------------------------------------------------
-    drop_address_raw: str = Field(min_length=1, max_length=255)
+    # Optional, which §1.2 does not say but the codebase requires: no POS/DMS
+    # adapter populates a destination today (see Order.delivery_address's
+    # docstring - "no source-system adapter has been updated to populate these
+    # yet"), so requiring it here would break every existing ingestion path.
+    # It is also the right call independently: §2.2 principle 7 says never block
+    # intake on a missing field. An order without a destination is accepted and
+    # stored, it just isn't dispatchable - which `is_dispatchable` reports.
+    drop_address_raw: str | None = Field(default=None, max_length=255)
     drop_lat: float | None = Field(default=None, ge=-90, le=90)
     drop_lng: float | None = Field(default=None, ge=-180, le=180)
     drop_contact_name: str | None = Field(default=None, max_length=120)
