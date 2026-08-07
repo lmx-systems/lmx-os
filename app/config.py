@@ -133,6 +133,19 @@ class Settings(BaseSettings):
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
 
+    # Geocoding (app/geocoding/) - turns a typed address into coordinates so
+    # LMX Link's ad-hoc pickup works without anyone pre-registering a shop.
+    #
+    # Unlike every other external dependency in this file there is NO stub
+    # fallback, because geocoding has no usable degraded mode: a stub either
+    # fails (no order ever routes) or invents coordinates (a driver is sent to a
+    # fictional address). The default provider is therefore a real one that
+    # needs no account - Nominatim - so "unconfigured" can't happen.
+    #
+    # Nominatim is a PILOT choice: 1 req/sec, no commercial bulk use. Real volume
+    # forces a keyed provider, which is what this setting exists to switch to.
+    geocoder_provider: str = "nominatim"
+
     # Payroll (app/payroll/): W2 hours submission today, with 1099/gig pay
     # rails expected to join behind the same PayrollProvider interface as
     # the driver-classification phases roll out (docs/NEXT_STEPS.md). No
