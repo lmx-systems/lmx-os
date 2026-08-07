@@ -169,3 +169,25 @@ export interface ProposedRuleApprovalResult {
   status: string
   active_rule_id: string | null
 }
+
+// Public client signup review (docs/LMX_LINK_PLAN.md). Anyone can apply;
+// nobody dispatches an LMX van until someone here approves them.
+export interface PendingSignupView {
+  client_id: string
+  company_name: string
+  service_area: string | null
+  contact_name: string | null
+  contact_email: string | null
+  contact_phone: string | null
+  terms_version: string | null
+  terms_accepted_at: string | null
+  signup_status: string
+  submitted_at: string
+  hub_id: string
+}
+
+export interface SignupDecisionResult {
+  client_id: string
+  signup_status: string
+  rates_created: number | null
+}

@@ -7,6 +7,7 @@ import { FleetRoster } from './components/FleetRoster'
 import { OperationsPanel } from './components/OperationsPanel'
 import { OnboardClientForm } from './components/OnboardClientForm'
 import { UrgencyRulesPanel } from './components/UrgencyRulesPanel'
+import { PendingSignupsPanel } from './components/PendingSignupsPanel'
 import { ProposedRulesPanel } from './components/ProposedRulesPanel'
 import { LoginPage } from './components/LoginPage'
 import { Toast } from './components/ui/Toast'
@@ -152,6 +153,10 @@ function App() {
                       }}
                       onToast={showToast}
                     />
+                    {/* Above the manual onboarding form on purpose: an applicant
+                        who is already waiting should be approved, not
+                        re-created by hand as a second client record. */}
+                    <PendingSignupsPanel key={`signups-${hubId}`} hubId={hubId} onToast={showToast} />
                     <OnboardClientForm hubId={hubId} onToast={showToast} />
                     <UrgencyRulesPanel key={`urgency-${hubId}`} hubId={hubId} onToast={showToast} />
                     <ProposedRulesPanel key={`proposed-${hubId}`} hubId={hubId} onToast={showToast} />

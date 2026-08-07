@@ -50,6 +50,18 @@ class Client(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
 
+    # Where the applicant says they need deliveries, in their own words
+    # (migration 0030). Free text rather than a structured region because hubs
+    # have no service-area model yet - so at signup a client is placed on a
+    # provisional hub and ops assigns the real one at approval, using this.
+    # Structured routing of signups to hubs is deferred until there is more
+    # than one hub to route between.
+    service_area: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The applicant's phone. Lives here rather than on ClientUser because it is
+    # how ops calls the *company* back to qualify them, which is a fact about
+    # the relationship rather than about one login.
+    contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     # Client-facing portal logins now live in their own table
     # (app/models/client_user.py, migration 0019, docs/ROADMAP.md C4) -
     # many named users per client, not the single inline

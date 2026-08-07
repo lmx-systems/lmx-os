@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.admin_routes import router as admin_router
 from app.api.client_routes import router as client_router
+from app.api.public_routes import router as public_router
 from app.api.driver_routes import router as driver_router
 from app.api.ops_auth_routes import router as ops_auth_router
 from app.api.routes import router as ops_router
@@ -114,3 +115,6 @@ app.include_router(driver_router)
 app.include_router(webhooks_router)
 app.include_router(client_router)
 app.include_router(admin_router)
+# The only unauthenticated write surface - see app/api/public_routes.py for what
+# protects it.
+app.include_router(public_router)

@@ -11,7 +11,9 @@ import type {
   OpsProfileView,
   OptimizationResult,
   OrderStatusSummary,
+  PendingSignupView,
   ProposedRuleApprovalResult,
+  SignupDecisionResult,
   ProposedRuleView,
   UrgencyRuleBody,
   UrgencyRuleView,
@@ -143,5 +145,23 @@ export const api = {
     request<ProposedRuleApprovalResult>(`/admin/proposed-rules/${ruleId}/approve`, { method: 'POST' }),
 
   dismissProposedRule: (ruleId: string) =>
-    request<ProposedRuleApprovalResult>(`/admin/proposed-rules/${ruleId}/dismiss`, { method: 'POST' }),
+    request<ProposedRuleApprovalResult>(`/admin/proposed-rules/${ruleId}/dismiss`, { method: 'POST' }),,
+
+  // Public-signup review (docs/LMX_LINK_PLAN.md). Approval is also where a
+  // client's per-tier rates get set - which is what guarantees an active
+  // client is always billable.
+  listSignups: (status = 'pending') =>
+    request<PendingSignupView[]>(`/admin/signups?status=${encodeURIComponent(status)}`),
+
+  approveSignup: (clientId: string, body: { rates: { sla_tier: string; rate_per_drop_cents: number }[]; hub_id?: string }) =>
+    request<SignupDecisionResult>(`/admin/signups/${clientId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  rejectSignup: (clientId: string, reason?: string) =>
+    request<SignupDecisionResult>(`/admin/signups/${clientId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: reason ?? null }),
+    }),
 }

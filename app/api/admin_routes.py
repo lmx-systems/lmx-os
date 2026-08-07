@@ -14,6 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -66,7 +67,15 @@ from app.gig_platform import service as gig_store
 from app.gig_platform.density import hub_density_report
 from app.returns.service import AWAITING_STATUSES, return_views
 from app.schemas.gig import GigDensityReport, GigJobView
+from app.schemas.signup import (
+    ApproveSignupBody,
+    PendingSignupView,
+    RejectSignupBody,
+    SignupDecisionResult,
+)
 from app.schemas.returns import ReturnItemView
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -659,3 +668,158 @@ async def get_gig_density(
     intake (G1/G2), which was deferred as a 30-driver problem.
     """
     return await hub_density_report(session, hub_id, days=days)
+
+
+# ---------------------------------------------------------------------------
+# Public-signup review queue (docs/LMX_LINK_PLAN.md)
+#
+# The gate that keeps a self-serve signup form compatible with LMX being a B2B
+# operator rather than self-serve SaaS. Anyone can apply; nobody dispatches an
+# LMX van until someone here approves them.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/signups", response_model=list[PendingSignupView])
+async def list_signups(
+    status: str = "pending",
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[PendingSignupView]:
+    """Applicants awaiting review, oldest first so nobody is left behind a
+    newer one. Pass `status` to see approved or rejected history instead."""
+    result = await session.execute(
+        select(Client).where(Client.signup_status == status).order_by(Client.created_at)
+    )
+    clients = list(result.scalars().all())
+    if not clients:
+        return []
+
+    # The applicant's own details live on their first admin user. Batched rather
+    # than queried per client so the queue is one round trip.
+    users_result = await session.execute(
+        select(ClientUser)
+        .where(ClientUser.client_id.in_([c.id for c in clients]))
+        .order_by(ClientUser.created_at)
+    )
+    first_user: dict[uuid.UUID, ClientUser] = {}
+    for user in users_result.scalars():
+        first_user.setdefault(user.client_id, user)
+
+    return [
+        PendingSignupView(
+            client_id=str(c.id),
+            company_name=c.name,
+            service_area=c.service_area,
+            contact_name=first_user[c.id].name if c.id in first_user else None,
+            contact_email=first_user[c.id].email if c.id in first_user else None,
+            contact_phone=c.contact_phone,
+            terms_version=c.terms_accepted_version,
+            terms_accepted_at=c.terms_accepted_at,
+            signup_status=c.signup_status,
+            submitted_at=c.created_at,
+            hub_id=str(c.hub_id),
+        )
+        for c in clients
+    ]
+
+
+@router.post("/signups/{client_id}/approve", response_model=SignupDecisionResult)
+async def approve_signup(
+    client_id: str,
+    body: ApproveSignupBody,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> SignupDecisionResult:
+    """Approve an applicant, set their rates, and let them in.
+
+    **Rates are required here, and that is the design.** Approval is the only
+    moment where somebody is already looking at this client and deciding
+    commercial terms, so it is the natural place to set them - and doing it here
+    means an active client always has rates. That removes the whole class of
+    problem where a self-signed-up client submits orders that price as null
+    (see Order.fee_cents, which insists null must never look like a free
+    delivery). A client we approved but cannot bill is worse than one still
+    waiting.
+
+    Activating the client and its first user happens last, after the rates are
+    in the session, so a failure part-way cannot leave someone able to order
+    with no rates configured.
+    """
+    client = await session.get(Client, uuid.UUID(client_id))
+    if client is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if client.signup_status == "active":
+        # Idempotent rather than an error: two ops users clicking approve on the
+        # same queue is an ordinary race, not a mistake worth surfacing.
+        return SignupDecisionResult(client_id=client_id, signup_status="active", rates_created=0)
+    if client.signup_status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only a pending signup can be approved; this one is '{client.signup_status}'",
+        )
+
+    bad_tiers = [r.sla_tier for r in body.rates if r.sla_tier not in VALID_SLA_TIERS]
+    if bad_tiers:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown sla_tier(s): {bad_tiers}. Valid tiers: {sorted(VALID_SLA_TIERS)}",
+        )
+
+    if body.hub_id is not None:
+        hub = await session.get(Hub, uuid.UUID(body.hub_id))
+        if hub is None:
+            raise HTTPException(status_code=404, detail="Hub not found")
+        client.hub_id = hub.id
+
+    for rate in body.rates:
+        session.add(
+            ClientRate(
+                client_id=client.id,
+                sla_tier=rate.sla_tier,
+                rate_per_drop_cents=rate.rate_per_drop_cents,
+            )
+        )
+
+    client.signup_status = "active"
+
+    # Their first login becomes usable. C4 re-checks is_active every request, so
+    # this is the single switch that turns a pending applicant into a client who
+    # can sign in and order.
+    users = await session.execute(select(ClientUser).where(ClientUser.client_id == client.id))
+    for user in users.scalars():
+        user.is_active = True
+
+    await session.commit()
+    return SignupDecisionResult(
+        client_id=client_id, signup_status="active", rates_created=len(body.rates)
+    )
+
+
+@router.post("/signups/{client_id}/reject", response_model=SignupDecisionResult)
+async def reject_signup(
+    client_id: str,
+    body: RejectSignupBody,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> SignupDecisionResult:
+    """Decline an applicant.
+
+    The row stays rather than being deleted, so a company that applies again is
+    recognisable and ops isn't re-deciding from nothing. Their user stays
+    inactive, so nothing can log in.
+    """
+    client = await session.get(Client, uuid.UUID(client_id))
+    if client is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if client.signup_status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only a pending signup can be rejected; this one is '{client.signup_status}'",
+        )
+
+    client.signup_status = "rejected"
+    # Deliberately not surfaced to the applicant - it is a note for whoever sees
+    # them apply a second time.
+    logger.info("signup_rejected", client_id=client_id, reason=body.reason)
+    await session.commit()
+    return SignupDecisionResult(client_id=client_id, signup_status="rejected")
