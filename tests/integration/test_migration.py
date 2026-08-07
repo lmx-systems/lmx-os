@@ -55,6 +55,12 @@ async def test_upgrade_head_creates_expected_enums(db_engine):
     order_status_labels = [label for typname, label in rows if typname == "order_status"]
 
     assert sla_labels == ["T1", "T2", "T3", "HOT_SHOT"]
+    # The last four are the LMX Link contract's stop-level progress states
+    # (migration 0028, docs/LMX_LINK_PLAN.md §1.4). They sort at the end rather
+    # than in lifecycle order because `ALTER TYPE ... ADD VALUE` appends - this
+    # list is enum *storage* order, not the state machine's order, which lives
+    # in app/orders/state_machine.py. Don't "tidy" them into sequence; the
+    # sort position is a fact about Postgres, not a choice.
     assert order_status_labels == [
         "received",
         "classified",
@@ -65,6 +71,10 @@ async def test_upgrade_head_creates_expected_enums(db_engine):
         "cancelled",
         "delivery_failed",
         "returned",
+        "accepted",
+        "en_route_pickup",
+        "picked_up",
+        "en_route_drop",
     ]
 
 

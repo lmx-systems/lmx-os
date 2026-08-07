@@ -26,6 +26,16 @@ class OrderStatus(str, enum.Enum):
     held = "held"          # sitting in the batch-hold queue
     queued = "queued"       # released from hold, waiting for a route assignment
     assigned = "assigned"   # attached to a stop on a route
+    # Stop-level progress promoted onto the order (LMX_LINK_PLAN.md §1.4, the
+    # one status machine every sink shares - see app/orders/state_machine.py).
+    # Before these existed an order sat at `assigned` from dispatch until
+    # delivery, with progress visible only on its Stop rows - so a client
+    # watching their order saw "assigned" for an hour with no way to tell
+    # whether the driver had actually collected it yet.
+    accepted = "accepted"                  # a driver took the offer covering it
+    en_route_pickup = "en_route_pickup"
+    picked_up = "picked_up"
+    en_route_drop = "en_route_drop"
     delivered = "delivered"
     cancelled = "cancelled"
     # A driver flagged the stop covering this order (shop closed, access
@@ -45,8 +55,17 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "orders"
 
     hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
-    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)
-    shop_id: Mapped[UUID] = mapped_column(ForeignKey("shop_profiles.id"), nullable=False)
+    # Both nullable as of the LMX Link contract (migration 0028). A path with no
+    # client relationship at all has no client_id, and an order captured before
+    # its pickup address has been resolved to a Shop has no shop_id yet.
+    #
+    # WARNING for anything that reads these: a null client_id means "not a
+    # client's order", NOT "any client". Every client-scoped query must filter
+    # explicitly - see app/api/client_routes.py and app/billing/service.py,
+    # which both already compare against a specific client_id and are therefore
+    # safe. A query that omits the filter would leak across the boundary.
+    client_id: Mapped[UUID | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
+    shop_id: Mapped[UUID | None] = mapped_column(ForeignKey("shop_profiles.id"), nullable=True)
 
     external_order_ref: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     source_system: Mapped[str] = mapped_column(String(32), nullable=False)  # epicor | mam | asa | flat_file
@@ -116,6 +135,83 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     delivery_contact_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     delivery_contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     delivery_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # ------------------------------------------------------------------
+    # LMX Link contract fields (docs/LMX_LINK_PLAN.md §1.2, migration 0028).
+    # See app/schemas/lmx_order.py for the field-by-field reasoning; this is
+    # the persisted half of that object.
+    # ------------------------------------------------------------------
+
+    # Who promised the customer a delivery time - the single most important
+    # field in the design (§1.3). `LMX` means the SLA engine classifies and
+    # owns the clock; `EXTERNAL` means somebody else promised and we enforce
+    # their window without reclassifying it. Every existing row is LMX.
+    sla_owner: Mapped[str] = mapped_column(String(16), nullable=False, server_default="LMX")
+
+    # The source's own identifier for this order. Distinct from
+    # external_order_ref only in intent - kept as its own column so the
+    # (source_system, source_order_ref) uniqueness that gives every adapter
+    # idempotent intake can be added without overloading a column that
+    # predates the contract.
+    source_order_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    # Ad-hoc pickup: a typed address for a place we have no Shop row for yet.
+    # app/ingestion/service.py geocodes it, dedupes on the normalized form, and
+    # creates the Shop - so the second order to the same address reuses it
+    # (§2.2 principle 3, "remember every shop"). These stay populated after
+    # that as the raw thing the customer actually typed.
+    pickup_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pickup_contact_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    pickup_contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Hard windows, set by whoever owns the commitment. Distinct from
+    # hold_deadline, which is ours and internal: these are what was promised.
+    pickup_window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pickup_window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivery_window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivery_window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # What the customer was actually told, as opposed to what we computed. Kept
+    # separately on purpose: if the two diverge, theirs is the one that matters.
+    promised_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Whether this order can move between drivers. A per-job property rather
+    # than a system mode, because both onboarding tracks run simultaneously
+    # during any migration and one optimizer run handles both. Mirrors
+    # app/models/gig_job.py's assignment_scope, which this will absorb.
+    assignment_scope: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="any_driver"
+    )
+
+    # Proof-of-delivery requirements for this order's source (§1.2, "Proof").
+    # JSONB rather than columns because it is a small config blob the driver app
+    # reads whole, and its shape will grow with new sources. Empty dict means
+    # "app defaults", so every pre-contract order behaves exactly as before.
+    proof_requirements: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    # Economics. `fee_cents` below predates the contract and remains what LMX
+    # charges per drop; these carry the wider picture so per-drop and per-mile
+    # revenue can coexist in one margin report.
+    revenue_basis: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="per_drop"
+    )
+    quoted_amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_actuals_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Carried in v1 although collection is not built: retrofitting payment onto
+    # an order contract is a migration, and the point of a contract is to not
+    # need one.
+    payer_type: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="contract_client"
+    )
+    payment_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="unbilled"
+    )
+
+    # Autonomy eligibility, captured from the first van so the first partner
+    # conversation starts with a measured addressable share of real order flow
+    # rather than a projection. Carried now, used later.
+    modality_eligible: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    modality_assigned: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # What LMX charges the client for this drop (Phase 8) - set once at
     # classification time (app/ingestion/service.py) from the client's

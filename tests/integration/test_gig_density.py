@@ -168,7 +168,12 @@ async def test_jobs_per_driver_per_day_uses_days_actually_worked(db_session):
     """A part-time driver shouldn't drag the fleet's throughput down by
     counting calendar days they never worked."""
     hub_id, (driver_id,) = await _seed_hub(db_session)
-    day_one = NOW - timedelta(days=3)
+    # Anchored to a fixed hour, not just NOW-3d. The two jobs below are meant to
+    # land on the SAME calendar day two hours apart, and NOW-relative arithmetic
+    # silently breaks that when the suite runs within two hours of UTC midnight -
+    # `day_one + 2h` rolls into the next date and the driver looks like they
+    # worked three days instead of two. Cost a real debugging detour once.
+    day_one = (NOW - timedelta(days=3)).replace(hour=9, minute=0, second=0, microsecond=0)
     db_session.add_all(
         [
             _job(hub_id, driver_id, status="delivered", offered=day_one,
