@@ -3,6 +3,7 @@ import { TopBar } from './components/TopBar'
 import { KpiStrip } from './components/KpiStrip'
 import { OrderPipeline } from './components/OrderPipeline'
 import { HoldQueueTable } from './components/HoldQueueTable'
+import { FleetMap } from './components/FleetMap'
 import { FleetRoster } from './components/FleetRoster'
 import { OperationsPanel } from './components/OperationsPanel'
 import { OnboardClientForm } from './components/OnboardClientForm'
@@ -134,6 +135,11 @@ function App() {
                 <HoldQueueTable key={hubId} data={held.data} error={held.error} loading={held.loading} />
               </div>
               <div className="flex flex-col gap-4">
+                {/* Map above the roster: "where is my fleet" is the glance a
+                    dispatcher takes, and the roster is the detail they drop to.
+                    Both read the same polled fleet data, so they cannot
+                    disagree with each other. */}
+                <FleetMap key={`map-${hubId}`} data={fleet.data} error={fleet.error} loading={fleet.loading} />
                 <FleetRoster data={fleet.data} error={fleet.error} loading={fleet.loading} />
                 {opsProfile.role === 'admin' && (
                   <>

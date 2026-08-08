@@ -17,6 +17,13 @@ export interface DriverState {
   // the Redis fleet-state entry has no matching Driver row (shouldn't
   // happen in practice, but the backend doesn't assume it can't).
   name: string | null
+  // Last reported position (docs/ROADMAP.md F1). All three are null together
+  // for a driver whose app has never reported one - which is also exactly why
+  // the optimizer would skip them, so the map treats it as a real state to
+  // surface rather than a row to hide.
+  lat: number | null
+  lng: number | null
+  location_recorded_at: string | null
 }
 
 export interface HeldOrderView {
