@@ -133,6 +133,17 @@ class Settings(BaseSettings):
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
 
+    # Shared secret for app/api/internal_routes.py - the scheduler-callable
+    # dispatch and learning-loop endpoints. A platform scheduler carries a
+    # platform OIDC token or a static secret, not an LMX ops session, so it can't
+    # use the ops-user endpoints.
+    #
+    # UNSET DISABLES THOSE ROUTES ENTIRELY (they 404). They do not fall open: an
+    # unauthenticated run-cycle endpoint is both a denial-of-service lever and a
+    # way to move real work, and "forgot to set the secret" is exactly the
+    # deployment where that would matter most.
+    internal_api_token: str | None = None
+
     # How many trusted proxies sit in front of this app (app/client_ip.py,
     # docs/ROADMAP.md L15). Decides which X-Forwarded-For entry is the real
     # caller, which every rate limiter keys on.

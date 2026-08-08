@@ -40,7 +40,15 @@ EXEMPT_PATHS = frozenset(
 # its own IP rate limiting and creates nothing that can act: the client lands in
 # `pending` and its first user is created inactive. Add routes under this prefix
 # only when they are safe for anyone on the internet to call.
-EXEMPT_PREFIXES = ("/driver", "/client", "/webhooks", "/public")
+#
+# /internal: scheduler-callable dispatch/learning-loop triggers
+# (app/api/internal_routes.py). Exempt from OPS-USER auth, not from auth: every
+# route there requires a shared secret and the whole router 404s when none is
+# configured. A platform scheduler carries an OIDC token or a static secret, not
+# an LMX ops session, so minting a long-lived ops account for a robot was the
+# alternative - and a robot with an ops session can do considerably more than run
+# a dispatch cycle.
+EXEMPT_PREFIXES = ("/driver", "/client", "/webhooks", "/public", "/internal")
 
 
 def _is_exempt(path: str) -> bool:
