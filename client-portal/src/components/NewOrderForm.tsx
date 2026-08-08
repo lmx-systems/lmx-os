@@ -2,20 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api, ApiError } from '../lib/api'
 import type { ClientOrderResult, ClientShopView, DeadlineChoice } from '../lib/types'
+import { DeadlinePicker, PickupPicker } from './orderFields'
 
 interface NewOrderFormProps {
   onOrderPlaced: () => void
 }
-
-// §2.2 principle 4: "Deadline as a choice, not a datetime picker. Nobody at a
-// counter operates a calendar widget." These four map to urgency flags the SLA
-// engine already reads - the client says how urgent, LMX decides the tier.
-const DEADLINES: { value: DeadlineChoice; label: string; hint: string }[] = [
-  { value: 'now', label: 'Now', hint: 'Straight there, no waiting' },
-  { value: 'within_the_hour', label: 'Within the hour', hint: 'Urgent' },
-  { value: 'today', label: 'Today', hint: 'Standard' },
-  { value: 'tomorrow', label: 'Tomorrow', hint: 'Scheduled' },
-]
 
 /**
  * Place an order (docs/LMX_LINK_PLAN.md §2.2).
@@ -142,85 +133,30 @@ export function NewOrderForm({ onOrderPlaced }: NewOrderFormProps) {
         />
       </label>
 
-      {/* Principle 3: remember every shop. */}
-      <div className="flex flex-col gap-1 text-sm text-[var(--text-secondary)]">
-        Collect from
-        {shops === null ? (
-          <div className="text-xs text-[var(--text-muted)]">Loading your pickup locations…</div>
-        ) : (
-          <>
-            {shops.length > 0 && (
-              <div className="mb-1 flex flex-wrap gap-1.5">
-                {shops.map((shop) => {
-                  const selected = pickupShopId === shop.shop_id
-                  return (
-                    <button
-                      key={shop.shop_id}
-                      type="button"
-                      onClick={() => {
-                        markStarted()
-                        setPickupShopId(selected ? '' : shop.shop_id)
-                        setPickupAddress('')
-                      }}
-                      title={shop.address ?? undefined}
-                      className={`rounded-full border px-3 py-1.5 text-[13px] transition-colors ${
-                        selected
-                          ? 'border-[var(--accent)] bg-[var(--accent)] text-white'
-                          : 'border-[var(--border-strong)] text-[var(--text-secondary)] hover:border-[var(--accent)]'
-                      }`}
-                    >
-                      {shop.name}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-            {!pickupShopId && (
-              <input
-                required={shops.length === 0}
-                value={pickupAddress}
-                onChange={(e) => setPickupAddress(e.target.value)}
-                placeholder={shops.length > 0 ? 'Or type a new address' : '1200 E 6th St, Austin TX'}
-                autoComplete="off"
-                className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2.5 text-[15px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-              />
-            )}
-            {!pickupShopId && (
-              <span className="text-xs text-[var(--text-muted)]">
-                We'll remember it — next time it's one tap.
-              </span>
-            )}
-          </>
-        )}
-      </div>
+      {/* Principle 3: remember every shop. Shared with the paste panel. */}
+      <PickupPicker
+        shops={shops}
+        shopId={pickupShopId}
+        address={pickupAddress}
+        onShopId={(v) => {
+          markStarted()
+          setPickupShopId(v)
+        }}
+        onAddress={(v) => {
+          markStarted()
+          setPickupAddress(v)
+        }}
+      />
 
-      {/* Principle 4: deadline as a choice. */}
-      <div className="flex flex-col gap-1.5 text-sm text-[var(--text-secondary)]">
-        When
-        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-          {DEADLINES.map((option) => {
-            const selected = deadline === option.value
-            return (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => {
-                  markStarted()
-                  setDeadline(option.value)
-                }}
-                className={`flex flex-col items-start rounded-[var(--radius)] border px-3 py-2 text-left transition-colors ${
-                  selected
-                    ? 'border-[var(--accent)] bg-[var(--accent)]/10'
-                    : 'border-[var(--border-strong)] hover:border-[var(--accent)]'
-                }`}
-              >
-                <span className="text-[14px] font-medium text-[var(--text-primary)]">{option.label}</span>
-                <span className="text-[11px] text-[var(--text-muted)]">{option.hint}</span>
-              </button>
-            )
-          })}
-        </div>
-      </div>
+      {/* Principle 4: deadline as a choice. Shared with the paste panel so the
+          option set can't drift - these values map to SLA tiers server-side. */}
+      <DeadlinePicker
+        value={deadline}
+        onChange={(v) => {
+          markStarted()
+          setDeadline(v)
+        }}
+      />
 
       {/* Principle 7: everything below is optional and collapsed by default, so
           the fast path is three fields. */}

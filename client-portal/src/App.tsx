@@ -11,6 +11,7 @@ import type {
 import { LoginPage } from './components/LoginPage'
 import { SignupPage } from './components/SignupPage'
 import { NewOrderForm } from './components/NewOrderForm'
+import { BulkPastePanel } from './components/BulkPastePanel'
 import { TopBar } from './components/TopBar'
 import { OrdersTable } from './components/OrdersTable'
 import { OrderDetail } from './components/OrderDetail'
@@ -43,6 +44,7 @@ export default function App() {
   const [invoices, setInvoices] = useState<InvoiceSummaryView[] | null>(null)
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetailView | null>(null)
   const [view, setView] = useState<View>({ name: 'orders' })
+  const [bulkMode, setBulkMode] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -202,15 +204,37 @@ export default function App() {
 
         {view.name === 'new-order' && (
           <div className="max-w-xl">
-            <h1 className="mb-4 text-[16px] font-semibold text-[var(--text-primary)]">Send a delivery</h1>
-            <NewOrderForm
-              onOrderPlaced={() => {
-                // Refresh the orders list in the background so switching tabs
-                // shows the new order rather than a stale list - without
-                // yanking the user off the confirmation they just earned.
-                api.myOrders().then(setOrders).catch(() => {})
-              }}
-            />
+            <div className="mb-4 flex items-baseline justify-between gap-3">
+              <h1 className="text-[16px] font-semibold text-[var(--text-primary)]">
+                {bulkMode ? 'Send several deliveries' : 'Send a delivery'}
+              </h1>
+              {/* A quiet text switch rather than tabs: the single-order form is
+                  what a counter uses all day, and paste is an occasional
+                  back-office move. Making them equal-weight would suggest
+                  otherwise. */}
+              <button
+                onClick={() => setBulkMode((v) => !v)}
+                className="shrink-0 text-[13px] font-medium text-[var(--accent)] hover:underline"
+              >
+                {bulkMode ? 'Just one delivery' : 'Paste several'}
+              </button>
+            </div>
+            {bulkMode ? (
+              <BulkPastePanel
+                onOrdersPlaced={() => {
+                  api.myOrders().then(setOrders).catch(() => {})
+                }}
+              />
+            ) : (
+              <NewOrderForm
+                onOrderPlaced={() => {
+                  // Refresh the orders list in the background so switching tabs
+                  // shows the new order rather than a stale list - without
+                  // yanking the user off the confirmation they just earned.
+                  api.myOrders().then(setOrders).catch(() => {})
+                }}
+              />
+            )}
           </div>
         )}
         {view.name === 'orders' && (

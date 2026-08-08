@@ -127,6 +127,74 @@ class ClientOrderResult(BaseModel):
     dispatchable: bool
 
 
+# A dispatcher with six orders pastes six lines (§2.2 principle 5). Capped
+# because every genuinely new address costs a geocoder call, and the pilot
+# provider is limited to one per second - a 60-row paste of unseen addresses
+# would hold the request open for a minute. 25 is comfortably more than the
+# "six orders" the principle describes while keeping the worst case bounded.
+# See app/geocoding/nominatim.py; a keyed provider removes this ceiling.
+MAX_BATCH_ROWS = 25
+
+
+class ClientOrderBatchRow(BaseModel):
+    """One pasted line, already split into fields."""
+
+    drop_address: str = Field(min_length=1, max_length=255)
+    reference: str | None = Field(default=None, max_length=120)
+    drop_contact_name: str | None = Field(default=None, max_length=120)
+
+
+class ClientOrderBatchBody(BaseModel):
+    """Several orders sharing one pickup and one deadline.
+
+    That sharing is the whole reason this is usable: a dispatcher sending six
+    deliveries is almost always sending them from the same place with the same
+    urgency, so asking for those once instead of six times is most of the saving.
+    Anything genuinely per-order stays on the row.
+    """
+
+    pickup_shop_id: str | None = None
+    pickup_address: str | None = Field(default=None, max_length=255)
+    deadline: DeadlineChoice = "today"
+    rows: list[ClientOrderBatchRow] = Field(min_length=1, max_length=MAX_BATCH_ROWS)
+    entry_seconds: int | None = Field(default=None, ge=0, le=3600)
+
+    @model_validator(mode="after")
+    def _needs_a_pickup(self) -> "ClientOrderBatchBody":
+        if self.pickup_shop_id is None and not (self.pickup_address or "").strip():
+            raise ValueError("either pickup_shop_id or pickup_address is required")
+        return self
+
+
+class ClientOrderBatchRowResult(BaseModel):
+    """What happened to one row.
+
+    Carries the row index and the address back so a partial failure can be shown
+    against the line the dispatcher actually pasted, rather than as a count.
+    """
+
+    index: int
+    drop_address: str
+    # Exactly one of these is set.
+    order: ClientOrderResult | None = None
+    error: str | None = None
+
+
+class ClientOrderBatchResult(BaseModel):
+    """The outcome of a paste.
+
+    **Deliberately not all-or-nothing.** §2.2 principle 5 says to show what was
+    understood and let them fix it, and the CSV adapter has the same requirement
+    stated as "never silently drop a row". One unfindable address among six must
+    not discard the five that were fine - the dispatcher fixes that line and
+    resubmits it alone.
+    """
+
+    accepted: int
+    failed: int
+    results: list[ClientOrderBatchRowResult]
+
+
 # NOTE: there is no shop schema here on purpose. `GET /client/shops` and
 # `ClientShopView` already exist (app/schemas/client_auth.py) for the returns
 # picker, and they are what backs §2.2 principle 3's remembered-shops behaviour

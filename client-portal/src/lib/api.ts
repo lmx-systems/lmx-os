@@ -2,6 +2,8 @@ import { clearToken, getToken } from './auth'
 import type {
   ClientAuthToken,
   ClientOrderDetailView,
+  ClientOrderBatchBody,
+  ClientOrderBatchResult,
   ClientOrderBody,
   ClientOrderResult,
   ClientOrderSummaryView,
@@ -135,4 +137,13 @@ export const api = {
   // rate-limited by IP.
   signup: (body: ClientSignupBody) =>
     request<ClientSignupResult>('/public/signup', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Bulk paste (§2.2 principle 5). Deliberately not all-or-nothing - the
+  // response reports per line, because one unfindable address among six must
+  // not discard the five that were fine.
+  submitOrdersBatch: (body: ClientOrderBatchBody) =>
+    request<ClientOrderBatchResult>('/client/orders/batch', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 }

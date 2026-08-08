@@ -149,3 +149,32 @@ export interface ClientSignupResult {
   status: string
   message: string
 }
+
+// Bulk paste (§2.2 principle 5). Mirrors app/schemas/client_order.py.
+export interface ClientOrderBatchRow {
+  drop_address: string
+  reference?: string
+  drop_contact_name?: string
+}
+
+export interface ClientOrderBatchBody {
+  pickup_shop_id?: string | null
+  pickup_address?: string | null
+  deadline: DeadlineChoice
+  rows: ClientOrderBatchRow[]
+  entry_seconds?: number | null
+}
+
+export interface ClientOrderBatchRowResult {
+  index: number
+  drop_address: string
+  // Exactly one of these is set. Partial success is the normal case.
+  order: ClientOrderResult | null
+  error: string | null
+}
+
+export interface ClientOrderBatchResult {
+  accepted: number
+  failed: number
+  results: ClientOrderBatchRowResult[]
+}

@@ -45,6 +45,9 @@ from app.models.shop import Shop
 from app.returns.service import AWAITING_STATUSES, return_views
 from app.schemas.billing import InvoiceDetailView, InvoiceSummaryView
 from app.schemas.client_order import (
+    ClientOrderBatchBody,
+    ClientOrderBatchResult,
+    ClientOrderBatchRowResult,
     ClientOrderBody,
     ClientOrderResult,
     deadline_payload_flags,
@@ -444,6 +447,164 @@ async def _require_approved_client(session: AsyncSession, client: AuthedClient) 
     return row
 
 
+def _generated_reference() -> str:
+    """A reference for a client who didn't give one.
+
+    Optional on purpose - one more mandatory field is one more reason not to
+    finish the form - so something has to fill the gap, and it has to be
+    findable when they ring up about it.
+    """
+    return f"LMX-{secrets.token_hex(4).upper()}"
+
+
+def _address_error_detail(exc: Exception) -> str:
+    """Which address we couldn't place, in words a counter person can act on."""
+    which = "pickup" if isinstance(exc, OriginUnresolvableError) else "delivery"
+    return f"We couldn't find that {which} address - please check it and try again."
+
+
+async def _resolve_pickup(
+    session: AsyncSession,
+    client_row: Client,
+    *,
+    shop_id: str | None,
+    typed_address: str | None,
+) -> tuple[str | None, str | None]:
+    """Turn a client's chosen pickup into (address, shop_external_ref).
+
+    Shared by the single-order and batch paths so the ownership check can't drift
+    between them - a shop id from another client must be a 404 on both, never a
+    usable pickup.
+    """
+    address = (typed_address or "").strip() or None
+    if shop_id is None:
+        return address, None
+
+    shop = await session.get(Shop, uuid.UUID(shop_id))
+    # Scoped, not merely existence-checked.
+    if shop is None or shop.client_id != client_row.id:
+        raise HTTPException(status_code=404, detail="Pickup location not found")
+
+    # A remembered shop with no external_ref predates this path; fall back to its
+    # stored address so it still resolves rather than failing.
+    if shop.external_ref is None:
+        return shop.address, None
+    return address, shop.external_ref
+
+
+@router.post("/orders/batch", response_model=ClientOrderBatchResult)
+async def submit_orders_batch(
+    body: ClientOrderBatchBody,
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> ClientOrderBatchResult:
+    """Several orders at once - the paste path (§2.2 principle 5).
+
+    "A dispatcher with six orders pastes six lines. Parse them, show what was
+    understood, let them fix it."
+
+    **Not all-or-nothing, deliberately.** Each row is ingested independently and
+    reported on independently, so one unfindable address among six does not
+    discard the five that were fine - the dispatcher fixes that line and
+    resubmits it alone. The CSV adapter has the same requirement written as
+    "never silently drop a row", and this is that rule applied a step earlier.
+
+    Rows share a pickup and a deadline, which is what makes this fast: a
+    dispatcher sending six deliveries is almost always sending them from one
+    place with one urgency. Anything genuinely per-order stays on the row.
+
+    Latency worth knowing about: every genuinely NEW address costs a geocoder
+    call, and the pilot provider allows one per second (app/geocoding/nominatim.py).
+    A paste of previously-seen addresses returns immediately from cache; a paste
+    of entirely new ones takes roughly a second per row. That ceiling is a real
+    argument for a keyed provider, not a reason to cap lower than 25.
+    """
+    client_row = await _require_approved_client(session, client)
+    pickup_address, shop_external_ref = await _resolve_pickup(
+        session, client_row, shop_id=body.pickup_shop_id, typed_address=body.pickup_address
+    )
+
+    queue = HoldQueueStore()
+    geocoder = get_geocoder()
+    results: list[ClientOrderBatchRowResult] = []
+
+    for index, row in enumerate(body.rows):
+        reference = (row.reference or "").strip() or _generated_reference()
+        lmx = LMXOrder(
+            source_system="client_portal",
+            source_order_ref=reference,
+            hub_id=str(client_row.hub_id),
+            client_id=str(client_row.id),
+            shop_external_ref=shop_external_ref,
+            pickup_address=pickup_address,
+            drop_address_raw=row.drop_address,
+            drop_contact_name=row.drop_contact_name,
+            sla_owner="LMX",
+            received_at=datetime.now(timezone.utc),
+            raw_payload=deadline_payload_flags(body.deadline),
+        )
+
+        try:
+            order = await ingest_lmx_order(session, queue, lmx, geocoder=geocoder)
+        except (OriginUnresolvableError, DestinationUnresolvableError) as exc:
+            # A bad pickup fails every row identically, which is correct - the
+            # pickup is shared - and the dispatcher sees it on every line rather
+            # than having to infer it.
+            results.append(
+                ClientOrderBatchRowResult(
+                    index=index, drop_address=row.drop_address, error=_address_error_detail(exc)
+                )
+            )
+            continue
+        except ShopNotFoundError:
+            raise HTTPException(status_code=404, detail="Pickup location not found") from None
+        except Exception:  # noqa: BLE001
+            # One malformed row must not take down the rest of a dispatcher's
+            # paste. Logged with the index so the cause is findable, reported
+            # generically because whatever it was isn't the client's to debug.
+            logger.exception("batch_order_row_failed", row_index=index)
+            results.append(
+                ClientOrderBatchRowResult(
+                    index=index,
+                    drop_address=row.drop_address,
+                    error="Something went wrong with this line - please try it on its own.",
+                )
+            )
+            continue
+
+        results.append(
+            ClientOrderBatchRowResult(
+                index=index,
+                drop_address=row.drop_address,
+                order=ClientOrderResult(
+                    order_id=str(order.id),
+                    reference=reference,
+                    status=order.status.value,
+                    sla_tier=order.sla_tier,
+                    collect_by=order.hold_deadline,
+                    estimated_delivery_by=await _estimate_delivery_by(session, order),
+                    fee_cents=order.fee_cents,
+                    dispatchable=order.delivery_lat is not None and order.delivery_lng is not None,
+                ),
+            )
+        )
+
+    accepted = sum(1 for r in results if r.order is not None)
+    logger.info(
+        "client_orders_batch_submitted",
+        client_id=str(client_row.id),
+        rows=len(body.rows),
+        accepted=accepted,
+        failed=len(results) - accepted,
+        deadline_choice=body.deadline,
+        used_remembered_shop=body.pickup_shop_id is not None,
+        entry_seconds=body.entry_seconds,
+    )
+    return ClientOrderBatchResult(
+        accepted=accepted, failed=len(results) - accepted, results=results
+    )
+
+
 @router.post("/orders", response_model=ClientOrderResult, status_code=201)
 async def submit_order(
     body: ClientOrderBody,
@@ -464,21 +625,11 @@ async def submit_order(
     """
     client_row = await _require_approved_client(session, client)
 
-    pickup_address = (body.pickup_address or "").strip() or None
-    shop_external_ref = None
-    if body.pickup_shop_id is not None:
-        shop = await session.get(Shop, uuid.UUID(body.pickup_shop_id))
-        # Scoped check, not just existence: a shop id from another client is a
-        # 404 here, never a usable pickup.
-        if shop is None or shop.client_id != client_row.id:
-            raise HTTPException(status_code=404, detail="Pickup location not found")
-        shop_external_ref = shop.external_ref
-        # A remembered shop with no external_ref predates this path; fall back to
-        # its stored address so it still resolves rather than failing.
-        if shop_external_ref is None:
-            pickup_address = shop.address
+    pickup_address, shop_external_ref = await _resolve_pickup(
+        session, client_row, shop_id=body.pickup_shop_id, typed_address=body.pickup_address
+    )
 
-    reference = (body.reference or "").strip() or f"LMX-{secrets.token_hex(4).upper()}"
+    reference = (body.reference or "").strip() or _generated_reference()
 
     lmx = LMXOrder(
         source_system="client_portal",
@@ -506,21 +657,12 @@ async def submit_order(
 
     try:
         order = await ingest_lmx_order(session, HoldQueueStore(), lmx, geocoder=get_geocoder())
-    except OriginUnresolvableError as exc:
-        # A typed address we couldn't place. Refusing beats accepting something
-        # undeliverable - and the client can fix a typo immediately, which
-        # nobody can do once a driver is standing in the wrong street.
-        raise HTTPException(
-            status_code=422,
-            detail="We couldn't find that pickup address - please check it and try again.",
-        ) from exc
-    except DestinationUnresolvableError as exc:
-        # Separate message from the pickup case on purpose: "we couldn't find
-        # that address" is useless if it doesn't say which one.
-        raise HTTPException(
-            status_code=422,
-            detail="We couldn't find that delivery address - please check it and try again.",
-        ) from exc
+    except (OriginUnresolvableError, DestinationUnresolvableError) as exc:
+        # Refusing beats accepting something undeliverable - and the client can
+        # fix a typo immediately, which nobody can do once a driver is standing
+        # in the wrong street. The message names WHICH address, because "we
+        # couldn't find that address" is useless if it doesn't say.
+        raise HTTPException(status_code=422, detail=_address_error_detail(exc)) from exc
     except ShopNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Pickup location not found") from exc
 
