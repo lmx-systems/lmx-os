@@ -33,14 +33,25 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import uuid
+
+from app.client_auth.login_rate_limit import LoginRateLimiter
+from app.client_auth.password_reset import PasswordResetStore, ResetRequestRateLimitExceeded
 from app.client_auth.passwords import hash_password
 from app.client_auth.signup_rate_limit import SignupRateLimiter, SignupRateLimitExceeded
+from app.config import settings
 from app.db import get_db
 from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
-from app.messaging.client_emails import send_signup_received_email
+from app.messaging.client_emails import send_password_reset_email, send_signup_received_email
 from app.models.hub import Hub
-from app.schemas.signup import ClientSignupBody, ClientSignupResult
+from app.schemas.signup import (
+    ClientSignupBody,
+    ClientSignupResult,
+    PasswordResetConfirmBody,
+    PasswordResetRequestBody,
+    PasswordResetResult,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -157,3 +168,116 @@ async def client_signup(
     )
 
     return ClientSignupResult(status="pending", message=_ACCEPTED_MESSAGE)
+
+
+# ---------------------------------------------------------------------------
+# Password reset (docs/ROADMAP.md L14)
+#
+# Unauthenticated because a locked-out user has no session by definition. Both
+# endpoints answer identically whether or not the address is real - see
+# PasswordResetResult - so neither can be used to test which companies are LMX
+# clients.
+# ---------------------------------------------------------------------------
+
+_RESET_REQUESTED_MESSAGE = (
+    "If that address has an LMX account, we've sent a link to reset the password. "
+    "It's valid for one hour."
+)
+
+
+@router.post("/password-reset/request", response_model=PasswordResetResult, status_code=202)
+async def request_password_reset(
+    body: PasswordResetRequestBody,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> PasswordResetResult:
+    """Ask for a reset link.
+
+    Every branch below returns the same 202 and the same sentence. An unknown
+    address, a pending applicant, a deactivated user and a successful send are
+    indistinguishable from outside - which is the whole point, because the
+    alternative is an endpoint that tells anyone which businesses are LMX
+    clients.
+
+    Two throttles, doing different jobs: the IP limiter stops a scripted sweep
+    across many addresses, and the per-email limiter stops one inbox being buried
+    from many IPs. The per-email charge happens BEFORE the account lookup so it
+    applies identically to real and unknown addresses.
+    """
+    try:
+        await SignupRateLimiter().check_and_increment(_client_ip(request))
+    except SignupRateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+    store = PasswordResetStore()
+    try:
+        await store.check_request_allowed(body.email)
+    except ResetRequestRateLimitExceeded:
+        # Deliberately NOT a 429. A distinct response here would leak that this
+        # address has been asked about repeatedly, which is itself a signal about
+        # whether it exists. Silently do nothing and return the same message.
+        logger.info("password_reset_rate_limited")
+        return PasswordResetResult(message=_RESET_REQUESTED_MESSAGE)
+
+    result = await session.execute(select(ClientUser).where(ClientUser.email == body.email))
+    user = result.scalar_one_or_none()
+
+    # Only an ACTIVE user gets a link. A pending applicant would otherwise have
+    # their application confirmed to whoever typed the address - and resetting
+    # would grant them nothing anyway, since C4 re-checks is_active every request.
+    if user is not None and user.is_active:
+        token = await store.issue(str(user.id))
+        reset_url = f"{settings.portal_base_url.rstrip('/')}/reset-password?token={token}"
+        await send_password_reset_email(
+            to=user.email, contact_name=user.name, reset_url=reset_url
+        )
+        logger.info("password_reset_requested", client_user_id=str(user.id))
+    else:
+        # Logged without the address, so the log isn't the oracle the response
+        # refuses to be.
+        logger.info("password_reset_requested_for_unusable_account")
+
+    return PasswordResetResult(message=_RESET_REQUESTED_MESSAGE)
+
+
+@router.post("/password-reset/confirm", response_model=PasswordResetResult)
+async def confirm_password_reset(
+    body: PasswordResetConfirmBody,
+    session: AsyncSession = Depends(get_db),
+) -> PasswordResetResult:
+    """Redeem a reset link and set a new password.
+
+    A wrong token, an expired one and an already-used one all produce the same
+    400. Distinguishing them would tell someone holding a stale link whether it
+    was ever valid, and there is nothing a legitimate user does differently with
+    that information - they request another link either way.
+    """
+    store = PasswordResetStore()
+    client_user_id = await store.consume(body.token)
+    if client_user_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="That reset link has expired or already been used - please request a new one.",
+        )
+
+    user = await session.get(ClientUser, uuid.UUID(client_user_id))
+    # Deactivated between the link being issued and used. Rare, but the token
+    # outlives the state it was issued against, so it has to be rechecked.
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail="That reset link has expired or already been used - please request a new one.",
+        )
+
+    user.password_hash = hash_password(body.new_password)
+    await session.commit()
+
+    # They were most likely locked out by failed attempts on the way here, so
+    # clear that counter - otherwise a correct new password still bounces.
+    await LoginRateLimiter().reset(user.email)
+    await store.invalidate_all_for_user(client_user_id)
+
+    logger.info("password_reset_completed", client_user_id=client_user_id)
+    return PasswordResetResult(
+        message="Your password has been changed - you can sign in with it now."
+    )

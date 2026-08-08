@@ -146,4 +146,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  // Password reset (docs/ROADMAP.md L14). Both are unauthenticated - a
+  // locked-out user has no session by definition. The request endpoint answers
+  // identically whether or not the address exists, so nothing here should try
+  // to infer anything from a success.
+  requestPasswordReset: (email: string) =>
+    request<{ message: string }>('/public/password-reset/request', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  confirmPasswordReset: (token: string, newPassword: string) =>
+    request<{ message: string }>('/public/password-reset/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token, new_password: newPassword }),
+    }),
 }

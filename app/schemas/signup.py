@@ -144,3 +144,32 @@ class SignupDecisionResult(BaseModel):
     signup_status: SignupStatus
     # Null on rejection - nothing was created to charge against.
     rates_created: int | None = None
+
+
+class PasswordResetRequestBody(BaseModel):
+    """Ask for a reset link. Unauthenticated - a locked-out user has no session."""
+
+    email: str = Field(min_length=3, max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, value: str) -> str:
+        return _looks_like_an_email(value)
+
+
+class PasswordResetConfirmBody(BaseModel):
+    token: str = Field(min_length=16, max_length=128)
+    # Same floor as signup. A reset is not a good moment to relax the rule that
+    # got applied when the account was created.
+    new_password: str = Field(min_length=10, max_length=128)
+
+
+class PasswordResetResult(BaseModel):
+    """Says the same thing whether or not the address exists.
+
+    The response to a reset request must not distinguish a real account from an
+    unknown one, or the endpoint becomes a way to test which companies bank with
+    LMX. Same reasoning as the duplicate-signup response.
+    """
+
+    message: str

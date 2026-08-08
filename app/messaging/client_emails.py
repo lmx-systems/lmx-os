@@ -104,3 +104,36 @@ Any questions, just reply.
         # they don't know exists. Whoever approved them can still phone.
         logger.warning("signup_approved_email_not_sent", company=company_name, to_hint=to[:3])
     return sent
+
+
+async def send_password_reset_email(
+    *, to: str, contact_name: str, reset_url: str
+) -> bool:
+    """The reset link (docs/ROADMAP.md L14).
+
+    Only ever sent to an address that belongs to an ACTIVE client user. A pending
+    applicant deliberately gets nothing: mailing them a reset link would confirm
+    that their application exists, and resetting the password wouldn't grant
+    access anyway since C4 re-checks `is_active` on every request.
+
+    The copy states the expiry and that an unrequested email can be ignored.
+    Both matter more than they look - the first stops a support call an hour
+    later, and the second is what someone needs to read if this arrives because
+    an attacker typed their address.
+    """
+    body = f"""Hi {contact_name},
+
+Someone asked to reset the password for your LMX account. If that was you, use
+this link within the next hour:
+
+{reset_url}
+
+If it wasn't you, you can ignore this - your password hasn't changed, and
+whoever asked can't see this message.
+
+— LMX
+"""
+    sent = await _send(to=to, subject="Reset your LMX password", body=body)
+    if not sent:
+        logger.warning("password_reset_email_not_sent", to_hint=to[:3])
+    return sent

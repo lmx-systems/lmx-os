@@ -10,6 +10,7 @@ import type {
 } from './lib/types'
 import { LoginPage } from './components/LoginPage'
 import { SignupPage } from './components/SignupPage'
+import { ResetPasswordPage } from './components/ResetPasswordPage'
 import { NewOrderForm } from './components/NewOrderForm'
 import { BulkPastePanel } from './components/BulkPastePanel'
 import { TopBar } from './components/TopBar'
@@ -37,6 +38,15 @@ export default function App() {
   const [loggedIn, setLoggedIn] = useState(() => getToken() !== null)
   const [showSignup, setShowSignup] = useState(
     () => typeof window !== 'undefined' && window.location.pathname.replace(/\/$/, '') === '/signup',
+  )
+  // Reset links arrive by email as /reset-password?token=… Read once on mount:
+  // the token is a single-use credential and re-reading it after redemption
+  // would only ever find a spent one.
+  const [resetToken, setResetToken] = useState(() =>
+    typeof window !== 'undefined' &&
+    window.location.pathname.replace(/\/$/, '') === '/reset-password'
+      ? new URLSearchParams(window.location.search).get('token')
+      : null,
   )
   const [profile, setProfile] = useState<ClientProfileView | null>(null)
   const [orders, setOrders] = useState<ClientOrderSummaryView[] | null>(null)
@@ -117,6 +127,10 @@ export default function App() {
   // auth gate because a prospective client has no token by definition. Path
   // rather than a hash so the link reads like a normal page; nginx.conf's SPA
   // fallback already serves index.html for it.
+  if (!loggedIn && resetToken) {
+    return <ResetPasswordPage token={resetToken} onDone={() => setResetToken(null)} />
+  }
+
   if (!loggedIn && showSignup) {
     return <SignupPage onSignedIn={() => setShowSignup(false)} />
   }
