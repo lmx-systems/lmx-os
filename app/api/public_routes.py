@@ -38,6 +38,7 @@ from app.client_auth.signup_rate_limit import SignupRateLimiter, SignupRateLimit
 from app.db import get_db
 from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
+from app.messaging.client_emails import send_signup_received_email
 from app.models.hub import Hub
 from app.schemas.signup import ClientSignupBody, ClientSignupResult
 
@@ -146,4 +147,13 @@ async def client_signup(
         service_area=body.service_area,
         terms_version=body.terms_version,
     )
+
+    # After the commit, so a mail failure can't roll back a real application -
+    # and only on the genuinely-new path, never for a duplicate (see the
+    # IntegrityError branch above and the note in client_emails.py on why
+    # mailing the address's real owner would be a disclosure).
+    await send_signup_received_email(
+        to=body.contact_email, contact_name=body.contact_name, company_name=body.company_name
+    )
+
     return ClientSignupResult(status="pending", message=_ACCEPTED_MESSAGE)

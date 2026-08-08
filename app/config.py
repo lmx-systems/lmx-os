@@ -133,6 +133,28 @@ class Settings(BaseSettings):
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
 
+    # Transactional email (app/messaging/email_client.py). Same
+    # "unconfigured -> stub" status as Twilio: unset means every notification
+    # logs instead of sending.
+    #
+    # SMTP rather than a vendor API deliberately - the same credentials point at
+    # SES, Postmark or anything else, so which provider LMX uses stays a config
+    # decision. No provider is chosen yet.
+    #
+    # Without these, LMX Link's signup says "we'll be in touch" and nothing is,
+    # approval activates a login silently, and a locked-out client has no way
+    # back in. It is the largest functional gap in the feature.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_address: str | None = None
+    smtp_use_tls: bool = True
+
+    # Where a client's portal lives, for links inside those emails. An approval
+    # notification that doesn't say where to sign in is barely a notification.
+    portal_base_url: str = "http://localhost:5174"
+
     # Geocoding (app/geocoding/) - turns a typed address into coordinates so
     # LMX Link's ad-hoc pickup works without anyone pre-registering a shop.
     #

@@ -64,6 +64,7 @@ from app.schemas.admin import (
 )
 from app.schemas.billing import InvoiceDetailView, InvoiceGenerateBody
 from app.gig_platform import service as gig_store
+from app.messaging.client_emails import send_signup_approved_email
 from app.gig_platform.density import hub_density_report
 from app.returns.service import AWAITING_STATUSES, return_views
 from app.schemas.gig import GigDensityReport, GigJobView
@@ -786,10 +787,26 @@ async def approve_signup(
     # this is the single switch that turns a pending applicant into a client who
     # can sign in and order.
     users = await session.execute(select(ClientUser).where(ClientUser.client_id == client.id))
-    for user in users.scalars():
+    activated = list(users.scalars())
+    for user in activated:
         user.is_active = True
 
     await session.commit()
+
+    # Tell them, after the commit. Best-effort by design: an approval must stand
+    # even when mail is down, because blocking onboarding on a mail outage is
+    # worse than a client who has to be phoned. A failed send logs loudly and
+    # the panel still shows them active, which is what lets someone notice.
+    #
+    # Sent to the first user - the one created by their own signup - rather than
+    # to everyone, since ops can add colleagues later and they don't each need
+    # an approval notice.
+    if activated:
+        first = min(activated, key=lambda u: u.created_at)
+        await send_signup_approved_email(
+            to=first.email, contact_name=first.name, company_name=client.name
+        )
+
     return SignupDecisionResult(
         client_id=client_id, signup_status="active", rates_created=len(body.rates)
     )
