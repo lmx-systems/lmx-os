@@ -186,9 +186,12 @@ async def test_full_driver_app_core_loop(db_session, real_redis_client):
         driver=authed, session=db_session,
     )
 
-    # Picking up doesn't mark the order delivered - only the dropoff does.
+    # Picking up doesn't mark the order delivered - only the dropoff does - but
+    # it is now visibly distinct from "assigned" (LMX_LINK_PLAN.md §1.4). This
+    # assertion previously read `assigned`, which was the gap: a client watching
+    # their order had no way to tell whether their parts had been collected.
     await db_session.refresh(order)
-    assert order.status == OrderStatus.assigned
+    assert order.status == OrderStatus.picked_up
 
     # 7. Dropoff: arrive, proof of delivery (screens 1l/1m).
     await arrive_at_stop(dropoff.stop_id, driver=authed, session=db_session)

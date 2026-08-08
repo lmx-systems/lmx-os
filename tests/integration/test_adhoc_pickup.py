@@ -339,4 +339,6 @@ async def test_an_adhoc_order_reaches_the_driver_at_real_coordinates(db_session,
     # during ingestion. get() would return that stale object and the assertion
     # would pass or fail for the wrong reason.
     await db_session.refresh(order)
-    assert order.status == OrderStatus.assigned
+    # en_route_pickup, not assigned: accepting the offer means a driver has taken
+    # the job and is on their way (§1.4).
+    assert order.status == OrderStatus.en_route_pickup

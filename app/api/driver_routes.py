@@ -58,6 +58,7 @@ from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 from app.optimizer.event_trigger import dispatch_event_bus
+from app.orders.status_service import advance_orders
 from app.returns.service import return_views
 from app.schemas.returns import CollectReturnBody, ReturnItemView
 from app.schemas.driver_app import (
@@ -996,6 +997,12 @@ async def accept_offer(
     )
     await dispatch_event_bus.publish(str(offer.hub_id), "driver_status_changed")
 
+    # A driver has taken this work and is on their way to collect it
+    # (LMX_LINK_PLAN.md §1.4). This is the first transition a client actually
+    # feels: before it, an order sat at "assigned" from the dispatch cycle with
+    # no signal that anyone had picked it up as a job.
+    await advance_orders(session, list(orders_by_id.keys()), OrderStatus.en_route_pickup)
+
     await session.commit()
 
     # Real PIN issuance (docs/ROADMAP.md A4): text each dropoff's PIN to
@@ -1643,19 +1650,20 @@ async def complete_stop(
     order_ids_result = await session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == stop.id))
     order_ids = [row[0] for row in order_ids_result.all()]
 
-    # Only a *dropoff* stop's completion means an order was actually
-    # delivered - completing a pickup stop just means the parcels were
-    # collected, so its orders stay "assigned" (there's no intermediate
-    # "picked up" OrderStatus value in v1; the route/stop status already
-    # captures that detail more precisely than Order.status does).
-    if stop.stop_type == "dropoff" and order_ids:
-        # `now` is this stop's completed_at (set above) - the delivery
-        # moment. delivered_at is a real, stable ground-truth column (I1),
-        # not the updated_at proxy billing/portal used to read.
-        await session.execute(
-            update(Order)
-            .where(Order.id.in_(order_ids))
-            .values(status=OrderStatus.delivered, delivered_at=now)
+    # Order status now follows the stop (LMX_LINK_PLAN.md §1.4). This used to
+    # update only on a dropoff, on the reasoning that stop status captured
+    # collection more precisely than Order.status could - true, but it left a
+    # client watching their order sitting on "assigned" for an hour with no way
+    # to tell whether their parts had been collected. That is the gap the
+    # stop-level states close.
+    if order_ids:
+        await advance_orders(
+            session,
+            order_ids,
+            OrderStatus.delivered if stop.stop_type == "dropoff" else OrderStatus.picked_up,
+            # `now` is this stop's completed_at, set above - the real moment,
+            # which for a dropoff is also delivered_at's ground truth (I1).
+            occurred_at=now,
         )
 
     remaining_result = await session.execute(
@@ -1770,10 +1778,11 @@ async def flag_stop_issue(
     order_ids_result = await session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == stop.id))
     order_ids = [row[0] for row in order_ids_result.all()]
     if order_ids:
+        # delivery_failed is §1.4's EXCEPTION_RAISED - the same state under the
+        # name this codebase already used, rather than a duplicate value.
+        await advance_orders(session, order_ids, OrderStatus.delivery_failed)
         await session.execute(
-            update(Order)
-            .where(Order.id.in_(order_ids))
-            .values(status=OrderStatus.delivery_failed, failure_reason=body.reason.value)
+            update(Order).where(Order.id.in_(order_ids)).values(failure_reason=body.reason.value)
         )
 
     remaining_result = await session.execute(
