@@ -9,6 +9,8 @@ import type {
   InvoiceSummaryView,
 } from './lib/types'
 import { LoginPage } from './components/LoginPage'
+import { SignupPage } from './components/SignupPage'
+import { NewOrderForm } from './components/NewOrderForm'
 import { TopBar } from './components/TopBar'
 import { OrdersTable } from './components/OrdersTable'
 import { OrderDetail } from './components/OrderDetail'
@@ -22,6 +24,7 @@ import { ReturnsPanel } from './components/ReturnsPanel'
 // screens this app has today: orders list, order detail, invoices list,
 // invoice detail, login.
 type View =
+  | { name: 'new-order' }
   | { name: 'orders' }
   | { name: 'order-detail'; orderId: string }
   | { name: 'invoices' }
@@ -31,6 +34,9 @@ type View =
 
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(() => getToken() !== null)
+  const [showSignup, setShowSignup] = useState(
+    () => typeof window !== 'undefined' && window.location.pathname.replace(/\/$/, '') === '/signup',
+  )
   const [profile, setProfile] = useState<ClientProfileView | null>(null)
   const [orders, setOrders] = useState<ClientOrderSummaryView[] | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<ClientOrderDetailView | null>(null)
@@ -105,6 +111,14 @@ export default function App() {
     setView({ name: 'orders' })
   }
 
+  // The public signup page - the URL LMX shares or embeds. Checked before the
+  // auth gate because a prospective client has no token by definition. Path
+  // rather than a hash so the link reads like a normal page; nginx.conf's SPA
+  // fallback already serves index.html for it.
+  if (!loggedIn && showSignup) {
+    return <SignupPage onSignedIn={() => setShowSignup(false)} />
+  }
+
   if (!loggedIn) {
     return <LoginPage onLoggedIn={() => setLoggedIn(true)} />
   }
@@ -117,6 +131,7 @@ export default function App() {
     )
   }
 
+  const onNewOrderTab = view.name === 'new-order'
   const onOrdersTab = view.name === 'orders' || view.name === 'order-detail'
   const onInvoicesTab = view.name === 'invoices' || view.name === 'invoice-detail'
   const onReturnsTab = view.name === 'returns'
@@ -131,6 +146,16 @@ export default function App() {
       <TopBar profile={profile} onLogout={handleLogout} />
       <main className="mx-auto max-w-5xl px-6 py-6">
         <nav className="mb-5 flex gap-1 border-b border-[var(--border)] print:hidden">
+          <button
+            onClick={() => setView({ name: 'new-order' })}
+            className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+              onNewOrderTab
+                ? 'border-[var(--accent)] text-[var(--text-primary)]'
+                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            New order
+          </button>
           <button
             onClick={() => setView({ name: 'orders' })}
             className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
@@ -175,6 +200,19 @@ export default function App() {
           )}
         </nav>
 
+        {view.name === 'new-order' && (
+          <div className="max-w-xl">
+            <h1 className="mb-4 text-[16px] font-semibold text-[var(--text-primary)]">Send a delivery</h1>
+            <NewOrderForm
+              onOrderPlaced={() => {
+                // Refresh the orders list in the background so switching tabs
+                // shows the new order rather than a stale list - without
+                // yanking the user off the confirmation they just earned.
+                api.myOrders().then(setOrders).catch(() => {})
+              }}
+            />
+          </div>
+        )}
         {view.name === 'orders' && (
           <>
             <h1 className="mb-4 text-[16px] font-semibold text-[var(--text-primary)]">Your orders</h1>

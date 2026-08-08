@@ -67,6 +67,22 @@ class OriginUnresolvableError(Exception):
     """
 
 
+class DestinationUnresolvableError(Exception):
+    """A typed delivery address that could not be turned into coordinates.
+
+    Also fatal, for the symmetric reason: without a drop coordinate no dropoff
+    Stop can be generated (see `Order.delivery_lat`'s docstring), so the order
+    would be collected and then have nowhere to go.
+
+    This is NOT a violation of §2.2 principle 7 ("never block on a missing
+    field"). That principle is about optional detail - a contact name, an access
+    note - which should never stop an order being taken. An address nobody can
+    find is not missing detail, it is an undeliverable order, and the person who
+    can fix it is standing at the form right now. Once they have walked away, it
+    becomes a phone call.
+    """
+
+
 def _parcel_barcodes(payload: dict) -> list[str]:
     """Ownership-agnostic package barcodes for an order (docs/ROADMAP.md W10).
     If the source payload carries the distributor's own pick-ticket barcodes
@@ -366,6 +382,20 @@ async def ingest_lmx_order(
 
     shop = await _resolve_or_create_shop(session, lmx, geocoder=geocoder)
 
+    # Resolve the destination too, when one was given without coordinates.
+    # Adapter orders carry no destination at all today (Order.delivery_address's
+    # docstring), so this is skipped entirely on that path and only runs for
+    # sources that actually state a drop - which today means the client portal.
+    drop_lat, drop_lng = lmx.drop_lat, lmx.drop_lng
+    if drop_lat is None and lmx.drop_address_raw:
+        resolved_drop = await resolve_address(session, lmx.drop_address_raw, geocoder=geocoder)
+        if resolved_drop is None:
+            raise DestinationUnresolvableError(
+                f"could not geocode delivery address {lmx.drop_address_raw!r} - the order "
+                "would be collected with nowhere to take it"
+            )
+        drop_lat, drop_lng = resolved_drop.lat, resolved_drop.lng
+
     order = Order(
         hub_id=uuid.UUID(lmx.hub_id),
         client_id=uuid.UUID(lmx.client_id) if lmx.client_id else None,
@@ -396,13 +426,11 @@ async def ingest_lmx_order(
         payer_type=lmx.economics.payer_type,
         payment_status=lmx.economics.payment_status,
         modality_assigned=lmx.modality_assigned,
-        # Destination. Geocoding the drop is deliberately NOT done here: an order
-        # with no drop coordinates is still accepted and stored (§2.2 principle
-        # 7), it just can't generate a dropoff Stop - which is exactly the
-        # existing behaviour documented on Order.delivery_lat.
+        # Destination, geocoded above when the source gave an address without
+        # coordinates.
         delivery_address=lmx.drop_address_raw,
-        delivery_lat=lmx.drop_lat,
-        delivery_lng=lmx.drop_lng,
+        delivery_lat=drop_lat,
+        delivery_lng=drop_lng,
         delivery_contact_name=lmx.drop_contact_name,
         delivery_contact_phone=lmx.drop_contact_phone,
         delivery_notes=lmx.access_notes,

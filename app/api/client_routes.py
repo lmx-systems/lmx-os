@@ -13,6 +13,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -25,6 +26,7 @@ from app.billing.service import invoice_detail_view, invoice_summary_view
 from app.geocoding import get_geocoder
 from app.gig_platform.economics import minutes_for_miles
 from app.ingestion.service import (
+    DestinationUnresolvableError,
     OriginUnresolvableError,
     ShopNotFoundError,
     ingest_lmx_order,
@@ -60,6 +62,8 @@ from app.schemas.client_auth import (
     ClientUserUpdateBody,
     ClientUserView,
 )
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/client", tags=["client"])
 
@@ -510,8 +514,28 @@ async def submit_order(
             status_code=422,
             detail="We couldn't find that pickup address - please check it and try again.",
         ) from exc
+    except DestinationUnresolvableError as exc:
+        # Separate message from the pickup case on purpose: "we couldn't find
+        # that address" is useless if it doesn't say which one.
+        raise HTTPException(
+            status_code=422,
+            detail="We couldn't find that delivery address - please check it and try again.",
+        ) from exc
     except ShopNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Pickup location not found") from exc
+
+    # The §3.4 entry-time target, measured rather than asserted. Logged as
+    # structured data so "under 30 seconds from the second order onward" is
+    # answerable from real counter use instead of a demo stopwatch.
+    logger.info(
+        "client_order_submitted",
+        order_id=str(order.id),
+        client_id=str(client_row.id),
+        deadline_choice=body.deadline,
+        sla_tier=order.sla_tier,
+        used_remembered_shop=body.pickup_shop_id is not None,
+        entry_seconds=body.entry_seconds,
+    )
 
     return ClientOrderResult(
         order_id=str(order.id),

@@ -251,15 +251,56 @@ async def test_the_confirmation_carries_a_real_collect_by_commitment(db_session,
     assert result.status == "held"
 
 
-async def test_the_delivery_time_is_an_estimate_and_comes_after_collection(db_session, real_redis_client):
-    """Named `estimated_delivery_by` rather than `delivery_by` deliberately -
-    there is no verified travel-time model until E1 is done."""
+async def test_the_order_is_dispatchable_because_both_ends_are_geocoded(db_session, real_redis_client):
+    """Both addresses are resolved at ingestion, so a portal order can generate
+    a pickup AND a dropoff stop. Without the drop half it would be collected and
+    then have nowhere to go."""
     _, client_id = await _seed(db_session)
-    # Drop coordinates are absent until the drop is geocoded, so this order has
-    # no estimate at all - which is the honest answer rather than a guess.
     result = await submit_order(_body(), client=_authed(client_id), session=db_session)
-    assert result.estimated_delivery_by is None
-    assert result.dispatchable is False
+
+    assert result.dispatchable is True
+
+    order = await db_session.get(Order, uuid.UUID(result.order_id))
+    assert order.delivery_lat is not None
+    assert order.delivery_lng is not None
+
+
+async def test_the_delivery_time_is_an_estimate_that_follows_collection(db_session, real_redis_client):
+    """Named `estimated_delivery_by` rather than `delivery_by` deliberately -
+    it is straight-line distance at a placeholder speed, because there is no
+    verified travel-time model until E1 makes a live routing call. It must at
+    least be internally coherent: you cannot deliver before you collect."""
+    _, client_id = await _seed(db_session)
+    result = await submit_order(_body(), client=_authed(client_id), session=db_session)
+
+    assert result.estimated_delivery_by is not None
+    assert result.estimated_delivery_by >= result.collect_by
+
+
+async def test_an_unfindable_delivery_address_is_refused_distinctly(db_session, real_redis_client, monkeypatch):
+    """A different message from the pickup case - "we couldn't find that
+    address" is useless if it doesn't say which one."""
+    import app.api.client_routes as routes
+
+    class PickupOnly(BaseGeocoder):
+        """Resolves the pickup, fails the drop."""
+
+        provider_name = "fake"
+
+        async def geocode(self, address: str):
+            if address == PICKUP_ADDRESS:
+                return GeocodeResult(
+                    lat=PICKUP_LAT, lng=PICKUP_LNG, display_name=address, provider="fake"
+                )
+            return None
+
+    monkeypatch.setattr(routes, "get_geocoder", lambda: PickupOnly())
+    _, client_id = await _seed(db_session)
+
+    with pytest.raises(HTTPException) as exc:
+        await submit_order(_body(), client=_authed(client_id), session=db_session)
+    assert exc.value.status_code == 422
+    assert "delivery address" in exc.value.detail
 
 
 async def test_the_price_comes_back_when_a_rate_exists(db_session, real_redis_client):

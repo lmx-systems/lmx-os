@@ -73,6 +73,17 @@ class ClientOrderBody(BaseModel):
     line_items: list[ClientOrderLine] = Field(default_factory=list)
     total_weight_units: float = Field(default=1.0, ge=0)
 
+    # How long this order took to type, measured client-side from the first
+    # keystroke. §3.4 targets under 30 seconds from the second order onward, and
+    # the only honest way to know whether that holds is to measure real entries
+    # by real counter staff - a stopwatch in a demo proves nothing.
+    #
+    # Client-supplied and therefore not trustworthy as an individual number, but
+    # that is fine: it is a distribution to watch, not a per-order fact, and
+    # nobody has an incentive to lie about it. Bounded anyway so a broken client
+    # can't write nonsense into the logs.
+    entry_seconds: int | None = Field(default=None, ge=0, le=3600)
+
     @model_validator(mode="after")
     def _needs_a_pickup(self) -> "ClientOrderBody":
         if self.pickup_shop_id is None and not (self.pickup_address or "").strip():

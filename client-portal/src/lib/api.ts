@@ -2,8 +2,12 @@ import { clearToken, getToken } from './auth'
 import type {
   ClientAuthToken,
   ClientOrderDetailView,
+  ClientOrderBody,
+  ClientOrderResult,
   ClientOrderSummaryView,
   ClientProfileView,
+  ClientSignupBody,
+  ClientSignupResult,
   ClientShopView,
   ClientUserView,
   InvoiceDetailView,
@@ -121,4 +125,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ manifest }),
     }),
+
+  // Placing an order (LMX_LINK_PLAN.md §2.2).
+  submitOrder: (body: ClientOrderBody) =>
+    request<ClientOrderResult>('/client/orders', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Public signup - the only call here made with no token at all. The
+  // endpoint is exempt from ops auth (app/ops_auth/middleware.py) and
+  // rate-limited by IP.
+  signup: (body: ClientSignupBody) =>
+    request<ClientSignupResult>('/public/signup', { method: 'POST', body: JSON.stringify(body) }),
 }

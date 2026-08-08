@@ -91,4 +91,61 @@ export interface ClientShopView {
   shop_id: string
   name: string
   external_ref: string | null
+  // Shops auto-created from a typed pickup address are named after that
+  // address; a registered one may be called "Midtown", so the counter needs
+  // to see where it actually is before picking it.
+  address: string | null
+}
+
+// Placing an order (LMX_LINK_PLAN.md §2.2). Mirrors
+// app/schemas/client_order.py.
+export type DeadlineChoice = 'now' | 'within_the_hour' | 'today' | 'tomorrow'
+
+export interface ClientOrderBody {
+  pickup_shop_id?: string | null
+  pickup_address?: string | null
+  pickup_contact_name?: string | null
+  pickup_contact_phone?: string | null
+  drop_address: string
+  drop_contact_name?: string | null
+  drop_contact_phone?: string | null
+  access_notes?: string | null
+  deadline: DeadlineChoice
+  reference?: string | null
+  line_items?: { description: string; quantity: number }[]
+  total_weight_units?: number
+  // How long this order took to enter, measured from first keystroke.
+  // §3.4 targets under 30 seconds from the second order onward, and the
+  // only honest way to know is to measure real entries.
+  entry_seconds?: number | null
+}
+
+export interface ClientOrderResult {
+  order_id: string
+  reference: string
+  status: string
+  sla_tier: string
+  collect_by: string
+  // An ESTIMATE, not a commitment - see app/schemas/client_order.py. Never
+  // show it with the same certainty as collect_by.
+  estimated_delivery_by: string | null
+  fee_cents: number | null
+  dispatchable: boolean
+}
+
+// Public signup (LMX_LINK_PLAN.md). Mirrors app/schemas/signup.py.
+export interface ClientSignupBody {
+  company_name: string
+  contact_name: string
+  contact_email: string
+  contact_phone?: string | null
+  service_area: string
+  password: string
+  terms_version: string
+  accepted_terms: boolean
+}
+
+export interface ClientSignupResult {
+  status: string
+  message: string
 }
