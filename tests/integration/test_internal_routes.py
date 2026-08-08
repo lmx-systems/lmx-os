@@ -158,3 +158,85 @@ async def test_the_learning_loop_runs_across_hubs_too(db_session, real_redis_cli
     assert result["hubs"][str(hub_id)] == 0
     again = await run_learning_loop_for_all_hubs(session=db_session)
     assert again["hubs"][str(hub_id)] == 0
+
+
+# ---------------------------------------------------------------------------
+# The forwarded-header diagnostic
+# ---------------------------------------------------------------------------
+
+
+class _HeaderRequest:
+    """Enough of Request for the diagnostic: headers with getlist, and a peer."""
+
+    def __init__(self, *, peer: str | None, forwarded: list[str] | None = None) -> None:
+        self.client = type("C", (), {"host": peer})() if peer else None
+        self._forwarded = forwarded or []
+
+        class _H:
+            def __init__(self, values: list[str]) -> None:
+                self._values = values
+
+            def get(self, key: str, default=None):
+                if key == "x-forwarded-for" and self._values:
+                    return ", ".join(self._values)
+                return default
+
+            def getlist(self, key: str):
+                return self._values if key == "x-forwarded-for" else []
+
+        self.headers = _H(self._forwarded)
+
+
+async def test_the_diagnostic_numbers_the_chain_from_the_right(configured, monkeypatch):
+    """The number you set is read straight off your own entry, so nobody has to
+    reason about which end of X-Forwarded-For is trustworthy."""
+    from app.api.internal_routes import inspect_forwarded_headers
+
+    monkeypatch.setattr(settings, "trusted_proxy_count", 0)
+    request = _HeaderRequest(peer="10.0.0.5", forwarded=["1.2.3.4, 203.0.113.7, 198.51.100.4"])
+
+    result = await inspect_forwarded_headers(request)
+
+    # Rightmost first - the end our own infrastructure writes.
+    assert [c["value"] for c in result["chain"]] == ["198.51.100.4", "203.0.113.7", "1.2.3.4"]
+    # A caller finding 203.0.113.7 as their own IP reads off 2.
+    by_value = {c["value"]: c["trusted_proxy_count_if_this_is_you"] for c in result["chain"]}
+    assert by_value["203.0.113.7"] == 2
+    assert by_value["198.51.100.4"] == 1
+
+
+async def test_the_diagnostic_shows_what_is_configured_and_resolved_today(configured, monkeypatch):
+    """Both halves matter: what the setting is, and what it currently produces -
+    which is how you tell whether a change had the effect you expected."""
+    from app.api.internal_routes import inspect_forwarded_headers
+
+    monkeypatch.setattr(settings, "trusted_proxy_count", 1)
+    request = _HeaderRequest(peer="10.0.0.5", forwarded=["1.2.3.4, 203.0.113.7"])
+
+    result = await inspect_forwarded_headers(request)
+
+    assert result["configured_trusted_proxy_count"] == 1
+    assert result["resolved_client_ip"] == "203.0.113.7"
+    assert result["tcp_peer"] == "10.0.0.5"
+
+
+async def test_the_diagnostic_flags_a_repeated_header(configured, monkeypatch):
+    """Some infrastructure appends a second X-Forwarded-For rather than extending
+    the first, and reading one value joins them - which would otherwise look like
+    a single long chain and give the wrong count."""
+    from app.api.internal_routes import inspect_forwarded_headers
+
+    monkeypatch.setattr(settings, "trusted_proxy_count", 0)
+    request = _HeaderRequest(peer="10.0.0.5", forwarded=["1.2.3.4", "203.0.113.7"])
+
+    result = await inspect_forwarded_headers(request)
+
+    assert result["x_forwarded_for_header_count"] == 2
+
+
+async def test_the_diagnostic_needs_the_secret(unconfigured):
+    """Echoing request headers back reveals internal proxy addresses, so it is
+    gated exactly like the run-cycle routes."""
+    with pytest.raises(HTTPException) as exc:
+        await require_internal_secret(x_lmx_internal_token="anything")
+    assert exc.value.status_code == 404

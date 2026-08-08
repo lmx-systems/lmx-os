@@ -39,6 +39,16 @@ this change alters no behaviour until someone deliberately says how many proxies
 exist. Setting it higher than the real number is the dangerous direction - it
 starts trusting caller-supplied entries - so the default errs the safe way and the
 setting's docstring says so.
+
+**THIS MUST BE THE ONLY LAYER INTERPRETING FORWARDED HEADERS.** Uvicorn enables
+proxy-header handling by default and will itself rewrite `request.client.host`
+from `X-Forwarded-For` for connections coming from `--forwarded-allow-ips`. With
+both layers active, "fall back to the peer" below can fall back to a value the
+caller supplied - which quietly inverts the safety of the default. The Dockerfile
+therefore runs uvicorn with `--no-proxy-headers`, and that flag is load-bearing
+rather than tidiness: verified by request, a forged header resolves to the real
+peer with it and to the forged value without it. If this app is ever started some
+other way, that flag has to come too.
 """
 from __future__ import annotations
 

@@ -35,10 +35,11 @@ from __future__ import annotations
 import secrets as secrets_mod
 
 import structlog
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.client_ip import client_ip
 from app.config import settings
 from app.db import get_db
 from app.learning_loop.service import run_nightly_job
@@ -122,3 +123,62 @@ async def run_learning_loop_for_all_hubs(session: AsyncSession = Depends(get_db)
             results[hub_id] = f"error: {type(exc).__name__}"
     logger.info("scheduled_learning_loop_complete", hubs=len(results))
     return {"hubs": results}
+
+
+@router.get("/forwarded-headers", dependencies=[Depends(require_internal_secret)])
+async def inspect_forwarded_headers(request: Request) -> dict:
+    """What the proxy chain actually looks like, for setting TRUSTED_PROXY_COUNT.
+
+    Exists because that setting cannot be guessed and getting it wrong in the
+    too-high direction is worse than leaving it at 0: each proxy APPENDS the
+    address it saw, so claiming more proxies than exist starts trusting entries
+    the caller wrote, and an attacker can then mint a fresh empty rate-limit
+    bucket per request. Every platform orders and rewrites `X-Forwarded-For`
+    slightly differently, so the only reliable answer comes from a real request
+    through the real infrastructure.
+
+    **How to use it.** Call this from a network whose public IP you know - a
+    phone on mobile data is easiest - and find your own address in `chain`. The
+    `trusted_proxy_count_if_this_is_you` on that entry is the value to set.
+
+    Behind the internal token, not open: echoing request headers back is an
+    information-disclosure surface, and it reveals internal proxy addresses.
+
+    Safe to leave in place. It stays useful for diagnosing rate-limiting that is
+    throttling the wrong thing, which is a class of problem that is otherwise
+    very hard to see from the outside.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    entries = [part.strip() for part in (forwarded or "").split(",") if part.strip()]
+
+    # Repeated headers are a real case and they change how the chain parses -
+    # some infrastructure appends a second X-Forwarded-For rather than extending
+    # the first, and Starlette joins those with ", " when you read one value.
+    # Surfaced separately so that doesn't quietly look like one long chain.
+    raw_occurrences = request.headers.getlist("x-forwarded-for")
+
+    return {
+        "resolved_client_ip": client_ip(request),
+        "configured_trusted_proxy_count": settings.trusted_proxy_count,
+        "tcp_peer": request.client.host if request.client else None,
+        "x_forwarded_for_raw": forwarded,
+        "x_forwarded_for_header_count": len(raw_occurrences),
+        # Rightmost first, because that is the end written by our own
+        # infrastructure and the end the count is measured from.
+        "chain": [
+            {
+                "value": value,
+                "position_from_right": index + 1,
+                "trusted_proxy_count_if_this_is_you": index + 1,
+            }
+            for index, value in enumerate(reversed(entries))
+        ],
+        "x_forwarded_proto": request.headers.get("x-forwarded-proto"),
+        "forwarded": request.headers.get("forwarded"),
+        "how_to_read_this": (
+            "Find your own public IP in `chain` and set TRUSTED_PROXY_COUNT to "
+            "that entry's trusted_proxy_count_if_this_is_you. If your IP is not "
+            "in the chain at all, leave it at 0 - something is rewriting the "
+            "header and the TCP peer is the only honest value."
+        ),
+    }
