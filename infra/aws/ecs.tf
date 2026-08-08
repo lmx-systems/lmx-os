@@ -40,6 +40,17 @@ resource "aws_ecs_task_definition" "app" {
       { name = "PHOTO_UPLOAD_BUCKET", value = aws_s3_bucket.photo_uploads.bucket },
       { name = "PHOTO_UPLOAD_REGION", value = var.aws_region },
       { name = "DASHBOARD_CORS_ORIGINS", value = "https://ops.lmxit.com,https://portal.lmxit.com" },
+      # Exactly one trusted proxy: the ALB defined in alb.tf, which is the only
+      # thing in front of these tasks. Without this the app defaults to 0 and
+      # keys every rate limit on the ALB's own address - one shared bucket for
+      # the entire internet, which matters most for the unauthenticated public
+      # signup and password-reset endpoints.
+      #
+      # This number must match reality. Raising it without adding a real proxy
+      # starts trusting caller-supplied X-Forwarded-For entries, which lets an
+      # attacker mint a fresh empty bucket per request. See app/client_ip.py.
+      # If a CDN is ever put in front of the ALB, this becomes 2.
+      { name = "TRUSTED_PROXY_COUNT", value = "1" },
     ]
 
     logConfiguration = {

@@ -14,13 +14,13 @@ a runaway retry loop, a scraping attempt - not limiting normal usage.
 Tune GENERAL_RATE_LIMIT_MAX_REQUESTS down only with real traffic data in
 hand, not a guess.
 
-Known limitation: keyed by request.client.host, the direct TCP peer as
-this ASGI server sees it - correct only when nothing sits in front of it.
-Behind a real reverse proxy/load balancer (Phase 5's hosting decision),
-every request would appear to come from the proxy's own IP unless
-X-Forwarded-For is parsed and trusted, which this doesn't do yet - same
-class of gap as app/config.py's TWILIO_WEBHOOK_BASE_URL override exists
-to cover for signature verification.
+Proxy-aware since L15: the caller's address comes from
+app/client_ip.py::client_ip, which reads X-Forwarded-For according to
+TRUSTED_PROXY_COUNT rather than trusting the direct TCP peer. Behind a load
+balancer, keying on the peer would have made every request look like it came
+from the balancer - one shared bucket throttling the whole internet as a
+single caller. See that module for why naively taking the first
+X-Forwarded-For entry would have been worse than the original bug.
 """
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app import metrics
+from app.client_ip import client_ip
 from app.config import settings
 from app.logging_config import get_logger
 from app.redis_client import get_client, timed_operation
@@ -42,8 +43,8 @@ logger = get_logger(__name__)
 EXEMPT_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json"})
 
 
-def _key(client_ip: str) -> str:
-    return f"rate_limit:general:{client_ip}"
+def _key(caller_ip: str) -> str:
+    return f"rate_limit:general:{caller_ip}"
 
 
 class GeneralRateLimitMiddleware(BaseHTTPMiddleware):
@@ -51,17 +52,17 @@ class GeneralRateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path in EXEMPT_PATHS:
             return await call_next(request)
 
-        client_ip = request.client.host if request.client else "unknown"
+        caller_ip = client_ip(request)
         redis = get_client()
         async with timed_operation("general_rate_limit.check"):
             pipe = redis.pipeline(transaction=True)
-            pipe.incr(_key(client_ip))
-            pipe.expire(_key(client_ip), settings.general_rate_limit_window_seconds, nx=True)
+            pipe.incr(_key(caller_ip))
+            pipe.expire(_key(caller_ip), settings.general_rate_limit_window_seconds, nx=True)
             count, _ = await pipe.execute()
 
         if count > settings.general_rate_limit_max_requests:
             metrics.RATE_LIMIT_REJECTIONS.inc()
-            logger.warning("general_rate_limit_exceeded", client_ip=client_ip, path=request.url.path)
+            logger.warning("general_rate_limit_exceeded", client_ip=caller_ip, path=request.url.path)
             return JSONResponse(
                 {"detail": "Too many requests - slow down and try again shortly"},
                 status_code=429,

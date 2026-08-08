@@ -133,6 +133,23 @@ class Settings(BaseSettings):
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
 
+    # How many trusted proxies sit in front of this app (app/client_ip.py,
+    # docs/ROADMAP.md L15). Decides which X-Forwarded-For entry is the real
+    # caller, which every rate limiter keys on.
+    #
+    # 0 means "trust nothing, use the TCP peer" - correct for local development
+    # and for the app running with nothing in front of it. Set it to the real
+    # number of proxies when deploying: 1 for a single load balancer, 2 for a CDN
+    # in front of one.
+    #
+    # SETTING THIS TOO HIGH IS THE DANGEROUS DIRECTION. Each proxy appends the
+    # address it saw, so the last N entries are ours and everything left of them
+    # was supplied by the caller. Claiming more proxies than exist starts trusting
+    # caller-written entries, which lets an attacker mint a fresh rate-limit
+    # bucket per request - no limit at all, dressed up as one. Too low merely
+    # throttles a shared bucket too aggressively.
+    trusted_proxy_count: int = 0
+
     # Transactional email (app/messaging/email_client.py). Same
     # "unconfigured -> stub" status as Twilio: unset means every notification
     # logs instead of sending.

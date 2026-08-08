@@ -11,10 +11,10 @@ a way to fill those tables and bury real applicants in the ops review queue -
 which is exactly the queue that gates whether anyone can dispatch our vans.
 
 Keyed on the caller's IP rather than the submitted email, because the email is
-attacker-chosen and a per-email limit stops nothing. Same caveat the S6 pass
-recorded for `app/rate_limit.py`: this is the direct TCP peer, which is correct
-only until a real reverse proxy sits in front (Phase 5's hosting decision), at
-which point it must read X-Forwarded-For or it will throttle the proxy itself.
+attacker-chosen and a per-email limit stops nothing. The caller's IP comes from
+`app/client_ip.py::client_ip` (L15), which reads X-Forwarded-For according to
+TRUSTED_PROXY_COUNT - so behind a load balancer this throttles the actual caller
+rather than lumping every applicant into the balancer's single bucket.
 """
 from __future__ import annotations
 

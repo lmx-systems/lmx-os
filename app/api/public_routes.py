@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 
 from app.client_auth.login_rate_limit import LoginRateLimiter
+from app.client_ip import client_ip
 from app.client_auth.password_reset import PasswordResetStore, ResetRequestRateLimitExceeded
 from app.client_auth.passwords import hash_password
 from app.client_auth.signup_rate_limit import SignupRateLimiter, SignupRateLimitExceeded
@@ -68,12 +69,13 @@ _ACCEPTED_MESSAGE = (
 def _client_ip(request: Request) -> str:
     """The caller's address, for rate limiting.
 
-    Same limitation the S6 pass recorded for `app/rate_limit.py`: this is the
-    direct TCP peer. Correct until a real reverse proxy sits in front (Phase 5's
-    hosting decision), after which it must read X-Forwarded-For or it will
-    throttle the proxy rather than the caller.
+    Delegates to the shared helper (L15), which reads X-Forwarded-For according
+    to TRUSTED_PROXY_COUNT. This used to be the direct TCP peer, which behind a
+    load balancer would have thrown every applicant into one shared bucket - so
+    the public signup limit would have been a single budget for the whole
+    internet.
     """
-    return request.client.host if request.client else "unknown"
+    return client_ip(request)
 
 
 @router.post("/signup", response_model=ClientSignupResult, status_code=202)
