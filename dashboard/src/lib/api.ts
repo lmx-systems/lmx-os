@@ -145,7 +145,7 @@ export const api = {
     request<ProposedRuleApprovalResult>(`/admin/proposed-rules/${ruleId}/approve`, { method: 'POST' }),
 
   dismissProposedRule: (ruleId: string) =>
-    request<ProposedRuleApprovalResult>(`/admin/proposed-rules/${ruleId}/dismiss`, { method: 'POST' }),,
+    request<ProposedRuleApprovalResult>(`/admin/proposed-rules/${ruleId}/dismiss`, { method: 'POST' }),
 
   // Public-signup review (docs/LMX_LINK_PLAN.md). Approval is also where a
   // client's per-tier rates get set - which is what guarantees an active

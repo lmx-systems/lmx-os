@@ -73,3 +73,41 @@ jobs:
             echo "::error::Integration tests were skipped - the postgres/redis service containers weren't reachable. This should never happen in CI; check the services: block above."
             exit 1
           fi
+
+  # Both web frontends. CI covered neither until August 2026, which is how a
+  # plain syntax error - a stray double comma in dashboard/src/lib/api.ts -
+  # shipped to main and sat there unnoticed.
+  #
+  # `tsc --noEmit` is NOT sufficient on its own and that is the lesson: it passed
+  # on the very error that broke the build. Both steps run, and the build is the
+  # one that actually gates.
+  frontends:
+    runs-on: ubuntu-latest
+    strategy:
+      # Don't stop the other app's build on the first failure - knowing whether
+      # both broke or only one is the useful signal.
+      fail-fast: false
+      matrix:
+        app: [dashboard, client-portal]
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npx vite build
