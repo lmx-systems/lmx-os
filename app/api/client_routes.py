@@ -9,15 +9,26 @@ whom is an admin who manages the others.
 """
 from __future__ import annotations
 
+import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.batch_queue.clustering import miles_between
+from app.batch_queue.store import HoldQueueStore
 from app.billing.invoice_pdf import render_invoice_pdf
 from app.billing.service import invoice_detail_view, invoice_summary_view
+from app.geocoding import get_geocoder
+from app.gig_platform.economics import minutes_for_miles
+from app.ingestion.service import (
+    OriginUnresolvableError,
+    ShopNotFoundError,
+    ingest_lmx_order,
+)
 from app.client_auth.dependencies import AuthedClient, get_current_client, require_client_admin
 from app.client_auth.login_rate_limit import LoginRateLimitExceeded, LoginRateLimiter
 from app.client_auth.passwords import hash_password, verify_password
@@ -31,6 +42,12 @@ from app.models.return_item import ReturnItem
 from app.models.shop import Shop
 from app.returns.service import AWAITING_STATUSES, return_views
 from app.schemas.billing import InvoiceDetailView, InvoiceSummaryView
+from app.schemas.client_order import (
+    ClientOrderBody,
+    ClientOrderResult,
+    deadline_payload_flags,
+)
+from app.schemas.lmx_order import LMXOrder, LineItem
 from app.schemas.returns import ReturnFlagBody, ReturnItemView
 from app.schemas.client_auth import (
     ClientAuthToken,
@@ -365,7 +382,9 @@ async def list_my_shops(
         select(Shop).where(Shop.client_id == uuid.UUID(client.client_id)).order_by(Shop.name)
     )
     return [
-        ClientShopView(shop_id=str(s.id), name=s.name, external_ref=s.external_ref)
+        ClientShopView(
+            shop_id=str(s.id), name=s.name, external_ref=s.external_ref, address=s.address
+        )
         for s in result.scalars().all()
     ]
 
@@ -390,3 +409,142 @@ async def list_my_returns(
     query = query.order_by(ReturnItem.created_at.desc())
     result = await session.execute(query)
     return await return_views(session, list(result.scalars().all()))
+
+
+# ---------------------------------------------------------------------------
+# Order submission (docs/LMX_LINK_PLAN.md §2.2)
+#
+# The first order-CREATING endpoint a client has ever had. Everything else on
+# this router reads what LMX already knows; this is the front door.
+# ---------------------------------------------------------------------------
+
+
+async def _require_approved_client(session: AsyncSession, client: AuthedClient) -> Client:
+    """Load the client and refuse if they aren't approved yet.
+
+    Belt and braces rather than redundancy. A pending client's user is created
+    inactive, so `get_current_client` should already have rejected them at the
+    token check - but that is one boolean on a different table, and the
+    consequence of it being wrong is a stranger putting work into the dispatch
+    queue. This checks the fact that actually matters: has a human approved this
+    company.
+    """
+    row = await session.get(Client, uuid.UUID(client.client_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if row.signup_status != "active":
+        raise HTTPException(
+            status_code=403,
+            detail="Your account is still being reviewed - you'll be able to send orders once it's approved.",
+        )
+    return row
+
+
+@router.post("/orders", response_model=ClientOrderResult, status_code=201)
+async def submit_order(
+    body: ClientOrderBody,
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> ClientOrderResult:
+    """Submit an order.
+
+    Runs the same ingestion path as an Epicor webhook - normalize, resolve or
+    create the pickup, classify, land in the batch-hold queue. Nothing
+    downstream knows this came from a person rather than a POS, which is §1.1's
+    rule working as intended.
+
+    The client's deadline choice becomes an urgency flag on the payload and is
+    classified by the existing SLA engine, rather than letting them name a tier.
+    LMX owns the commitment (§1.3): a customer says how urgent it is, we decide
+    what that means.
+    """
+    client_row = await _require_approved_client(session, client)
+
+    pickup_address = (body.pickup_address or "").strip() or None
+    shop_external_ref = None
+    if body.pickup_shop_id is not None:
+        shop = await session.get(Shop, uuid.UUID(body.pickup_shop_id))
+        # Scoped check, not just existence: a shop id from another client is a
+        # 404 here, never a usable pickup.
+        if shop is None or shop.client_id != client_row.id:
+            raise HTTPException(status_code=404, detail="Pickup location not found")
+        shop_external_ref = shop.external_ref
+        # A remembered shop with no external_ref predates this path; fall back to
+        # its stored address so it still resolves rather than failing.
+        if shop_external_ref is None:
+            pickup_address = shop.address
+
+    reference = (body.reference or "").strip() or f"LMX-{secrets.token_hex(4).upper()}"
+
+    lmx = LMXOrder(
+        source_system="client_portal",
+        source_order_ref=reference,
+        hub_id=str(client_row.hub_id),
+        client_id=str(client_row.id),
+        shop_external_ref=shop_external_ref,
+        pickup_address=pickup_address,
+        pickup_contact_name=body.pickup_contact_name,
+        pickup_contact_phone=body.pickup_contact_phone,
+        drop_address_raw=body.drop_address,
+        drop_contact_name=body.drop_contact_name,
+        drop_contact_phone=body.drop_contact_phone,
+        access_notes=body.access_notes,
+        sla_owner="LMX",
+        total_weight_units=body.total_weight_units,
+        line_items=[
+            LineItem(description=li.description, quantity=li.quantity) for li in body.line_items
+        ],
+        received_at=datetime.now(timezone.utc),
+        # The deadline choice, expressed as the urgency flags the SLA engine
+        # already reads. Not a tier the client picked.
+        raw_payload=deadline_payload_flags(body.deadline),
+    )
+
+    try:
+        order = await ingest_lmx_order(session, HoldQueueStore(), lmx, geocoder=get_geocoder())
+    except OriginUnresolvableError as exc:
+        # A typed address we couldn't place. Refusing beats accepting something
+        # undeliverable - and the client can fix a typo immediately, which
+        # nobody can do once a driver is standing in the wrong street.
+        raise HTTPException(
+            status_code=422,
+            detail="We couldn't find that pickup address - please check it and try again.",
+        ) from exc
+    except ShopNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Pickup location not found") from exc
+
+    return ClientOrderResult(
+        order_id=str(order.id),
+        reference=reference,
+        status=order.status.value,
+        sla_tier=order.sla_tier,
+        collect_by=order.hold_deadline,
+        estimated_delivery_by=await _estimate_delivery_by(session, order),
+        fee_cents=order.fee_cents,
+        dispatchable=order.delivery_lat is not None and order.delivery_lng is not None,
+    )
+
+
+async def _estimate_delivery_by(session: AsyncSession, order: Order) -> datetime | None:
+    """A rough delivery time for the confirmation - an ESTIMATE, not a promise.
+
+    §2.2 principle 6 wants the confirmation to show a commitment rather than a
+    spinner, and a collect-by time alone reads as half an answer. But there is
+    no verified travel-time model here: the real routing integration has never
+    made a live call (E1, blocked on a Google Cloud account). So this is
+    straight-line distance at the same placeholder average speed the gig
+    accept-gate uses, and the field it populates is named
+    `estimated_delivery_by` rather than `delivery_by` on purpose.
+
+    Returns None when the drop hasn't been geocoded - guessing without a
+    destination would be inventing twice over.
+    """
+    if order.hold_deadline is None or order.delivery_lat is None or order.delivery_lng is None:
+        return None
+    # Pickup coordinates live on the Shop, not the Order - that Shop-dependency
+    # is the same one documented in app/ingestion/service.py.
+    shop = await session.get(Shop, order.shop_id) if order.shop_id else None
+    if shop is None:
+        return None
+    miles = miles_between(shop.lat, shop.lng, float(order.delivery_lat), float(order.delivery_lng))
+    return order.hold_deadline + timedelta(minutes=minutes_for_miles(miles))

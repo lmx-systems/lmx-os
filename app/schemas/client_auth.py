@@ -27,11 +27,20 @@ class ClientProfileView(BaseModel):
 
 class ClientShopView(BaseModel):
     """One of the caller company's shops - drives the portal's flag-cores-ready
-    picker (docs/ROADMAP.md W1 slice 4)."""
+    picker (docs/ROADMAP.md W1 slice 4) and the New Order form's remembered
+    pickup list (LMX_LINK_PLAN.md §2.2 principle 3).
+
+    Includes shops auto-created from a typed pickup address, which is the point
+    of that principle: an address typed once never has to be typed again.
+    """
 
     shop_id: str
     name: str
     external_ref: str | None
+    # Added for the order form - the name of an auto-created shop is the typed
+    # address, but a registered one may be called "Midtown" and a counter person
+    # needs to see where that actually is before picking it.
+    address: str | None = None
 
 
 class ClientUserView(BaseModel):
