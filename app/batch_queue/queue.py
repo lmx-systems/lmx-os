@@ -82,6 +82,15 @@ class HeldOrder:
     # Defaults to "" rather than being required so existing callers/tests
     # that only care about the decision logic don't need updating.
     shop_name: str = ""
+    # Where the order is going. Not used by any decision in this module either -
+    # clustering is deliberately on the PICKUP location, since that is what
+    # commingling shares - but carried through the queue so the Dispatch
+    # Optimizer can hand the real pickup-to-delivery journey to the routing
+    # solver instead of a single visit at the shop
+    # (app/optimizer/google_routes_client.py). Optional for the same reason
+    # `Order.delivery_lat` is nullable: no source adapter populates it yet.
+    delivery_lat: float | None = None
+    delivery_lng: float | None = None
 
 
 @dataclass(frozen=True)

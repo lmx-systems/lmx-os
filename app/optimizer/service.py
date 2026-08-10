@@ -91,6 +91,12 @@ class DispatchOptimizerService:
                 order_ids=[order.order_id],
                 lat=order.shop_lat,
                 lng=order.shop_lng,
+                # Lets the solver plan pickup -> delivery instead of a single visit
+                # at the shop. None when the order has no geocoded drop, which the
+                # client handles by falling back to the old single-visit shape
+                # rather than refusing to dispatch.
+                delivery_lat=order.delivery_lat,
+                delivery_lng=order.delivery_lng,
                 weight_units=1.0,  # per-order weight isn't in HeldOrder; refined once
                 # the optimizer reads directly from `orders.weight_units` in Phase 1.
                 sla_tier=order.sla_tier,
