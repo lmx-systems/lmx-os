@@ -55,7 +55,10 @@ RevenueBasis = Literal["per_drop", "per_mile", "contract"]
 # Who settles, and when. Carried in v1 even though collection is not built:
 # retrofitting payment onto an order contract is a migration, and the whole
 # point of a contract is to not need one. See the plan's gap 9.
-PayerType = Literal["contract_client", "prepaid", "card_on_file"]
+# `cash_on_delivery` means the driver collects the DISTRIBUTOR'S invoice amount at the
+# door (W2). It was absent until now, which meant `COD_DISPUTE` was a stop failure reason
+# for a payment mode no order could declare.
+PayerType = Literal["contract_client", "prepaid", "card_on_file", "cash_on_delivery"]
 PaymentStatus = Literal["not_billable", "unbilled", "invoiced", "paid"]
 
 # Size buckets a counter person can pick without a tape measure. Feeds vehicle
@@ -100,6 +103,11 @@ class Economics(BaseModel):
     payer_type: PayerType = "contract_client"
     payment_status: PaymentStatus = "unbilled"
     payment_terms_days: int | None = Field(default=None, ge=0)
+    # What the driver collects at the door when payer_type is cash_on_delivery (W2).
+    # **Money that isn't ours** - the distributor's invoice to their own customer, which
+    # is why it is not `quoted_amount_cents` and not `fee_cents`. A dispute over it is
+    # between those two parties, and the driver has no authority to change it.
+    cod_amount_cents: int | None = Field(default=None, ge=0)
 
 
 class LMXOrder(BaseModel):

@@ -189,3 +189,39 @@ class DriverDocumentReviewResult(BaseModel):
     # someone, rather than having to go and check.
     driver_can_go_on_shift: bool
     outstanding_problems: list[str]
+
+
+# ---------------------------------------------------------------------------
+# COD disputes (docs/ROADMAP.md W2)
+# ---------------------------------------------------------------------------
+
+
+class ShopDisputeRowView(BaseModel):
+    shop_id: str | None
+    shop_name: str
+    client_id: str | None
+    client_name: str
+    disputed_count: int
+    # Beside the disputes on purpose: three out of four deliveries and three out of three
+    # hundred are different facts, and a report that counts only failures makes them look
+    # the same.
+    collected_count: int
+    disputed_amount_cents: int
+    dispute_rate: float
+
+
+class CodDisputeReportView(BaseModel):
+    window_start: datetime
+    window_end: datetime
+    disputed_count: int
+    collected_count: int
+    disputed_amount_cents: int
+    # Worst first - the point of the report is which conversation to have.
+    shops: list[ShopDisputeRowView]
+    # Disputes the distributor was never told about. Surfaced separately because it breaks
+    # the promise the feature makes ("one tap escalates"), and folded into a total it would
+    # disappear.
+    unescalated_count: int
+    # Why. With no SMS provider configured (B5) every dispute is un-escalated, and that is
+    # one deployment-wide fact rather than N per-account failures.
+    sms_configured: bool

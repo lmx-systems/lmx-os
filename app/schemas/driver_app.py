@@ -162,6 +162,44 @@ class JobOfferView(BaseModel):
         return len(self.stops)
 
 
+class CodObligationView(BaseModel):
+    """Money owed at this stop, shown before the driver knocks.
+
+    Sent with the stop so the app can display the amount on the way there rather than
+    discovering it at the door - a driver who learns there is money to collect while the
+    customer is already reaching for the parts has lost the moment to ask for it.
+    """
+
+    order_id: str
+    amount_due_cents: int
+    # Once settled, the app stops asking. Both a collection and a dispute settle it: the
+    # rule is "keep moving", so a driver is not held at a door by an unresolved dispute.
+    settled: bool
+    outcome: str | None = None
+
+
+class CollectCodBody(BaseModel):
+    """Confirming the FULL amount was taken.
+
+    **There is deliberately no amount field**, and that absence is the enforcement of
+    "never negotiate" (docs/ROADMAP.md W2). The money is the distributor's invoice to
+    their own customer; nobody at LMX has authority to discount it, so a field to type a
+    smaller number into would hand a driver an authority they were never given. Collect
+    it all, or raise a dispute.
+    """
+
+    method: Literal["cash", "check"]
+
+
+class CodDisputeBody(BaseModel):
+    """The customer won't pay. One tap, then move on."""
+
+    # What they said, in the driver's words. Free text because the useful signal is a
+    # pattern across an account, and a dropdown written now would decide in advance which
+    # patterns can be seen.
+    note: str | None = Field(default=None, max_length=500)
+
+
 class StopProofRequirementView(BaseModel):
     """What this stop must produce, so the app can ASK for the right thing.
 
@@ -199,6 +237,8 @@ class StopView(BaseModel):
     # What proof this stop needs. Always present, defaulting to the one-photo
     # baseline, so the app never has to guess.
     proof: StopProofRequirementView | None = None
+    # Money to collect here, if any (W2). Empty for the overwhelming majority of stops.
+    cod: list[CodObligationView] = Field(default_factory=list)
 
 
 class RouteView(BaseModel):

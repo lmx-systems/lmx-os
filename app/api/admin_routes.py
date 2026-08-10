@@ -32,6 +32,7 @@ from app.models.client_rate import ClientRate
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.models.driver import Driver
 from app.compliance.driver_documents import evaluate_driver_documents
+from app.reporting.cod_disputes import build_cod_dispute_report
 from app.models.driver_device import DriverDevice
 from app.models.driver_document import (
     REVIEW_PENDING,
@@ -57,11 +58,13 @@ from app.redis_client import get_client as get_redis_client
 from app.schemas.admin import (
     ClientOnboardingBody,
     ClientOnboardingResult,
+    CodDisputeReportView,
     DriverDocumentReviewBody,
     DriverDocumentReviewResult,
     DriverPayrollSubmission,
     HubClosureBody,
     PendingDriverDocumentView,
+    ShopDisputeRowView,
     HubClosureView,
     OrderResolutionResult,
     PayrollRunResult,
@@ -996,4 +999,46 @@ async def review_driver_document(
         verified_expires_at=doc.verified_expires_at,
         driver_can_go_on_shift=compliance.can_go_on_shift,
         outstanding_problems=[problem.detail for problem in compliance.problems],
+    )
+
+
+@router.get("/hubs/{hub_id}/cod-disputes", response_model=CodDisputeReportView)
+async def cod_dispute_report(
+    hub_id: str,
+    window_days: int = 30,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> CodDisputeReportView:
+    """Repeat COD disputes per account (docs/ROADMAP.md W2).
+
+    **A single dispute is a bad afternoon; the same account disputing every month is a
+    commercial problem** - and it is invisible unless somebody counts. Grouped by shop
+    rather than by client, because a distributor can have forty branches and "your account
+    has a dispute problem" is not actionable where "the Riverside branch does" is.
+
+    Feeds the monthly owner report the roadmap asks for. `window_days` defaults to 30 to
+    match that cadence.
+    """
+    report = await build_cod_dispute_report(session, hub_id=hub_id, window_days=window_days)
+    return CodDisputeReportView(
+        window_start=report.window_start,
+        window_end=report.window_end,
+        disputed_count=report.disputed_count,
+        collected_count=report.collected_count,
+        disputed_amount_cents=report.disputed_amount_cents,
+        unescalated_count=report.unescalated_count,
+        sms_configured=report.sms_configured,
+        shops=[
+            ShopDisputeRowView(
+                shop_id=row.shop_id,
+                shop_name=row.shop_name,
+                client_id=row.client_id,
+                client_name=row.client_name,
+                disputed_count=row.disputed_count,
+                collected_count=row.collected_count,
+                disputed_amount_cents=row.disputed_amount_cents,
+                dispute_rate=round(row.dispute_rate, 4),
+            )
+            for row in report.shops
+        ],
     )

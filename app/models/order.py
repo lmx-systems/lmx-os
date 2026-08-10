@@ -236,6 +236,12 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     payment_status: Mapped[str] = mapped_column(
         String(24), nullable=False, server_default="unbilled"
     )
+    # What the driver must collect at the door when payer_type is cash_on_delivery
+    # (docs/ROADMAP.md W2, migration 0038). The DISTRIBUTOR'S invoice amount, not ours -
+    # deliberately not folded into fee_cents or quoted_amount_cents, because conflating
+    # money we carry with money we charge would make a customer's dispute look like a
+    # billing question about LMX.
+    cod_amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Autonomy eligibility, captured from the first van so the first partner
     # conversation starts with a measured addressable share of real order flow
