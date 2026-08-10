@@ -16,7 +16,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.geocoding.base import BaseGeocoder, GeocodeResult, normalize_address
+from app.geocoding.base import (
+    BaseGeocoder,
+    GeocodeResult,
+    GeocoderUnavailableError,
+    normalize_address,
+)
 from app.models.geocoded_address import GeocodedAddress
 
 logger = structlog.get_logger(__name__)
@@ -64,7 +69,26 @@ async def resolve_address(
             provider=cached.provider or "cache",
         )
 
-    result = await geocoder.geocode(address)
+    try:
+        result = await geocoder.geocode(address)
+    except GeocoderUnavailableError as exc:
+        # WE COULDN'T ASK - so nothing gets cached. This is the distinction the
+        # whole GeocoderUnavailableError type exists for: a negative cache row is
+        # never retried, so caching a quota exhaustion or a rejected API key would
+        # permanently mark every address attempted during that window as
+        # unresolvable, and every future order to them would be refused with
+        # nothing to explain why.
+        #
+        # Returning None still refuses this order, which is correct - we have no
+        # coordinates - but the address stays clean and the next attempt asks
+        # again.
+        logger.warning(
+            "geocode_provider_unavailable",
+            provider=geocoder.provider_name,
+            error=str(exc),
+            detail="not cached - the address was never actually answered for",
+        )
+        return None
 
     row = GeocodedAddress(
         normalized_address=normalized,

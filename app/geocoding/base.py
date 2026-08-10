@@ -27,6 +27,24 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 
+class GeocoderUnavailableError(Exception):
+    """The provider could not answer, for reasons that are ours rather than the
+    address's - exhausted quota, a rejected key, a network failure, a response we
+    couldn't parse.
+
+    **This distinction is load-bearing, not pedantry.** The address cache
+    (app/geocoding/cache.py) remembers a failed lookup so a resubmitted typo
+    doesn't burn the request budget three times - and it never retries what it
+    remembered. If "we couldn't ask" and "this address doesn't exist" were the
+    same outcome, one quota exhaustion or one expired API key would permanently
+    mark every address attempted during it as unresolvable, and every future
+    order to those addresses would be refused with nothing to explain why.
+
+    So: return None for a definitive no-match, raise this for anything else.
+    Callers must not cache a raise.
+    """
+
+
 @dataclass(frozen=True)
 class GeocodeResult:
     """One resolved address."""
@@ -49,10 +67,13 @@ class BaseGeocoder(ABC):
     async def geocode(self, address: str) -> GeocodeResult | None:
         """Resolve one address.
 
-        Returns None when the address cannot be resolved with confidence, or
-        when the provider is unreachable. Implementations must not raise for an
-        unresolvable address - that is an ordinary outcome, not an error - but
-        may raise for genuine misconfiguration.
+        Returns None ONLY when the provider definitively says this address does
+        not resolve - a typo, a made-up street. That outcome is cached, so it
+        must mean "asked and answered no", never "couldn't ask".
+
+        Raises `GeocoderUnavailableError` for everything else: exhausted quota, a
+        rejected key, a timeout, an unparseable response. See that exception for
+        why conflating the two would poison the cache.
         """
         raise NotImplementedError
 
