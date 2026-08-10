@@ -46,6 +46,14 @@ class Client(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Which terms version they accepted, and when. A checkbox is not the
     # artifact - what they agreed to has to be identifiable later.
     terms_accepted_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # When ops approved this signup (migration 0036). Recorded because §3.4's
+    # headline metric - "time from new customer says yes to first order delivered",
+    # target same day - has no start point without it. Approval used to flip
+    # signup_status and nothing else, so the instant was lost.
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     terms_accepted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

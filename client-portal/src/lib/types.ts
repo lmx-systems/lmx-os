@@ -266,3 +266,23 @@ export interface ApiKeyView {
 export interface ApiKeyCreated extends ApiKeyView {
   token: string
 }
+
+// CSV manifest upload (docs/LMX_LINK_PLAN.md T3).
+export interface ManifestRowResult {
+  // The line number in the dispatcher's own file, counting the header - they are
+  // looking at the same spreadsheet.
+  line_number: number
+  drop_address: string | null
+  order: ClientOrderResult | null
+  error: string | null
+}
+
+export interface ManifestUploadResult {
+  accepted: number
+  failed: number
+  // Which header we read as which field, so a dispatcher can confirm we took
+  // "Ship To Address" as the destination.
+  column_mapping: Record<string, string>
+  // Every line of the file, exactly once.
+  results: ManifestRowResult[]
+}

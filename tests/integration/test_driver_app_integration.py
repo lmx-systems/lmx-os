@@ -65,6 +65,11 @@ from tests.integration.conftest import make_driver_compliant
 
 pytestmark = pytest.mark.integration
 
+# Proof of delivery now has to actually contain proof (app/delivery/proof.py). These
+# tests used to pass `method="photo"` with no URL, which the endpoint accepted - the
+# defect, encoded as a fixture.
+POD_PHOTO = "local-capture://pod/test/photo.jpg"
+
 
 async def _seed(db_session):
     hub_id, client_id, shop_id, driver_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
@@ -285,7 +290,7 @@ async def test_complete_stop_rejects_a_stop_that_never_arrived(db_session, real_
     authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
 
     with pytest.raises(HTTPException) as exc_info:
-        await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+        await complete_stop(pickup.stop_id, CompleteStopBody(method="photo", photo_url=POD_PHOTO), driver=authed, session=db_session)
     assert exc_info.value.status_code == 409
 
 
@@ -304,7 +309,7 @@ async def test_complete_stop_rejects_pickup_not_fully_scanned(db_session, real_r
 
     await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
     with pytest.raises(HTTPException) as exc_info:
-        await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+        await complete_stop(pickup.stop_id, CompleteStopBody(method="photo", photo_url=POD_PHOTO), driver=authed, session=db_session)
     assert exc_info.value.status_code == 409
 
 
@@ -324,12 +329,12 @@ async def test_complete_stop_is_idempotent_on_retry(db_session, real_redis_clien
 
     await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
     await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
-    first = await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+    first = await complete_stop(pickup.stop_id, CompleteStopBody(method="photo", photo_url=POD_PHOTO), driver=authed, session=db_session)
 
     # A retried/double-tapped complete call (e.g. an offline-queue replay
     # after a dropped response) must return the same success, not a 409 -
     # this is what makes it safe for a client to blindly retry.
-    second = await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+    second = await complete_stop(pickup.stop_id, CompleteStopBody(method="photo", photo_url=POD_PHOTO), driver=authed, session=db_session)
     assert second == first
 
 
@@ -339,7 +344,7 @@ async def test_complete_stop_replay_with_different_payload_keeps_original(db_ses
 
     await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
     await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
-    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo", photo_url=POD_PHOTO), driver=authed, session=db_session)
 
     # First write wins - a replay with a different payload must not silently
     # overwrite already-committed proof-of-delivery. StopView doesn't
@@ -362,7 +367,7 @@ async def test_complete_stop_still_rejects_a_failed_stop(db_session, real_redis_
     # A genuine conflict (stop already terminal via a DIFFERENT terminal
     # status than "completed") must still 409, not be treated as a replay.
     with pytest.raises(HTTPException) as exc_info:
-        await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+        await complete_stop(pickup.stop_id, CompleteStopBody(method="photo", photo_url=POD_PHOTO), driver=authed, session=db_session)
     assert exc_info.value.status_code == 409
 
 
@@ -372,7 +377,7 @@ async def test_complete_stop_records_left_at(db_session, real_redis_client):
 
     await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
     await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
-    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo", photo_url=POD_PHOTO), driver=authed, session=db_session)
 
     await arrive_at_stop(dropoff.stop_id, driver=authed, session=db_session)
     final_view = await complete_stop(
@@ -479,7 +484,7 @@ async def test_completing_a_pickup_stop_sends_a_picked_up_shop_sms(db_session, r
 
     await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
     await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
-    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo", photo_url=POD_PHOTO), driver=authed, session=db_session)
 
     messages = await _shop_messages(db_session, pickup.stop_id)
     # The "en route" sent at accept, plus "picked up" sent at completion -
@@ -577,7 +582,7 @@ async def test_flag_stop_rejects_an_already_terminal_stop(db_session, real_redis
 
     await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
     await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
-    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo", photo_url=POD_PHOTO), driver=authed, session=db_session)
 
     with pytest.raises(HTTPException) as exc_info:
         await flag_stop_issue(
@@ -600,7 +605,13 @@ async def test_dropoff_completes_after_its_pickup_was_flagged(db_session, real_r
 
     await arrive_at_stop(dropoff.stop_id, driver=authed, session=db_session)
     completed_dropoff = await complete_stop(
-        dropoff.stop_id, CompleteStopBody(method="signature"), driver=authed, session=db_session
+        dropoff.stop_id,
+        # A signature URL, because "method=signature" with nothing captured no longer
+        # counts as proof (app/delivery/proof.py). This test is about a flagged pickup
+        # not blocking its dropoff, not about proof.
+        CompleteStopBody(method="signature", signature_url="https://example.com/sig.png"),
+        driver=authed,
+        session=db_session,
     )
     assert completed_dropoff.status == "completed"
 

@@ -421,6 +421,7 @@ async def ingest_lmx_order(
         promised_at=lmx.promised_at,
         assignment_scope=lmx.assignment_scope,
         proof_requirements=lmx.proof.model_dump(),
+        entry_seconds=lmx.entry_seconds,
         revenue_basis=lmx.economics.revenue_basis,
         quoted_amount_cents=lmx.economics.quoted_amount_cents,
         payer_type=lmx.economics.payer_type,

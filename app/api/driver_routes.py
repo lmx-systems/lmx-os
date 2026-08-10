@@ -86,6 +86,7 @@ from app.schemas.driver_app import (
     ScanParcelBody,
     ScanParcelsBody,
     SendMessageBody,
+    StopProofRequirementView,
     StopView,
     TripSummaryView,
     UploadUrlRequestBody,
@@ -108,6 +109,7 @@ from app.schemas.gig import (
     MarginalEconomicsView,
 )
 from app.compliance.driver_documents import evaluate_driver_documents
+from app.delivery.proof import ProofNotSatisfied, assert_proof_satisfied, resolve_stop_proof
 from app.models.driver_document import REQUIRED_DOC_TYPES, REVIEW_PENDING
 from app.storage.document_upload_client import (
     UnsupportedDocumentType,
@@ -1250,6 +1252,7 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     completed_at=stop.completed_at,
                     failure_reason=stop.failure_reason,
                     flag_note=stop.flag_note,
+                    proof=await _stop_proof_view(session, stop.id),
                 )
             )
         else:
@@ -1274,6 +1277,10 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     left_at=stop.pod_left_at,
                     failure_reason=stop.failure_reason,
                     flag_note=stop.flag_note,
+                    # Sent with the stop rather than discovered on rejection: a driver
+                    # who learns at the door that this client wanted four photos has
+                    # already put the box down.
+                    proof=await _stop_proof_view(session, stop.id),
                 )
             )
 
@@ -1395,6 +1402,18 @@ async def _notify_shop_for_pickup_stop(
 # step (complete a dropoff whose pickup was never scanned) or re-run a
 # terminal transition's side effects a second time.
 _TERMINAL_STOP_STATUSES = {"completed", "failed"}
+
+
+async def _stop_proof_view(
+    session: AsyncSession, stop_id: uuid.UUID
+) -> StopProofRequirementView:
+    """What proof this stop needs, for the app to ask for up front."""
+    resolved = await resolve_stop_proof(session, stop_id)
+    return StopProofRequirementView(
+        photo_count_required=resolved.photo_count_required,
+        photo_subjects=resolved.photo_subjects,
+        signature_required=resolved.signature_required,
+    )
 
 
 async def _orders_for_recipient_notice(
@@ -1808,12 +1827,36 @@ async def complete_stop(
             await session.commit()
             raise HTTPException(status_code=400, detail="Incorrect PIN")
 
+    # **What the order actually requires, enforced at last** (docs/ROADMAP.md LMX
+    # Link; app/delivery/proof.py). `orders.proof_requirements` has been written at
+    # ingestion since L3 and read by nothing, so the object advertised configurable
+    # proof while this endpoint enforced a constant - and the constant was "none":
+    # `method="photo"` with a null photo_url completed the stop. Proof of delivery
+    # proved nothing.
+    required = await resolve_stop_proof(session, stop.id)
+    try:
+        assert_proof_satisfied(
+            required,
+            method=body.method,
+            photo_urls=body.all_photo_urls,
+            signature_url=body.signature_url,
+            # A verified PIN satisfies a signature requirement - both answer "the
+            # right person received this", and the PIN is the stronger of the two
+            # because it is checked against what we issued.
+            pin_verified=body.method == "pin",
+        )
+    except ProofNotSatisfied as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     now = datetime.now(timezone.utc)
     stop.status = "completed"
     stop.completed_at = now
     stop.pod_method = body.method
     stop.pod_photo_url = body.photo_url
     stop.pod_signature_url = body.signature_url
+    # Every photo captured, not just the first. A stop that required four and stored
+    # one would leave us unable to produce the evidence we just insisted on.
+    stop.pod_photo_urls = body.all_photo_urls
     stop.pod_pin = body.pin
     stop.pod_left_at = body.left_at
 

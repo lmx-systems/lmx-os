@@ -25,7 +25,9 @@ from app.ops_auth.dependencies import AuthedOpsUser, require_admin
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.last_cycle_store import LastCycleStore
 from app.optimizer.service import DispatchOptimizerService
+from app.reporting.lmx_link import build_scorecard
 from app.schemas.batch_queue import HeldOrderView
+from app.schemas.reporting import LinkScorecardView, MeasurementView
 from app.schemas.fleet import DriverLocation, DriverState
 from app.schemas.hub import HubSummary
 from app.schemas.learning_loop import NightlyJobResult, ProposedRuleSummary
@@ -48,6 +50,40 @@ async def prometheus_metrics() -> Response:
     restricting this to a private scrape network in production."""
     payload, content_type = metrics.render_latest()
     return Response(content=payload, media_type=content_type)
+
+
+@router.get("/lmx-link/scorecard", response_model=LinkScorecardView)
+async def lmx_link_scorecard(
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> LinkScorecardView:
+    """LMX Link's success metrics, computed from real rows (LMX_LINK_PLAN §3.4).
+
+    Those five targets have been quoted in updates since the plan was written and none
+    of them was answerable. Three now are; the other two say why not, in the response,
+    rather than being dropped or filled with something that looks like a number.
+
+    Computed on request rather than exported as Prometheus counters, for the same
+    reason `app/health/checks.py` evaluates server-side: per-process counters reset on
+    cold start and differ per instance on an autoscaled deployment. These are
+    distributions over durable rows.
+    """
+    scorecard = await build_scorecard(session)
+    return LinkScorecardView(
+        generated_at=scorecard.generated_at,
+        measurements=[
+            MeasurementView(
+                name=m.name,
+                target=m.target,
+                unit=m.unit,
+                median=m.median,
+                p90=m.p90,
+                sample_size=m.sample_size,
+                not_measured=m.not_measured,
+            )
+            for m in scorecard.measurements
+        ],
+    )
 
 
 @router.get("/hubs", response_model=list[HubSummary])

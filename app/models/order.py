@@ -136,6 +136,16 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     delivery_contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     delivery_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # How many seconds the client spent entering this order, as measured by their
+    # own browser (LMX_LINK_PLAN §3.4, migration 0036). Persisted rather than only
+    # logged because the target - "under 30 seconds, second order onward" - is a
+    # distribution over orders, and a log line is not a dataset.
+    #
+    # Client-reported and therefore not trustworthy as an audit figure; it is a
+    # product metric, not a billing input. Null for orders from any path that has no
+    # human entering them (Epicor, the public API).
+    entry_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # The capability that lets the delivery RECIPIENT - not the shop, not the
     # client - watch this delivery on a public page (docs/ROADMAP.md F3,
     # app/tracking/service.py, migration 0031).

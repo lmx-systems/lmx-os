@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +32,7 @@ from app.ingestion.service import (
     ingest_lmx_order,
 )
 from app.client_auth.dependencies import AuthedClient, get_current_client, require_client_admin
+from app.ingestion.manifest import ManifestUnreadable, parse_manifest
 from app.models.client_api_key import ClientApiKey, mint_api_key
 from app.models.client_webhook import (
     ClientWebhookEndpoint,
@@ -63,9 +64,14 @@ from app.schemas.billing import InvoiceDetailView, InvoiceSummaryView
 from app.schemas.client_order import (
     ClientOrderBatchBody,
     ClientOrderBatchResult,
+    ClientOrderBatchRow,
     ClientOrderBatchRowResult,
     ClientOrderBody,
+    MAX_BATCH_ROWS,
     ClientOrderResult,
+    DeadlineChoice,
+    ManifestRowResult,
+    ManifestUploadResult,
     deadline_payload_flags,
 )
 from app.schemas.lmx_order import LMXOrder, LineItem
@@ -556,6 +562,11 @@ async def submit_orders_batch(
             drop_address_raw=row.drop_address,
             drop_contact_name=row.drop_contact_name,
             sla_owner="LMX",
+            # The paste's total time, recorded on every order it produced. The
+            # alternative - attributing it to one arbitrary row - would make the
+            # median look like a single-order entry time, which is the number §3.4
+            # actually targets and would be silently overstated.
+            entry_seconds=body.entry_seconds,
             received_at=datetime.now(timezone.utc),
             raw_payload=deadline_payload_flags(body.deadline),
         )
@@ -661,6 +672,7 @@ async def submit_order(
         drop_contact_phone=body.drop_contact_phone,
         access_notes=body.access_notes,
         sla_owner="LMX",
+        entry_seconds=body.entry_seconds,
         total_weight_units=body.total_weight_units,
         line_items=[
             LineItem(description=li.description, quantity=li.quantity) for li in body.line_items
@@ -1018,3 +1030,115 @@ async def _my_api_key(
     if key is None:
         raise HTTPException(status_code=404, detail="API key not found")
     return key
+
+
+@router.post("/orders/manifest", response_model=ManifestUploadResult)
+async def upload_order_manifest(
+    file: UploadFile = File(...),
+    deadline: DeadlineChoice = Form(...),
+    pickup_shop_id: str | None = Form(default=None),
+    pickup_address: str | None = Form(default=None),
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> ManifestUploadResult:
+    """Upload a CSV manifest (docs/LMX_LINK_PLAN.md T3).
+
+    T3's exit criterion: *"a 40-row manifest imports, with bad rows reported and good
+    rows dispatched"*. The paste path (L9) already covered pasting; this is the file,
+    which is what a distributor actually has - an export from their counter system.
+
+    **Parses to the same rows the paste path takes and hands them to the same
+    function.** That is the point rather than an implementation detail: §1.1 says a new
+    adapter must not need a new way for orders to be created, and two ingestion paths
+    would drift on exactly the details that matter - SLA classification, shop memory,
+    the hold queue.
+
+    Multipart rather than JSON because the input is a file. The pickup and deadline
+    arrive as form fields for the same reason the paste path shares them across rows: a
+    manifest is one run from one place.
+
+    **Every line is reported.** Rows the parser rejected and rows ingestion refused
+    come back together, keyed on the line number the dispatcher sees in their
+    spreadsheet.
+    """
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            # Excel on Windows still writes cp1252, and a manifest with one smart quote
+            # in a contact name should not be a support ticket.
+            text = raw.decode("cp1252")
+        except UnicodeDecodeError:
+            raise HTTPException(
+                status_code=422,
+                detail="We couldn't read that file as text - export it as CSV and try again",
+            ) from None
+
+    try:
+        parsed = parse_manifest(text)
+    except ManifestUnreadable as exc:
+        # A whole-file problem, not 40 row problems. Reporting a missing address column
+        # as forty identical failures would bury the one thing to fix.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    logger.info(
+        "manifest_uploaded",
+        client_id=client.client_id,
+        filename=file.filename,
+        rows=len(parsed.rows),
+        parse_errors=len(parsed.errors),
+        column_mapping=parsed.column_mapping,
+    )
+
+    results: list[ManifestRowResult] = [
+        ManifestRowResult(line_number=error.line_number, drop_address=None, error=error.message)
+        for error in parsed.errors
+    ]
+
+    # **Chunked to MAX_BATCH_ROWS rather than raising that cap.** The paste limit of 25
+    # exists because every genuinely new address costs a geocoder call and the pilot
+    # provider allows one per second - it bounds how long one request holds open. A
+    # manifest legitimately runs to 40 rows and beyond (T3), so the answer is several
+    # bounded calls rather than one unbounded one, which keeps the paste path's
+    # guarantee intact instead of quietly weakening it for everyone.
+    for offset in range(0, len(parsed.rows), MAX_BATCH_ROWS):
+        chunk = parsed.rows[offset : offset + MAX_BATCH_ROWS]
+        batch = await submit_orders_batch(
+            ClientOrderBatchBody(
+                pickup_shop_id=pickup_shop_id,
+                pickup_address=pickup_address,
+                deadline=deadline,
+                rows=[
+                    ClientOrderBatchRow(
+                        drop_address=row.drop_address,
+                        reference=row.reference,
+                        drop_contact_name=row.drop_contact_name,
+                    )
+                    for row in chunk
+                ],
+            ),
+            client=client,
+            session=session,
+        )
+        # Back to line numbers. The batch result is indexed by position within its own
+        # chunk, which is neither the file's numbering nor the dispatcher's.
+        for row_result in batch.results:
+            source_row = chunk[row_result.index]
+            results.append(
+                ManifestRowResult(
+                    line_number=source_row.line_number,
+                    drop_address=row_result.drop_address,
+                    order=row_result.order,
+                    error=row_result.error,
+                )
+            )
+
+    results.sort(key=lambda r: r.line_number)
+    accepted = sum(1 for r in results if r.order is not None)
+    return ManifestUploadResult(
+        accepted=accepted,
+        failed=len(results) - accepted,
+        column_mapping=parsed.column_mapping,
+        results=results,
+    )

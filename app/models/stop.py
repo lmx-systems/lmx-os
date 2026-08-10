@@ -5,7 +5,7 @@ multiple commingled orders per Section 8's multi-client commingling design).
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -60,6 +60,13 @@ class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # photo | signature | pin
     pod_photo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     pod_signature_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Every photo captured, not only the first. `pod_photo_url` above predates
+    # configurable proof and holds a single URL; an order can require several with
+    # named subjects (ProofRequirements, migration 0037), and a stop that was made to
+    # produce four photos must not store one - we would have insisted on evidence we
+    # then failed to keep. The single column stays populated so existing readers and
+    # older app builds keep working.
+    pod_photo_urls: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     pod_pin: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Where the driver says they left it (e.g. "front door") - screen 1m's
     # "Left at" field. Free text, not validated against anything.

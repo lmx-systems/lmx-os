@@ -162,6 +162,20 @@ class JobOfferView(BaseModel):
         return len(self.stops)
 
 
+class StopProofRequirementView(BaseModel):
+    """What this stop must produce, so the app can ASK for the right thing.
+
+    Sent with every stop rather than discovered on rejection: a driver who finds out
+    at the door that this client wanted four photos has already put the box down and
+    driven off. The strictest requirement across the stop's orders
+    (app/delivery/proof.py).
+    """
+
+    photo_count_required: int
+    photo_subjects: list[str]
+    signature_required: bool
+
+
 class StopView(BaseModel):
     stop_id: str
     sequence: int
@@ -182,6 +196,9 @@ class StopView(BaseModel):
     left_at: str | None = None
     failure_reason: str | None = None
     flag_note: str | None = None
+    # What proof this stop needs. Always present, defaulting to the one-photo
+    # baseline, so the app never has to guess.
+    proof: StopProofRequirementView | None = None
 
 
 class RouteView(BaseModel):
@@ -223,13 +240,33 @@ class UploadUrlResult(BaseModel):
 
 
 class CompleteStopBody(BaseModel):
-    """Proof of delivery, screen 1m."""
+    """Proof of delivery, screen 1m.
+
+    `photo_urls` exists because an order can require more than one photo, with named
+    subjects (`ProofRequirements`, docs/LMX_LINK_PLAN.md §1.2) - a single `photo_url`
+    cannot express "the shelf, the box, the paperwork". `photo_url` is kept and folded
+    in as the first photo, so an older app build keeps working through the change.
+    """
 
     method: Literal["photo", "signature", "pin"]
     photo_url: str | None = None
+    photo_urls: list[str] = Field(default_factory=list, max_length=8)
     signature_url: str | None = None
     pin: str | None = None
     left_at: str | None = None
+
+    @property
+    def all_photo_urls(self) -> list[str]:
+        """Every photo supplied, however it was sent, de-duplicated in order.
+
+        An app that sends the same URL in both fields must not have it counted twice
+        toward a photo requirement - that would let one photo satisfy "two photos".
+        """
+        combined: list[str] = []
+        for url in ([self.photo_url] if self.photo_url else []) + list(self.photo_urls):
+            if url and url not in combined:
+                combined.append(url)
+        return combined
 
 
 class StopFailureReason(str, enum.Enum):
