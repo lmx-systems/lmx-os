@@ -293,10 +293,11 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
         if stop is not None and await _is_the_drivers_current_stop(session, stop):
             position = await _driver_position(session, stop, FleetStateManager())
             if position is not None:
-                # The status vocabulary above is derived from Order.status, which
-                # nothing ever advances to en_route_drop today. The stop sequence
-                # is the more truthful source, so when it says the driver is
-                # inbound, say so.
+                # Order.status now reaches en_route_drop for exactly this case (L11),
+                # so this is usually a no-op agreeing with itself. Kept because the
+                # STOP is what governs whether the position may be shown at all, and
+                # the headline must not be able to disagree with the map: a page
+                # showing a moving van under the words "Collected" reads as a bug.
                 headline, detail = _RECIPIENT_STATUS[OrderStatus.en_route_drop]
 
     return TrackingView(

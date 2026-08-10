@@ -200,7 +200,11 @@ async def test_full_driver_app_core_loop(db_session, real_redis_client):
     # assertion previously read `assigned`, which was the gap: a client watching
     # their order had no way to tell whether their parts had been collected.
     await db_session.refresh(order)
-    assert order.status == OrderStatus.picked_up
+    # en_route_drop, not picked_up: completing the only pickup promotes the dropoff to
+    # the current stop, which is the driver genuinely being on their way to it
+    # (docs/ROADMAP.md L11). Both transitions happen, in order - picked_up then
+    # en_route_drop - and this is the one that lands.
+    assert order.status == OrderStatus.en_route_drop
 
     # 7. Dropoff: arrive, proof of delivery (screens 1l/1m).
     await arrive_at_stop(dropoff.stop_id, driver=authed, session=db_session)

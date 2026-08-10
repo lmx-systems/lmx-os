@@ -236,7 +236,9 @@ async def test_signup_to_delivered(db_session, real_redis_client, monkeypatch):
     )
 
     await db_session.refresh(order)
-    assert order.status == OrderStatus.picked_up, "the client can now see it's collected"
+    # Collected AND on the way: completing the pickup promotes the dropoff to current,
+    # so the order lands on en_route_drop rather than resting at picked_up (L11).
+    assert order.status == OrderStatus.en_route_drop, "the client can see it's on the way"
 
     # ---- 8. Deliver ----------------------------------------------------
     await arrive_at_stop(dropoff_stop.stop_id, driver=driver, session=db_session)

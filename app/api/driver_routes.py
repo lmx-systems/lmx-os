@@ -109,6 +109,7 @@ from app.schemas.gig import (
     MarginalEconomicsView,
 )
 from app.compliance.driver_documents import evaluate_driver_documents
+from app.delivery.en_route import mark_current_stop_en_route
 from app.delivery.proof import ProofNotSatisfied, assert_proof_satisfied, resolve_stop_proof
 from app.models.driver_document import REQUIRED_DOC_TYPES, REVIEW_PENDING
 from app.storage.document_upload_client import (
@@ -1159,6 +1160,11 @@ async def accept_offer(
     # no signal that anyone had picked it up as a job.
     await advance_orders(session, list(orders_by_id.keys()), OrderStatus.en_route_pickup)
 
+    # And the first stop is where they are actually driving (docs/ROADMAP.md L11).
+    # `Stop.status` has documented `en_route` since the model was written and nothing
+    # ever set it.
+    await mark_current_stop_en_route(session, route.id)
+
     await session.commit()
 
     # Real PIN issuance (docs/ROADMAP.md A4): text each dropoff's PIN to
@@ -1404,6 +1410,24 @@ async def _notify_shop_for_pickup_stop(
 _TERMINAL_STOP_STATUSES = {"completed", "failed"}
 
 
+def _assert_arrived(stop: Stop, action: str) -> None:
+    """Refuse an action that requires the driver to be at the stop.
+
+    **Checks for arrival rather than against `pending`, and that distinction is a bug
+    fix.** Four call sites spelled "has this driver arrived" as `status == "pending"`,
+    which was accurate only while `pending` was the sole pre-arrival state. Filling in
+    `en_route` (docs/ROADMAP.md L11) made it wrong at all four: a driver who was merely
+    driving toward a stop could scan its parcels and complete it, from anywhere.
+
+    A dead state is not inert - it is a value every guard was written without, and this
+    is what it cost to start using one.
+    """
+    if stop.status != "arrived":
+        raise HTTPException(
+            status_code=409, detail=f"Arrive at this stop before {action}"
+        )
+
+
 async def _stop_proof_view(
     session: AsyncSession, stop_id: uuid.UUID
 ) -> StopProofRequirementView:
@@ -1528,8 +1552,7 @@ async def scan_parcels(
 ) -> StopView:
     stop = await _get_owned_stop(session, stop_id, driver)
     _assert_stop_not_terminal(stop, "scan parcels")
-    if stop.status == "pending":
-        raise HTTPException(status_code=409, detail="Arrive at this stop before scanning parcels")
+    _assert_arrived(stop, "scanning parcels")
     stop.scanned_count = max(0, min(body.scanned_count, stop.parcel_count))
     await session.commit()
     return await _stop_view_after_reload(session, stop)
@@ -1557,8 +1580,7 @@ async def scan_parcel(
     re-scan of the same barcode is an idempotent no-op, not a double count."""
     stop = await _get_owned_stop(session, stop_id, driver, for_update=True)
     _assert_stop_not_terminal(stop, "scan a parcel")
-    if stop.status == "pending":
-        raise HTTPException(status_code=409, detail="Arrive at this stop before scanning parcels")
+    _assert_arrived(stop, "scanning parcels")
     if stop.stop_type != "pickup":
         raise HTTPException(status_code=409, detail="Parcels are scanned at the pickup stop")
 
@@ -1634,8 +1656,7 @@ async def collect_return(
     stop = await _get_owned_stop(session, stop_id, driver)
     if stop.stop_type != "dropoff":
         raise HTTPException(status_code=409, detail="Returns are collected at the delivery (dropoff) stop")
-    if stop.status == "pending":
-        raise HTTPException(status_code=409, detail="Arrive at this stop before collecting a return")
+    _assert_arrived(stop, "collecting a return")
 
     now = datetime.now(timezone.utc)
     expected = await _expected_returns_for_stop(session, stop.id)
@@ -1782,8 +1803,7 @@ async def complete_stop(
         return await _stop_view_after_reload(session, stop)
 
     _assert_stop_not_terminal(stop, "complete")  # still 409s on status == "failed" - a genuine conflict
-    if stop.status == "pending":
-        raise HTTPException(status_code=409, detail="Arrive at this stop before completing it")
+    _assert_arrived(stop, "completing it")
     if stop.stop_type == "pickup" and stop.scanned_count < stop.parcel_count:
         raise HTTPException(
             status_code=409,
@@ -1965,6 +1985,14 @@ async def complete_stop(
             )
         await session.commit()
 
+    if not route_finished:
+        # Completing a stop promotes the next one, and that is the moment the driver
+        # starts driving to it - the signal L11 needed. On a dropoff this is what
+        # finally advances its orders to `en_route_drop`, a state that existed in the
+        # machine and was never reached.
+        await mark_current_stop_en_route(session, stop.route_id)
+        await session.commit()
+
     if route_finished:
         # "Stop completed" is the design doc's third event-trigger source
         # (app/optimizer/event_trigger.py flagged it as having no producer
@@ -2023,6 +2051,10 @@ async def flag_stop_issue(
     if remaining_result.scalar_one() == 0:
         route = await session.get(Route, stop.route_id)
         route.status = "completed"
+    else:
+        # A flagged stop is finished too, so the next one is promoted and the driver is
+        # on their way to it (docs/ROADMAP.md L11) - the same signal as a completion.
+        await mark_current_stop_en_route(session, stop.route_id)
 
     await session.commit()
 
