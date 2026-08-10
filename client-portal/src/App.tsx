@@ -11,6 +11,7 @@ import type {
 import { LoginPage } from './components/LoginPage'
 import { SignupPage } from './components/SignupPage'
 import { TrackingPage } from './components/TrackingPage'
+import { WebhooksPanel } from './components/WebhooksPanel'
 import { ResetPasswordPage } from './components/ResetPasswordPage'
 import { NewOrderForm } from './components/NewOrderForm'
 import { BulkPastePanel } from './components/BulkPastePanel'
@@ -34,6 +35,7 @@ type View =
   | { name: 'invoice-detail'; invoiceId: string }
   | { name: 'returns' }
   | { name: 'team' }
+  | { name: 'integrations' }
 
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(() => getToken() !== null)
@@ -169,6 +171,7 @@ export default function App() {
   const onInvoicesTab = view.name === 'invoices' || view.name === 'invoice-detail'
   const onReturnsTab = view.name === 'returns'
   const onTeamTab = view.name === 'team'
+  const onIntegrationsTab = view.name === 'integrations'
   // The Team tab (user management, docs/ROADMAP.md C4) is admin-only - the
   // API 403s a member regardless, but there's no reason to show them a tab
   // they can't use.
@@ -229,6 +232,22 @@ export default function App() {
               }`}
             >
               Team
+            </button>
+          )}
+          {/* Admin-only for the same reason as Team: an endpoint is where their
+              order data goes, and its secret signs our requests - a dispatcher who
+              can submit orders shouldn't be able to redirect the notification
+              stream. */}
+          {isAdmin && (
+            <button
+              onClick={() => setView({ name: 'integrations' })}
+              className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+                onIntegrationsTab
+                  ? 'border-[var(--accent)] text-[var(--text-primary)]'
+                  : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              Integrations
             </button>
           )}
         </nav>
@@ -304,6 +323,7 @@ export default function App() {
           ))}
         {view.name === 'returns' && <ReturnsPanel />}
         {view.name === 'team' && isAdmin && <UsersPanel profile={profile} />}
+        {view.name === 'integrations' && isAdmin && <WebhooksPanel />}
       </main>
     </div>
   )

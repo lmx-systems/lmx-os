@@ -207,3 +207,42 @@ export interface TrackingView {
   // False on a finished delivery, so a forgotten open tab stops polling.
   is_live: boolean
 }
+
+// Outbound status webhooks (docs/ROADMAP.md F4).
+export interface WebhookEndpointBody {
+  url: string
+  description?: string
+}
+
+export interface WebhookEndpointView {
+  endpoint_id: string
+  url: string
+  description: string | null
+  is_active: boolean
+  // Surfaced so a client can see WHY an integration went quiet, rather than
+  // concluding we stopped sending.
+  consecutive_failures: number
+  disabled_at: string | null
+  last_success_at: string | null
+  created_at: string
+}
+
+// The create response, and the only place `secret` ever appears. A distinct type
+// rather than an optional field, so returning it is a deliberate choice at one
+// call site.
+export interface WebhookEndpointCreated extends WebhookEndpointView {
+  secret: string
+}
+
+export interface WebhookDeliveryView {
+  delivery_id: string
+  order_id: string
+  event_id: string
+  status: string
+  attempts: number
+  last_status_code: number | null
+  last_error: string | null
+  next_attempt_at: string | null
+  delivered_at: string | null
+  created_at: string
+}

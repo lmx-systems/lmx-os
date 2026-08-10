@@ -162,6 +162,15 @@ Don't trust an untested alert. The cheapest real test: temporarily set
 `DISPATCH_STALE_AFTER_SECONDS=1` on the service, put one order through, and wait.
 The check should go `503` and the alert should arrive. **Set it back.**
 
+### 4b. Add the webhook sweep to Cloud Scheduler
+
+While you're in the console: `POST /internal/webhooks/deliver-pending` needs a job
+alongside the dispatch one (docs/WEBHOOKS.md, ROADMAP F4). Owed webhooks are
+attempted immediately after the status change commits, but that attempt is a task
+in the process — a recycled instance loses it, and this sweep is what makes the
+enqueued row a guarantee rather than a hope. Same header, every 5 minutes, safe to
+over-call: a sweep with nothing due is one indexed query.
+
 ### 5. Alert on the deployment itself
 
 The uptime check above also covers total outage — if the service is down, the

@@ -9,17 +9,23 @@ The mirror of `app/ingestion/adapters/`. Sources normalize inbound into one orde
 object; sinks map one status machine outbound into whatever vocabulary each
 consumer speaks. Neither side is allowed to leak into the core.
 
-WHAT EXISTS TODAY is the interface, a logging sink, and the dispatch that calls
-them. What does not exist is a sink that reaches a customer: the client portal
-reads order status directly from Postgres, which is sufficient while the portal
-is the only surface. The moment a second consumer appears - the outbound webhook
-in particular (`F4` in docs/ROADMAP.md, T5 in the LMX Link plan) - it plugs in
-here rather than adding a second notification path.
+Two sinks exist: the logging one, which is always correct, and the outbound client
+webhook (`F4`, `app/webhooks/sink.py`) - the first that reaches outside this
+system. The client portal still reads status straight from Postgres, which remains
+right while it is a surface of this application rather than a consumer of it.
 
 Emission is deliberately best-effort and never fails the caller: a driver
 completing a stop must not see an error because a downstream consumer is down.
 That is the same reasoning behind the fire-and-forget shop SMS in
 `app/messaging/shop_notifications.py`.
+
+**WHY `emit` TAKES A SESSION.** `emit_status_change` is called from inside
+`advance_orders`, *before* the caller commits. A sink that acted on the event
+immediately - POSTing it, say - could therefore tell a consumer an order was
+delivered on a transaction that then rolled back, and there is no way to un-send
+that. Handing sinks the caller's session lets one that cares record its intent in
+the same transaction as the fact it describes, so the notification cannot get ahead
+of reality. Sinks that don't care (the logging one) ignore it.
 """
 from __future__ import annotations
 
@@ -28,6 +34,8 @@ from dataclasses import dataclass
 from datetime import datetime
 
 import structlog
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.order import OrderStatus
 from app.orders.state_machine import public_label
@@ -59,8 +67,13 @@ class BaseStatusSink(ABC):
     sink_name: str
 
     @abstractmethod
-    async def emit(self, event: StatusEvent) -> None:
-        """Deliver one transition.
+    async def emit(self, event: StatusEvent, session: AsyncSession | None = None) -> None:
+        """Deliver one transition, or durably record that it is owed.
+
+        `session` is the caller's, mid-transaction and NOT yet committed - see the
+        module docstring. A sink that writes through it commits atomically with the
+        status change. A sink that acts on the event immediately must not, because
+        the transition may still roll back.
 
         Must not raise. A sink that cannot deliver should log and return - the
         driver action that produced this event has already happened, and failing
@@ -81,7 +94,7 @@ class LoggingStatusSink(BaseStatusSink):
 
     sink_name = "logging"
 
-    async def emit(self, event: StatusEvent) -> None:
+    async def emit(self, event: StatusEvent, session: AsyncSession | None = None) -> None:
         logger.info(
             "order_status_changed",
             order_id=event.order_id,
@@ -94,15 +107,27 @@ class LoggingStatusSink(BaseStatusSink):
         )
 
 
-_SINKS: list[BaseStatusSink] = [LoggingStatusSink()]
+def _build_sinks() -> list[BaseStatusSink]:
+    # Imported here rather than at module scope: app/webhooks/sink.py imports
+    # StatusEvent from this module, so a top-level import would be circular.
+    from app.webhooks.sink import WebhookStatusSink
+
+    return [LoggingStatusSink(), WebhookStatusSink()]
+
+
+_SINKS: list[BaseStatusSink] | None = None
 
 
 def registered_sinks() -> list[BaseStatusSink]:
+    global _SINKS
+    if _SINKS is None:
+        _SINKS = _build_sinks()
     return list(_SINKS)
 
 
 async def emit_status_change(
     *,
+    session: AsyncSession | None = None,
     order_id: str,
     client_id: str | None,
     source_system: str,
@@ -128,6 +153,6 @@ async def emit_status_change(
     )
     for sink in registered_sinks():
         try:
-            await sink.emit(event)
+            await sink.emit(event, session)
         except Exception:  # noqa: BLE001 - a sink must never break a driver action
             logger.warning("status_sink_failed", sink=sink.sink_name, order_id=order_id)

@@ -2,6 +2,7 @@ from app.models.call import Call
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.models.client_user import ClientUser
+from app.models.client_webhook import ClientWebhookEndpoint, WebhookDelivery
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.driver_document import DriverDocument
@@ -43,6 +44,8 @@ __all__ = [
     "Parcel",
     "ReturnItem",
     "Route",
+    "ClientWebhookEndpoint",
+    "WebhookDelivery",
     "DriverDevice",
     "DriverShiftEvent",
     "OpsUser",

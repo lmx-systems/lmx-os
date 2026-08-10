@@ -48,6 +48,7 @@ from app.client_ip import client_ip
 from app.config import settings
 from app.db import get_db
 from app.health.checks import evaluate
+from app.webhooks.delivery import deliver_pending
 from app.learning_loop.service import run_nightly_job
 from app.models.hub import Hub
 from app.optimizer.service import DispatchOptimizerService
@@ -129,6 +130,27 @@ async def run_learning_loop_for_all_hubs(session: AsyncSession = Depends(get_db)
             results[hub_id] = f"error: {type(exc).__name__}"
     logger.info("scheduled_learning_loop_complete", hubs=len(results))
     return {"hubs": results}
+
+
+@router.post("/webhooks/deliver-pending", dependencies=[Depends(require_internal_secret)])
+async def deliver_pending_webhooks(session: AsyncSession = Depends(get_db)) -> dict:
+    """Deliver every owed webhook that is due (docs/ROADMAP.md F4).
+
+    **The guarantee, as opposed to the optimisation.** A status change enqueues a
+    `WebhookDelivery` row in the same transaction as itself, then schedules an
+    immediate attempt after commit - which is what keeps §1.4's under-30-second
+    write-back target reachable. That attempt is a task in this process, so a
+    suspended or recycled instance loses it. This sweep is what makes the row's
+    existence mean the notification will happen rather than probably happened.
+
+    Exactly the same relationship as `/internal/dispatch/run-all` has to the event
+    bus, and it wants the same schedule: frequent enough that a retry isn't hours
+    late, and safe to over-call because a sweep with nothing due is one indexed
+    query.
+    """
+    counts = await deliver_pending(session)
+    logger.info("scheduled_webhook_sweep_complete", **counts)
+    return {"attempted": sum(counts.values()), "outcomes": counts}
 
 
 @router.get("/health/dispatch", dependencies=[Depends(require_internal_secret)])
