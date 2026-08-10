@@ -58,6 +58,7 @@ from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 from app.optimizer.event_trigger import dispatch_event_bus
+from app.messaging.cod_notifications import ESCALATION_SENT, notify_shop_of_cod_dispute
 from app.messaging.tracking_notifications import notify_recipient_picked_up
 from app.orders.status_service import advance_orders
 from app.returns.service import return_views
@@ -86,6 +87,9 @@ from app.schemas.driver_app import (
     ScanParcelBody,
     ScanParcelsBody,
     SendMessageBody,
+    CodDisputeBody,
+    CodObligationView,
+    CollectCodBody,
     StopProofRequirementView,
     StopView,
     TripSummaryView,
@@ -109,7 +113,16 @@ from app.schemas.gig import (
     MarginalEconomicsView,
 )
 from app.compliance.driver_documents import evaluate_driver_documents
+from app.delivery.cod import (
+    CodError,
+    CodNotSettled,
+    assert_cod_settled,
+    cod_obligations,
+    record_collection,
+    record_dispute,
+)
 from app.delivery.en_route import mark_current_stop_en_route
+from app.models.cod_collection import CodCollection
 from app.delivery.proof import ProofNotSatisfied, assert_proof_satisfied, resolve_stop_proof
 from app.models.driver_document import REQUIRED_DOC_TYPES, REVIEW_PENDING
 from app.storage.document_upload_client import (
@@ -1259,6 +1272,7 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     failure_reason=stop.failure_reason,
                     flag_note=stop.flag_note,
                     proof=await _stop_proof_view(session, stop.id),
+                    cod=await _stop_cod_view(session, stop.id),
                 )
             )
         else:
@@ -1287,6 +1301,7 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     # who learns at the door that this client wanted four photos has
                     # already put the box down.
                     proof=await _stop_proof_view(session, stop.id),
+                    cod=await _stop_cod_view(session, stop.id),
                 )
             )
 
@@ -1426,6 +1441,38 @@ def _assert_arrived(stop: Stop, action: str) -> None:
         raise HTTPException(
             status_code=409, detail=f"Arrive at this stop before {action}"
         )
+
+
+async def _stop_cod_view(session: AsyncSession, stop_id: uuid.UUID) -> list[CodObligationView]:
+    """Money owed at this stop, and whether it is settled (docs/ROADMAP.md W2).
+
+    Sent with the stop rather than discovered at the door: a driver who learns there is
+    money to collect while the customer is already taking the parts has lost the moment to
+    ask for it.
+    """
+    obligations = await cod_obligations(session, stop_id)
+    if not obligations:
+        return []
+
+    recorded = {
+        str(row[0]): row[1]
+        for row in (
+            await session.execute(
+                select(CodCollection.order_id, CodCollection.outcome).where(
+                    CodCollection.stop_id == stop_id
+                )
+            )
+        ).all()
+    }
+    return [
+        CodObligationView(
+            order_id=obligation.order_id,
+            amount_due_cents=obligation.amount_due_cents,
+            settled=obligation.order_id in recorded,
+            outcome=recorded.get(obligation.order_id),
+        )
+        for obligation in obligations
+    ]
 
 
 async def _stop_proof_view(
@@ -1642,6 +1689,125 @@ async def _expected_returns_for_stop(session: AsyncSession, stop_id: uuid.UUID) 
     return list(result.scalars().all())
 
 
+@router.post("/stops/{stop_id}/collect-cod", response_model=StopView)
+async def collect_cod(
+    stop_id: str,
+    body: CollectCodBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> StopView:
+    """Record that the full cash-on-delivery amount was collected (docs/ROADMAP.md W2).
+
+    **There is no amount in the request body, and that absence is the feature.** The
+    figure comes off the order, so "collected" can only mean "all of it". The money is the
+    distributor's invoice to their own customer; nobody at LMX has authority to discount
+    it, so a field to type a smaller number into would hand a driver an authority they
+    were never given - and leave them negotiating at a door on someone else's behalf,
+    which is exactly what the rule exists to get them out of.
+
+    Requires arrival, like every other at-the-door action. Idempotent: a retried tap on a
+    bad connection records one collection, not two payments.
+    """
+    stop = await _get_owned_stop(session, stop_id, driver)
+    _assert_stop_not_terminal(stop, "collect payment")
+    _assert_arrived(stop, "collecting payment")
+    if stop.stop_type != "dropoff":
+        raise HTTPException(
+            status_code=409, detail="Payment is collected at the delivery stop"
+        )
+
+    obligations = await cod_obligations(session, stop.id)
+    if not obligations:
+        raise HTTPException(
+            status_code=409, detail="Nothing to collect - this delivery isn't cash on delivery"
+        )
+
+    for obligation in obligations:
+        order = await session.get(Order, uuid.UUID(obligation.order_id))
+        try:
+            await record_collection(
+                session,
+                order=order,
+                stop_id=stop.id,
+                driver_id=driver.driver_id,
+                method=body.method,
+            )
+        except CodError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    await session.commit()
+    return await _stop_view_after_reload(session, stop)
+
+
+@router.post("/stops/{stop_id}/cod-dispute", response_model=StopView)
+async def raise_cod_dispute(
+    stop_id: str,
+    body: CodDisputeBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> StopView:
+    """The customer won't pay. One tap, the distributor is told, the driver moves on (W2).
+
+    **Escalates to the distributor, not to LMX ops.** The disputed sum is their invoice to
+    their own customer, so they are the only party who can decide anything about it -
+    waive it, insist, phone the customer. Routing it through us first would insert LMX
+    into a commercial dispute we are not part of, and cost the one thing that matters:
+    the distributor hearing about it while their customer is still standing there.
+
+    Does NOT fail the stop by itself. Whether the parts go back is R5's resolution
+    decision, made by someone with the full picture; this endpoint's job is to record the
+    dispute, escalate it, and let the driver leave. A driver who wants to record the
+    delivery as failed still uses `flag_stop_issue` with COD_DISPUTE.
+    """
+    stop = await _get_owned_stop(session, stop_id, driver)
+    _assert_stop_not_terminal(stop, "raise a payment dispute")
+    _assert_arrived(stop, "raising a payment dispute")
+
+    obligations = await cod_obligations(session, stop.id)
+    if not obligations:
+        raise HTTPException(
+            status_code=409, detail="This delivery isn't cash on delivery"
+        )
+
+    disputes = []
+    for obligation in obligations:
+        order = await session.get(Order, uuid.UUID(obligation.order_id))
+        try:
+            dispute = await record_dispute(
+                session,
+                order=order,
+                stop_id=stop.id,
+                driver_id=driver.driver_id,
+                note=body.note,
+            )
+        except CodError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        disputes.append((dispute, order))
+
+    await session.commit()
+
+    # After the commit, so a dead SMS gateway cannot roll back the dispute: the record is
+    # the thing that must survive, the message is a courtesy on top of it.
+    for dispute, order in disputes:
+        shop = await session.get(Shop, order.shop_id) if order.shop_id else None
+        outcome = await notify_shop_of_cod_dispute(
+            session,
+            hub_id=uuid.UUID(driver.hub_id),
+            driver_id=uuid.UUID(driver.driver_id),
+            stop_id=stop.id,
+            shop=shop,
+            delivery_address=order.delivery_address,
+            amount_cents=dispute.amount_due_cents,
+            reference=order.source_order_ref or order.external_order_ref,
+            note=dispute.dispute_note,
+        )
+        if outcome == ESCALATION_SENT:
+            dispute.escalated_at = datetime.now(timezone.utc)
+    await session.commit()
+
+    return await _stop_view_after_reload(session, stop)
+
+
 @router.post("/stops/{stop_id}/collect-return", response_model=list[ReturnItemView])
 async def collect_return(
     stop_id: str,
@@ -1853,6 +2019,16 @@ async def complete_stop(
     # proof while this endpoint enforced a constant - and the constant was "none":
     # `method="photo"` with a null photo_url completed the stop. Proof of delivery
     # proved nothing.
+    # **Money first.** Before this, a driver could mark a COD delivery done with no
+    # record of any cash changing hands - parts gone, invoice unpaid, no dispute raised to
+    # explain it, and nothing anywhere noticing (docs/ROADMAP.md W2). A dispute counts as
+    # settled for the purpose of leaving, because the rule is "keep moving".
+    if stop.stop_type == "dropoff":
+        try:
+            await assert_cod_settled(session, stop.id)
+        except CodNotSettled as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     required = await resolve_stop_proof(session, stop.id)
     try:
         assert_proof_satisfied(

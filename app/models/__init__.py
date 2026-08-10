@@ -1,5 +1,6 @@
 from app.models.call import Call
 from app.models.client import Client
+from app.models.cod_collection import CodCollection
 from app.models.client_rate import ClientRate
 from app.models.client_api_key import ClientApiKey
 from app.models.client_user import ClientUser
@@ -45,6 +46,7 @@ __all__ = [
     "Parcel",
     "ReturnItem",
     "Route",
+    "CodCollection",
     "ClientApiKey",
     "ClientWebhookEndpoint",
     "WebhookDelivery",

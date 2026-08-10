@@ -426,6 +426,7 @@ async def ingest_lmx_order(
         quoted_amount_cents=lmx.economics.quoted_amount_cents,
         payer_type=lmx.economics.payer_type,
         payment_status=lmx.economics.payment_status,
+        cod_amount_cents=lmx.economics.cod_amount_cents,
         modality_assigned=lmx.modality_assigned,
         # Destination, geocoded above when the source gave an address without
         # coordinates.
