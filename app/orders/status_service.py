@@ -96,6 +96,9 @@ async def advance_orders(
         moved.append(order)
 
         await emit_status_change(
+            # The caller's uncommitted transaction, so a sink can record an owed
+            # notification atomically with the transition - see app/orders/sinks.py.
+            session=session,
             order_id=str(order.id),
             client_id=str(order.client_id) if order.client_id else None,
             source_system=order.source_system,

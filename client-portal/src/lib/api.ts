@@ -16,6 +16,10 @@ import type {
   InvoiceSummaryView,
   ReturnItemView,
   TrackingView,
+  WebhookDeliveryView,
+  WebhookEndpointBody,
+  WebhookEndpointCreated,
+  WebhookEndpointView,
 } from './types'
 
 // /client/* is exempt from the ops-dashboard auth gate
@@ -138,6 +142,26 @@ export const api = {
   // rate-limited by IP.
   signup: (body: ClientSignupBody) =>
     request<ClientSignupResult>('/public/signup', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Outbound status webhooks (docs/ROADMAP.md F4). Admin-only server-side: an
+  // endpoint is where we send this client's order data, and its secret signs
+  // those requests.
+  listWebhooks: () => request<WebhookEndpointView[]>('/client/webhooks'),
+
+  createWebhook: (body: WebhookEndpointBody) =>
+    request<WebhookEndpointCreated>('/client/webhooks', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  enableWebhook: (endpointId: string) =>
+    request<WebhookEndpointView>(`/client/webhooks/${endpointId}/enable`, { method: 'POST' }),
+
+  disableWebhook: (endpointId: string) =>
+    request<WebhookEndpointView>(`/client/webhooks/${endpointId}/disable`, { method: 'POST' }),
+
+  listWebhookDeliveries: (endpointId: string) =>
+    request<WebhookDeliveryView[]>(`/client/webhooks/${endpointId}/deliveries`),
 
   // Public delivery tracking (docs/ROADMAP.md F3). No auth header - the token in
   // the path IS the credential, which is why the backend rate-limits this and

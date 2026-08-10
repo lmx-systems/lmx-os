@@ -32,6 +32,18 @@ from app.ingestion.service import (
     ingest_lmx_order,
 )
 from app.client_auth.dependencies import AuthedClient, get_current_client, require_client_admin
+from app.models.client_webhook import (
+    ClientWebhookEndpoint,
+    WebhookDelivery,
+    new_webhook_secret,
+)
+from app.schemas.webhooks import (
+    WebhookDeliveryView,
+    WebhookEndpointBody,
+    WebhookEndpointCreated,
+    WebhookEndpointView,
+)
+from app.webhooks.url_safety import UnsafeWebhookUrl, validate_webhook_url
 from app.client_auth.login_rate_limit import LoginRateLimitExceeded, LoginRateLimiter
 from app.client_auth.passwords import hash_password, verify_password
 from app.client_auth.tokens import issue_token
@@ -714,3 +726,176 @@ async def _estimate_delivery_by(session: AsyncSession, order: Order) -> datetime
         return None
     miles = miles_between(shop.lat, shop.lng, float(order.delivery_lat), float(order.delivery_lng))
     return order.hold_deadline + timedelta(minutes=minutes_for_miles(miles))
+
+
+# ---------------------------------------------------------------------------
+# Outbound status webhooks (docs/ROADMAP.md F4)
+# ---------------------------------------------------------------------------
+#
+# The client's own integration, so the client configures it - not ops. Admin-only
+# within the client, because an endpoint is a place we will send their order data
+# and its secret signs those requests; a dispatcher who can submit orders should
+# not be able to redirect the notification stream.
+
+
+@router.get("/webhooks", response_model=list[WebhookEndpointView])
+async def list_my_webhooks(
+    client: AuthedClient = Depends(require_client_admin),
+    session: AsyncSession = Depends(get_db),
+) -> list[WebhookEndpointView]:
+    result = await session.execute(
+        select(ClientWebhookEndpoint)
+        .where(ClientWebhookEndpoint.client_id == uuid.UUID(client.client_id))
+        .order_by(ClientWebhookEndpoint.created_at)
+    )
+    return [_webhook_view(endpoint) for endpoint in result.scalars().all()]
+
+
+@router.post("/webhooks", response_model=WebhookEndpointCreated, status_code=201)
+async def create_my_webhook(
+    body: WebhookEndpointBody,
+    client: AuthedClient = Depends(require_client_admin),
+    session: AsyncSession = Depends(get_db),
+) -> WebhookEndpointCreated:
+    """Subscribe a URL to this client's order status changes.
+
+    **The URL is validated before it is stored, and that is a security control
+    rather than input hygiene** (`app/webhooks/url_safety.py`). This server will
+    make repeated outbound requests to whatever is saved here, from inside our
+    network - so an unchecked value is an SSRF primitive pointed at the cloud
+    metadata service or at our own internal router.
+
+    The secret comes back exactly once. It is never returned again, by any endpoint,
+    which is why the response model differs from the list model rather than the
+    field being optional on one shared shape.
+    """
+    try:
+        url = validate_webhook_url(body.url)
+    except UnsafeWebhookUrl as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    endpoint = ClientWebhookEndpoint(
+        client_id=uuid.UUID(client.client_id),
+        url=url,
+        secret=new_webhook_secret(),
+        description=body.description,
+    )
+    session.add(endpoint)
+    await session.commit()
+
+    logger.info(
+        "client_webhook_created",
+        client_id=client.client_id,
+        endpoint_id=str(endpoint.id),
+    )
+    view = _webhook_view(endpoint)
+    return WebhookEndpointCreated(**view.model_dump(), secret=endpoint.secret)
+
+
+@router.post("/webhooks/{endpoint_id}/enable", response_model=WebhookEndpointView)
+async def enable_my_webhook(
+    endpoint_id: str,
+    client: AuthedClient = Depends(require_client_admin),
+    session: AsyncSession = Depends(get_db),
+) -> WebhookEndpointView:
+    """Turn an endpoint back on after it was disabled by sustained failure.
+
+    Re-enabling resets the failure count, otherwise an endpoint that had reached the
+    cutoff would be switched off again by its very next failure and the client would
+    never get a clean run at proving their fix worked.
+    """
+    endpoint = await _my_webhook(session, client, endpoint_id)
+    endpoint.is_active = True
+    endpoint.consecutive_failures = 0
+    endpoint.disabled_at = None
+    await session.commit()
+    return _webhook_view(endpoint)
+
+
+@router.post("/webhooks/{endpoint_id}/disable", response_model=WebhookEndpointView)
+async def disable_my_webhook(
+    endpoint_id: str,
+    client: AuthedClient = Depends(require_client_admin),
+    session: AsyncSession = Depends(get_db),
+) -> WebhookEndpointView:
+    endpoint = await _my_webhook(session, client, endpoint_id)
+    endpoint.is_active = False
+    endpoint.disabled_at = datetime.now(timezone.utc)
+    await session.commit()
+    return _webhook_view(endpoint)
+
+
+@router.get("/webhooks/{endpoint_id}/deliveries", response_model=list[WebhookDeliveryView])
+async def list_my_webhook_deliveries(
+    endpoint_id: str,
+    client: AuthedClient = Depends(require_client_admin),
+    session: AsyncSession = Depends(get_db),
+) -> list[WebhookDeliveryView]:
+    """Recent attempts, so a client can debug their own handler.
+
+    "Did you actually send it?" is the first question of every webhook integration,
+    and without this the honest answer is "check our logs" - which they cannot do.
+    Newest first, and the status code and error string are included so they can tell
+    a handler that 500s apart from a URL that never resolved.
+    """
+    endpoint = await _my_webhook(session, client, endpoint_id)
+    result = await session.execute(
+        select(WebhookDelivery)
+        .where(WebhookDelivery.endpoint_id == endpoint.id)
+        .order_by(WebhookDelivery.sequence.desc())
+        .limit(50)
+    )
+    return [
+        WebhookDeliveryView(
+            delivery_id=str(delivery.id),
+            order_id=str(delivery.order_id),
+            event_id=delivery.event_id,
+            status=delivery.status,
+            attempts=delivery.attempts,
+            last_status_code=delivery.last_status_code,
+            last_error=delivery.last_error,
+            next_attempt_at=delivery.next_attempt_at,
+            delivered_at=delivery.delivered_at,
+            created_at=delivery.created_at,
+        )
+        for delivery in result.scalars().all()
+    ]
+
+
+def _webhook_view(endpoint: ClientWebhookEndpoint) -> WebhookEndpointView:
+    return WebhookEndpointView(
+        endpoint_id=str(endpoint.id),
+        url=endpoint.url,
+        description=endpoint.description,
+        is_active=endpoint.is_active,
+        consecutive_failures=endpoint.consecutive_failures,
+        disabled_at=endpoint.disabled_at,
+        last_success_at=endpoint.last_success_at,
+        created_at=endpoint.created_at,
+    )
+
+
+async def _my_webhook(
+    session: AsyncSession, client: AuthedClient, endpoint_id: str
+) -> ClientWebhookEndpoint:
+    """This client's endpoint, or a 404.
+
+    Scoped by client_id in the WHERE clause rather than fetched and then checked -
+    the same shape as every other per-client read here. A 404 rather than a 403 for
+    another client's endpoint, so the endpoint isn't an existence oracle for other
+    clients' integration ids.
+    """
+    try:
+        parsed = uuid.UUID(endpoint_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Webhook not found") from None
+    result = await session.execute(
+        select(ClientWebhookEndpoint).where(
+            ClientWebhookEndpoint.id == parsed,
+            ClientWebhookEndpoint.client_id == uuid.UUID(client.client_id),
+        )
+    )
+    endpoint = result.scalar_one_or_none()
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    return endpoint
