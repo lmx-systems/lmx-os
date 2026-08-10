@@ -178,3 +178,32 @@ export interface ClientOrderBatchResult {
   failed: number
   results: ClientOrderBatchRowResult[]
 }
+
+// The public tracking page's payload (docs/ROADMAP.md F3, app/schemas/tracking.py).
+//
+// This mirrors a privacy boundary rather than a convenience DTO: the backend
+// schema is the exhaustive list of what an unauthenticated caller holding a
+// tracking URL can learn. No driver name or phone, no other stops, no client
+// identity, no internal ids.
+export interface DriverPositionView {
+  lat: number
+  lng: number
+  // Shown as "updated Ns ago". A dot with no timestamp reads as live even when
+  // it's stale, which is worse than showing no dot at all.
+  recorded_at: string
+}
+
+export interface TrackingView {
+  status: string
+  // The two strings a person actually reads. `status` is for our own logic -
+  // "en_route_drop" is a sink's vocabulary, not a customer's.
+  headline: string
+  detail: string
+  destination_hint: string | null
+  estimated_arrival: string | null
+  delivered_at: string | null
+  // Present only while this recipient's drop is the driver's CURRENT stop.
+  driver_position: DriverPositionView | null
+  // False on a finished delivery, so a forgotten open tab stops polling.
+  is_live: boolean
+}
