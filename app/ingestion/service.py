@@ -22,6 +22,7 @@ from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
 from app.geocoding import BaseGeocoder, get_geocoder, normalize_address, resolve_address
 from app.ingestion.registry import get_adapter
+from app.billing.rates import distance_between, price_drop
 from app.models.client_rate import ClientRate
 from app.models.order import Order, OrderStatus
 from app.models.parcel import Parcel
@@ -311,27 +312,52 @@ async def _load_tier_overrides(session: AsyncSession, hub_id: str) -> list[TierO
     return overrides
 
 
-async def _lookup_fee_cents(session: AsyncSession, client_id: str, sla_tier: str) -> int | None:
-    """
-    Phase 8 per-client, per-tier billing rate lookup. Returns None (not 0)
-    when the client has no ClientRate configured for this tier yet -
-    Order.fee_cents' docstring is explicit that null must never look like
-    a free delivery. Logged as a warning rather than raised: a missing
-    rate is an onboarding gap ops needs to fix, not a reason to fail the
-    whole ingestion pipeline for every order from that client.
+async def _price_order(
+    session: AsyncSession,
+    *,
+    client_id: str,
+    sla_tier: str,
+    lmx: LMXOrder,
+    order: Order,
+    shop: Shop,
+) -> tuple[int | None, dict | None]:
+    """(fee_cents, breakdown) for this order, from the client's rate for this tier.
+
+    Returns (None, None) when the client has no ClientRate for this tier yet -
+    `Order.fee_cents`' docstring is explicit that null must never look like a free
+    delivery. Logged as a warning rather than raised: a missing rate is an onboarding gap
+    ops needs to fix, not a reason to fail ingestion for every order from that client.
+
+    **Priced here, once, and frozen on the order.** That was already true and matters more
+    now that a rate can have a per-mile component: a rate card edited mid-month must not
+    retroactively reprice work already taken, and with a distance term it would move
+    numbers a client has already been quoted.
     """
     result = await session.execute(
-        select(ClientRate.rate_per_drop_cents).where(
+        select(ClientRate).where(
             ClientRate.client_id == uuid.UUID(client_id), ClientRate.sla_tier == sla_tier
         )
     )
-    fee_cents = result.scalar_one_or_none()
-    if fee_cents is None:
+    rate = result.scalar_one_or_none()
+    if rate is None:
         logger.warning(
             "client_rate_missing", client_id=client_id, sla_tier=sla_tier,
             detail="No ClientRate configured for this client/tier - fee_cents left null.",
         )
-    return fee_cents
+        return None, None
+
+    priced = price_drop(
+        rate,
+        miles=distance_between(
+            shop.lat, shop.lng, order.delivery_lat, order.delivery_lng
+        ),
+        # From the contract object, not the row: line items are carried on LMXOrder and
+        # are not a column on Order, so reading them off the row would price every
+        # piece-rate contract at zero pieces and never say so.
+        pieces=len(lmx.line_items),
+        weight_units=float(order.weight_units or 0),
+    )
+    return priced.fee_cents, priced.breakdown
 
 
 def _lmx_from_normalized(normalized: NormalizedOrder, payload: dict) -> LMXOrder:
@@ -486,9 +512,17 @@ async def ingest_lmx_order(
     # No client relationship means nothing to bill against. Skipped rather than
     # logged as a missing rate, which would be misleading - there is no rate to
     # be missing.
-    order.fee_cents = (
-        await _lookup_fee_cents(session, lmx.client_id, sla_tier) if lmx.client_id else None
-    )
+    if lmx.client_id:
+        order.fee_cents, order.fee_breakdown = await _price_order(
+            session,
+            client_id=lmx.client_id,
+            sla_tier=sla_tier,
+            lmx=lmx,
+            order=order,
+            shop=shop,
+        )
+    else:
+        order.fee_cents, order.fee_breakdown = None, None
     order.status = OrderStatus.held
     await session.commit()
     metrics.ORDERS_INGESTED.labels(hub_id=lmx.hub_id, source_system=lmx.source_system).inc()

@@ -29,6 +29,7 @@ from app.delivery.resolution import RESOLUTION_ACTIONS, OrderNotFailedError, res
 from app.driver_auth.dependencies import revoked_devices_key
 from app.models.client import Client
 from app.models.client_rate import ClientRate
+from app.models.client_sla_term import ClientSlaTerm
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.models.driver import Driver
 from app.compliance.driver_documents import evaluate_driver_documents
@@ -58,6 +59,10 @@ from app.redis_client import get_client as get_redis_client
 from app.schemas.admin import (
     ClientOnboardingBody,
     ClientOnboardingResult,
+    ClientRateBody,
+    ClientRateView,
+    ClientSlaTermBody,
+    ClientSlaTermView,
     CodDisputeReportView,
     DriverDocumentReviewBody,
     DriverDocumentReviewResult,
@@ -1042,3 +1047,154 @@ async def cod_dispute_report(
             for row in report.shops
         ],
     )
+
+
+# ---------------------------------------------------------------------------
+# Rate tables and SLA terms (docs/ROADMAP.md F5, W3)
+# ---------------------------------------------------------------------------
+#
+# Both are CONTRACT data - what a client agreed to pay and what we agreed to deliver. They
+# live together because a credit is a percentage of a fee, so the two cannot sensibly be
+# maintained apart.
+
+
+@router.get("/clients/{client_id}/rates", response_model=list[ClientRateView])
+async def list_client_rates(
+    client_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[ClientRateView]:
+    result = await session.execute(
+        select(ClientRate)
+        .where(ClientRate.client_id == uuid.UUID(client_id))
+        .order_by(ClientRate.sla_tier)
+    )
+    return [
+        ClientRateView(
+            rate_id=str(rate.id),
+            sla_tier=rate.sla_tier,
+            rate_per_drop_cents=rate.rate_per_drop_cents,
+            rate_per_mile_cents=rate.rate_per_mile_cents,
+            rate_per_piece_cents=rate.rate_per_piece_cents,
+            rate_per_weight_unit_cents=rate.rate_per_weight_unit_cents,
+            minimum_charge_cents=rate.minimum_charge_cents,
+        )
+        for rate in result.scalars().all()
+    ]
+
+
+@router.put("/clients/{client_id}/rates", response_model=ClientRateView)
+async def upsert_client_rate(
+    client_id: str,
+    body: ClientRateBody,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> ClientRateView:
+    """Set or change one tier's rate (docs/ROADMAP.md F5).
+
+    **Changing a rate does not reprice anything already taken.** `fee_cents` and
+    `fee_breakdown` are frozen on the order at ingestion, so a card edited mid-month
+    affects the next order and not the last hundred - which is what keeps a quote a quote.
+    Worth knowing when a client asks why today's edit didn't change this month's statement.
+    """
+    result = await session.execute(
+        select(ClientRate).where(
+            ClientRate.client_id == uuid.UUID(client_id),
+            ClientRate.sla_tier == body.sla_tier,
+        )
+    )
+    rate = result.scalar_one_or_none()
+    if rate is None:
+        rate = ClientRate(client_id=uuid.UUID(client_id), sla_tier=body.sla_tier)
+        session.add(rate)
+
+    rate.rate_per_drop_cents = body.rate_per_drop_cents
+    rate.rate_per_mile_cents = body.rate_per_mile_cents
+    rate.rate_per_piece_cents = body.rate_per_piece_cents
+    rate.rate_per_weight_unit_cents = body.rate_per_weight_unit_cents
+    rate.minimum_charge_cents = body.minimum_charge_cents
+    await session.commit()
+
+    logger.info(
+        "client_rate_set", client_id=client_id, sla_tier=body.sla_tier, rate_id=str(rate.id)
+    )
+    return ClientRateView(rate_id=str(rate.id), **body.model_dump())
+
+
+@router.get("/clients/{client_id}/sla-terms", response_model=list[ClientSlaTermView])
+async def list_client_sla_terms(
+    client_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[ClientSlaTermView]:
+    result = await session.execute(
+        select(ClientSlaTerm)
+        .where(ClientSlaTerm.client_id == uuid.UUID(client_id))
+        .order_by(ClientSlaTerm.sla_tier)
+    )
+    return [
+        ClientSlaTermView(
+            term_id=str(term.id),
+            sla_tier=term.sla_tier,
+            delivery_target_minutes=term.delivery_target_minutes,
+            credit_percent=term.credit_percent,
+            credit_minimum_cents=term.credit_minimum_cents,
+            credit_maximum_cents=term.credit_maximum_cents,
+        )
+        for term in result.scalars().all()
+    ]
+
+
+@router.put("/clients/{client_id}/sla-terms", response_model=ClientSlaTermView)
+async def upsert_client_sla_term(
+    client_id: str,
+    body: ClientSlaTermBody,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> ClientSlaTermView:
+    """Record what we promised this client for this tier, and what missing it costs (W3).
+
+    **Contract data, not a constant.** LMX has no company-wide delivery SLA written down
+    anywhere - `app/sla/engine.py` only defines hold windows - so hardcoding a target would
+    have invented our service level in a Python file. Each row is what somebody actually
+    agreed to, per client and per tier, because two distributors on T1 may still have
+    signed different papers.
+
+    A tier with no term is not credited, and the assessment reports that separately rather
+    than treating it as nothing owed.
+    """
+    if (
+        body.credit_minimum_cents is not None
+        and body.credit_maximum_cents is not None
+        and body.credit_minimum_cents > body.credit_maximum_cents
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="The credit minimum can't be more than the maximum",
+        )
+
+    result = await session.execute(
+        select(ClientSlaTerm).where(
+            ClientSlaTerm.client_id == uuid.UUID(client_id),
+            ClientSlaTerm.sla_tier == body.sla_tier,
+        )
+    )
+    term = result.scalar_one_or_none()
+    if term is None:
+        term = ClientSlaTerm(client_id=uuid.UUID(client_id), sla_tier=body.sla_tier)
+        session.add(term)
+
+    term.delivery_target_minutes = body.delivery_target_minutes
+    term.credit_percent = body.credit_percent
+    term.credit_minimum_cents = body.credit_minimum_cents
+    term.credit_maximum_cents = body.credit_maximum_cents
+    await session.commit()
+
+    logger.info(
+        "client_sla_term_set",
+        client_id=client_id,
+        sla_tier=body.sla_tier,
+        target_minutes=body.delivery_target_minutes,
+        credit_percent=body.credit_percent,
+    )
+    return ClientSlaTermView(term_id=str(term.id), **body.model_dump())

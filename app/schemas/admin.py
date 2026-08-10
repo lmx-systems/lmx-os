@@ -225,3 +225,53 @@ class CodDisputeReportView(BaseModel):
     # Why. With no SMS provider configured (B5) every dispute is un-escalated, and that is
     # one deployment-wide fact rather than N per-account failures.
     sms_configured: bool
+
+
+# ---------------------------------------------------------------------------
+# Rate tables and SLA terms (docs/ROADMAP.md F5, W3)
+# ---------------------------------------------------------------------------
+
+
+class ClientRateBody(BaseModel):
+    """One tier's price for one client.
+
+    Components are ADDITIVE - `fee = base + miles*per_mile + pieces*per_piece +
+    weight*per_weight`, floored at `minimum_charge_cents`. Written that way because courier
+    rates are quoted that way ("$8 plus $1.50 a mile, minimum $12"), and a
+    mutually-exclusive basis would force every hybrid contract to be approximated.
+    """
+
+    sla_tier: str
+    rate_per_drop_cents: int = Field(ge=0)
+    rate_per_mile_cents: int = Field(default=0, ge=0)
+    rate_per_piece_cents: int = Field(default=0, ge=0)
+    rate_per_weight_unit_cents: int = Field(default=0, ge=0)
+    minimum_charge_cents: int | None = Field(default=None, ge=0)
+
+
+class ClientRateView(ClientRateBody):
+    rate_id: str
+
+
+class ClientSlaTermBody(BaseModel):
+    """What we promised, and what missing it costs.
+
+    **The target is why this exists.** Credits are owed against a delivery commitment and
+    none was recorded anywhere: `app/sla/engine.py` defines HOLD windows (when we must set
+    off), not delivery times. Without this a credit schedule would be a penalty with no
+    trigger.
+
+    Measured from when the order reached us, because that is the moment the client can
+    point at - they know when they sent it and not when our driver happened to collect it.
+    """
+
+    sla_tier: str
+    delivery_target_minutes: int = Field(gt=0)
+    # Percentage of the order's fee, so the credit scales with what was charged.
+    credit_percent: int = Field(default=0, ge=0, le=100)
+    credit_minimum_cents: int | None = Field(default=None, ge=0)
+    credit_maximum_cents: int | None = Field(default=None, ge=0)
+
+
+class ClientSlaTermView(ClientSlaTermBody):
+    term_id: str
