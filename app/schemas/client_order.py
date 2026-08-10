@@ -200,3 +200,34 @@ class ClientOrderBatchResult(BaseModel):
 # picker, and they are what backs §2.2 principle 3's remembered-shops behaviour
 # for this form too. Adding a second shop view would have meant two endpoints
 # listing the same rows with different fields.
+
+
+class ManifestRowResult(BaseModel):
+    """One line of an uploaded manifest, as the dispatcher sees it.
+
+    Keyed on `line_number` rather than an array index, because the dispatcher is
+    looking at the same file in a spreadsheet: an error saying "row 4" that means the
+    fifth line is worse than no line number at all.
+    """
+
+    line_number: int
+    drop_address: str | None
+    order: ClientOrderResult | None = None
+    error: str | None = None
+
+
+class ManifestUploadResult(BaseModel):
+    """The row-level report T3 requires.
+
+    **Every line of the file appears here exactly once**, as an order or as an error.
+    A dispatcher who uploads 40 lines and gets 38 deliveries with no account of the
+    other two has lost orders they still believe are coming.
+    """
+
+    accepted: int
+    failed: int
+    # Which header we read as which field. Echoed back because the parser matches
+    # generously - a dispatcher should be able to see we took "Ship To Address" as the
+    # destination rather than wonder why every delivery is going to one place.
+    column_mapping: dict[str, str]
+    results: list[ManifestRowResult]

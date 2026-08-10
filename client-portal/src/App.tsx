@@ -15,6 +15,7 @@ import { WebhooksPanel } from './components/WebhooksPanel'
 import { ResetPasswordPage } from './components/ResetPasswordPage'
 import { NewOrderForm } from './components/NewOrderForm'
 import { BulkPastePanel } from './components/BulkPastePanel'
+import { ManifestUploadPanel } from './components/ManifestUploadPanel'
 import { TopBar } from './components/TopBar'
 import { OrdersTable } from './components/OrdersTable'
 import { OrderDetail } from './components/OrderDetail'
@@ -66,7 +67,7 @@ export default function App() {
   const [invoices, setInvoices] = useState<InvoiceSummaryView[] | null>(null)
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetailView | null>(null)
   const [view, setView] = useState<View>({ name: 'orders' })
-  const [bulkMode, setBulkMode] = useState(false)
+  const [entryMode, setEntryMode] = useState<'single' | 'paste' | 'file'>('single')
   const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -254,23 +255,53 @@ export default function App() {
 
         {view.name === 'new-order' && (
           <div className="max-w-xl">
-            <div className="mb-4 flex items-baseline justify-between gap-3">
+            <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
               <h1 className="text-[16px] font-semibold text-[var(--text-primary)]">
-                {bulkMode ? 'Send several deliveries' : 'Send a delivery'}
+                {entryMode === 'single'
+                  ? 'Send a delivery'
+                  : entryMode === 'paste'
+                    ? 'Send several deliveries'
+                    : 'Import a manifest'}
               </h1>
-              {/* A quiet text switch rather than tabs: the single-order form is
-                  what a counter uses all day, and paste is an occasional
-                  back-office move. Making them equal-weight would suggest
-                  otherwise. */}
-              <button
-                onClick={() => setBulkMode((v) => !v)}
-                className="shrink-0 text-[13px] font-medium text-[var(--accent)] hover:underline"
-              >
-                {bulkMode ? 'Just one delivery' : 'Paste several'}
-              </button>
+              {/* Quiet text switches rather than tabs, and in this order on purpose:
+                  the single-order form is what a counter uses all day, pasting is an
+                  occasional back-office move, and a file import is rarer still.
+                  Equal-weight tabs would suggest otherwise. */}
+              <div className="flex shrink-0 gap-3 text-[13px] font-medium">
+                {entryMode !== 'single' && (
+                  <button
+                    onClick={() => setEntryMode('single')}
+                    className="text-[var(--accent)] hover:underline"
+                  >
+                    Just one delivery
+                  </button>
+                )}
+                {entryMode !== 'paste' && (
+                  <button
+                    onClick={() => setEntryMode('paste')}
+                    className="text-[var(--accent)] hover:underline"
+                  >
+                    Paste several
+                  </button>
+                )}
+                {entryMode !== 'file' && (
+                  <button
+                    onClick={() => setEntryMode('file')}
+                    className="text-[var(--accent)] hover:underline"
+                  >
+                    Upload a file
+                  </button>
+                )}
+              </div>
             </div>
-            {bulkMode ? (
+            {entryMode === 'paste' ? (
               <BulkPastePanel
+                onOrdersPlaced={() => {
+                  api.myOrders().then(setOrders).catch(() => {})
+                }}
+              />
+            ) : entryMode === 'file' ? (
+              <ManifestUploadPanel
                 onOrdersPlaced={() => {
                   api.myOrders().then(setOrders).catch(() => {})
                 }}

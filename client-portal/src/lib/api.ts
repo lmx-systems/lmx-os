@@ -13,6 +13,8 @@ import type {
   ClientSignupBody,
   ClientSignupResult,
   ClientShopView,
+  DeadlineChoice,
+  ManifestUploadResult,
   ClientUserView,
   InvoiceDetailView,
   InvoiceSummaryView,
@@ -48,9 +50,13 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken()
+  // FormData must NOT get an explicit Content-Type: the browser generates one with the
+  // multipart boundary in it, and setting our own silently strips that, which makes the
+  // server see a body it cannot parse.
+  const isFormData = init?.body instanceof FormData
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     ...init,
@@ -187,6 +193,23 @@ export const api = {
   // Bulk paste (§2.2 principle 5). Deliberately not all-or-nothing - the
   // response reports per line, because one unfindable address among six must
   // not discard the five that were fine.
+  // CSV manifest upload (docs/LMX_LINK_PLAN.md T3). Multipart, because the input is a
+  // file - so the pickup and deadline travel as form fields alongside it.
+  uploadManifest: (
+    file: File,
+    options: { deadline: DeadlineChoice; pickupShopId?: string | null; pickupAddress?: string | null },
+  ) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('deadline', options.deadline)
+    if (options.pickupShopId) form.append('pickup_shop_id', options.pickupShopId)
+    if (options.pickupAddress) form.append('pickup_address', options.pickupAddress)
+    return request<ManifestUploadResult>('/client/orders/manifest', {
+      method: 'POST',
+      body: form,
+    })
+  },
+
   submitOrdersBatch: (body: ClientOrderBatchBody) =>
     request<ClientOrderBatchResult>('/client/orders/batch', {
       method: 'POST',
