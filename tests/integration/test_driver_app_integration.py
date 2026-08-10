@@ -61,6 +61,8 @@ from app.schemas.driver_app import (
 from app.schemas.driver_auth import RequestOtpBody, VerifyOtpBody
 from app.schemas.fleet import DriverLocation, DriverState
 
+from tests.integration.conftest import make_driver_compliant
+
 pytestmark = pytest.mark.integration
 
 
@@ -143,7 +145,9 @@ async def test_full_driver_app_core_loop(db_session, real_redis_client):
     )
     assert updated_profile.setup_complete is True
 
-    # 3. Go online (screens 1d/1e).
+    # 3. Go online (screens 1d/1e). Requires verified license + insurance since
+    # R4 - the gate used to pass a driver with no documents at all.
+    await make_driver_compliant(db_session, driver_id)
     await update_my_availability(DriverAvailabilityUpdate(status="available"), driver=authed, session=db_session)
 
     # 4. A Dispatch Optimizer cycle should create a job offer, not directly

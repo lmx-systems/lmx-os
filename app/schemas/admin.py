@@ -1,5 +1,6 @@
 """Schemas for internal/admin-only endpoints (app/api/admin_routes.py)."""
-from datetime import date
+from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -137,3 +138,54 @@ class PayrollRunResult(BaseModel):
     hub_id: str
     engine: str
     submissions: list[DriverPayrollSubmission]
+
+
+# ---------------------------------------------------------------------------
+# Driver compliance document review (docs/ROADMAP.md R4)
+# ---------------------------------------------------------------------------
+
+
+class PendingDriverDocumentView(BaseModel):
+    """One document awaiting an ops verdict.
+
+    Carries the driver's name and the claimed date because the review IS the
+    comparison: the reviewer opens the file, reads the expiry off it, and either
+    confirms or contradicts what the driver said. A queue that showed only a file
+    link would make them go and look the driver up.
+    """
+
+    document_id: str
+    driver_id: str
+    driver_name: str
+    doc_type: str
+    claimed_expires_at: date
+    file_url: str | None
+    review_status: str
+    uploaded_at: datetime
+
+
+class DriverDocumentReviewBody(BaseModel):
+    """An ops verdict on one document.
+
+    `verified_expires_at` is required on approval and is what the reviewer read off
+    the document - NOT a copy of the driver's claim. That is the entire point of
+    the field: if approving just accepted the claimed date, this review would be a
+    rubber stamp on self-attested data and the hole R4 exists to close would still
+    be open one step further along.
+    """
+
+    decision: Literal["verify", "reject"]
+    verified_expires_at: date | None = None
+    rejection_reason: str | None = None
+
+
+class DriverDocumentReviewResult(BaseModel):
+    document_id: str
+    doc_type: str
+    review_status: str
+    verified_expires_at: date | None
+    # Whether this driver can now go on shift. Answered here so a reviewer working
+    # a queue can see that clearing the second of two documents actually unblocked
+    # someone, rather than having to go and check.
+    driver_can_go_on_shift: bool
+    outstanding_problems: list[str]

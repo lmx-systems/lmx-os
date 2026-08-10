@@ -11,7 +11,7 @@ Bearer token - see app/driver_auth/dependencies.py.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
@@ -67,7 +67,10 @@ from app.schemas.driver_app import (
     CompleteStopBody,
     DeclineOfferBody,
     DriverAvailabilityUpdate,
+    DriverComplianceProblemView,
+    DriverComplianceView,
     DriverDocumentUpdate,
+    DriverDocumentUploadBody,
     DriverDocumentView,
     DriverLocationPingBody,
     DriverProfileUpdate,
@@ -103,6 +106,12 @@ from app.schemas.gig import (
     GigJobStatusUpdate,
     GigJobView,
     MarginalEconomicsView,
+)
+from app.compliance.driver_documents import evaluate_driver_documents
+from app.models.driver_document import REQUIRED_DOC_TYPES, REVIEW_PENDING
+from app.storage.document_upload_client import (
+    UnsupportedDocumentType,
+    create_document_upload,
 )
 from app.storage.photo_upload_client import generate_object_key, get_photo_upload_client
 
@@ -575,13 +584,41 @@ async def update_my_payment_method(
 # ---------------------------------------------------------------------------
 
 
-async def _get_expired_documents(session: AsyncSession, driver_id: str) -> list[DriverDocument]:
+def _document_view(doc: DriverDocument) -> DriverDocumentView:
+    return DriverDocumentView(
+        doc_type=doc.doc_type,
+        claimed_expires_at=doc.claimed_expires_at,
+        verified_expires_at=doc.verified_expires_at,
+        review_status=doc.review_status,
+        rejection_reason=doc.rejection_reason,
+        file_url=doc.file_url,
+        is_usable=doc.is_usable_on,
+    )
+
+
+def _require_known_doc_type(doc_type: str) -> str:
+    """`doc_type` arrives as a URL path segment and used to be stored verbatim, so
+    a driver could invent document types. Against a gate that checks for PRESENCE
+    of required types that would be a way to clutter their own record with rows
+    nobody asked for."""
+    if doc_type not in REQUIRED_DOC_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown document type - expected one of {', '.join(REQUIRED_DOC_TYPES)}",
+        )
+    return doc_type
+
+
+async def _my_document(
+    session: AsyncSession, driver: AuthedDriver, doc_type: str
+) -> DriverDocument | None:
     result = await session.execute(
         select(DriverDocument).where(
-            DriverDocument.driver_id == uuid.UUID(driver_id), DriverDocument.expires_at < date.today()
+            DriverDocument.driver_id == uuid.UUID(driver.driver_id),
+            DriverDocument.doc_type == doc_type,
         )
     )
-    return list(result.scalars().all())
+    return result.scalar_one_or_none()
 
 
 @router.get("/me/documents", response_model=list[DriverDocumentView])
@@ -591,10 +628,88 @@ async def list_my_documents(
     result = await session.execute(
         select(DriverDocument).where(DriverDocument.driver_id == uuid.UUID(driver.driver_id))
     )
-    return [
-        DriverDocumentView(doc_type=doc.doc_type, expires_at=doc.expires_at, file_url=doc.file_url)
-        for doc in result.scalars().all()
-    ]
+    return [_document_view(doc) for doc in result.scalars().all()]
+
+
+@router.get("/me/compliance", response_model=DriverComplianceView)
+async def my_compliance(
+    driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
+) -> DriverComplianceView:
+    """Why the "go online" toggle is disabled, if it is (docs/ROADMAP.md R4).
+
+    Exists so the app can explain the block up front instead of letting a driver
+    discover it by tapping the toggle and getting a 409 - and so the explanation is
+    the SAME computation the gate uses, rather than the app's own guess at it.
+    """
+    result = await evaluate_driver_documents(session, driver.driver_id)
+    return DriverComplianceView(
+        can_go_on_shift=result.can_go_on_shift,
+        problems=[
+            DriverComplianceProblemView(
+                doc_type=problem.doc_type, reason=problem.reason, detail=problem.detail
+            )
+            for problem in result.problems
+        ],
+    )
+
+
+@router.post("/me/documents/{doc_type}/upload-url", response_model=UploadUrlResult)
+async def create_document_upload_url(
+    doc_type: str,
+    body: DriverDocumentUploadBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> UploadUrlResult:
+    """Somewhere to put a photo of a license or insurance card.
+
+    **This replaces the driver being able to name their own `file_url`.** Before
+    this, `PUT /driver/me/documents/{doc_type}` accepted any string and stored it
+    as compliance evidence, so a fabricated URL was indistinguishable from a real
+    scan. The backend now mints the object key, and writes `file_url` itself from
+    that key - so the row can only point at something we hold.
+
+    Submitting a new upload resets the review: a document that was verified, then
+    replaced, is not still verified. Re-uploading after a rejection is the normal
+    path, and it must put the row back in the queue rather than leaving the old
+    verdict attached to new evidence.
+    """
+    _require_known_doc_type(doc_type)
+    try:
+        upload, key = create_document_upload(driver.driver_id, doc_type, body.content_type)
+    except UnsupportedDocumentType as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    doc = await _my_document(session, driver, doc_type)
+    if doc is None:
+        doc = DriverDocument(
+            driver_id=uuid.UUID(driver.driver_id),
+            doc_type=doc_type,
+            claimed_expires_at=body.claimed_expires_at,
+        )
+        session.add(doc)
+
+    doc.claimed_expires_at = body.claimed_expires_at
+    doc.file_url = upload.final_url
+    # New evidence, so no verdict. Everything a previous review established is
+    # about a file this row no longer points at.
+    doc.review_status = REVIEW_PENDING
+    doc.verified_expires_at = None
+    doc.reviewed_at = None
+    doc.reviewed_by_ops_user_id = None
+    doc.rejection_reason = None
+    await session.commit()
+
+    logger.info(
+        "driver_document_uploaded",
+        driver_id=driver.driver_id,
+        doc_type=doc_type,
+        object_key=key,
+    )
+    return UploadUrlResult(
+        upload_url=upload.upload_url,
+        final_url=upload.final_url,
+        requires_upload=upload.requires_upload,
+    )
 
 
 @router.put("/me/documents/{doc_type}", response_model=DriverDocumentView)
@@ -604,19 +719,35 @@ async def update_my_document(
     driver: AuthedDriver = Depends(get_current_driver),
     session: AsyncSession = Depends(get_db),
 ) -> DriverDocumentView:
-    result = await session.execute(
-        select(DriverDocument).where(
-            DriverDocument.driver_id == uuid.UUID(driver.driver_id), DriverDocument.doc_type == doc_type
-        )
-    )
-    doc = result.scalar_one_or_none()
+    """Correct the expiry date a driver gave us.
+
+    Records a CLAIM and nothing more (docs/ROADMAP.md R4). This endpoint used to
+    be the whole compliance story - the driver set the date the gate then read, so
+    a lapsed license became a valid one by typing next year. The date is now
+    context for a reviewer; only `verified_expires_at`, set by an ops user reading
+    the document, opens the gate.
+
+    Changing the claimed date sends the document back for review: if we had already
+    verified it against one date and the driver now says a different one, the
+    verdict no longer matches what they are asserting.
+    """
+    _require_known_doc_type(doc_type)
+    doc = await _my_document(session, driver, doc_type)
     if doc is None:
-        doc = DriverDocument(driver_id=uuid.UUID(driver.driver_id), doc_type=doc_type, expires_at=body.expires_at)
-        session.add(doc)
-    doc.expires_at = body.expires_at
-    doc.file_url = body.file_url
+        raise HTTPException(
+            status_code=404,
+            detail="Upload the document first - there's nothing on file to correct",
+        )
+
+    if doc.claimed_expires_at != body.claimed_expires_at:
+        doc.review_status = REVIEW_PENDING
+        doc.verified_expires_at = None
+        doc.reviewed_at = None
+        doc.reviewed_by_ops_user_id = None
+        doc.rejection_reason = None
+    doc.claimed_expires_at = body.claimed_expires_at
     await session.commit()
-    return DriverDocumentView(doc_type=doc.doc_type, expires_at=doc.expires_at, file_url=doc.file_url)
+    return _document_view(doc)
 
 
 @router.post("/me/state")
@@ -628,13 +759,20 @@ async def update_my_availability(
     row = await _get_driver_row(session, driver)
 
     if body.status == "available":
-        expired = await _get_expired_documents(session, driver.driver_id)
-        if expired:
-            expired_types = ", ".join(doc.doc_type for doc in expired)
+        # **The gate that used to be defeatable two ways** (docs/ROADMAP.md R4).
+        # It refused only when a document row on file had passed an expiry date the
+        # DRIVER had typed - so typing next year got you online, and having no
+        # documents at all got you online too, because nothing on file could be
+        # expired. `evaluate_driver_documents` requires each document to be
+        # present, reviewed by an ops user, and unexpired per the reviewer's date.
+        compliance = await evaluate_driver_documents(session, driver.driver_id)
+        if not compliance.can_go_on_shift:
             raise HTTPException(
                 status_code=409,
-                detail=f"Renew your {expired_types} before going online - see wireframe screen 1r's "
-                "document-expiry annotation.",
+                # Every reason at once, so a driver missing two documents isn't
+                # sent back twice. GET /driver/me/compliance returns the same
+                # structure for the app to render up front.
+                detail="; ".join(problem.detail for problem in compliance.problems),
             )
 
     manager = FleetStateManager()

@@ -8,6 +8,7 @@ import { FleetRoster } from './components/FleetRoster'
 import { OperationsPanel } from './components/OperationsPanel'
 import { OnboardClientForm } from './components/OnboardClientForm'
 import { UrgencyRulesPanel } from './components/UrgencyRulesPanel'
+import { DriverDocumentsPanel } from './components/DriverDocumentsPanel'
 import { PendingSignupsPanel } from './components/PendingSignupsPanel'
 import { ProposedRulesPanel } from './components/ProposedRulesPanel'
 import { LoginPage } from './components/LoginPage'
@@ -163,6 +164,9 @@ function App() {
                         who is already waiting should be approved, not
                         re-created by hand as a second client record. */}
                     <PendingSignupsPanel key={`signups-${hubId}`} hubId={hubId} onToast={showToast} />
+                    {/* No hub key: compliance review is whole-company, since an
+                        unreviewed license keeps a driver off the road everywhere. */}
+                    <DriverDocumentsPanel onToast={showToast} />
                     <OnboardClientForm hubId={hubId} onToast={showToast} />
                     <UrgencyRulesPanel key={`urgency-${hubId}`} hubId={hubId} onToast={showToast} />
                     <ProposedRulesPanel key={`proposed-${hubId}`} hubId={hubId} onToast={showToast} />

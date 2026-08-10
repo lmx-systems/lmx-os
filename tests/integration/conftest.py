@@ -26,6 +26,11 @@ import app.redis_client as redis_client_module
 from app.config import settings
 from app.db import Base
 
+# Registers every table on Base.metadata, which the truncate below walks. Three
+# models were missing from this package's imports until a FK to ops_users made
+# the gap visible - see app/models/__init__.py.
+import app.models  # noqa: F401
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -157,3 +162,36 @@ async def _reset_global_engine_pool():
     await db_module.engine.dispose()
     yield
     await db_module.engine.dispose()
+
+
+async def make_driver_compliant(db_session, driver_id, *, expires_in_days: int = 180):
+    """Give a driver the verified documents they now need to go on shift (R4).
+
+    Exists because "go online" stopped being free. Every required document must be
+    present, uploaded, reviewed by an ops user, and unexpired per the reviewer's
+    date - so any test that puts a driver on the road has to say so explicitly
+    rather than inheriting a gate that passed by default.
+
+    That the default USED to be compliant is precisely the bug
+    (app/compliance/driver_documents.py): the old gate only refused when a document
+    row on file had passed a driver-typed expiry, so a driver with no documents at
+    all sailed through.
+    """
+    from datetime import date, datetime, timedelta, timezone
+
+    from app.models.driver_document import REQUIRED_DOC_TYPES, REVIEW_VERIFIED, DriverDocument
+
+    expiry = date.today() + timedelta(days=expires_in_days)
+    for doc_type in REQUIRED_DOC_TYPES:
+        db_session.add(
+            DriverDocument(
+                driver_id=driver_id,
+                doc_type=doc_type,
+                claimed_expires_at=expiry,
+                verified_expires_at=expiry,
+                review_status=REVIEW_VERIFIED,
+                reviewed_at=datetime.now(timezone.utc),
+                file_url=f"local-capture://driver-documents/{driver_id}/{doc_type}/test",
+            )
+        )
+    await db_session.commit()

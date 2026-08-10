@@ -2,6 +2,8 @@ import { clearToken, getToken } from './auth'
 import type {
   ClientOnboardingBody,
   ClientOnboardingResult,
+  DriverDocumentReviewBody,
+  DriverDocumentReviewResult,
   DriverState,
   HeldOrderView,
   HubSummary,
@@ -11,6 +13,7 @@ import type {
   OpsProfileView,
   OptimizationResult,
   OrderStatusSummary,
+  PendingDriverDocumentView,
   PendingSignupView,
   ProposedRuleApprovalResult,
   SignupDecisionResult,
@@ -152,6 +155,17 @@ export const api = {
   // client is always billable.
   listSignups: (status = 'pending') =>
     request<PendingSignupView[]>(`/admin/signups?status=${encodeURIComponent(status)}`),
+
+  // Driver compliance review (docs/ROADMAP.md R4). Not hub-scoped: a driver whose
+  // license is unreviewed can't work at any hub.
+  listPendingDriverDocuments: () =>
+    request<PendingDriverDocumentView[]>('/admin/drivers/documents/pending'),
+
+  reviewDriverDocument: (documentId: string, body: DriverDocumentReviewBody) =>
+    request<DriverDocumentReviewResult>(`/admin/drivers/documents/${documentId}/review`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   approveSignup: (clientId: string, body: { rates: { sla_tier: string; rate_per_drop_cents: number }[]; hub_id?: string }) =>
     request<SignupDecisionResult>(`/admin/signups/${clientId}/approve`, {

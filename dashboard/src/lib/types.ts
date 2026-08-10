@@ -198,3 +198,34 @@ export interface SignupDecisionResult {
   signup_status: string
   rates_created: number | null
 }
+
+// Driver compliance document review (docs/ROADMAP.md R4).
+export interface PendingDriverDocumentView {
+  document_id: string
+  driver_id: string
+  driver_name: string
+  doc_type: string
+  // What the DRIVER says. Shown next to an empty field for what the document
+  // actually says, because the review is that comparison.
+  claimed_expires_at: string
+  file_url: string | null
+  review_status: string
+  uploaded_at: string
+}
+
+export interface DriverDocumentReviewBody {
+  decision: 'verify' | 'reject'
+  // Required to verify, and deliberately NOT defaulted to claimed_expires_at -
+  // see DriverDocumentsPanel on why prefilling would make this a rubber stamp.
+  verified_expires_at?: string
+  rejection_reason?: string
+}
+
+export interface DriverDocumentReviewResult {
+  document_id: string
+  doc_type: string
+  review_status: string
+  verified_expires_at: string | null
+  driver_can_go_on_shift: boolean
+  outstanding_problems: string[]
+}

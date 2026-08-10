@@ -50,18 +50,65 @@ class PaymentMethodUpdate(BaseModel):
 
 
 class DriverDocumentView(BaseModel):
-    doc_type: str  # license | insurance
-    expires_at: date
-    file_url: str | None = None
+    """One compliance document as the driver sees it (docs/ROADMAP.md R4).
 
-    @property
-    def is_expired(self) -> bool:
-        return self.expires_at < date.today()
+    Shows BOTH dates on purpose. `claimed_expires_at` is what the driver typed;
+    `verified_expires_at` is what an LMX reviewer read off the document, and is the
+    only one any decision acts on. Surfacing both is what makes a rejection
+    legible - "you told us March, the card says January" is a fixable message,
+    whereas one merged date would just look like we lost their upload.
+    """
+
+    doc_type: str  # license | insurance
+    claimed_expires_at: date
+    verified_expires_at: date | None = None
+    review_status: str  # pending | verified | rejected
+    rejection_reason: str | None = None
+    file_url: str | None = None
+    # Whether this document currently supports going on shift. Computed on the
+    # server so the app can't arrive at a different answer than the gate does.
+    is_usable: bool
 
 
 class DriverDocumentUpdate(BaseModel):
-    expires_at: date
-    file_url: str | None = None
+    """What a driver may set on their own document.
+
+    **`file_url` is deliberately absent.** It used to be here, and a driver could
+    submit any string - `https://example.com/anything` was stored and treated as
+    their license scan. It is now written by the backend from a key it minted for
+    a presigned upload (POST /driver/me/documents/{doc_type}/upload-url), so the
+    row can only ever point at something we actually hold.
+
+    The expiry date the driver gives is recorded as a CLAIM. It does not open the
+    gate; a reviewer reading the document does.
+    """
+
+    claimed_expires_at: date
+
+
+class DriverDocumentUploadBody(BaseModel):
+    """Requesting somewhere to put a photo of a license or insurance card."""
+
+    content_type: str
+    # The driver's own reading of the expiry, captured at the same moment as the
+    # photo so the reviewer has something to compare the document against.
+    claimed_expires_at: date
+
+
+class DriverComplianceProblemView(BaseModel):
+    doc_type: str
+    # missing | awaiting_review | rejected | expired - a machine-readable reason so
+    # the app can branch (upload something / wait / contact ops) instead of
+    # parsing the sentence.
+    reason: str
+    detail: str
+
+
+class DriverComplianceView(BaseModel):
+    """Why the "go online" button is disabled, if it is."""
+
+    can_go_on_shift: bool
+    problems: list[DriverComplianceProblemView]
 
 
 class DriverAvailabilityUpdate(BaseModel):
