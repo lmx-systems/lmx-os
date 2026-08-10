@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.admin_routes import router as admin_router
 from app.api.client_routes import router as client_router
 from app.api.internal_routes import router as internal_router
+from app.api.public_api_routes import router as public_api_router
 from app.api.public_routes import router as public_router
 from app.api.driver_routes import router as driver_router
 from app.api.ops_auth_routes import router as ops_auth_router
@@ -119,6 +120,11 @@ app.include_router(admin_router)
 # The only unauthenticated write surface - see app/api/public_routes.py for what
 # protects it.
 app.include_router(public_router)
+# The public order API - a client's own system, authenticated by an API key
+# (docs/ORDER_API.md). Exempt from ops auth, NOT from auth: every route carries its
+# own per-client key check, and the client is derived from that key rather than from
+# the request.
+app.include_router(public_api_router)
 # Scheduler-callable dispatch/learning-loop triggers, behind a shared secret and
 # disabled entirely when INTERNAL_API_TOKEN is unset. Exists because a
 # serverless platform suspends the in-process poll loop dispatch relies on.

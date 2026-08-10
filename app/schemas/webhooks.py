@@ -65,3 +65,38 @@ class WebhookDeliveryView(BaseModel):
     next_attempt_at: datetime | None
     delivered_at: datetime | None
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# API keys for inbound order submission (docs/ORDER_API.md)
+# ---------------------------------------------------------------------------
+
+
+class ApiKeyBody(BaseModel):
+    description: str | None = None
+
+
+class ApiKeyView(BaseModel):
+    """A key on the client's integrations screen.
+
+    **No token, and no way to recover one.** Only the hash is stored, so we could not
+    return it even if we wanted to - which is the point: a database disclosure leaks
+    nothing usable. `token_prefix` is what makes the list navigable, and it is what
+    makes rotation safe: revoking the wrong key is otherwise a coin flip.
+    """
+
+    api_key_id: str
+    token_prefix: str
+    description: str | None
+    is_active: bool
+    # The field rotation depends on. A client with two keys needs to know which one
+    # their system is actually using before revoking the other.
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+    created_at: datetime
+
+
+class ApiKeyCreated(ApiKeyView):
+    """The create response, and the only place the full token ever appears."""
+
+    token: str

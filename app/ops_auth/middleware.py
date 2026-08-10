@@ -48,7 +48,18 @@ EXEMPT_PATHS = frozenset(
 # an LMX ops session, so minting a long-lived ops account for a robot was the
 # alternative - and a robot with an ops session can do considerably more than run
 # a dispatch cycle.
-EXEMPT_PREFIXES = ("/driver", "/client", "/webhooks", "/public", "/internal")
+#
+# /api/v1: the public order API (app/api/public_api_routes.py). Exempt from
+# OPS-USER auth, not from auth: every route requires a per-client API key
+# (app/client_api/dependencies.py), and the client is derived FROM that key rather
+# than from the request - which is exactly why it is a new prefix instead of opening
+# up /ingestion, whose hub_id and client_id are path parameters. Versioned because it
+# is the first contract in this system that someone outside it writes code against.
+#
+# ADD NOTHING HERE THAT DOES NOT AUTHENTICATE ITSELF. That warning applies to every
+# entry above, and this prefix is the one most likely to tempt a future route that
+# "just needs to be reachable".
+EXEMPT_PREFIXES = ("/driver", "/client", "/webhooks", "/public", "/internal", "/api/v1")
 
 
 def _is_exempt(path: str) -> bool:

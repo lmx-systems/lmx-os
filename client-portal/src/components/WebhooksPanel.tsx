@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, ApiError } from '../lib/api'
+import { ApiKeysPanel } from './ApiKeysPanel'
 import { formatDate } from '../lib/format'
 import type { WebhookDeliveryView, WebhookEndpointView } from '../lib/types'
 
@@ -96,8 +97,18 @@ export function WebhooksPanel() {
 
   return (
     <div className="flex flex-col gap-6">
+      <h1 className="text-[16px] font-semibold text-[var(--text-primary)]">Integrations</h1>
+
+      {/* Orders in first, status out second - the order an integrator actually
+          builds them in. */}
+      <ApiKeysPanel />
+
+      <hr className="border-[var(--border)]" />
+
       <div>
-        <h1 className="text-[16px] font-semibold text-[var(--text-primary)]">Integrations</h1>
+        <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+          Getting status updates back
+        </h2>
         <p className="mt-1 max-w-2xl text-[13px] text-[var(--text-muted)]">
           We&rsquo;ll POST a signed JSON message to your system every time one of your orders
           changes status &mdash; collected, on the way, delivered. Every request carries an{' '}
