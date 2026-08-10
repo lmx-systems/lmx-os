@@ -46,6 +46,9 @@ from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.messaging.client_emails import send_password_reset_email, send_signup_received_email
 from app.models.hub import Hub
+from app.schemas.tracking import DriverPositionView, TrackingView
+from app.tracking.rate_limit import TrackingRateLimiter, TrackingRateLimitExceeded
+from app.tracking.service import TrackingTokenInvalid, resolve_tracking
 from app.schemas.signup import (
     ClientSignupBody,
     ClientSignupResult,
@@ -282,4 +285,60 @@ async def confirm_password_reset(
     logger.info("password_reset_completed", client_user_id=client_user_id)
     return PasswordResetResult(
         message="Your password has been changed - you can sign in with it now."
+    )
+
+
+@router.get("/track/{token}", response_model=TrackingView)
+async def track_delivery(
+    token: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> TrackingView:
+    """Where is my delivery (docs/ROADMAP.md F3).
+
+    The one unauthenticated READ on this router, and the trade-off is the mirror
+    image of signup's. Signup's question is "what can a stranger create"; this
+    one's is "what can a stranger see, about whom, and for how long" - because the
+    obvious implementation hands a member of the public a live GPS feed for one of
+    our employees. `app/tracking/service.py` holds the three rules that answer
+    that, and `app/schemas/tracking.py` is the exhaustive list of what comes back.
+
+    **404 for an unknown token and for an expired one, with an identical body.**
+    Distinguishing them would confirm to a token-guesser that they had found a
+    real order, leaving the rate limiter as the only thing between them and a
+    working guess. Same reasoning as the uniform responses on signup and password
+    reset.
+    """
+    limiter = TrackingRateLimiter()
+    try:
+        # Charged before the lookup, so probing tokens costs the prober rather
+        # than our database.
+        await limiter.check_and_increment(_client_ip(request))
+    except TrackingRateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+    try:
+        view = await resolve_tracking(session, token)
+    except TrackingTokenInvalid:
+        raise HTTPException(
+            status_code=404, detail="We couldn't find that delivery"
+        ) from None
+
+    return TrackingView(
+        status=view.status,
+        headline=view.headline,
+        detail=view.detail,
+        destination_hint=view.destination_hint,
+        estimated_arrival=view.estimated_arrival,
+        delivered_at=view.delivered_at,
+        driver_position=(
+            DriverPositionView(
+                lat=view.driver_position.lat,
+                lng=view.driver_position.lng,
+                recorded_at=view.driver_position.recorded_at,
+            )
+            if view.driver_position is not None
+            else None
+        ),
+        is_live=view.is_live,
     )

@@ -136,6 +136,26 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     delivery_contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     delivery_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # The capability that lets the delivery RECIPIENT - not the shop, not the
+    # client - watch this delivery on a public page (docs/ROADMAP.md F3,
+    # app/tracking/service.py, migration 0031).
+    #
+    # Nullable and minted lazily rather than on insert: every order predating
+    # this feature has none, and orders are created from several paths
+    # (both ingestion entry points, returns, failed-delivery resolution). One
+    # lazy helper covers new and legacy rows identically, and an order nobody
+    # ever tracks never gets a credential it doesn't need.
+    #
+    # Unique because the endpoint looks orders up BY this value, and indexed
+    # because that lookup is on the hot path of a page that polls. Stored in the
+    # clear: unlike a password-reset token this has to be resolvable from a URL
+    # on every poll, and the row it sits beside already holds the delivery
+    # address and the recipient's phone number - both more sensitive than a
+    # position feed that stops working a day after delivery.
+    tracking_token: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
+
     # ------------------------------------------------------------------
     # LMX Link contract fields (docs/LMX_LINK_PLAN.md §1.2, migration 0028).
     # See app/schemas/lmx_order.py for the field-by-field reasoning; this is

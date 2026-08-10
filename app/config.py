@@ -183,6 +183,17 @@ class Settings(BaseSettings):
     # notification that doesn't say where to sign in is barely a notification.
     portal_base_url: str = "http://localhost:5174"
 
+    # Customer-facing tracking links (app/tracking/, docs/ROADMAP.md F3).
+    #
+    # How long a tracking link keeps working after the delivery finishes. It has
+    # to outlive the delivery by something - a recipient who checks the next
+    # morning should see the confirmation rather than a dead link - but not
+    # indefinitely: the token is the page's only credential, and a link with no
+    # end date is a permanent window onto whichever driver is carrying that route.
+    # Past this, the endpoint answers exactly as it does for a token that never
+    # existed.
+    tracking_link_grace_hours: int = 24
+
     # Geocoding (app/geocoding/) - turns a typed address into coordinates so
     # LMX Link's ad-hoc pickup works without anyone pre-registering a shop.
     #

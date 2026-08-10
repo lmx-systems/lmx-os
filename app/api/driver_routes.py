@@ -58,6 +58,7 @@ from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 from app.optimizer.event_trigger import dispatch_event_bus
+from app.messaging.tracking_notifications import notify_recipient_picked_up
 from app.orders.status_service import advance_orders
 from app.returns.service import return_views
 from app.schemas.returns import CollectReturnBody, ReturnItemView
@@ -1258,6 +1259,25 @@ async def _notify_shop_for_pickup_stop(
 _TERMINAL_STOP_STATUSES = {"completed", "failed"}
 
 
+async def _orders_for_recipient_notice(
+    session: AsyncSession, order_ids: list[uuid.UUID]
+) -> list[Order]:
+    """The orders on a just-completed pickup that have a recipient to text.
+
+    Filtered here rather than inside the notifier so a commingled pickup carrying
+    five orders doesn't do five round-trips to discover four of them have no phone
+    number on file (docs/ROADMAP.md F3).
+    """
+    if not order_ids:
+        return []
+    result = await session.execute(
+        select(Order).where(
+            Order.id.in_(order_ids), Order.delivery_contact_phone.is_not(None)
+        )
+    )
+    return list(result.scalars().all())
+
+
 def _assert_stop_not_terminal(stop: Stop, action: str) -> None:
     if stop.status in _TERMINAL_STOP_STATUSES:
         raise HTTPException(status_code=409, detail=f"Stop is {stop.status}, cannot {action}")
@@ -1747,6 +1767,20 @@ async def complete_stop(
         if next_pickup is not None:
             await _notify_shop_for_pickup_stop(
                 session, hub_id=driver.hub_id, driver_id=driver.driver_id, stop=next_pickup, event="en_route"
+            )
+
+        # Text each recipient their live tracking link (docs/ROADMAP.md F3).
+        # Pickup is the trigger because it is the first moment the link is worth
+        # opening - there is now a van with their parts on it. Same best-effort
+        # placement as the shop SMS above: after the completion commit, so a
+        # failed send can never unwind a delivery the driver already made.
+        for order_row in await _orders_for_recipient_notice(session, order_ids):
+            await notify_recipient_picked_up(
+                session,
+                hub_id=uuid.UUID(driver.hub_id),
+                driver_id=uuid.UUID(driver.driver_id),
+                stop_id=stop.id,
+                order=order_row,
             )
         await session.commit()
 

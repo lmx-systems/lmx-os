@@ -15,6 +15,7 @@ import type {
   InvoiceDetailView,
   InvoiceSummaryView,
   ReturnItemView,
+  TrackingView,
 } from './types'
 
 // /client/* is exempt from the ops-dashboard auth gate
@@ -137,6 +138,12 @@ export const api = {
   // rate-limited by IP.
   signup: (body: ClientSignupBody) =>
     request<ClientSignupResult>('/public/signup', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Public delivery tracking (docs/ROADMAP.md F3). No auth header - the token in
+  // the path IS the credential, which is why the backend rate-limits this and
+  // answers 404 identically for an unknown and an expired token.
+  trackDelivery: (token: string) =>
+    request<TrackingView>(`/public/track/${encodeURIComponent(token)}`),
 
   // Bulk paste (§2.2 principle 5). Deliberately not all-or-nothing - the
   // response reports per line, because one unfindable address among six must

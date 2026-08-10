@@ -10,6 +10,7 @@ import type {
 } from './lib/types'
 import { LoginPage } from './components/LoginPage'
 import { SignupPage } from './components/SignupPage'
+import { TrackingPage } from './components/TrackingPage'
 import { ResetPasswordPage } from './components/ResetPasswordPage'
 import { NewOrderForm } from './components/NewOrderForm'
 import { BulkPastePanel } from './components/BulkPastePanel'
@@ -45,6 +46,15 @@ export default function App() {
   const [resetToken, setResetToken] = useState(() =>
     typeof window !== 'undefined' &&
     window.location.pathname.replace(/\/$/, '') === '/reset-password'
+      ? new URLSearchParams(window.location.search).get('token')
+      : null,
+  )
+  // Tracking links arrive by SMS as /track?token=… and go to a delivery
+  // RECIPIENT, who has no account here at all. Read once on mount, and checked
+  // before every auth branch below - a logged-in client following a tracking link
+  // should still see the tracking page, not their own orders list.
+  const [trackingToken] = useState(() =>
+    typeof window !== 'undefined' && window.location.pathname.replace(/\/$/, '') === '/track'
       ? new URLSearchParams(window.location.search).get('token')
       : null,
   )
@@ -127,6 +137,13 @@ export default function App() {
   // auth gate because a prospective client has no token by definition. Path
   // rather than a hash so the link reads like a normal page; nginx.conf's SPA
   // fallback already serves index.html for it.
+  // Before the auth gate AND before the logged-in branches: the audience is a
+  // member of the public, and whether some client happens to be signed in on this
+  // browser has nothing to do with it.
+  if (trackingToken) {
+    return <TrackingPage token={trackingToken} />
+  }
+
   if (!loggedIn && resetToken) {
     return <ResetPasswordPage token={resetToken} onDone={() => setResetToken(null)} />
   }
