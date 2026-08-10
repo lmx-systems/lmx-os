@@ -792,6 +792,9 @@ async def approve_signup(
         )
 
     client.signup_status = "active"
+    # The start of §3.4's headline metric ("customer says yes" -> first delivery).
+    # Written here because this is the moment, and nothing else records it.
+    client.approved_at = datetime.now(timezone.utc)
 
     # Their first login becomes usable. C4 re-checks is_active every request, so
     # this is the single switch that turns a pending applicant into a client who

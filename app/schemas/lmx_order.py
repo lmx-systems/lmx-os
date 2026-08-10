@@ -159,6 +159,14 @@ class LMXOrder(BaseModel):
     # is the one that matters to them.
     promised_at: datetime | None = None
 
+    # How long the person entering this order took, from their own browser
+    # (§3.4, migration 0036). Only set by paths where a human types the order -
+    # null for Epicor and for the public API, where there is nobody to time.
+    #
+    # A product metric, not an audit figure: it is client-reported and nothing
+    # verifies it.
+    entry_seconds: int | None = Field(default=None, ge=0, le=3600)
+
     # --- Payload --------------------------------------------------------
     line_items: list[LineItem] = Field(default_factory=list)
     total_weight_units: float = Field(default=1.0, ge=0)

@@ -556,6 +556,11 @@ async def submit_orders_batch(
             drop_address_raw=row.drop_address,
             drop_contact_name=row.drop_contact_name,
             sla_owner="LMX",
+            # The paste's total time, recorded on every order it produced. The
+            # alternative - attributing it to one arbitrary row - would make the
+            # median look like a single-order entry time, which is the number §3.4
+            # actually targets and would be silently overstated.
+            entry_seconds=body.entry_seconds,
             received_at=datetime.now(timezone.utc),
             raw_payload=deadline_payload_flags(body.deadline),
         )
@@ -661,6 +666,7 @@ async def submit_order(
         drop_contact_phone=body.drop_contact_phone,
         access_notes=body.access_notes,
         sla_owner="LMX",
+        entry_seconds=body.entry_seconds,
         total_weight_units=body.total_weight_units,
         line_items=[
             LineItem(description=li.description, quantity=li.quantity) for li in body.line_items
