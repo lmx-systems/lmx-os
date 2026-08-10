@@ -31,7 +31,14 @@ from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.models.driver import Driver
+from app.compliance.driver_documents import evaluate_driver_documents
 from app.models.driver_device import DriverDevice
+from app.models.driver_document import (
+    REVIEW_PENDING,
+    REVIEW_REJECTED,
+    REVIEW_VERIFIED,
+    DriverDocument,
+)
 from app.models.hub import Hub
 from app.models.hub_closure import HubClosure
 from app.learning_loop.promotion import (
@@ -50,8 +57,11 @@ from app.redis_client import get_client as get_redis_client
 from app.schemas.admin import (
     ClientOnboardingBody,
     ClientOnboardingResult,
+    DriverDocumentReviewBody,
+    DriverDocumentReviewResult,
     DriverPayrollSubmission,
     HubClosureBody,
+    PendingDriverDocumentView,
     HubClosureView,
     OrderResolutionResult,
     PayrollRunResult,
@@ -840,3 +850,147 @@ async def reject_signup(
     logger.info("signup_rejected", client_id=client_id, reason=body.reason)
     await session.commit()
     return SignupDecisionResult(client_id=client_id, signup_status="rejected")
+
+
+# ---------------------------------------------------------------------------
+# Driver compliance document review (docs/ROADMAP.md R4)
+# ---------------------------------------------------------------------------
+#
+# The human step that makes the availability gate mean something. Before this
+# existed, a driver set their own document expiry and the gate read it back to
+# them - so "documents on file, none expired" was a claim the driver had made about
+# themselves, dressed as a check the system had performed.
+
+
+@router.get("/drivers/documents/pending", response_model=list[PendingDriverDocumentView])
+async def list_pending_driver_documents(
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[PendingDriverDocumentView]:
+    """Documents uploaded and waiting on a verdict.
+
+    Not hub-scoped, unlike most of this router: compliance review is a
+    whole-company function, and a driver whose license is unreviewed cannot work at
+    any hub. Oldest first, because the driver who has waited longest is the one
+    being kept off the road by us rather than by their paperwork.
+
+    Only rows with a `file_url` - a document nobody has uploaded anything against
+    has nothing to review, and listing it would put items in the queue that a
+    reviewer can only skip.
+    """
+    result = await session.execute(
+        select(DriverDocument, Driver.name)
+        .join(Driver, Driver.id == DriverDocument.driver_id)
+        .where(
+            DriverDocument.review_status == REVIEW_PENDING,
+            DriverDocument.file_url.is_not(None),
+        )
+        .order_by(DriverDocument.updated_at)
+    )
+    return [
+        PendingDriverDocumentView(
+            document_id=str(doc.id),
+            driver_id=str(doc.driver_id),
+            driver_name=driver_name,
+            doc_type=doc.doc_type,
+            claimed_expires_at=doc.claimed_expires_at,
+            file_url=doc.file_url,
+            review_status=doc.review_status,
+            uploaded_at=doc.updated_at,
+        )
+        for doc, driver_name in result.all()
+    ]
+
+
+@router.post(
+    "/drivers/documents/{document_id}/review", response_model=DriverDocumentReviewResult
+)
+async def review_driver_document(
+    document_id: str,
+    body: DriverDocumentReviewBody,
+    session: AsyncSession = Depends(get_db),
+    admin: AuthedOpsUser = Depends(require_admin),
+) -> DriverDocumentReviewResult:
+    """Record that a human read this document and what it said.
+
+    **Approving REQUIRES an expiry date the reviewer read off the document.** It
+    deliberately does not default to the driver's claimed date: a verdict that
+    copied the claim would move the self-attestation problem one step later rather
+    than fixing it, and the resulting row would look verified while carrying a
+    number nobody had checked.
+
+    Attributed to the reviewing ops user. An unattributed compliance decision is
+    barely better than none - if a driver turns out to have been cleared on a bad
+    document, "who cleared it" has to have an answer.
+
+    Idempotent-unfriendly on purpose: re-reviewing an already-decided document is a
+    409. A second verdict on the same evidence is either a mistake or a disagreement
+    that should be resolved by the driver re-uploading, not by silently overwriting
+    the first reviewer.
+    """
+    try:
+        doc = await session.get(DriverDocument, uuid.UUID(document_id))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Document not found") from None
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc.review_status != REVIEW_PENDING:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This document was already {doc.review_status} - the driver must re-upload to reopen it",
+        )
+    if doc.file_url is None:
+        raise HTTPException(
+            status_code=409, detail="Nothing has been uploaded against this document yet"
+        )
+
+    now = datetime.now(timezone.utc)
+    if body.decision == "verify":
+        if body.verified_expires_at is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "verified_expires_at is required - it must be the date on the "
+                    "document, not the date the driver claimed"
+                ),
+            )
+        doc.review_status = REVIEW_VERIFIED
+        doc.verified_expires_at = body.verified_expires_at
+        doc.rejection_reason = None
+    else:
+        if not body.rejection_reason:
+            raise HTTPException(
+                status_code=422,
+                detail="rejection_reason is required - a driver can't fix a rejection they can't read",
+            )
+        doc.review_status = REVIEW_REJECTED
+        doc.verified_expires_at = None
+        doc.rejection_reason = body.rejection_reason
+
+    doc.reviewed_at = now
+    doc.reviewed_by_ops_user_id = uuid.UUID(admin.ops_user_id)
+    await session.commit()
+
+    # Recomputed rather than inferred: clearing the second of two documents is what
+    # actually unblocks a driver, and a reviewer working a queue should see that
+    # happen instead of having to go and check.
+    compliance = await evaluate_driver_documents(session, str(doc.driver_id))
+
+    logger.info(
+        "driver_document_reviewed",
+        document_id=str(doc.id),
+        driver_id=str(doc.driver_id),
+        doc_type=doc.doc_type,
+        decision=body.decision,
+        reviewed_by=admin.ops_user_id,
+        driver_can_go_on_shift=compliance.can_go_on_shift,
+    )
+
+    return DriverDocumentReviewResult(
+        document_id=str(doc.id),
+        doc_type=doc.doc_type,
+        review_status=doc.review_status,
+        verified_expires_at=doc.verified_expires_at,
+        driver_can_go_on_shift=compliance.can_go_on_shift,
+        outstanding_problems=[problem.detail for problem in compliance.problems],
+    )
