@@ -1,5 +1,7 @@
 import { clearToken, getToken } from './auth'
 import type {
+  ApiKeyCreated,
+  ApiKeyView,
   ClientAuthToken,
   ClientOrderDetailView,
   ClientOrderBatchBody,
@@ -142,6 +144,19 @@ export const api = {
   // rate-limited by IP.
   signup: (body: ClientSignupBody) =>
     request<ClientSignupResult>('/public/signup', { method: 'POST', body: JSON.stringify(body) }),
+
+  // API keys for inbound order submission (docs/ORDER_API.md). Admin-only: a key
+  // can dispatch real vans and bill this client.
+  listApiKeys: () => request<ApiKeyView[]>('/client/api-keys'),
+
+  createApiKey: (description?: string) =>
+    request<ApiKeyCreated>('/client/api-keys', {
+      method: 'POST',
+      body: JSON.stringify({ description }),
+    }),
+
+  revokeApiKey: (apiKeyId: string) =>
+    request<ApiKeyView>(`/client/api-keys/${apiKeyId}/revoke`, { method: 'POST' }),
 
   // Outbound status webhooks (docs/ROADMAP.md F4). Admin-only server-side: an
   // endpoint is where we send this client's order data, and its secret signs

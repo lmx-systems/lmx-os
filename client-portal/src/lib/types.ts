@@ -246,3 +246,23 @@ export interface WebhookDeliveryView {
   delivered_at: string | null
   created_at: string
 }
+
+// API keys for inbound order submission (docs/ORDER_API.md).
+export interface ApiKeyView {
+  api_key_id: string
+  // Only the hash is stored, so the full token genuinely cannot be recovered. The
+  // prefix is what makes rotation safe - revoking the wrong key is otherwise a coin
+  // flip.
+  token_prefix: string
+  description: string | null
+  is_active: boolean
+  // Which key your system is actually using, which is what you check before
+  // revoking the other one.
+  last_used_at: string | null
+  revoked_at: string | null
+  created_at: string
+}
+
+export interface ApiKeyCreated extends ApiKeyView {
+  token: string
+}

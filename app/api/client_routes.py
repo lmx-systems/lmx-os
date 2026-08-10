@@ -32,12 +32,16 @@ from app.ingestion.service import (
     ingest_lmx_order,
 )
 from app.client_auth.dependencies import AuthedClient, get_current_client, require_client_admin
+from app.models.client_api_key import ClientApiKey, mint_api_key
 from app.models.client_webhook import (
     ClientWebhookEndpoint,
     WebhookDelivery,
     new_webhook_secret,
 )
 from app.schemas.webhooks import (
+    ApiKeyBody,
+    ApiKeyCreated,
+    ApiKeyView,
     WebhookDeliveryView,
     WebhookEndpointBody,
     WebhookEndpointCreated,
@@ -899,3 +903,118 @@ async def _my_webhook(
     if endpoint is None:
         raise HTTPException(status_code=404, detail="Webhook not found")
     return endpoint
+
+
+# ---------------------------------------------------------------------------
+# API keys for inbound order submission (docs/ORDER_API.md, LMX Link T5)
+# ---------------------------------------------------------------------------
+#
+# The mirror of the webhook endpoints above: those are how status leaves, these are
+# how orders arrive. Admin-only for the same reason - a key can submit orders that
+# dispatch real vans and bill this client, so a dispatcher who can place an order
+# should not be able to mint a credential that outlives their own account.
+
+
+@router.get("/api-keys", response_model=list[ApiKeyView])
+async def list_my_api_keys(
+    client: AuthedClient = Depends(require_client_admin),
+    session: AsyncSession = Depends(get_db),
+) -> list[ApiKeyView]:
+    result = await session.execute(
+        select(ClientApiKey)
+        .where(ClientApiKey.client_id == uuid.UUID(client.client_id))
+        .order_by(ClientApiKey.created_at)
+    )
+    return [_api_key_view(key) for key in result.scalars().all()]
+
+
+@router.post("/api-keys", response_model=ApiKeyCreated, status_code=201)
+async def create_my_api_key(
+    body: ApiKeyBody,
+    client: AuthedClient = Depends(require_client_admin),
+    session: AsyncSession = Depends(get_db),
+) -> ApiKeyCreated:
+    """Mint a key for this client's own system.
+
+    **Several keys per client is the point, not an accident.** A single key cannot be
+    rotated without downtime: the client would have to revoke and re-deploy in the
+    same instant. Two live keys means add the new one, deploy, confirm `last_used_at`
+    moved, then revoke the old one.
+
+    The token is returned exactly once and only the hash is kept, so it genuinely
+    cannot be recovered - a client who loses it mints another and revokes this one.
+    """
+    token, token_hash, token_prefix = mint_api_key()
+    key = ClientApiKey(
+        client_id=uuid.UUID(client.client_id),
+        token_hash=token_hash,
+        token_prefix=token_prefix,
+        description=body.description,
+    )
+    session.add(key)
+    await session.commit()
+
+    logger.info(
+        "client_api_key_created",
+        client_id=client.client_id,
+        api_key_id=str(key.id),
+        # The PREFIX only - logging a credential is how a log becomes a secret store.
+        token_prefix=token_prefix,
+    )
+    return ApiKeyCreated(**_api_key_view(key).model_dump(), token=token)
+
+
+@router.post("/api-keys/{api_key_id}/revoke", response_model=ApiKeyView)
+async def revoke_my_api_key(
+    api_key_id: str,
+    client: AuthedClient = Depends(require_client_admin),
+    session: AsyncSession = Depends(get_db),
+) -> ApiKeyView:
+    """Kill a key immediately.
+
+    Deactivated rather than deleted, so the client keeps a record of what existed and
+    when it stopped - a revocation is exactly the kind of event someone asks about
+    afterwards. There is no un-revoke: a key that may have leaked must not be
+    resurrectable by anyone who reaches this endpoint, so recovery means minting a new
+    one.
+    """
+    key = await _my_api_key(session, client, api_key_id)
+    key.is_active = False
+    key.revoked_at = datetime.now(timezone.utc)
+    await session.commit()
+    logger.info(
+        "client_api_key_revoked", client_id=client.client_id, api_key_id=str(key.id)
+    )
+    return _api_key_view(key)
+
+
+def _api_key_view(key: ClientApiKey) -> ApiKeyView:
+    return ApiKeyView(
+        api_key_id=str(key.id),
+        token_prefix=key.token_prefix,
+        description=key.description,
+        is_active=key.is_active,
+        last_used_at=key.last_used_at,
+        revoked_at=key.revoked_at,
+        created_at=key.created_at,
+    )
+
+
+async def _my_api_key(
+    session: AsyncSession, client: AuthedClient, api_key_id: str
+) -> ClientApiKey:
+    """This client's key, or a 404 - scoped in the WHERE clause, not checked after."""
+    try:
+        parsed = uuid.UUID(api_key_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="API key not found") from None
+    result = await session.execute(
+        select(ClientApiKey).where(
+            ClientApiKey.id == parsed,
+            ClientApiKey.client_id == uuid.UUID(client.client_id),
+        )
+    )
+    key = result.scalar_one_or_none()
+    if key is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+    return key
