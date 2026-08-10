@@ -35,4 +35,9 @@ class Invoice(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     period_start: Mapped[date] = mapped_column(Date, nullable=False)
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    # What was charged before credits (migration 0039). `total_cents` is the NET, which
+    # is what is owed - but a statement showing only a net is one a client cannot check
+    # against their own records, so the two halves are kept as well.
+    gross_cents: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    credit_cents: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     total_cents: Mapped[int] = mapped_column(Integer, nullable=False)

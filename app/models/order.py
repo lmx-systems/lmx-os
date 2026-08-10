@@ -243,6 +243,12 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # billing question about LMX.
     cod_amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # How `fee_cents` was arrived at (docs/ROADMAP.md F5, migration 0039). With a flat
+    # per-drop rate the question never came up; with a rate table, "why is this line
+    # $19.40" is a question a client will ask - and reconstructing it later from a rate
+    # card that may since have changed is not an answer.
+    fee_breakdown: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # Autonomy eligibility, captured from the first van so the first partner
     # conversation starts with a measured addressable share of real order flow
     # rather than a projection. Carried now, used later.

@@ -2,6 +2,7 @@ from app.models.call import Call
 from app.models.client import Client
 from app.models.cod_collection import CodCollection
 from app.models.client_rate import ClientRate
+from app.models.client_sla_term import ClientSlaTerm
 from app.models.client_api_key import ClientApiKey
 from app.models.client_user import ClientUser
 from app.models.client_webhook import ClientWebhookEndpoint, WebhookDelivery
@@ -16,6 +17,7 @@ from app.models.gig_payout import GigPayout
 from app.models.hub import Hub
 from app.models.hub_closure import HubClosure
 from app.models.invoice import Invoice
+from app.models.invoice_credit import InvoiceCredit
 from app.models.message import Message
 from app.models.ops_user import OpsUser
 from app.models.order import Order
@@ -46,7 +48,9 @@ __all__ = [
     "Parcel",
     "ReturnItem",
     "Route",
+    "ClientSlaTerm",
     "CodCollection",
+    "InvoiceCredit",
     "ClientApiKey",
     "ClientWebhookEndpoint",
     "WebhookDelivery",
