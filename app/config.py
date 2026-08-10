@@ -201,6 +201,24 @@ class Settings(BaseSettings):
     # are the two things switching providers exists to escape.
     geocoder_provider: str = "nominatim"
 
+    # Alerting thresholds (app/health/checks.py, docs/ROADMAP.md S4). These are
+    # the two numbers that decide whether the on-call check is trusted or muted.
+    #
+    # dispatch_stale_after_seconds: how long orders may sit in the hold queue
+    # with no dispatch cycle before that is an outage rather than batching.
+    # **This MUST be comfortably larger than the Cloud Scheduler interval that
+    # calls /internal/dispatch/run-all.** That scheduler is the safety net, so it
+    # bounds how stale a healthy system can look; setting this below the interval
+    # means the check fires between every scheduled run and gets muted within a
+    # week. 15 minutes suits a 5-minute schedule.
+    dispatch_stale_after_seconds: int = 900
+    #
+    # stuck_order_after_seconds: grace past what the client was promised before an
+    # unassigned order is an engineering problem. Not zero on purpose - an order a
+    # minute late is ops's to chase, and paging for that trains people to ignore
+    # the alert that matters.
+    stuck_order_after_seconds: int = 1800
+
     # Payroll (app/payroll/): W2 hours submission today, with 1099/gig pay
     # rails expected to join behind the same PayrollProvider interface as
     # the driver-classification phases roll out (docs/NEXT_STEPS.md). No

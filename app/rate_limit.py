@@ -40,7 +40,22 @@ logger = get_logger(__name__)
 # and gating them just risks breaking monitoring/tooling that polls them
 # on its own fast, fixed schedule - same reasoning as
 # app/ops_auth/middleware.py's OpsUserAuthMiddleware.
-EXEMPT_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json"})
+#
+# /internal/health/dispatch is exempt for a sharper reason than schedule
+# (app/health/checks.py). This middleware needs Redis to make its decision, so
+# with the alerting endpoint gated, a Redis outage raises HERE and the response
+# becomes an opaque 500 - losing exactly the body that would have said "redis:
+# unreachable". The endpoint whose job is to diagnose an outage must not be
+# unable to answer during one. A 429 would be worse still: it fails the uptime
+# check, so monitoring reports the system unhealthy because monitoring polled it.
+#
+# The cost is small. An unauthenticated flood of this path is rejected by
+# require_internal_secret with a 404 and ZERO I/O - no database, no Redis, just a
+# constant-time string compare - which is cheaper per request than the Redis
+# round-trip this middleware would have spent deciding to allow it.
+EXEMPT_PATHS = frozenset(
+    {"/health", "/docs", "/redoc", "/openapi.json", "/internal/health/dispatch"}
+)
 
 
 def _key(caller_ip: str) -> str:

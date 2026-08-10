@@ -25,6 +25,10 @@ long-lived ops account for a robot, this router has its own shared-secret check.
 scheduler configuration doesn't hardcode a hub id and a newly onboarded hub is
 covered the moment it exists rather than when someone remembers to add a job.
 
+**Also here: the alerting endpoint** (`GET /health/dispatch`, docs/ALERTING.md).
+Not a scheduler trigger, but the same kind of caller - an automated platform poller
+holding a shared secret rather than an ops session - and the same gate applies.
+
 SECURITY: the secret is compared with `secrets.compare_digest`, and the router is
 disabled entirely when unset - it does NOT fall open. An unauthenticated
 run-cycle endpoint would let anyone force dispatch cycles, which is both a
@@ -33,15 +37,17 @@ denial-of-service lever and a way to move real work.
 from __future__ import annotations
 
 import secrets as secrets_mod
+from datetime import datetime, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.client_ip import client_ip
 from app.config import settings
 from app.db import get_db
+from app.health.checks import evaluate
 from app.learning_loop.service import run_nightly_job
 from app.models.hub import Hub
 from app.optimizer.service import DispatchOptimizerService
@@ -123,6 +129,49 @@ async def run_learning_loop_for_all_hubs(session: AsyncSession = Depends(get_db)
             results[hub_id] = f"error: {type(exc).__name__}"
     logger.info("scheduled_learning_loop_complete", hubs=len(results))
     return {"hubs": results}
+
+
+@router.get("/health/dispatch", dependencies=[Depends(require_internal_secret)])
+async def dispatch_health(response: Response) -> dict:
+    """200 when the fleet is fine, 503 when something is worth waking up for.
+
+    **This endpoint IS the alert rule.** A Cloud Monitoring uptime check hitting
+    this URL on a timer, with an alert policy on check failure, is the whole
+    alerting stack - no Prometheus server, no sidecar collector, no time-series
+    database. `app/health/checks.py` explains why that is the right shape here
+    rather than a shortcut: per-process metrics cannot answer a question about an
+    autoscaled service, and the condition that matters most ("dispatch stopped")
+    is an absence rather than a value.
+
+    Deliberately NOT the existing `GET /health`, which reports that this process
+    can serve a request and is what a load balancer should use. Mixing them would
+    mean a wedged dispatch loop pulls the instance out of service, which fixes
+    nothing and takes the API down with it.
+
+    Behind the internal token like everything else on this router: hub ids, queue
+    depths and late-order counts are operational intelligence. Cloud Monitoring
+    uptime checks can send a custom header, so this costs nothing to reach.
+
+    **The response body is written for whoever the alert wakes.** The status code
+    fires the alert; `failing` and each check's `detail` say what broke and
+    against which threshold, so the first move is obvious without opening the
+    codebase.
+    """
+    report = await evaluate()
+    if not report.ok:
+        # 503 rather than 500: this instance is serving fine, the system it
+        # watches is not. Any non-200 trips the uptime check either way, but the
+        # distinction matters when reading logs after the fact.
+        response.status_code = 503
+    return {
+        "status": "ok" if report.ok else "degraded",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "failing": report.failing,
+        "checks": [
+            {"name": check.name, "ok": check.ok, "detail": check.detail}
+            for check in report.checks
+        ],
+    }
 
 
 @router.get("/forwarded-headers", dependencies=[Depends(require_internal_secret)])

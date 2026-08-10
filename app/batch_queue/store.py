@@ -66,3 +66,15 @@ class HoldQueueStore:
         async with timed_operation("holdqueue.get_all"):
             raw = await self._redis.hgetall(_queue_key(hub_id))
         return [_deserialize(v) for v in raw.values()]
+
+    async def depth(self, hub_id: str) -> int:
+        """How many orders are waiting, without reading them.
+
+        HLEN rather than len(get_all()): the health check
+        (app/health/checks.py) only needs the count, and it runs on a timer
+        against every active hub, so deserializing every held order to
+        discard it would make a monitoring probe the heaviest reader of
+        this queue.
+        """
+        async with timed_operation("holdqueue.depth"):
+            return int(await self._redis.hlen(_queue_key(hub_id)))
