@@ -31,6 +31,8 @@ def _serialize(order: HeldOrder) -> str:
             "hold_deadline": order.hold_deadline.isoformat(),
             "held_since": order.held_since.isoformat(),
             "shop_name": order.shop_name,
+            "delivery_lat": order.delivery_lat,
+            "delivery_lng": order.delivery_lng,
         }
     )
 
@@ -47,6 +49,11 @@ def _deserialize(raw: str) -> HeldOrder:
         # .get(): rows written before this field existed won't have it -
         # falls back to "" rather than KeyError-ing on old Redis data.
         shop_name=data.get("shop_name", ""),
+        # Same reasoning, and it matters more here than for shop_name: orders
+        # already sitting in the queue at deploy time were written without these,
+        # so a KeyError would strand every one of them.
+        delivery_lat=data.get("delivery_lat"),
+        delivery_lng=data.get("delivery_lng"),
     )
 
 

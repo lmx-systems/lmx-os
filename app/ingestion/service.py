@@ -501,6 +501,12 @@ async def ingest_lmx_order(
             hold_deadline=hold_deadline,
             held_since=now,
             shop_name=shop.name,
+            # Carried so the routing solver plans the real journey rather than a
+            # visit to the shop - see StopCandidate.delivery_lat. Numeric(9,6)
+            # comes back as Decimal, which json.dumps can't serialize, so the
+            # float() is load-bearing rather than tidiness.
+            delivery_lat=float(order.delivery_lat) if order.delivery_lat is not None else None,
+            delivery_lng=float(order.delivery_lng) if order.delivery_lng is not None else None,
         ),
     )
 

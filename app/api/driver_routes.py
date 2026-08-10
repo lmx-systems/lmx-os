@@ -733,6 +733,21 @@ async def _requeue_orders_from_offer(
                 hold_deadline=(order.hold_deadline if order else None) or (now + timedelta(minutes=5)),
                 held_since=now,
                 shop_name=stop.get("shop_name", ""),
+                # Read off the order rather than the offer payload: the offer only
+                # ever carried pickup coordinates. Without this a declined or
+                # lapsed order would go back into the queue having lost its
+                # delivery location, so the next cycle would plan half its journey
+                # (app/optimizer/google_routes_client.py::_build_request).
+                delivery_lat=(
+                    float(order.delivery_lat)
+                    if order is not None and order.delivery_lat is not None
+                    else None
+                ),
+                delivery_lng=(
+                    float(order.delivery_lng)
+                    if order is not None and order.delivery_lng is not None
+                    else None
+                ),
             ),
         )
     await dispatch_event_bus.publish(hub_id, "job_offer_lapsed")

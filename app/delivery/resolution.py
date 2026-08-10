@@ -99,5 +99,7 @@ async def _redeliver(session: AsyncSession, hold_queue: HoldQueueStore, order: O
             hold_deadline=order.hold_deadline,
             held_since=now,
             shop_name=shop.name,
+            delivery_lat=float(order.delivery_lat) if order.delivery_lat is not None else None,
+            delivery_lng=float(order.delivery_lng) if order.delivery_lng is not None else None,
         ),
     )

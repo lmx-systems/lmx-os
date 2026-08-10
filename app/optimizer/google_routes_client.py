@@ -25,12 +25,25 @@ import google.auth
 import google.auth.transport.requests
 import httpx
 import structlog
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.config import settings
 from app.schemas.optimizer import DriverCandidate, RouteAssignment, StopCandidate
 
 logger = structlog.get_logger(__name__)
+
+
+class RouteOptimizationError(Exception):
+    """The solver could not answer, and asking again won't help.
+
+    A malformed request, a disabled API, a service account without
+    `roles/cloudoptimization.user`. Carries Google's own error message, because
+    for this API that message is usually the actual fix.
+    """
+
+
+class _RetryableRouteOptimizationError(RouteOptimizationError):
+    """Same, except a second attempt might work - a timeout, a 429, a 5xx."""
 
 GOOGLE_ROUTE_OPTIMIZATION_ENDPOINT = "https://routeoptimization.googleapis.com/v1/{parent}:optimizeTours"
 CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
@@ -59,6 +72,29 @@ SOLVE_TIMEOUT = "3s"
 # skipping a T1.
 SLA_TIER_SKIP_PENALTY = {"HOT_SHOT": 1_000_000.0, "T1": 100_000.0, "T2": 10_000.0, "T3": 1_000.0}
 DEFAULT_SKIP_PENALTY = 10_000.0
+
+# What driving actually costs us, which is the solver's entire objective function.
+#
+# **Without these the request has no objective at all.** Vehicle costs default to
+# zero in the API, so a model whose only costs are the skip penalties above tells
+# the solver "serve everything you can, and I don't care how." Every feasible
+# assignment then scores identically and the returned sequence is arbitrary - we
+# would be paying for a routing solver and asking it to optimize nothing, while
+# `considerRoadTraffic` bought accurate traffic data for a route nobody minimised.
+# That is invisible in a unit test, because the response parses perfectly.
+#
+# Denominated in dollars so the numbers stay interpretable next to the penalties:
+# roughly a loaded hourly driver cost, and fuel plus wear per kilometre.
+# costPerHour rather than costPerTraveledHour on purpose - our drivers are paid
+# for waiting time too, so idling at a shop should cost the plan something.
+COST_PER_HOUR = 30.0
+COST_PER_KILOMETER = 0.35
+
+# The penalties above have to stay far larger than any achievable route cost, or
+# the solver starts preferring to skip an order over driving to it. A realistic
+# single-cycle route is a couple of hours and a few tens of kilometres - call it
+# $100 - so even T3's 1,000 leaves a 10x margin. Worth rechecking if these
+# coefficients are ever raised into the same order of magnitude as a penalty.
 
 
 class RouteOptimizationClient(ABC):
@@ -94,20 +130,130 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
             await asyncio.to_thread(self._credentials.refresh, self._auth_request)
         return self._credentials.token
 
-    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=0.25, max=1))
+    @retry(
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=0.25, max=1),
+        # Only retry what a retry can fix. Without a predicate this retried ANY
+        # exception, including a 400 INVALID_ARGUMENT from a malformed request -
+        # doubling latency inside a 5s cycle budget for a failure that is
+        # guaranteed to happen again.
+        retry=retry_if_exception_type(_RetryableRouteOptimizationError),
+        # Surface the real exception rather than tenacity's RetryError. Without
+        # this the caller gets "RetryError[...]" and Google's actual complaint is
+        # buried in __cause__ - which, combined with the error body being dropped
+        # below, made a failed call almost undiagnosable.
+        reraise=True,
+    )
     async def optimize(
         self, drivers: list[DriverCandidate], stops: list[StopCandidate]
     ) -> tuple[list[RouteAssignment], list[str]]:
         token = await self._bearer_token()
         request_body = self._build_request(drivers, stops)
 
-        response = await self._http.post(
-            GOOGLE_ROUTE_OPTIMIZATION_ENDPOINT.format(parent=f"projects/{self._project_id}"),
-            json=request_body,
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        response.raise_for_status()
+        try:
+            response = await self._http.post(
+                GOOGLE_ROUTE_OPTIMIZATION_ENDPOINT.format(parent=f"projects/{self._project_id}"),
+                json=request_body,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        except httpx.HTTPError as exc:
+            # Transport-level: timeout, connection reset, DNS. Worth one retry.
+            raise _RetryableRouteOptimizationError(f"route optimization request failed: {exc}") from exc
+
+        if response.status_code != 200:
+            self._raise_for_error_response(response)
+
         return self._parse_response(response.json())
+
+    @staticmethod
+    def _raise_for_error_response(response: httpx.Response) -> None:
+        """Turn a non-200 into an exception that still carries Google's reason.
+
+        **`raise_for_status()` threw the response body away, and for this API the
+        body is the whole diagnosis.** A 403 here is almost always one of two
+        completely different problems - "Cloud Optimization API has not been used
+        in project X before or it is disabled" versus a service account missing
+        `roles/cloudoptimization.user` - and the status code alone cannot tell
+        them apart. A 400 names the exact field it rejected. Dropping that turns a
+        two-minute fix into an afternoon, which is precisely the cost this client
+        has been sitting on unverified (docs/ROADMAP.md E1).
+        """
+        detail = response.text[:1000]
+        try:
+            payload = response.json()
+            detail = payload.get("error", {}).get("message") or detail
+        except ValueError:
+            pass
+
+        logger.error(
+            "route_optimization_error",
+            status_code=response.status_code,
+            detail=detail,
+        )
+
+        message = f"route optimization returned HTTP {response.status_code}: {detail}"
+        # 429 and 5xx can succeed on a second attempt; 400/401/403/404 cannot, and
+        # retrying them just spends the cycle budget twice to fail identically.
+        if response.status_code == 429 or response.status_code >= 500:
+            raise _RetryableRouteOptimizationError(message)
+        raise RouteOptimizationError(message)
+
+    @staticmethod
+    def _build_shipment(stop: StopCandidate) -> dict:
+        """One order as a shipment: collect at the shop, drop at the customer.
+
+        **This is the mapping defect E1 was most likely to expose.** The request
+        previously carried a single `deliveries` entry at `stop.lat/lng` - which is
+        the SHOP, the pickup (see app/optimizer/service.py's StopCandidate
+        construction). So the solver was told every job both began and ended on
+        collection: the delivery leg's drive was never costed, sequencing never
+        considered where the van had to go next, and `considerRoadTraffic: True`
+        bought accurate traffic for legs that weren't in the model at all. It
+        parses perfectly and returns a plausible plan, which is why no unit test
+        caught it.
+
+        Route Optimization treats a shipment atomically - either every visit
+        request is performed or the whole shipment is skipped - so pairing the two
+        legs also means a driver can never be assigned a collection whose delivery
+        doesn't fit in the plan.
+
+        Falls back to the old single-visit shape when the drop isn't geocoded,
+        because `Order.delivery_lat` is nullable and refusing to dispatch would
+        strand orders that are collectable today. Logged, not silent: an
+        unmodelled delivery leg is worth knowing about.
+        """
+        shipment: dict = {
+            "label": stop.stop_id,
+            "loadDemands": {"weight": {"amount": str(max(round(stop.weight_units), 0))}},
+            "penaltyCost": SLA_TIER_SKIP_PENALTY.get(stop.sla_tier, DEFAULT_SKIP_PENALTY),
+        }
+
+        if stop.has_delivery_location:
+            shipment["pickups"] = [
+                {"arrivalLocation": {"latitude": stop.lat, "longitude": stop.lng}}
+            ]
+            shipment["deliveries"] = [
+                {
+                    "arrivalLocation": {
+                        "latitude": stop.delivery_lat,
+                        "longitude": stop.delivery_lng,
+                    }
+                }
+            ]
+            return shipment
+
+        logger.warning(
+            "route_optimization_stop_without_delivery_location",
+            stop_id=stop.stop_id,
+            detail=(
+                "planning a visit to the shop only - the delivery leg is not "
+                "costed, so travel time and sequencing for this stop are optimistic"
+            ),
+        )
+        shipment["deliveries"] = [
+            {"arrivalLocation": {"latitude": stop.lat, "longitude": stop.lng}}
+        ]
+        return shipment
 
     @staticmethod
     def _build_request(drivers: list[DriverCandidate], stops: list[StopCandidate]) -> dict:
@@ -115,17 +261,7 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
         horizon_end = now + MODEL_HORIZON
 
         shipments = [
-            {
-                "label": stop.stop_id,
-                "deliveries": [
-                    {"arrivalLocation": {"latitude": stop.lat, "longitude": stop.lng}}
-                ],
-                "loadDemands": {
-                    "weight": {"amount": str(max(round(stop.weight_units), 0))}
-                },
-                "penaltyCost": SLA_TIER_SKIP_PENALTY.get(stop.sla_tier, DEFAULT_SKIP_PENALTY),
-            }
-            for stop in stops
+            GoogleRouteOptimizationClient._build_shipment(stop) for stop in stops
         ]
 
         vehicles = [
@@ -138,6 +274,10 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
                 "loadLimits": {
                     "weight": {"maxLoad": str(max(round(driver.capacity_remaining_units), 0))}
                 },
+                # The objective function. Omitting these leaves every feasible
+                # plan equally optimal - see COST_PER_HOUR above.
+                "costPerHour": COST_PER_HOUR,
+                "costPerKilometer": COST_PER_KILOMETER,
             }
             for driver in drivers
         ]
@@ -158,13 +298,45 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
         assignments = [
             RouteAssignment(
                 driver_id=route["vehicleLabel"],
-                stop_ids=[visit["shipmentLabel"] for visit in route.get("visits", [])],
+                stop_ids=GoogleRouteOptimizationClient._visit_sequence(route),
             )
             for route in payload.get("routes", [])
             if route.get("visits")
         ]
         unassigned = [skipped["label"] for skipped in payload.get("skippedShipments", [])]
         return assignments, unassigned
+
+    @staticmethod
+    def _visit_sequence(route: dict) -> list[str]:
+        """The order ids on this route, in the sequence they're collected.
+
+        **Deduplication is required, not defensive.** Now that a shipment carries a
+        pickup AND a delivery, the response contains TWO visits bearing the same
+        `shipmentLabel` - so the previous flat comprehension would have listed
+        every order twice, and `assigned_stop_ids` in service.py would have built
+        job offers with duplicated stops.
+
+        First-appearance order is the pickup sequence, which is exactly what a
+        RouteAssignment feeds: service.py turns `stop_ids` into a RouteOffer's list
+        of collections, and the pickup/delivery Stop rows are generated later by
+        `accept_offer`. It also stays correct for a shipment with no modelled
+        delivery, whose single visit is at the shop.
+
+        **Known limitation, deliberately not solved here.** A truly optimal plan
+        can interleave legs - collect A, collect B, drop B, drop A - and a flat
+        list of order ids cannot express that. The solver still PLANS with both
+        legs (which is what makes its travel times and feasibility right); what
+        isn't carried through is the interleaved drop ordering, because
+        `RouteAssignment` and `RouteOffer` model a route as a sequence of orders
+        rather than of visits. Changing that reaches into the driver app's route
+        representation and belongs on its own.
+        """
+        sequence: list[str] = []
+        for visit in route.get("visits", []):
+            label = visit.get("shipmentLabel")
+            if label and label not in sequence:
+                sequence.append(label)
+        return sequence
 
 
 class StubRouteOptimizationClient(RouteOptimizationClient):
@@ -215,13 +387,40 @@ class StubRouteOptimizationClient(RouteOptimizationClient):
         return route_assignments, unassigned
 
 
+_client: RouteOptimizationClient | None = None
+
+
 def get_route_optimization_client() -> RouteOptimizationClient:
+    """The process-wide routing client, built once.
+
+    **Caching this is a correctness fix, not an optimisation.**
+    `DispatchOptimizerService()` is constructed fresh on every dispatch cycle
+    (app/optimizer/event_trigger.py, app/api/internal_routes.py,
+    app/api/routes.py), so without a cache every cycle:
+
+      - ran `google.auth.default()`, a BLOCKING credential discovery call, inside
+        a constructor on the event loop;
+      - threw away the credential cache, so `_bearer_token()` always saw
+        `valid == False` and did a blocking token-endpoint round-trip - several
+        hundred milliseconds of the 5s cycle budget, spent re-proving an identity
+        we already had;
+      - leaked an `httpx.AsyncClient` that nobody closed.
+
+    Same shape as `app/geocoding/__init__.py`'s provider cache. Tests that need a
+    different selection reset this module attribute.
+    """
+    global _client
+    if _client is not None:
+        return _client
+
     if settings.google_cloud_project_id:
         logger.info("optimizer_client_selected", engine="google_route_optimization")
-        return GoogleRouteOptimizationClient(project_id=settings.google_cloud_project_id)
-    logger.warning(
-        "optimizer_client_selected",
-        engine="stub_nearest_neighbor",
-        reason="GOOGLE_CLOUD_PROJECT_ID not configured - running in stub mode",
-    )
-    return StubRouteOptimizationClient()
+        _client = GoogleRouteOptimizationClient(project_id=settings.google_cloud_project_id)
+    else:
+        logger.warning(
+            "optimizer_client_selected",
+            engine="stub_nearest_neighbor",
+            reason="GOOGLE_CLOUD_PROJECT_ID not configured - running in stub mode",
+        )
+        _client = StubRouteOptimizationClient()
+    return _client

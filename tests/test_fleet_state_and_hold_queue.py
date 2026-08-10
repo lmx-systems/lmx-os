@@ -122,3 +122,73 @@ async def test_hold_queue_store_add_get_remove_roundtrip(fake_redis):
 
     await store.remove("hub-1", "o1")
     assert await store.get_all("hub-1") == []
+
+
+# ---------------------------------------------------------------------------
+# Delivery coordinates travel through the queue (docs/ROADMAP.md E1)
+# ---------------------------------------------------------------------------
+
+
+def _held(**overrides) -> HeldOrder:
+    now = datetime.now(timezone.utc)
+    base = dict(
+        order_id="o1",
+        shop_lat=34.05,
+        shop_lng=-118.25,
+        sla_tier="T2",
+        hold_deadline=now + timedelta(minutes=30),
+        held_since=now,
+        shop_name="Midtown Auto Parts",
+    )
+    base.update(overrides)
+    return HeldOrder(**base)
+
+
+@pytest.mark.asyncio
+async def test_the_delivery_location_survives_a_queue_roundtrip(fake_redis):
+    """The optimizer reads held orders back out of Redis, so a drop location that
+    doesn't survive serialization means the routing solver plans a collection and
+    no delivery (app/optimizer/google_routes_client.py::_build_shipment)."""
+    store = HoldQueueStore()
+    await store.add("hub-1", _held(delivery_lat=34.10, delivery_lng=-118.30))
+
+    restored = (await store.get_all("hub-1"))[0]
+
+    assert restored.delivery_lat == 34.10
+    assert restored.delivery_lng == -118.30
+
+
+@pytest.mark.asyncio
+async def test_an_order_with_no_known_drop_roundtrips_as_none(fake_redis):
+    store = HoldQueueStore()
+    await store.add("hub-1", _held())
+
+    restored = (await store.get_all("hub-1"))[0]
+
+    assert restored.delivery_lat is None
+    assert restored.delivery_lng is None
+
+
+@pytest.mark.asyncio
+async def test_a_row_written_before_these_fields_existed_still_reads(fake_redis):
+    """Orders already sitting in the queue at deploy time were written without
+    these keys. A KeyError here would strand every one of them."""
+    import json
+
+    legacy = json.dumps(
+        {
+            "order_id": "o-legacy",
+            "shop_lat": 34.05,
+            "shop_lng": -118.25,
+            "sla_tier": "T2",
+            "hold_deadline": datetime.now(timezone.utc).isoformat(),
+            "held_since": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    await fake_redis.hset("holdqueue:hub-1:orders", "o-legacy", legacy)
+
+    restored = (await HoldQueueStore().get_all("hub-1"))[0]
+
+    assert restored.order_id == "o-legacy"
+    assert restored.shop_name == ""
+    assert restored.delivery_lat is None
