@@ -194,6 +194,11 @@ class Settings(BaseSettings):
     #
     # Nominatim is a PILOT choice: 1 req/sec, no commercial bulk use. Real volume
     # forces a keyed provider, which is what this setting exists to switch to.
+    #
+    # "nominatim" | "google". Setting "google" requires google_maps_api_key and
+    # RAISES rather than falling back if it is missing - a silent fallback would
+    # put a paying client back on Nominatim's licence and 1-req/sec ceiling, which
+    # are the two things switching providers exists to escape.
     geocoder_provider: str = "nominatim"
 
     # Payroll (app/payroll/): W2 hours submission today, with 1099/gig pay

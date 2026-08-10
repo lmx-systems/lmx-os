@@ -27,7 +27,7 @@ import asyncio
 import httpx
 import structlog
 
-from app.geocoding.base import BaseGeocoder, GeocodeResult
+from app.geocoding.base import BaseGeocoder, GeocodeResult, GeocoderUnavailableError
 from app.redis_client import get_client as get_redis_client
 
 logger = structlog.get_logger(__name__)
@@ -76,15 +76,16 @@ class NominatimGeocoder(BaseGeocoder):
 
     async def geocode(self, address: str) -> GeocodeResult | None:
         if not await self._acquire_slot():
-            # Not an error - the caller stores the order unresolved and it can be
-            # geocoded later. Logged at warning because sustained contention here
-            # is the signal that pilot volume has outgrown Nominatim.
+            # Raises rather than returning None: we never asked, so this must not
+            # be cached as "this address does not resolve". Sustained contention
+            # here is the signal that volume has outgrown Nominatim - which is
+            # what GoogleGeocoder (L12) exists for.
             logger.warning(
                 "geocode_throttled",
                 provider=self.provider_name,
                 reason="could not acquire a rate-limit slot within the wait budget",
             )
-            return None
+            raise GeocoderUnavailableError("rate-limit slot unavailable")
 
         try:
             response = await self._http.get(
@@ -93,23 +94,24 @@ class NominatimGeocoder(BaseGeocoder):
             )
         except httpx.HTTPError as exc:
             logger.warning("geocode_request_failed", provider=self.provider_name, error=str(exc))
-            return None
+            raise GeocoderUnavailableError(f"geocoding request failed: {exc}") from exc
 
         if response.status_code != 200:
             logger.warning(
                 "geocode_bad_status", provider=self.provider_name, status=response.status_code
             )
-            return None
+            raise GeocoderUnavailableError(f"geocoding returned HTTP {response.status_code}")
 
         try:
             payload = response.json()
-        except ValueError:
+        except ValueError as exc:
             logger.warning("geocode_bad_payload", provider=self.provider_name)
-            return None
+            raise GeocoderUnavailableError("geocoding returned a non-JSON body") from exc
 
         if not payload:
-            # A real, ordinary outcome: the address doesn't resolve. Info rather
-            # than warning - a typo'd address is a user event, not a system fault.
+            # The one case that is genuinely a no-match and therefore cacheable:
+            # Nominatim answered, with nothing. A typo'd address is a user event,
+            # not a system fault, so info rather than warning.
             logger.info("geocode_no_match", provider=self.provider_name)
             return None
 
@@ -117,9 +119,9 @@ class NominatimGeocoder(BaseGeocoder):
         try:
             lat = float(top["lat"])
             lng = float(top["lon"])
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError) as exc:
             logger.warning("geocode_unparseable_coords", provider=self.provider_name)
-            return None
+            raise GeocoderUnavailableError("could not read coordinates from response") from exc
 
         return GeocodeResult(
             lat=lat,

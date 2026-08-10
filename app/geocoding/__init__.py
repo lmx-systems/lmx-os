@@ -14,8 +14,14 @@ precisely so that "unconfigured" never happens.
 change rather than a code change. Today there is one implementation.
 """
 from app.config import settings
-from app.geocoding.base import BaseGeocoder, GeocodeResult, normalize_address
+from app.geocoding.base import (
+    BaseGeocoder,
+    GeocodeResult,
+    GeocoderUnavailableError,
+    normalize_address,
+)
 from app.geocoding.cache import resolve_address
+from app.geocoding.google import GoogleGeocoder
 from app.geocoding.nominatim import NominatimGeocoder
 
 import structlog
@@ -38,18 +44,34 @@ def get_geocoder() -> BaseGeocoder:
         return _geocoder
 
     provider = (settings.geocoder_provider or "nominatim").lower()
+
+    if provider == "google":
+        # Refuse rather than fall back to Nominatim. Someone who set this to
+        # "google" expects Google, and quietly geocoding a paying client's
+        # addresses against OSM instead would be both a licensing problem and a
+        # silent return of the 1-req/sec ceiling they set this to escape.
+        if not settings.google_maps_api_key:
+            raise ValueError(
+                "GEOCODER_PROVIDER=google but GOOGLE_MAPS_API_KEY is unset - refusing "
+                "to fall back to Nominatim, whose terms forbid commercial use"
+            )
+        logger.info("geocoder_selected", provider="google")
+        _geocoder = GoogleGeocoder(api_key=settings.google_maps_api_key)
+        return _geocoder
+
     if provider != "nominatim":
-        # Fail loudly rather than silently falling back: someone setting this to
-        # "google" expects Google, and quietly geocoding against OSM instead
-        # would be a wrong-addresses-in-production class of surprise.
         raise ValueError(
-            f"unknown GEOCODER_PROVIDER {provider!r} - only 'nominatim' is implemented"
+            f"unknown GEOCODER_PROVIDER {provider!r} - expected 'google' or 'nominatim'"
         )
 
-    logger.info(
+    logger.warning(
         "geocoder_selected",
         provider="nominatim",
-        note="pilot provider - no account required, 1 req/sec, not for production volume",
+        note=(
+            "PILOT provider - no account required, 1 req/sec, and its usage policy "
+            "forbids commercial bulk use. Set GEOCODER_PROVIDER=google with a key "
+            "before running a paying client."
+        ),
     )
     _geocoder = NominatimGeocoder()
     return _geocoder
@@ -58,6 +80,7 @@ def get_geocoder() -> BaseGeocoder:
 __all__ = [
     "BaseGeocoder",
     "GeocodeResult",
+    "GeocoderUnavailableError",
     "get_geocoder",
     "normalize_address",
     "resolve_address",
