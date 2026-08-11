@@ -1053,102 +1053,28 @@ async def accept_offer(
     orders_result = await session.execute(select(Order).where(Order.id.in_(order_ids)))
     orders_by_id = {o.id: o for o in orders_result.scalars().all()}
 
-    sequence = 0
+    # How this route is ordered.
+    #
+    # `offer.visit_payload` is the optimizer's own plan: one entry per leg, in the order
+    # it intends them driven, which can interleave - collect A, collect B, drop B, drop A.
+    # When it is present the route follows it. When it is absent the old construction runs
+    # instead: an offer written before migration 0042 is still sitting in front of a real
+    # driver for up to `job_offer_ttl_seconds`, and refusing it would make a mid-shift
+    # deploy reject work somebody was about to accept.
+    plan = _planned_visits(offer, set(orders_by_id))
 
-    # One pickup stop per unique shop, aggregating any commingled orders
-    # from that shop (Section 8 clustering) into a single parcel count -
-    # except HOT_SHOT orders (Phase 8), which never share a stop with any
-    # other order, even another HOT_SHOT order from the same shop, per
-    # Sourabh's "direct point-to-point, never commingled" definition. Each
-    # HOT_SHOT order gets its own dedicated pickup Stop with parcel_count=1.
-    orders_by_shop: dict[uuid.UUID, list[uuid.UUID]] = {}
-    hot_shot_order_ids: list[uuid.UUID] = []
-    for order in orders_by_id.values():
-        if order.sla_tier == SLATier.HOT_SHOT:
-            hot_shot_order_ids.append(order.id)
-        else:
-            orders_by_shop.setdefault(order.shop_id, []).append(order.id)
-
-    # Tracks whichever pickup stop lands at sequence 0 - that's the driver's
-    # first stop the moment this offer is accepted, so it gets an
-    # immediate "en route" shop SMS below (Phase 8 shop notifications).
-    first_pickup_stop: Stop | None = None
-    first_pickup_is_hot_shot = False
-
-    # HOT_SHOT pickups go first - the premium tier a client is paying extra
-    # for shouldn't sit behind a driver's other pickups on the same route.
-    for oid in hot_shot_order_ids:
-        order = orders_by_id[oid]
-        pickup = Stop(
-            route_id=route.id,
-            shop_id=order.shop_id,
-            sequence=sequence,
-            # Real parcel count (docs/ROADMAP.md W10), falling back to 1 for
-            # an order with no Parcel rows (e.g. seeded directly in a test,
-            # or ingested before W10) so scan progress still works.
-            parcel_count=(await _parcel_count_for_orders(session, [oid])) or 1,
-            stop_type="pickup",
-        )
-        session.add(pickup)
-        await session.flush()
-        session.add(StopOrder(stop_id=pickup.id, order_id=oid))
-        if first_pickup_stop is None:
-            first_pickup_stop, first_pickup_is_hot_shot = pickup, True
-        sequence += 1
-
-    for shop_id, shop_order_ids in orders_by_shop.items():
-        pickup = Stop(
-            route_id=route.id,
-            shop_id=shop_id,
-            sequence=sequence,
-            stop_type="pickup",
-            # Real parcel count across this pickup's commingled orders (W10),
-            # falling back to one-per-order when no Parcel rows exist.
-            parcel_count=(await _parcel_count_for_orders(session, shop_order_ids)) or len(shop_order_ids),
-        )
-        session.add(pickup)
-        await session.flush()
-        for oid in shop_order_ids:
-            session.add(StopOrder(stop_id=pickup.id, order_id=oid))
-        if first_pickup_stop is None:
-            first_pickup_stop, first_pickup_is_hot_shot = pickup, False
-        sequence += 1
-
-    # One dropoff stop per order, in the sequence the optimizer assigned
-    # them - see app/models/order.py's delivery_* fields and the module
-    # docstring on drop-sequencing being unoptimized in v1. HOT_SHOT
-    # dropoffs are sorted first, same reasoning as their pickups above -
-    # this still preserves "every pickup stop is sequenced before every
-    # dropoff stop" (see complete_stop's unfinished_pickups check below),
-    # it just prioritizes HOT_SHOT within each of those two blocks.
-    hot_shot_id_set = set(hot_shot_order_ids)
-    sorted_stop_payload = sorted(
-        offer.stop_payload,
-        key=lambda s: 0 if uuid.UUID(s["order_id"]) in hot_shot_id_set else 1,
-    )
-    # Collected here, sent after the main commit below - same "generate
-    # now, notify best-effort afterward" split as the shop SMS further
-    # down, so a Twilio blip can never roll back a route the driver
-    # already accepted.
-    dropoffs_needing_pin_sms: list[tuple[Stop, Order]] = []
-
-    for stop_summary in sorted_stop_payload:
-        order = orders_by_id.get(uuid.UUID(stop_summary["order_id"]))
-        if order is None:
-            continue
-        dropoff = Stop(route_id=route.id, shop_id=None, sequence=sequence, stop_type="dropoff", parcel_count=1)
-        # Real PIN issuance (docs/ROADMAP.md A4) - only when there's
-        # somewhere real to send it. No contact phone on file means
-        # method="pin" simply won't be an option complete_stop accepts
-        # for this stop, same as everywhere else in this app that treats
-        # "nothing configured" as "can't do this," not "silently succeed."
-        if order.delivery_contact_phone:
-            dropoff.delivery_pin = generate_delivery_pin()
-            dropoffs_needing_pin_sms.append((dropoff, order))
-        session.add(dropoff)
-        await session.flush()
-        session.add(StopOrder(stop_id=dropoff.id, order_id=order.id))
-        sequence += 1
+    if plan is None:
+        (
+            first_pickup_stop,
+            first_pickup_is_hot_shot,
+            dropoffs_needing_pin_sms,
+        ) = await _build_stops_unplanned(session, route, orders_by_id)
+    else:
+        (
+            first_pickup_stop,
+            first_pickup_is_hot_shot,
+            dropoffs_needing_pin_sms,
+        ) = await _build_stops_from_plan(session, route, orders_by_id, plan)
 
     offer.status = "accepted"
     offer.responded_at = now
@@ -2564,3 +2490,302 @@ async def list_my_trips(
         )
         for route in routes
     ]
+
+
+# ---------------------------------------------------------------------------
+# Turning an accepted offer into stops
+# ---------------------------------------------------------------------------
+
+
+def _planned_visits(
+    offer: RouteOffer, known_order_ids: set[uuid.UUID]
+) -> list[tuple[uuid.UUID, str]] | None:
+    """The optimizer's planned leg sequence, or None if this offer has no plan.
+
+    Returns None rather than an empty list for "no plan", because those mean different
+    things: no plan falls back to the old construction, and an empty plan would build a
+    route with no stops.
+
+    Anything referencing an order that is not in this offer is dropped. `orders_by_id`
+    comes from `stop_payload`, so a visit for something else means the two payloads
+    disagree - and in that case the orders are the authority, since they are what the
+    driver was shown.
+    """
+    raw = offer.visit_payload
+    if not raw:
+        return None
+
+    visits: list[tuple[uuid.UUID, str]] = []
+    for entry in raw:
+        kind = entry.get("kind")
+        if kind not in ("pickup", "delivery"):
+            continue
+        try:
+            order_id = uuid.UUID(entry["order_id"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if order_id in known_order_ids:
+            visits.append((order_id, kind))
+
+    # Every order needs both legs. A plan missing one is a plan we cannot execute -
+    # a drop with no collection can never complete (complete_stop's pickup guard), and
+    # a collection with no drop leaves parcels aboard forever. Fall back rather than
+    # build something a driver would get stuck in.
+    for order_id in known_order_ids:
+        legs = {kind for oid, kind in visits if oid == order_id}
+        if legs != {"pickup", "delivery"}:
+            logger.warning(
+                "route_offer_plan_incomplete",
+                order_id=str(order_id),
+                legs=sorted(legs),
+                detail="falling back to unplanned stop construction",
+            )
+            return None
+
+    return visits
+
+
+def _hot_shot_first(
+    plan: list[tuple[uuid.UUID, str]], hot_shot_ids: set[uuid.UUID]
+) -> list[tuple[uuid.UUID, str]]:
+    """HOT_SHOT legs to the front, everything else in planned order.
+
+    **This is an override of the plan, and it is deliberate.** The solver is told a
+    HOT_SHOT matters via `SLA_TIER_SKIP_PENALTY` - a million-unit cost for skipping one -
+    but it is never told *when* the collection is due, because `hold_deadline` is not sent
+    as a `timeWindows` constraint. So it has every reason not to drop a hot shot and no
+    reason to schedule it early, and letting the plan govern unqualified would quietly
+    stop prioritising the tier a customer pays extra for.
+
+    Hoisting both of a hot shot's legs is also strictly better than what this replaced.
+    The old construction put every pickup before every dropoff, so a hot shot's *delivery*
+    waited behind every other collection on the route - the opposite of the direct
+    point-to-point trip being sold. Now it is collected and delivered first, and the
+    remaining orders interleave as planned.
+
+    The right long-term fix is to send time windows so urgency lives in the model rather
+    than in a post-hoc sort here; that is tracked with E10's hold-window placeholders.
+    Stable within each group, so the planned order survives inside the partition.
+    """
+    if not hot_shot_ids:
+        return plan
+    hot = [v for v in plan if v[0] in hot_shot_ids]
+    rest = [v for v in plan if v[0] not in hot_shot_ids]
+    return hot + rest
+
+
+async def _new_dropoff(
+    session: AsyncSession, route: Route, sequence: int, order: Order
+) -> tuple[Stop, bool]:
+    """A dropoff stop, and whether its PIN needs texting.
+
+    Real PIN issuance (docs/ROADMAP.md A4) - only when there is somewhere real to send
+    it. No contact phone on file means method="pin" simply will not be an option
+    complete_stop accepts for this stop, same as everywhere else in this app that treats
+    "nothing configured" as "can't do this," not "silently succeed."
+    """
+    dropoff = Stop(
+        route_id=route.id, shop_id=None, sequence=sequence, stop_type="dropoff", parcel_count=1
+    )
+    needs_pin = bool(order.delivery_contact_phone)
+    if needs_pin:
+        dropoff.delivery_pin = generate_delivery_pin()
+    session.add(dropoff)
+    await session.flush()
+    session.add(StopOrder(stop_id=dropoff.id, order_id=order.id))
+    return dropoff, needs_pin
+
+
+async def _build_stops_from_plan(
+    session: AsyncSession,
+    route: Route,
+    orders_by_id: dict[uuid.UUID, Order],
+    plan: list[tuple[uuid.UUID, str]],
+) -> tuple[Stop | None, bool, list[tuple[Stop, Order]]]:
+    """Stops in the order the optimizer planned to drive them.
+
+    Commingling survives interleaving: **consecutive** pickup legs at the same shop
+    collapse into one stop, because that is one visit to one door. Non-consecutive visits
+    to the same shop stay separate - if the plan goes shop A, shop B, shop A, the solver
+    had a reason and merging them would silently discard it.
+
+    HOT_SHOT never shares a stop with anything, not even another HOT_SHOT from the same
+    shop, per the direct point-to-point definition of the tier.
+    """
+    hot_shot_ids = {
+        oid for oid, order in orders_by_id.items() if order.sla_tier == SLATier.HOT_SHOT
+    }
+    ordered = _hot_shot_first(plan, hot_shot_ids)
+
+    sequence = 0
+    first_pickup_stop: Stop | None = None
+    first_pickup_is_hot_shot = False
+    dropoffs_needing_pin_sms: list[tuple[Stop, Order]] = []
+
+    # The pickup stop currently open for commingling, and the shop it is at. Reset by any
+    # intervening dropoff, because a stop the driver has already left cannot gain parcels.
+    open_pickup: Stop | None = None
+    open_pickup_shop: uuid.UUID | None = None
+
+    for order_id, kind in ordered:
+        order = orders_by_id.get(order_id)
+        if order is None:
+            continue
+
+        if kind == "delivery":
+            dropoff, needs_pin = await _new_dropoff(session, route, sequence, order)
+            if needs_pin:
+                dropoffs_needing_pin_sms.append((dropoff, order))
+            sequence += 1
+            open_pickup = None
+            open_pickup_shop = None
+            continue
+
+        is_hot_shot = order_id in hot_shot_ids
+        can_commingle = (
+            open_pickup is not None
+            and not is_hot_shot
+            and open_pickup_shop == order.shop_id
+            and not any(o in hot_shot_ids for o in await _orders_on_stop(session, open_pickup))
+        )
+        if can_commingle:
+            session.add(StopOrder(stop_id=open_pickup.id, order_id=order_id))
+            open_pickup.parcel_count += (
+                await _parcel_count_for_orders(session, [order_id])
+            ) or 1
+            continue
+
+        pickup = Stop(
+            route_id=route.id,
+            shop_id=order.shop_id,
+            sequence=sequence,
+            stop_type="pickup",
+            # Real parcel count (docs/ROADMAP.md W10), falling back to 1 for an order
+            # with no Parcel rows so scan progress still works.
+            parcel_count=(await _parcel_count_for_orders(session, [order_id])) or 1,
+        )
+        session.add(pickup)
+        await session.flush()
+        session.add(StopOrder(stop_id=pickup.id, order_id=order_id))
+        if first_pickup_stop is None:
+            first_pickup_stop, first_pickup_is_hot_shot = pickup, is_hot_shot
+        sequence += 1
+        # A hot shot is never open for commingling.
+        open_pickup = None if is_hot_shot else pickup
+        open_pickup_shop = None if is_hot_shot else order.shop_id
+
+    return first_pickup_stop, first_pickup_is_hot_shot, dropoffs_needing_pin_sms
+
+
+async def _orders_on_stop(session: AsyncSession, stop: Stop) -> list[uuid.UUID]:
+    result = await session.execute(
+        select(StopOrder.order_id).where(StopOrder.stop_id == stop.id)
+    )
+    return [row[0] for row in result.all()]
+
+
+async def _build_stops_unplanned(
+    session: AsyncSession, route: Route, orders_by_id: dict[uuid.UUID, Order]
+) -> tuple[Stop | None, bool, list[tuple[Stop, Order]]]:
+    """Every pickup, then every dropoff, HOT_SHOT first within each block.
+
+    The construction used before offers carried a plan (migration 0042). Reached only by
+    an offer written by the previous version and still inside its TTL, which means this
+    stops running roughly two minutes after a deploy. Kept rather than deleted because
+    the alternative is rejecting work a driver was about to accept.
+    """
+    sequence = 0
+
+    # One pickup stop per unique shop, aggregating any commingled orders
+    # from that shop (Section 8 clustering) into a single parcel count -
+    # except HOT_SHOT orders (Phase 8), which never share a stop with any
+    # other order, even another HOT_SHOT order from the same shop, per
+    # Sourabh's "direct point-to-point, never commingled" definition. Each
+    # HOT_SHOT order gets its own dedicated pickup Stop with parcel_count=1.
+    orders_by_shop: dict[uuid.UUID, list[uuid.UUID]] = {}
+    hot_shot_order_ids: list[uuid.UUID] = []
+    for order in orders_by_id.values():
+        if order.sla_tier == SLATier.HOT_SHOT:
+            hot_shot_order_ids.append(order.id)
+        else:
+            orders_by_shop.setdefault(order.shop_id, []).append(order.id)
+
+    # Tracks whichever pickup stop lands at sequence 0 - that's the driver's
+    # first stop the moment this offer is accepted, so it gets an
+    # immediate "en route" shop SMS below (Phase 8 shop notifications).
+    first_pickup_stop: Stop | None = None
+    first_pickup_is_hot_shot = False
+
+    # HOT_SHOT pickups go first - the premium tier a client is paying extra
+    # for shouldn't sit behind a driver's other pickups on the same route.
+    for oid in hot_shot_order_ids:
+        order = orders_by_id[oid]
+        pickup = Stop(
+            route_id=route.id,
+            shop_id=order.shop_id,
+            sequence=sequence,
+            # Real parcel count (docs/ROADMAP.md W10), falling back to 1 for
+            # an order with no Parcel rows (e.g. seeded directly in a test,
+            # or ingested before W10) so scan progress still works.
+            parcel_count=(await _parcel_count_for_orders(session, [oid])) or 1,
+            stop_type="pickup",
+        )
+        session.add(pickup)
+        await session.flush()
+        session.add(StopOrder(stop_id=pickup.id, order_id=oid))
+        if first_pickup_stop is None:
+            first_pickup_stop, first_pickup_is_hot_shot = pickup, True
+        sequence += 1
+
+    for shop_id, shop_order_ids in orders_by_shop.items():
+        pickup = Stop(
+            route_id=route.id,
+            shop_id=shop_id,
+            sequence=sequence,
+            stop_type="pickup",
+            # Real parcel count across this pickup's commingled orders (W10),
+            # falling back to one-per-order when no Parcel rows exist.
+            parcel_count=(await _parcel_count_for_orders(session, shop_order_ids)) or len(shop_order_ids),
+        )
+        session.add(pickup)
+        await session.flush()
+        for oid in shop_order_ids:
+            session.add(StopOrder(stop_id=pickup.id, order_id=oid))
+        if first_pickup_stop is None:
+            first_pickup_stop, first_pickup_is_hot_shot = pickup, False
+        sequence += 1
+
+    # One dropoff stop per order, in the sequence the optimizer assigned
+    # them - see app/models/order.py's delivery_* fields and the module
+    # docstring on drop-sequencing being unoptimized in v1. HOT_SHOT
+    # dropoffs are sorted first, same reasoning as their pickups above -
+    # this still preserves "every pickup stop is sequenced before every
+    # dropoff stop" (see complete_stop's unfinished_pickups check below),
+    # it just prioritizes HOT_SHOT within each of those two blocks.
+    hot_shot_id_set = set(hot_shot_order_ids)
+    sorted_order_ids = sorted(
+        orders_by_id, key=lambda oid: 0 if oid in hot_shot_id_set else 1
+    )
+    # Collected here, sent after the main commit below - same "generate
+    # now, notify best-effort afterward" split as the shop SMS further
+    # down, so a Twilio blip can never roll back a route the driver
+    # already accepted.
+    dropoffs_needing_pin_sms: list[tuple[Stop, Order]] = []
+
+    for order_id in sorted_order_ids:
+        order = orders_by_id[order_id]
+        dropoff = Stop(route_id=route.id, shop_id=None, sequence=sequence, stop_type="dropoff", parcel_count=1)
+        # Real PIN issuance (docs/ROADMAP.md A4) - only when there's
+        # somewhere real to send it. No contact phone on file means
+        # method="pin" simply won't be an option complete_stop accepts
+        # for this stop, same as everywhere else in this app that treats
+        # "nothing configured" as "can't do this," not "silently succeed."
+        if order.delivery_contact_phone:
+            dropoff.delivery_pin = generate_delivery_pin()
+            dropoffs_needing_pin_sms.append((dropoff, order))
+        session.add(dropoff)
+        await session.flush()
+        session.add(StopOrder(stop_id=dropoff.id, order_id=order.id))
+        sequence += 1
+
+    return first_pickup_stop, first_pickup_is_hot_shot, dropoffs_needing_pin_sms

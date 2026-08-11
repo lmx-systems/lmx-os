@@ -399,7 +399,8 @@ async def test_accept_offer_never_commingles_a_hot_shot_pickup(db_session, real_
     same offer - unlike T1/T2/T3, which do commingle (see the module
     docstring's Section 8 clustering reference). Also checks that the
     HOT_SHOT pickup and dropoff are sequenced ahead of the regular
-    order's, and that "every pickup precedes every dropoff" still holds.
+    order's, and that "every pickup precedes every dropoff" still holds on the
+    unplanned construction path.
     """
     hub_id, client_id, shop_id, driver_id, regular_order = await _seed(db_session)
     authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
@@ -457,8 +458,12 @@ async def test_accept_offer_never_commingles_a_hot_shot_pickup(db_session, real_
     regular_dropoff = next(d for d in dropoffs if d.order_ids == [str(regular_order.id)])
     assert hot_dropoff.sequence < regular_dropoff.sequence
 
-    # The "every pickup before every dropoff" invariant complete_stop's
-    # unfinished_pickups check relies on must still hold.
+    # Every pickup before every dropoff. This offer carries no `visit_payload`, so it
+    # builds through `_build_stops_unplanned` - the path an in-flight offer takes across
+    # a deploy (migration 0042). A planned route is free to interleave, and
+    # `complete_stop` no longer depends on this ordering: it asks whether THIS order was
+    # collected rather than whether every earlier pickup was
+    # (tests/integration/test_route_sequencing.py).
     assert max(p.sequence for p in pickups) < min(d.sequence for d in dropoffs)
 
 

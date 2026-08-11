@@ -39,6 +39,19 @@ class RouteOffer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     stop_payload: Mapped[list] = mapped_column(JSONB, nullable=False)
 
+    # The optimizer's planned leg sequence (migration 0042): one entry per visit, with
+    # `order_id`, `kind` ("pickup" | "delivery") and the planned `arrival`.
+    #
+    # `stop_payload` above is a list of ORDERS and is what the driver sees in the offer
+    # preview. It cannot express a sequence of legs, which is why `accept_offer` used to
+    # rebuild every route as "every pickup, then every dropoff" - legal, but not the route
+    # the solver costed, and the reason its arrival times were unusable.
+    #
+    # Nullable for one reason: offers live for `job_offer_ttl_seconds`, so a deploy lands
+    # while real offers are in front of real drivers without one. `accept_offer` falls back
+    # to the old construction for those.
+    visit_payload: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     offered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

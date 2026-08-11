@@ -28,7 +28,12 @@ import structlog
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.config import settings
-from app.schemas.optimizer import DriverCandidate, RouteAssignment, StopCandidate
+from app.schemas.optimizer import (
+    DriverCandidate,
+    RouteAssignment,
+    RouteVisit,
+    StopCandidate,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -298,7 +303,7 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
         assignments = [
             RouteAssignment(
                 driver_id=route["vehicleLabel"],
-                stop_ids=GoogleRouteOptimizationClient._visit_sequence(route),
+                visits=GoogleRouteOptimizationClient._visit_sequence(route),
             )
             for route in payload.get("routes", [])
             if route.get("visits")
@@ -307,36 +312,72 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
         return assignments, unassigned
 
     @staticmethod
-    def _visit_sequence(route: dict) -> list[str]:
-        """The order ids on this route, in the sequence they're collected.
+    def _visit_sequence(route: dict) -> list[RouteVisit]:
+        """Every leg on this route, in the order the solver planned to drive it.
 
-        **Deduplication is required, not defensive.** Now that a shipment carries a
-        pickup AND a delivery, the response contains TWO visits bearing the same
-        `shipmentLabel` - so the previous flat comprehension would have listed
-        every order twice, and `assigned_stop_ids` in service.py would have built
-        job offers with duplicated stops.
+        This used to deduplicate by `shipmentLabel` and return a flat list of order
+        ids, which was the only shape `RouteAssignment` could hold. That threw away
+        the thing worth having: **a plan can interleave legs** - collect A, collect B,
+        drop B, drop A - and a list of order ids cannot express it. The route was then
+        rebuilt as "every pickup, then every dropoff", so we drove a longer route than
+        the one the solver costed and quoted arrival times from a sequence we were not
+        following.
 
-        First-appearance order is the pickup sequence, which is exactly what a
-        RouteAssignment feeds: service.py turns `stop_ids` into a RouteOffer's list
-        of collections, and the pickup/delivery Stop rows are generated later by
-        `accept_offer`. It also stays correct for a shipment with no modelled
-        delivery, whose single visit is at the shop.
+        `isPickup` is what distinguishes the legs. A shipment with no modelled delivery
+        (`Order.delivery_lat` is nullable) has one visit, which `_build_shipment` files
+        under `deliveries` at the shop's own location - so it arrives here as a
+        delivery, and the pickup below is synthesised. Without that, such an order
+        would produce a drop with no collection and `complete_stop`'s guard would
+        refuse it forever.
 
-        **Known limitation, deliberately not solved here.** A truly optimal plan
-        can interleave legs - collect A, collect B, drop B, drop A - and a flat
-        list of order ids cannot express that. The solver still PLANS with both
-        legs (which is what makes its travel times and feasibility right); what
-        isn't carried through is the interleaved drop ordering, because
-        `RouteAssignment` and `RouteOffer` model a route as a sequence of orders
-        rather than of visits. Changing that reaches into the driver app's route
-        representation and belongs on its own.
+        `startTime` is carried through as the planned arrival. It is absolute and
+        therefore perishable - see `RouteVisit.arrival`.
         """
-        sequence: list[str] = []
-        for visit in route.get("visits", []):
-            label = visit.get("shipmentLabel")
-            if label and label not in sequence:
-                sequence.append(label)
-        return sequence
+        visits: list[RouteVisit] = []
+        for raw in route.get("visits", []):
+            label = raw.get("shipmentLabel")
+            if not label:
+                continue
+            visits.append(
+                RouteVisit(
+                    order_id=label,
+                    kind="pickup" if raw.get("isPickup") else "delivery",
+                    arrival=GoogleRouteOptimizationClient._parse_visit_time(
+                        raw.get("startTime")
+                    ),
+                )
+            )
+
+        # An order whose delivery leg was never modelled arrives with a delivery visit
+        # and no pickup. The collection is real work regardless, so it is inserted
+        # immediately before the drop rather than left out of the route.
+        without_pickup = {
+            v.order_id for v in visits if v.kind == "delivery"
+        } - {v.order_id for v in visits if v.kind == "pickup"}
+        if without_pickup:
+            repaired: list[RouteVisit] = []
+            for visit in visits:
+                if visit.kind == "delivery" and visit.order_id in without_pickup:
+                    repaired.append(
+                        RouteVisit(
+                            order_id=visit.order_id, kind="pickup", arrival=visit.arrival
+                        )
+                    )
+                repaired.append(visit)
+            visits = repaired
+
+        return visits
+
+    @staticmethod
+    def _parse_visit_time(value: str | None) -> datetime | None:
+        """Google returns RFC 3339 with a trailing Z, which older Pythons reject."""
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            logger.warning("route_optimization_unparseable_visit_time", value=value)
+            return None
 
 
 class StubRouteOptimizationClient(RouteOptimizationClient):
@@ -379,8 +420,19 @@ class StubRouteOptimizationClient(RouteOptimizationClient):
             # next nearest-neighbor check reflects the route in progress.
             driver_positions[best_driver_id] = (stop.lat, stop.lng)
 
+        # Pickups in the greedy order, then the deliveries in the same order.
+        #
+        # The stub does not model drop locations at all, so it has no basis for
+        # interleaving and inventing one here would be fabricated routing dressed up as
+        # a plan. Emitting both legs matters anyway: it means every test that runs a
+        # dispatch cycle exercises the same visit-driven construction the real solver
+        # feeds, with output identical to what this stub produced before.
         route_assignments = [
-            RouteAssignment(driver_id=driver_id, stop_ids=stop_ids)
+            RouteAssignment(
+                driver_id=driver_id,
+                visits=[RouteVisit(order_id=oid, kind="pickup") for oid in stop_ids]
+                + [RouteVisit(order_id=oid, kind="delivery") for oid in stop_ids],
+            )
             for driver_id, stop_ids in assignments.items()
             if stop_ids
         ]

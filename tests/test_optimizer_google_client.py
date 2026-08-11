@@ -437,3 +437,189 @@ def test_the_verification_scenario_sends_both_legs():
         # A drop at the same point as the collection would make the delivery leg
         # free, so the scenario wouldn't exercise it.
         assert (stop.lat, stop.lng) != (stop.delivery_lat, stop.delivery_lng)
+
+
+# ---------------------------------------------------------------------------
+# Visit-level sequencing (docs/ROADMAP.md L22)
+# ---------------------------------------------------------------------------
+
+
+def test_an_interleaved_plan_survives_parsing():
+    """The response has always carried this and we always threw it away.
+
+    `_visit_sequence` used to deduplicate by `shipmentLabel` and return a flat list of
+    order ids, because that was the only shape `RouteAssignment` could hold. A plan that
+    collects both orders and then delivers B before A cannot be expressed that way, so
+    the drop ordering was discarded here - and the route was rebuilt downstream as
+    "every pickup, then every dropoff".
+    """
+    payload = {
+        "routes": [
+            {
+                "vehicleLabel": "driver-1",
+                "visits": [
+                    {"shipmentLabel": "A", "isPickup": True, "startTime": "2026-08-11T18:00:00Z"},
+                    {"shipmentLabel": "B", "isPickup": True, "startTime": "2026-08-11T18:09:00Z"},
+                    {"shipmentLabel": "B", "isPickup": False, "startTime": "2026-08-11T18:21:00Z"},
+                    {"shipmentLabel": "A", "isPickup": False, "startTime": "2026-08-11T18:34:00Z"},
+                ],
+            }
+        ],
+        "skippedShipments": [],
+    }
+    assignments, unassigned = GoogleRouteOptimizationClient._parse_response(payload)
+    assert unassigned == []
+    visits = assignments[0].visits
+    assert [(v.order_id, v.kind) for v in visits] == [
+        ("A", "pickup"),
+        ("B", "pickup"),
+        ("B", "delivery"),
+        ("A", "delivery"),
+    ]
+
+
+def test_stop_ids_is_still_the_collection_order():
+    """Derived rather than stored, so it cannot disagree with the plan.
+
+    `app/optimizer/service.py` asks "which orders did this driver get", and each order
+    must appear once - two visits per shipment used to make that a real bug where offers
+    were built with duplicated stops.
+    """
+    payload = {
+        "routes": [
+            {
+                "vehicleLabel": "driver-1",
+                "visits": [
+                    {"shipmentLabel": "A", "isPickup": True},
+                    {"shipmentLabel": "B", "isPickup": True},
+                    {"shipmentLabel": "B", "isPickup": False},
+                    {"shipmentLabel": "A", "isPickup": False},
+                ],
+            }
+        ]
+    }
+    assignment = GoogleRouteOptimizationClient._parse_response(payload)[0][0]
+    assert assignment.stop_ids == ["A", "B"]
+
+
+def test_planned_arrival_times_are_carried_through():
+    """The eventual replacement for a straight-line ETA.
+
+    Absolute and therefore perishable, but the *intervals* are real road-network travel
+    times, which is what app/delivery/eta.py currently has to approximate at an assumed
+    average speed.
+    """
+    payload = {
+        "routes": [
+            {
+                "vehicleLabel": "driver-1",
+                "visits": [
+                    {"shipmentLabel": "A", "isPickup": True, "startTime": "2026-08-11T18:00:00Z"},
+                    {"shipmentLabel": "A", "isPickup": False, "startTime": "2026-08-11T18:26:00Z"},
+                ],
+            }
+        ]
+    }
+    visits = GoogleRouteOptimizationClient._parse_response(payload)[0][0].visits
+    assert visits[0].arrival is not None
+    assert (visits[1].arrival - visits[0].arrival).total_seconds() == 26 * 60
+
+
+def test_an_unparseable_arrival_time_does_not_lose_the_visit():
+    """The leg is real work whether or not we can read its timestamp.
+
+    Dropping the visit would silently remove a collection from the route; dropping only
+    the time costs an estimate that app/delivery/eta.py computes for itself anyway.
+    """
+    payload = {
+        "routes": [
+            {
+                "vehicleLabel": "driver-1",
+                "visits": [
+                    {"shipmentLabel": "A", "isPickup": True, "startTime": "not-a-time"},
+                    {"shipmentLabel": "A", "isPickup": False},
+                ],
+            }
+        ]
+    }
+    visits = GoogleRouteOptimizationClient._parse_response(payload)[0][0].visits
+    assert [(v.order_id, v.kind, v.arrival) for v in visits] == [
+        ("A", "pickup", None),
+        ("A", "delivery", None),
+    ]
+
+
+def test_an_order_with_no_modelled_delivery_gets_a_synthesised_pickup():
+    """`Order.delivery_lat` is nullable, so `_build_shipment` files the single visit
+    under `deliveries` at the shop's own location.
+
+    That arrives here as a delivery with no pickup. Left alone it would become a drop
+    with no collection, which `complete_stop`'s pickup guard refuses forever - a stop the
+    driver can neither finish nor escape. The collection is real work, so it is inserted
+    immediately before the drop.
+    """
+    payload = {
+        "routes": [
+            {
+                "vehicleLabel": "driver-1",
+                "visits": [
+                    {"shipmentLabel": "A", "isPickup": True},
+                    {"shipmentLabel": "A", "isPickup": False},
+                    {"shipmentLabel": "C", "isPickup": False},
+                ],
+            }
+        ]
+    }
+    visits = GoogleRouteOptimizationClient._parse_response(payload)[0][0].visits
+    assert [(v.order_id, v.kind) for v in visits] == [
+        ("A", "pickup"),
+        ("A", "delivery"),
+        ("C", "pickup"),
+        ("C", "delivery"),
+    ]
+
+
+def test_a_visit_with_no_shipment_label_is_ignored():
+    """Nothing downstream can act on a leg that names no order."""
+    payload = {
+        "routes": [
+            {
+                "vehicleLabel": "driver-1",
+                "visits": [
+                    {"shipmentLabel": "A", "isPickup": True},
+                    {"isPickup": False},
+                    {"shipmentLabel": "A", "isPickup": False},
+                ],
+            }
+        ]
+    }
+    visits = GoogleRouteOptimizationClient._parse_response(payload)[0][0].visits
+    assert [(v.order_id, v.kind) for v in visits] == [("A", "pickup"), ("A", "delivery")]
+
+
+async def test_the_stub_emits_both_legs_for_every_order():
+    """So every test that runs a dispatch cycle exercises the plan-driven path.
+
+    The stub has no drop locations and therefore no basis for interleaving - inventing
+    one would be fabricated routing dressed up as a plan. What it must do is emit both
+    legs, so the construction the real solver feeds is the construction under test
+    everywhere, with output identical to what this stub produced before.
+    """
+    from app.optimizer.google_routes_client import StubRouteOptimizationClient
+
+    drivers = [
+        DriverCandidate(driver_id="d1", lat=30.26, lng=-97.73, capacity_remaining_units=10)
+    ]
+    stops = [
+        StopCandidate(
+            stop_id="A", order_ids=["A"], lat=30.27, lng=-97.74, sla_tier="T2", weight_units=1
+        ),
+        StopCandidate(
+            stop_id="B", order_ids=["B"], lat=30.28, lng=-97.75, sla_tier="T2", weight_units=1
+        ),
+    ]
+    assignments, unassigned = await StubRouteOptimizationClient().optimize(drivers, stops)
+    assert unassigned == []
+    visits = assignments[0].visits
+    assert [v.kind for v in visits] == ["pickup", "pickup", "delivery", "delivery"]
+    assert assignments[0].stop_ids == ["A", "B"]

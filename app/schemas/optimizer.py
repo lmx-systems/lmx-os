@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -40,9 +41,47 @@ class DriverCandidate(BaseModel):
     capacity_remaining_units: float
 
 
+class RouteVisit(BaseModel):
+    """One leg of one order, in the sequence the optimizer planned it.
+
+    A shipment is two visits - collect, then deliver - and the solver plans both
+    together, which is what makes its travel times and feasibility right. Before this
+    existed, `RouteAssignment` carried a flat list of order ids, so the two visits per
+    order were deduplicated down to one and the planned *drop* ordering was thrown away
+    on the way out of the client. A route that the solver costed as "collect A, collect
+    B, drop B, drop A" was then rebuilt as "collect both, drop both" - legal, longer, and
+    not the plan whose arrival times we were quoting.
+    """
+
+    order_id: str
+    kind: Literal["pickup", "delivery"]
+    # The solver's planned arrival. Absolute, and therefore perishable: it assumes the
+    # route starts when the plan was made, and an offer can sit unaccepted for up to
+    # `job_offer_ttl_seconds`. Carried because the *intervals* between visits are real
+    # road-network travel times and are the eventual replacement for
+    # app/delivery/eta.py's straight-line estimate. Nothing reads it as an absolute
+    # timestamp today.
+    arrival: datetime | None = None
+
+
 class RouteAssignment(BaseModel):
     driver_id: str
-    stop_ids: list[str]  # in assigned sequence order
+    # Every leg, in planned order. Both visits for an order appear, pickup first.
+    visits: list[RouteVisit]
+
+    @property
+    def stop_ids(self) -> list[str]:
+        """The order ids on this route, in first-appearance (collection) order.
+
+        Kept as a derived view because that is what "which orders did this driver get"
+        means to `app/optimizer/service.py`, and deriving it removes any chance of the
+        two disagreeing.
+        """
+        seen: list[str] = []
+        for visit in self.visits:
+            if visit.order_id not in seen:
+                seen.append(visit.order_id)
+        return seen
 
 
 class OptimizationResult(BaseModel):

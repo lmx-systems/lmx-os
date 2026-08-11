@@ -7,15 +7,23 @@ and one side of that comparison never existed. This module writes it.
 
 Three decisions worth knowing before reading the code.
 
-**It walks the accepted sequence, not the solver's plan.** The obvious source of arrival
-times is the optimizer - `optimizeTours` is called with `considerRoadTraffic` and returns
-a `startTime` per visit. Those timestamps cannot honestly be used as stop ETAs, because
-`accept_offer` re-sequences afterwards: HOT_SHOT goes to the front of each block, and
-every pickup is placed before every dropoff, which the solver's interleaved plan does not
-do (see `_visit_sequence`'s note on that limitation). Copying planned timestamps onto a
-re-sequenced route would produce ETAs that are wrong and, worse, non-monotonic - stop 2
-arriving before stop 1 in the driver's own list. Carrying visit-level sequencing through
-`RouteOffer` is the fix for that, and it is its own piece of work.
+**It walks the accepted sequence, not the solver's planned timestamps.** The obvious
+source of arrival times is the optimizer - `optimizeTours` is called with
+`considerRoadTraffic` and returns a `startTime` per visit, and since L22 those times are
+carried all the way onto the offer (`RouteOffer.visit_payload`). They are still not used
+as ETAs directly, for two remaining reasons rather than the original one:
+
+  - **They are absolute and perishable.** The plan assumes the route starts when it was
+    made, and an offer can sit unaccepted for `job_offer_ttl_seconds`. Writing them
+    verbatim would quote arrival times computed from a departure that never happened.
+  - **HOT_SHOT legs are still hoisted** in `accept_offer`, because the solver is told a
+    hot shot must not be skipped but never told when it is due - so one override of the
+    plan survives, and any stop after it has moved.
+
+What is now available and worth having is the *intervals* between planned visits: real
+road-network travel times, which is exactly what `minutes_for_miles` approximates at an
+assumed speed. Shifting the walk onto those is the next step, and it is bounded by
+sending `timeWindows` to the solver so the HOT_SHOT hoist can go away.
 
 **One travel model, shared.** `minutes_for_miles` and `PLACEHOLDER_STOP_SERVICE_MINUTES`
 from `app/gig_platform/economics.py` - the same placeholders the accept-gate, the client

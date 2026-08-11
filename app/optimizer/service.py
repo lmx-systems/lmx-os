@@ -199,12 +199,26 @@ class DispatchOptimizerService:
                         )
                     if not offer_stops:
                         continue
+                    # The plan itself, alongside the per-order preview. Only visits for
+                    # orders that survived the `stops_by_id` filter above, so the two
+                    # payloads describe the same set of work rather than disagreeing.
+                    offered_order_ids = {s["order_id"] for s in offer_stops}
+                    visit_payload = [
+                        {
+                            "order_id": visit.order_id,
+                            "kind": visit.kind,
+                            "arrival": visit.arrival.isoformat() if visit.arrival else None,
+                        }
+                        for visit in assignment.visits
+                        if visit.order_id in offered_order_ids
+                    ]
                     session.add(
                         RouteOffer(
                             hub_id=uuid.UUID(hub_id),
                             driver_id=uuid.UUID(assignment.driver_id),
                             status="offered",
                             stop_payload=offer_stops,
+                            visit_payload=visit_payload,
                             offered_at=offer_time,
                             expires_at=offer_time + timedelta(seconds=settings.job_offer_ttl_seconds),
                         )
