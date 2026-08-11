@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { uploadCapturedFile } from '../api/uploadCapturedFile';
-import type { PodMethod } from '../api/types';
+import type { PodMethod, StopProofRequirement } from '../api/types';
 import { PhotoCaptureModal } from '../media/PhotoCaptureModal';
 import { SignaturePadModal } from '../media/SignaturePadModal';
 import { radius, spacing, typography, useThemeColors } from '../theme';
@@ -14,10 +14,20 @@ const METHODS: PodMethod[] = ['photo', 'signature', 'pin'];
 
 interface PodCaptureProps {
   stopId: string;
+  // What THIS order requires (docs/LMX_LINK_PLAN.md §1.2). Null falls back to the
+  // one-photo baseline, which is what every order without a stated requirement
+  // has always been.
+  proof: StopProofRequirement | null;
   method: PodMethod;
   onChangeMethod: (method: PodMethod) => void;
-  captured: boolean;
-  onCapture: (url: string) => void;
+  // Every photo captured so far, in order. A list rather than one URL because an
+  // order can ask for several with named subjects - and the API rejects a
+  // completion that is short, so the app has to be able to collect them.
+  photoUrls: string[];
+  signatureUrl: string | null;
+  onCapturePhoto: (url: string) => void;
+  onCaptureSignature: (url: string) => void;
+  onRemoveLastPhoto: () => void;
   pin: string;
   onChangePin: (pin: string) => void;
   // Real PIN verification (docs/ROADMAP.md A4) - null until a submit
@@ -38,10 +48,14 @@ interface PodCaptureProps {
 // gets submitted as CompleteStopBody.photo_url/signature_url.
 export function PodCapture({
   stopId,
+  proof,
   method,
   onChangeMethod,
-  captured,
-  onCapture,
+  photoUrls,
+  signatureUrl,
+  onCapturePhoto,
+  onCaptureSignature,
+  onRemoveLastPhoto,
   pin,
   onChangePin,
   pinError,
@@ -52,8 +66,20 @@ export function PodCapture({
 }: PodCaptureProps) {
   const colors = useThemeColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const canSubmit = method === 'pin' ? pin.length >= 4 : captured;
+  // Mirrors app/delivery/proof.py so the button is disabled for the same reasons
+  // the server would refuse - a driver should not be able to tap Complete and get
+  // a 422 telling them to take another photo.
+  const photosRequired = Math.max(proof?.photo_count_required ?? 1, method === 'photo' ? 1 : 0);
+  const signatureRequired = proof?.signature_required ?? false;
+  const photosDone = photoUrls.length >= photosRequired;
+  const identityDone =
+    !signatureRequired || signatureUrl !== null || (method === 'pin' && pin.length >= 4);
+  const methodCarriesEvidence =
+    method === 'photo' ? photoUrls.length > 0 : method === 'signature' ? signatureUrl !== null : pin.length >= 4;
+  const canSubmit = methodCarriesEvidence && photosDone && identityDone;
+
   const [modalOpen, setModalOpen] = useState(false);
+  const [captureKind, setCaptureKind] = useState<'photo' | 'signature'>('photo');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -63,7 +89,7 @@ export function PodCapture({
     setUploadError(null);
     try {
       const url = await uploadCapturedFile(stopId, 'photo', localUri, 'image/jpeg');
-      onCapture(url);
+      onCapturePhoto(url);
     } catch {
       setUploadError("Couldn't upload photo - check your connection and try again.");
     } finally {
@@ -77,7 +103,7 @@ export function PodCapture({
     setUploadError(null);
     try {
       const url = await uploadCapturedFile(stopId, 'signature', dataUri, 'image/png');
-      onCapture(url);
+      onCaptureSignature(url);
     } catch {
       setUploadError("Couldn't upload signature - check your connection and try again.");
     } finally {
@@ -98,15 +124,81 @@ export function PodCapture({
         ))}
       </View>
 
+      {/* What this particular order asks for, stated before the driver starts.
+          Named subjects are the whole reason a count above one exists - "four
+          photos" without saying of what produces four pictures of a doorstep. */}
+      {proof && (photosRequired > 1 || signatureRequired) && (
+        <View style={styles.requirement}>
+          <Text style={styles.requirementTitle}>This delivery needs</Text>
+          {photosRequired > 1 && (
+            <Text style={styles.requirementLine}>
+              {photosRequired} photos{proof.photo_subjects.length > 0 ? ` — ${proof.photo_subjects.join(', ')}` : ''}
+            </Text>
+          )}
+          {signatureRequired && (
+            <Text style={styles.requirementLine}>
+              A signature from the person receiving it (a PIN also counts)
+            </Text>
+          )}
+        </View>
+      )}
+
       {method !== 'pin' ? (
         <>
-          <Pressable style={styles.capturePlaceholder} onPress={() => setModalOpen(true)} disabled={uploading}>
+          <Pressable
+            style={styles.capturePlaceholder}
+            onPress={() => {
+              setCaptureKind(method === 'signature' ? 'signature' : 'photo');
+              setModalOpen(true);
+            }}
+            disabled={uploading}
+          >
             {uploading ? (
               <ActivityIndicator color={colors.textMuted} />
             ) : (
-              <Text style={styles.captureText}>{captured ? `${method} captured ✓` : `Tap to capture ${method}`}</Text>
+              <Text style={styles.captureText}>
+                {method === 'signature'
+                  ? signatureUrl
+                    ? 'signature captured ✓'
+                    : 'Tap to capture signature'
+                  : photosRequired > 1
+                    ? `Photo ${photoUrls.length} of ${photosRequired} — tap to add${
+                        proof?.photo_subjects[photoUrls.length]
+                          ? `: ${proof.photo_subjects[photoUrls.length]}`
+                          : ''
+                      }`
+                    : photoUrls.length > 0
+                      ? 'photo captured ✓'
+                      : 'Tap to capture photo'}
+              </Text>
             )}
           </Pressable>
+
+          {/* A retake, not an undo of the whole set - a driver whose fourth photo
+              came out blurred should not lose the first three. */}
+          {method === 'photo' && photoUrls.length > 0 && (
+            <Pressable onPress={onRemoveLastPhoto} style={styles.retake}>
+              <Text style={styles.retakeLabel}>Retake the last photo</Text>
+            </Pressable>
+          )}
+
+          {/* A signature can be required on top of photos, so it needs its own way
+              in rather than only being reachable by switching method. */}
+          {method === 'photo' && signatureRequired && (
+            <Pressable
+              onPress={() => {
+                setCaptureKind('signature');
+                setModalOpen(true);
+              }}
+              style={styles.retake}
+              disabled={uploading}
+            >
+              <Text style={styles.retakeLabel}>
+                {signatureUrl ? 'Signature captured ✓ — redo' : 'Add the signature'}
+              </Text>
+            </Pressable>
+          )}
+
           {uploadError && <Text style={styles.errorText}>{uploadError}</Text>}
         </>
       ) : (
@@ -120,10 +212,12 @@ export function PodCapture({
 
       <Button label="Complete delivery" onPress={onSubmit} loading={busy} disabled={!canSubmit} />
 
-      {method === 'photo' && (
+      {/* Keyed off what the driver asked to capture rather than the method, since a
+          photo-method delivery can still need a signature on top. */}
+      {captureKind === 'photo' && (
         <PhotoCaptureModal visible={modalOpen} onCaptured={handlePhotoCaptured} onCancel={() => setModalOpen(false)} />
       )}
-      {method === 'signature' && (
+      {captureKind === 'signature' && (
         <SignaturePadModal visible={modalOpen} onCaptured={handleSignatureCaptured} onCancel={() => setModalOpen(false)} />
       )}
     </View>
@@ -139,6 +233,16 @@ const makeStyles = (colors: ColorScheme) =>
     segmentLabel: { color: colors.textPrimary, fontWeight: '600' },
     segmentLabelActive: { color: colors.primaryText },
     captureText: { ...typography.small, color: colors.textMuted },
+    requirement: {
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: radius.md,
+      padding: spacing.md,
+      marginBottom: spacing.md,
+    },
+    requirementTitle: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
+    requirementLine: { ...typography.small, color: colors.textSecondary },
+    retake: { paddingVertical: spacing.sm, alignItems: 'center' },
+    retakeLabel: { ...typography.small, color: colors.accent, fontWeight: '600' },
     errorText: { ...typography.small, color: colors.danger, marginTop: -spacing.md, marginBottom: spacing.md },
     capturePlaceholder: {
       height: 140,

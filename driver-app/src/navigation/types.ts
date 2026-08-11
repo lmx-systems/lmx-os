@@ -1,3 +1,5 @@
+import type { NavigatorScreenParams } from '@react-navigation/native';
+
 export type AuthStackParamList = {
   SignIn: undefined;
   VerifyCode: { phone: string; debugCode: string | null };
@@ -41,8 +43,12 @@ export type EarningsStackParamList = {
   TripHistory: undefined;
 };
 
+// Typed as nested navigator params rather than `undefined` so a screen in one
+// tab can send the driver to a screen in another - the compliance banner on
+// Home needs to reach Documents under Profile, and `undefined` made that
+// unexpressible without a cast.
 export type MainTabParamList = {
-  HomeTab: undefined;
-  EarningsTab: undefined;
-  ProfileTab: undefined;
+  HomeTab: NavigatorScreenParams<HomeStackParamList> | undefined;
+  EarningsTab: NavigatorScreenParams<EarningsStackParamList> | undefined;
+  ProfileTab: NavigatorScreenParams<ProfileStackParamList> | undefined;
 };

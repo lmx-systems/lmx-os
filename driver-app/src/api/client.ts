@@ -3,7 +3,9 @@ import Constants from 'expo-constants';
 import type {
   AuthToken,
   Call,
+  CodMethod,
   DocType,
+  DriverCompliance,
   DriverDocument,
   DriverProfile,
   Earnings,
@@ -120,7 +122,31 @@ export const api = {
 
   getMyDocuments: () => request<DriverDocument[]>('/driver/me/documents'),
 
-  updateDocument: (docType: DocType, body: { expires_at: string; file_url?: string }) =>
+  // Why the go-online toggle is refusing. Read up front so the app can explain
+  // the block instead of letting the driver discover it by tapping and getting a
+  // 409 - and it is the SAME computation the gate uses, not the app's guess.
+  getMyCompliance: () => request<DriverCompliance>('/driver/me/compliance'),
+
+  // Somewhere to PUT a photo of a licence or insurance card.
+  //
+  // **The driver no longer names their own file_url**, which is what this
+  // replaces: the backend mints the object key and writes the URL itself, so the
+  // record can only ever point at something LMX actually holds. Submitting a new
+  // upload resets the review - a document that was verified and then replaced is
+  // not still verified.
+  createDocumentUploadUrl: (
+    docType: DocType,
+    body: { content_type: UploadContentType; claimed_expires_at: string },
+  ) =>
+    request<UploadUrlResult>(`/driver/me/documents/${docType}/upload-url`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  // Correct the expiry date only. `file_url` is deliberately absent: it used to
+  // be settable here, and any string was accepted and stored as a licence scan.
+  // Changing the claimed date sends the document back for review.
+  updateDocument: (docType: DocType, body: { claimed_expires_at: string }) =>
     request<DriverDocument>(`/driver/me/documents/${docType}`, {
       method: 'PUT',
       body: JSON.stringify(body),
@@ -149,9 +175,36 @@ export const api = {
       body: JSON.stringify({ kind, content_type: contentType }),
     }),
 
+  // Cash on delivery (docs/ROADMAP.md W2). **There is no amount parameter, and
+  // that absence is the rule**: the figure comes off the order, so "collected"
+  // can only mean all of it. The money is the distributor's invoice to their own
+  // customer and nobody at LMX has authority to discount it.
+  collectCod: (stopId: string, method: CodMethod) =>
+    request<Route['stops'][number]>(`/driver/stops/${stopId}/collect-cod`, {
+      method: 'POST',
+      body: JSON.stringify({ method }),
+    }),
+
+  // One tap, the distributor is told, the driver moves on.
+  raiseCodDispute: (stopId: string, note?: string) =>
+    request<Route['stops'][number]>(`/driver/stops/${stopId}/cod-dispute`, {
+      method: 'POST',
+      body: JSON.stringify({ note: note ?? null }),
+    }),
+
   completeStop: (
     stopId: string,
-    body: { method: PodMethod; photo_url?: string; signature_url?: string; pin?: string; left_at?: string },
+    body: {
+      method: PodMethod;
+      // Several, because an order can require more than one photo with named
+      // subjects. `photo_url` is still accepted by the server and folded in as
+      // the first photo, but sending the list is what satisfies a count above one.
+      photo_urls?: string[];
+      photo_url?: string;
+      signature_url?: string;
+      pin?: string;
+      left_at?: string;
+    },
   ) =>
     request<Route['stops'][number]>(`/driver/stops/${stopId}/complete`, {
       method: 'POST',

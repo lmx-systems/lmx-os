@@ -34,9 +34,34 @@ export type DocType = 'license' | 'insurance';
 
 export interface DriverDocument {
   doc_type: DocType;
-  // ISO date string (YYYY-MM-DD), matches Python's date serialization.
-  expires_at: string;
+  // What the DRIVER typed. Recorded as a claim and read by no gate - see
+  // app/models/driver_document.py. Kept visible so a rejection is legible
+  // ("you told us March, the card says January").
+  claimed_expires_at: string;
+  // What an LMX reviewer read off the document. Null until reviewed, and the
+  // only date that opens the go-online gate.
+  verified_expires_at: string | null;
+  review_status: 'pending' | 'verified' | 'rejected';
+  rejection_reason: string | null;
   file_url: string | null;
+  // Whether this document currently supports going on shift. Computed by the
+  // server so the app cannot arrive at a different answer than the gate does.
+  is_usable: boolean;
+}
+
+// Why the "go online" toggle is refusing, in the driver's language. Same
+// computation the gate itself uses, so the two can never disagree.
+export interface DriverComplianceProblem {
+  doc_type: string;
+  // missing | awaiting_review | rejected | expired - branch on this rather than
+  // parsing the sentence.
+  reason: 'missing' | 'awaiting_review' | 'rejected' | 'expired';
+  detail: string;
+}
+
+export interface DriverCompliance {
+  can_go_on_shift: boolean;
+  problems: DriverComplianceProblem[];
 }
 
 export interface OfferStopSummary {
@@ -80,7 +105,32 @@ export interface Stop {
   left_at: string | null;
   failure_reason: FlagReasonCode | null;
   flag_note: string | null;
+  // What proof THIS stop needs (docs/LMX_LINK_PLAN.md §1.2). Sent with the stop
+  // rather than discovered on rejection: a driver who finds out at the door that
+  // this client wanted four photos has already put the box down.
+  proof: StopProofRequirement | null;
+  // Money owed here, if any. Empty for the overwhelming majority of stops.
+  cod: CodObligation[];
 }
+
+export interface StopProofRequirement {
+  photo_count_required: number;
+  // The whole reason a count above one exists - "four photos" without saying of
+  // what produces four pictures of a doorstep.
+  photo_subjects: string[];
+  signature_required: boolean;
+}
+
+export interface CodObligation {
+  order_id: string;
+  amount_due_cents: number;
+  // Both a collection and a dispute settle it: the rule is "keep moving", so a
+  // driver is not held at a door by an unresolved dispute.
+  settled: boolean;
+  outcome: 'collected' | 'disputed' | null;
+}
+
+export type CodMethod = 'cash' | 'check';
 
 // Mirrors app/schemas/driver_app.py's StopFailureReason enum.
 export type FlagReasonCode = 'SHOP_CLOSED' | 'ACCESS_ISSUE' | 'COD_DISPUTE' | 'PARTS_MISSING' | 'REFUSED';

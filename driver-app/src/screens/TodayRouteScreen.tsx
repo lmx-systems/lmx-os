@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Switch, Text, View, StyleSheet } from 'react-native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { api, ApiError } from '../api/client';
@@ -7,9 +8,11 @@ import { useAuth } from '../auth/AuthContext';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { OfferBanner } from '../components/OfferBanner';
+import { ComplianceBanner } from '../components/ComplianceBanner';
 import { RouteChangeBanner } from '../components/RouteChangeBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
-import type { HomeStackParamList } from '../navigation/types';
+import type { DriverCompliance } from '../api/types';
+import type { HomeStackParamList, MainTabParamList } from '../navigation/types';
 import { startReportingLocation, stopReportingLocation } from '../location/reportDriverLocation';
 import type { RouteChangeEvent } from '../realtime/routeEventsClient';
 import { useRouteEvents } from '../realtime/useRouteEvents';
@@ -33,6 +36,10 @@ export function TodayRouteScreen({ navigation }: Props) {
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [selectedOfferId, setSelectedOfferId] = useState<string | null>(null);
   const [routeChangeEvent, setRouteChangeEvent] = useState<RouteChangeEvent | null>(null);
+  // Read up front so a blocked driver is told WHY rather than discovering it by
+  // tapping the toggle and getting a 409 (docs/ROADMAP.md R4). Same computation
+  // the gate uses, so the banner and the refusal can never disagree.
+  const [compliance, setCompliance] = useState<DriverCompliance | null>(null);
 
   useRouteEvents(route?.route_id ?? null, useCallback((event) => setRouteChangeEvent(event), []));
 
@@ -50,6 +57,19 @@ export function TodayRouteScreen({ navigation }: Props) {
     return stopReportingLocation;
   }, [isOnline]);
 
+  const loadCompliance = useCallback(async () => {
+    try {
+      setCompliance(await api.getMyCompliance());
+    } catch {
+      // Non-fatal: the gate still refuses correctly, the driver just gets the
+      // 409's text instead of the banner. Not worth failing the screen over.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCompliance();
+  }, [loadCompliance]);
+
   async function handleToggle(value: boolean) {
     setTogglingOnline(true);
     setToggleError(null);
@@ -60,6 +80,10 @@ export function TodayRouteScreen({ navigation }: Props) {
       // Most likely a 409 from app/api/driver_routes.py's going-online gate
       // (an expired or missing document - screen 1r's compliance section).
       setToggleError(err instanceof ApiError ? err.message : 'Could not go online - try again.');
+      // Re-read it: the most likely cause is a compliance change since the screen
+      // loaded (a document expiring overnight, or a review coming back), and the
+      // banner should reflect that rather than staying stale behind the error.
+      void loadCompliance();
     } finally {
       setTogglingOnline(false);
     }
@@ -85,6 +109,20 @@ export function TodayRouteScreen({ navigation }: Props) {
         </View>
         <Switch value={isOnline} onValueChange={handleToggle} disabled={togglingOnline} />
       </View>
+
+      {compliance && !compliance.can_go_on_shift && (
+        <ComplianceBanner
+          compliance={compliance}
+          // Documents lives in the Profile stack under a different tab, so this
+          // crosses navigators rather than pushing within Home's - getParent()
+          // is what makes that reachable from here.
+          onOpenDocuments={() =>
+            navigation
+              .getParent<BottomTabNavigationProp<MainTabParamList>>()
+              ?.navigate('ProfileTab', { screen: 'Documents' })
+          }
+        />
+      )}
 
       {toggleError && <Text style={styles.error}>{toggleError}</Text>}
 
