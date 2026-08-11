@@ -30,7 +30,7 @@ acceptance record is worth in a dispute.
 | `TERMS_VERSION = 'v1'` lived in `SignupPage.tsx` and was **sent to the server**, which stored whatever arrived. The only evidence of what an applicant agreed to was written by the applicant's browser. | The version is declared in the document's own front matter. `app/legal/documents.py` is the only place it is read from, and the endpoint writes the server's value. |
 | Nothing compared the submitted version to the current one. A form left open across a terms change would silently record assent to text the applicant never saw. | A mismatch is a 409 and nothing is written. The applicant reloads and reads the new version. |
 | Nothing checked a document existed. The checkbox named two documents in plain text with nowhere to go and read them. | Both are served and linked. A draft renders with a banner saying it is a draft and applies to nobody. |
-| Nothing deleted anything, ever. | `POST /internal/retention/prune` deletes driver location trails past the retention period the privacy policy states. |
+| Nothing deleted anything, ever. | `POST /internal/retention/prune` runs three sweeps daily — location trails, message and call metadata, and declined applications — against the periods the privacy policy states. Two image categories remain, and are bracketed in the policy so it cannot be published while they are unenforced. |
 
 `grep -n '\[[A-Z]' app/legal/content/*.md` is the complete list of holes in the drafts.
 Each one is a bracketed block of capitals saying what it is waiting on, and a test
@@ -83,23 +83,31 @@ checks.
 
 | Data | Proposed | Enforced today? |
 |---|---|---|
-| Driver location trail | 90 days | **Yes** — `settings.location_ping_retention_days`, pruned by `POST /internal/retention/prune`. Needs a daily schedule (below) |
+| Driver location trail | 90 days | **Yes** — `settings.location_ping_retention_days` |
+| SMS and call records | 2 years | **Yes** — `settings.communication_retention_days`. Metadata only; call content is never recorded |
+| Declined applications | 12 months | **Yes** — `settings.declined_application_retention_days`. Deletes the application and its inactive login |
 | Recipient tracking links | Dead ~24h after delivery | **Yes** — `settings.tracking_link_grace_hours` |
-| Delivery and billing records (incl. recipient name and address) | Account life + 7 years | No mechanism, and none needed yet — nothing deletes them |
-| Proof-of-delivery photos and signatures | 2 years | **No.** Object storage. Belongs in a bucket lifecycle rule, not an application loop. **Outstanding** |
-| Driver licence and insurance images | While engaged + 4 years | **No.** Same — object storage lifecycle. **Outstanding** |
-| SMS and call records | 2 years | **No.** No mechanism yet |
-| Declined applications | 12 months | **No.** No mechanism yet |
+| Delivery and billing records (incl. recipient name and address) | Account life + 7 years | No mechanism, and none needed — nothing deletes them |
+| Proof-of-delivery photos and signatures | **Undecided** | **No.** Object storage — a bucket lifecycle rule, not an application loop. **Outstanding, and it needs your number** |
+| Driver licence and insurance images | **Undecided** | **No.** Same. **Outstanding** |
 
-Two things follow. The location number is the only one that must agree with code —
-`settings.location_ping_retention_days` and the sentence in the policy have to move
-together. And the four unenforced rows are either a lifecycle rule to configure or a
-sweep to write; if counsel wants to state them, they need building first, and if we
-would rather not commit yet the policy should be vaguer instead.
+The first four run daily via `POST /internal/retention/prune`, which reports what it
+deleted per category rather than returning `ok` — "the sweep ran" and "the sweep deleted
+the rows it should have" are different claims.
 
-The proof-of-delivery period interacts with the claim window in decision 1. Deleting the
-photograph of a delivery before the client can still claim for it would be an
-own-goal — **whatever the claim window is, proof retention must be longer.**
+The two outstanding rows are now **bracketed placeholders in the policy itself**, so the
+publish-time check refuses the document until either a lifecycle rule exists or the
+sentence is softened. That was deliberate: a policy stating a period nothing enforces is
+worse than a policy that says less.
+
+Three of these numbers now have to agree with code — the settings named above and the
+sentences in the policy move together, or the document lies. What we need from you is the
+**two undecided image-retention periods**, because they cannot be guessed:
+
+**The proof-of-delivery period interacts with the claim window in decision 1.** Deleting
+the photograph of a delivery before the client can still claim for it would be an
+own-goal, so **whatever the claim window is, proof retention must be longer.** That makes
+these two questions one question, and the insurance conversation answers it first.
 
 ### 4. Sub-processors, contact details, governing law
 

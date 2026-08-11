@@ -58,7 +58,9 @@ shortly after your delivery is completed.
 
 **How long.** Delivery records, including your name and address, are kept for seven
 years as part of the business record of the delivery. Photographs and signatures
-taken as proof of delivery are kept for two years and then deleted.
+taken as proof of delivery are kept for
+**[PROOF-OF-DELIVERY IMAGE RETENTION — pending a storage lifecycle rule, and it must
+outlast the claim window in the terms]** and then deleted.
 
 ## 3. Drivers
 
@@ -77,8 +79,9 @@ location when you are off duty.**
 work, to pay you, and to resolve disputes about a delivery.
 
 **How long.** Your location history is kept for ninety days and then deleted
-automatically. Your licence and insurance documents are kept while you drive for us
-and then for four years. Delivery and payment records are kept for seven years.
+automatically. Your licence and insurance documents are kept while you drive for us and
+then for **[DRIVER DOCUMENT RETENTION — pending a storage lifecycle rule]**. Delivery and
+payment records are kept for seven years.
 
 ## 4. Text messages and calls
 

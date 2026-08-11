@@ -54,6 +54,14 @@ class Client(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
 
+    # When the application was declined (migration 0041). This is what the twelve-month
+    # retention on declined applications runs from - see app/legal/retention.py. Set once
+    # by the reject endpoint; deliberately not `updated_at`, which any later write to the
+    # row would move, restarting somebody's retention clock by accident.
+    rejected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     terms_accepted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

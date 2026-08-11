@@ -77,8 +77,10 @@ CODE_CHANGES = [
         "Nothing was ever deleted",
         "No retention mechanism of any kind existed, so any period a policy stated "
         "would have been untrue from the day it was published.",
-        "A scheduled sweep deletes driver location trails past the stated period. Four "
-        "other categories are named below as not yet enforced.",
+        "A daily sweep deletes location trails, message and call metadata, and declined "
+        "applications against the stated periods. The two image categories that remain "
+        "are bracketed in the policy, so it cannot be published while they are "
+        "unenforced.",
     ],
 ]
 
@@ -93,12 +95,18 @@ INSURANCE = [
 ]
 
 RETENTION = [
+    ["Driver location trail", "90 days", "**Yes** - daily sweep"],
     [
-        "Driver location trail",
-        "90 days",
-        "Yes - pruned by a scheduled sweep. Needs the daily schedule set up",
+        "Messages and call metadata",
+        "2 years",
+        "**Yes** - daily sweep. Metadata only; call content is never recorded",
     ],
-    ["Recipient tracking links", "Dead ~24h after delivery", "Yes"],
+    [
+        "Declined applications",
+        "12 months",
+        "**Yes** - daily sweep. Deletes the application and its inactive login",
+    ],
+    ["Recipient tracking links", "Dead ~24h after delivery", "**Yes**"],
     [
         "Delivery and billing records, including recipient name and address",
         "Account life + 7 years",
@@ -106,17 +114,15 @@ RETENTION = [
     ],
     [
         "Proof-of-delivery photos and signatures",
-        "2 years",
-        "**No.** Object storage - belongs in a bucket lifecycle rule, not an "
-        "application loop. Outstanding",
+        "**Undecided - we need your number**",
+        "**No.** Object storage - a bucket lifecycle rule, not an application loop. "
+        "Must outlast the claim window in decision 1",
     ],
     [
         "Driver licence and insurance images",
-        "While engaged + 4 years",
-        "**No.** Same - storage lifecycle. Outstanding",
+        "**Undecided**",
+        "**No.** Same - storage lifecycle",
     ],
-    ["SMS and call records", "2 years", "**No.** No mechanism yet"],
-    ["Declined applications", "12 months", "**No.** No mechanism yet"],
 ]
 
 TERMS_CLAUSES = [
@@ -286,17 +292,19 @@ def build(out: Path) -> None:
     sub(doc, "3.  Retention periods - the privacy policy states these as facts")
     body(
         doc,
-        "Every period below is **proposed by us, not decided**. The third column is what "
-        "actually happens today, which is the part that matters: a policy stating a "
-        "period nothing enforces is a promise about a thing that never happens.",
+        "The third column is what actually happens today, which is the part that matters: "
+        "a policy stating a period nothing enforces is a promise about a thing that never "
+        "happens. The first four are enforced by a daily sweep. **The two image "
+        "categories are the ones we need a number for.**",
     )
     table(doc, ["Data", "Proposed", "Enforced today?"], RETENTION)
     body(
         doc,
-        "Two things follow. The location figure is the only one that must agree with a "
-        "setting in our code, so that number and the sentence in the policy have to move "
-        "together. And the four unenforced rows either get built before the policy "
-        "states them, or the policy should be vaguer instead - please tell us which.",
+        "The enforced periods each correspond to a setting in our code, so those numbers "
+        "and the sentences in the policy move together or the document lies. The two "
+        "unenforced ones are currently bracketed placeholders in the policy itself, which "
+        "means our publish-time check refuses the document until either the mechanism "
+        "exists or the sentence is softened.",
     )
     body(
         doc,

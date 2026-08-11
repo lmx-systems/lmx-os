@@ -29,9 +29,15 @@ import app.legal.documents as legal
 from app.api.internal_routes import prune_retained_data
 from app.api.public_routes import client_signup, legal_document_body, legal_documents
 from app.config import settings
-from app.legal.retention import prune_location_pings
+from app.legal.retention import (
+    prune_all,
+    prune_communications,
+    prune_declined_applications,
+    prune_location_pings,
+)
 from app.models.client import Client
 from app.models.driver_location_ping import DriverLocationPing
+from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.models.hub import Hub
 from app.schemas.signup import ClientSignupBody
 
@@ -292,6 +298,207 @@ async def test_the_retention_route_returns_what_it_deleted(db_session, monkeypat
     await _seed_driver_with_pings(db_session, [45, 2])
 
     result = await prune_retained_data(session=db_session)
+    assert result["location_pings"]["deleted"] == 1
+    assert result["location_pings"]["retention_days"] == 30
+    assert result["location_pings"]["cutoff"]
+    # Every category reports, so an operator can tell which sweep actually ran.
+    assert set(result) == {"location_pings", "communications", "declined_applications"}
+
+
+# ---------------------------------------------------------------------------
+# 5. The other two retention sweeps
+# ---------------------------------------------------------------------------
+
+
+async def _seed_message(db_session, *, age_days: int):
+    from app.models.driver import Driver
+    from app.models.message import Message
+
+    hub_id = await _seed_hub(db_session)
+    driver_id = uuid.uuid4()
+    db_session.add(
+        Driver(
+            id=driver_id,
+            hub_id=hub_id,
+            name="Sam Okafor",
+            phone=f"+1512555{uuid.uuid4().int % 9000:04d}",
+        )
+    )
+    await db_session.flush()
+    msg = Message(
+        hub_id=hub_id,
+        driver_id=driver_id,
+        channel="driver",
+        direction="outbound",
+        body="Your code is 123456",
+        counterparty_phone="+15125550142",
+        created_at=datetime.now(timezone.utc) - timedelta(days=age_days),
+    )
+    db_session.add(msg)
+    await db_session.commit()
+    return msg
+
+
+async def test_old_messages_are_deleted_and_recent_ones_are_not(db_session, monkeypatch):
+    """The policy says two years for what we texted and to which number."""
+    from app.models.message import Message
+
+    monkeypatch.setattr(settings, "communication_retention_days", 730)
+    await _seed_message(db_session, age_days=800)
+    await _seed_message(db_session, age_days=10)
+
+    result = await prune_communications(db_session)
+    assert result["messages_deleted"] == 1
+    remaining = (await db_session.execute(select(Message))).scalars().all()
+    assert len(remaining) == 1
+
+
+async def test_a_message_that_never_sent_is_still_pruned(db_session, monkeypatch):
+    """Keyed on `created_at`, not a send timestamp.
+
+    A message that failed to send has no send timestamp. Keying on one would keep
+    exactly the rows least worth keeping, forever.
+    """
+    from app.models.message import Message
+
+    monkeypatch.setattr(settings, "communication_retention_days", 30)
+    msg = await _seed_message(db_session, age_days=90)
+    msg.sent_at = None
+    await db_session.commit()
+
+    assert (await prune_communications(db_session))["messages_deleted"] == 1
+    assert (await db_session.execute(select(Message))).scalars().all() == []
+
+
+async def _seed_declined(db_session, *, rejected_days_ago: int | None):
+    """A declined application, exactly as signup + rejection leaves it."""
+    hub_id = await _seed_hub(db_session)
+    client = Client(
+        hub_id=hub_id,
+        name="Turned Down Auto",
+        pos_system="client_portal",
+        signup_status="rejected",
+        service_area="Austin metro",
+        rejected_at=(
+            None
+            if rejected_days_ago is None
+            else datetime.now(timezone.utc) - timedelta(days=rejected_days_ago)
+        ),
+    )
+    db_session.add(client)
+    await db_session.flush()
+    # The inactive user signup created. This is the only owned row a real declined
+    # applicant has, and it has to go with the client or the delete fails on its FK.
+    db_session.add(
+        ClientUser(
+            client_id=client.id,
+            email=f"declined-{uuid.uuid4().hex[:8]}@example.com",
+            password_hash="x" * 60,
+            name="Jordan Rivera",
+            role=CLIENT_ADMIN_ROLE,
+            is_active=False,
+        )
+    )
+    await db_session.commit()
+    return client
+
+
+async def test_an_old_declined_application_is_deleted_with_its_user(db_session, monkeypatch):
+    monkeypatch.setattr(settings, "declined_application_retention_days", 365)
+    client = await _seed_declined(db_session, rejected_days_ago=400)
+
+    result = await prune_declined_applications(db_session)
     assert result["deleted"] == 1
-    assert result["retention_days"] == 30
-    assert result["cutoff"]
+    assert (await db_session.execute(select(Client))).scalars().all() == []
+    # The user goes too - a login row for a company we deleted is the worst of both.
+    assert (await db_session.execute(select(ClientUser))).scalars().all() == []
+    assert await db_session.get(Client, client.id) is None
+
+
+async def test_a_recent_rejection_is_kept(db_session, monkeypatch):
+    """Long enough to recognise a second application from the same company."""
+    monkeypatch.setattr(settings, "declined_application_retention_days", 365)
+    await _seed_declined(db_session, rejected_days_ago=30)
+    assert (await prune_declined_applications(db_session))["deleted"] == 0
+    assert len((await db_session.execute(select(Client))).scalars().all()) == 1
+
+
+async def test_an_undated_rejection_is_never_deleted_but_is_counted(db_session, monkeypatch):
+    """Rejections recorded before migration 0041 have no date.
+
+    The sweep will not invent one - deleting on a guess destroys a record early, and
+    keeping it silently hides a stuck row. It reports the count instead.
+    """
+    monkeypatch.setattr(settings, "declined_application_retention_days", 365)
+    await _seed_declined(db_session, rejected_days_ago=None)
+
+    result = await prune_declined_applications(db_session)
+    assert result["deleted"] == 0
+    assert result["skipped_undated"] == 1
+    assert len((await db_session.execute(select(Client))).scalars().all()) == 1
+
+
+async def test_a_declined_applicant_holding_records_is_left_alone(db_session, monkeypatch):
+    """The last line of defence.
+
+    A rejected client cannot order - `POST /client/orders` is gated on active status - so
+    an order here means a bug or a hand-edited status. Deleting is the wrong response to a
+    surprise, and it would destroy a business record we are meant to keep for seven years.
+    """
+    from app.models.order import Order, OrderStatus
+
+    monkeypatch.setattr(settings, "declined_application_retention_days", 365)
+    client = await _seed_declined(db_session, rejected_days_ago=400)
+    db_session.add(
+        Order(
+            hub_id=client.hub_id,
+            client_id=client.id,
+            external_order_ref=f"ORD-{uuid.uuid4().hex[:8]}",
+            source_order_ref=f"REF-{uuid.uuid4().hex[:8]}",
+            source_system="client_portal",
+            raw_payload={},
+            weight_units=1,
+            status=OrderStatus.received,
+            requested_at=datetime.now(timezone.utc),
+        )
+    )
+    await db_session.commit()
+
+    result = await prune_declined_applications(db_session)
+    assert result["deleted"] == 0
+    assert result["skipped_with_records"] == 1
+    assert await db_session.get(Client, client.id) is not None
+
+
+async def test_an_approved_client_is_never_touched(db_session, monkeypatch):
+    """Only `rejected` is in scope. An active customer with an old signup date is not a
+    declined application, and this sweep must not confuse the two."""
+    monkeypatch.setattr(settings, "declined_application_retention_days", 1)
+    hub_id = await _seed_hub(db_session)
+    db_session.add(
+        Client(
+            hub_id=hub_id,
+            name="Design Partner",
+            pos_system="client_portal",
+            signup_status="active",
+            rejected_at=datetime.now(timezone.utc) - timedelta(days=900),
+        )
+    )
+    await db_session.commit()
+
+    assert (await prune_declined_applications(db_session))["deleted"] == 0
+    assert len((await db_session.execute(select(Client))).scalars().all()) == 1
+
+
+async def test_prune_all_runs_every_sweep(db_session, monkeypatch):
+    monkeypatch.setattr(settings, "location_ping_retention_days", 30)
+    monkeypatch.setattr(settings, "communication_retention_days", 30)
+    monkeypatch.setattr(settings, "declined_application_retention_days", 30)
+    await _seed_driver_with_pings(db_session, [90])
+    await _seed_message(db_session, age_days=90)
+    await _seed_declined(db_session, rejected_days_ago=90)
+
+    result = await prune_all(db_session)
+    assert result["location_pings"]["deleted"] == 1
+    assert result["communications"]["messages_deleted"] == 1
+    assert result["declined_applications"]["deleted"] == 1

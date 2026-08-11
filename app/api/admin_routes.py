@@ -856,6 +856,10 @@ async def reject_signup(
         )
 
     client.signup_status = "rejected"
+    # Starts the twelve-month retention clock the privacy policy commits to
+    # (app/legal/retention.py). Without it the row is kept forever, because the sweep
+    # refuses to guess a date it was never given.
+    client.rejected_at = datetime.now(timezone.utc)
     # Deliberately not surfaced to the applicant - it is a note for whoever sees
     # them apply a second time.
     logger.info("signup_rejected", client_id=client_id, reason=body.reason)

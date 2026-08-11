@@ -47,7 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.client_ip import client_ip
 from app.config import settings
 from app.db import get_db
-from app.legal.retention import prune_location_pings
+from app.legal.retention import prune_all
 from app.health.checks import evaluate
 from app.webhooks.delivery import deliver_pending
 from app.learning_loop.service import run_nightly_job
@@ -156,21 +156,27 @@ async def deliver_pending_webhooks(session: AsyncSession = Depends(get_db)) -> d
 
 @router.post("/retention/prune", dependencies=[Depends(require_internal_secret)])
 async def prune_retained_data(session: AsyncSession = Depends(get_db)) -> dict:
-    """Delete personal data past the retention period the privacy policy states.
+    """Delete personal data past the retention periods the privacy policy states.
 
-    Currently one table: driver location trails, which are the only personal record
-    that grows without bound (app/legal/retention.py explains why the others are
-    either enforced elsewhere or belong in a storage lifecycle rule).
+    Three sweeps: driver location trails, sent messages and call metadata, and
+    applications we declined. Reported per category rather than as one total, because
+    "deleted 4000 rows" tells an operator nothing about whether the sweep that matters
+    actually ran.
 
     **The privacy policy is the specification for this endpoint**, not the other way
-    round. `settings.location_ping_retention_days` is the number printed in
-    app/legal/content/privacy.md, so the two move together or the document is lying.
+    round. Every period is a `settings.*_retention_days` value that is also a number
+    printed in app/legal/content/privacy.md, so the two move together or the document
+    is lying.
 
     Wants a daily schedule. Safe to over-call - a run with nothing due is one indexed
-    count - and safe to miss for a day, since the promise is a retention period rather
-    than a deletion deadline measured in hours.
+    count per category - and safe to miss for a day, since these are retention periods
+    rather than deletion deadlines measured in hours.
+
+    Two categories are deliberately absent and tracked in docs/LEGAL_BRIEF.md:
+    proof-of-delivery images and driver documents live in object storage, where a bucket
+    lifecycle rule is the right mechanism rather than an application loop.
     """
-    return await prune_location_pings(session)
+    return await prune_all(session)
 
 
 @router.get("/health/dispatch", dependencies=[Depends(require_internal_secret)])

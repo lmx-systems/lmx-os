@@ -173,18 +173,26 @@ over-call: a sweep with nothing due is one indexed query.
 
 ### 4c. Add the retention sweep to Cloud Scheduler
 
-One more, daily rather than every five minutes: `POST /internal/retention/prune`
-deletes driver location trails past `LOCATION_PING_RETENTION_DAYS`
-(app/legal/retention.py, docs/LEGAL_BRIEF.md).
+One more, daily rather than every five minutes: `POST /internal/retention/prune` runs
+three sweeps (app/legal/retention.py, docs/LEGAL_BRIEF.md) —
 
-**This one is a promise, not an optimisation.** The privacy policy states the
-retention period as a fact, so the schedule has to exist before the policy is
-published — a stated period nothing enforces is worse than no statement. Safe to
-over-call and safe to miss for a day: the commitment is a period, not a deadline
-measured in hours.
+| Sweep | Setting |
+|---|---|
+| Driver location trails | `LOCATION_PING_RETENTION_DAYS` (90) |
+| Sent messages and call metadata | `COMMUNICATION_RETENTION_DAYS` (730) |
+| Declined applications and their inactive logins | `DECLINED_APPLICATION_RETENTION_DAYS` (365) |
 
-Nothing pages if this stops. Worth glancing at the returned `deleted` count
-occasionally, which is why the endpoint reports it rather than `ok`.
+**These are promises, not optimisations.** Every one of those numbers is printed in the
+privacy policy as a fact, so the schedule has to exist before the policy is published — a
+stated period nothing enforces is worse than no statement. Safe to over-call and safe to
+miss for a day: the commitment is a period, not a deadline measured in hours.
+
+Nothing pages if this stops. The response reports each category separately rather than
+`ok`, so a glance tells you which sweep actually did anything. Two fields worth noticing
+on the declined-applications sweep: `skipped_undated` (rejections recorded before migration
+0041, which have no date and are never guessed at) and `skipped_with_records` (a rejected
+applicant holding orders or invoices — a bug upstream, and deleting is the wrong response
+to a surprise).
 
 ### 5. Alert on the deployment itself
 

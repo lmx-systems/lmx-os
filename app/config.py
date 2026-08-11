@@ -208,10 +208,20 @@ class Settings(BaseSettings):
     # publish the documents.
     allow_unpublished_terms: bool = False
 
-    # How long a driver's location trail is kept before it is pruned
-    # (app/legal/retention.py). This is the number the privacy policy states, so
-    # changing it here changes a published promise - the two have to move together.
+    # Retention periods (app/legal/retention.py).
+    #
+    # EVERY NUMBER HERE IS PRINTED IN app/legal/content/privacy.md. Changing one without
+    # the other makes the document lie, which is worse than having no policy - so treat
+    # these as edits to a published promise rather than as tuning knobs.
+    #
+    # A driver's location trail. The only personal record that grows without bound.
     location_ping_retention_days: int = 90
+    # Sent messages and call metadata. Never call content, which is not recorded.
+    communication_retention_days: int = 730
+    # Applications we declined. Long enough to recognise a second application from the
+    # same company, short enough that a company we said no to is not on our books
+    # indefinitely.
+    declined_application_retention_days: int = 365
 
     # Geocoding (app/geocoding/) - turns a typed address into coordinates so
     # LMX Link's ad-hoc pickup works without anyone pre-registering a shop.
