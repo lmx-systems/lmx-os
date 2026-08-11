@@ -27,6 +27,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 
 from app.delivery.proof import (
     ProofNotSatisfied,
@@ -392,3 +393,99 @@ async def test_the_route_tells_the_app_what_proof_each_stop_needs(
     assert dropoff.proof.photo_count_required == 2
     assert dropoff.proof.photo_subjects == ["box"]
     assert dropoff.proof.signature_required is True
+
+
+# ---------------------------------------------------------------------------
+# The path the driver app actually takes
+# ---------------------------------------------------------------------------
+
+
+async def test_a_multi_photo_requirement_completes_with_photo_urls(
+    db_session, real_redis_client
+):
+    """**The exact call the app now makes.** It used to send a single `photo_url`, so
+    an order requiring several was impossible to complete from the phone - a 422 with
+    no way forward. This pins the contract the rebuilt `PodCapture` depends on:
+    collect N photos, send the list, and the completion is accepted."""
+    from app.api.driver_routes import complete_stop
+    from app.driver_auth.dependencies import AuthedDriver
+    from app.models.route import Route
+    from app.schemas.driver_app import CompleteStopBody
+
+    hub_id, client_id, shop_id = await _seed(db_session)
+    stop = await _stop_with_orders(
+        db_session,
+        hub_id,
+        client_id,
+        shop_id,
+        [{"photo_count_required": 3, "photo_subjects": ["box", "label", "door"]}],
+    )
+    route = await db_session.get(Route, stop.route_id)
+    authed = AuthedDriver(
+        driver_id=str(route.driver_id), hub_id=str(hub_id), device_id="test-device"
+    )
+
+    # Two of three: still refused, and the message names what is missing.
+    with pytest.raises(HTTPException) as exc_info:
+        await complete_stop(
+            str(stop.id),
+            CompleteStopBody(method="photo", photo_urls=["a.jpg", "b.jpg"]),
+            driver=authed,
+            session=db_session,
+        )
+    assert exc_info.value.status_code == 422
+    assert "1 more photo" in exc_info.value.detail
+
+    view = await complete_stop(
+        str(stop.id),
+        CompleteStopBody(method="photo", photo_urls=["a.jpg", "b.jpg", "c.jpg"]),
+        driver=authed,
+        session=db_session,
+    )
+
+    assert view.status == "completed"
+    # Every photo kept, not just the first - otherwise we insisted on evidence we
+    # then failed to store.
+    await db_session.refresh(stop)
+    assert stop.pod_photo_urls == ["a.jpg", "b.jpg", "c.jpg"]
+
+
+async def test_a_signature_can_be_required_alongside_photos(db_session, real_redis_client):
+    """The app now sends both fields on every completion rather than only the one
+    matching the chosen method, because a photo-method delivery can still need a
+    signature. This is why."""
+    from app.api.driver_routes import complete_stop
+    from app.driver_auth.dependencies import AuthedDriver
+    from app.models.route import Route
+    from app.schemas.driver_app import CompleteStopBody
+
+    hub_id, client_id, shop_id = await _seed(db_session)
+    stop = await _stop_with_orders(
+        db_session,
+        hub_id,
+        client_id,
+        shop_id,
+        [{"photo_count_required": 1, "signature_required": True}],
+    )
+    route = await db_session.get(Route, stop.route_id)
+    authed = AuthedDriver(
+        driver_id=str(route.driver_id), hub_id=str(hub_id), device_id="test-device"
+    )
+
+    with pytest.raises(HTTPException):
+        await complete_stop(
+            str(stop.id),
+            CompleteStopBody(method="photo", photo_urls=["a.jpg"]),
+            driver=authed,
+            session=db_session,
+        )
+
+    view = await complete_stop(
+        str(stop.id),
+        CompleteStopBody(
+            method="photo", photo_urls=["a.jpg"], signature_url="https://x/sig.png"
+        ),
+        driver=authed,
+        session=db_session,
+    )
+    assert view.status == "completed"

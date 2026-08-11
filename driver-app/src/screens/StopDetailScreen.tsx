@@ -7,6 +7,7 @@ import { api, ApiError } from '../api/client';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { ParcelScanPanel } from '../components/ParcelScanPanel';
+import { CodPanel } from '../components/CodPanel';
 import { PodCapture } from '../components/PodCapture';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SyncStatusPill } from '../components/SyncStatusPill';
@@ -56,7 +57,10 @@ export function StopDetailScreen({ route, navigation }: Props) {
   // uploaded URL from PodCapture (app/api/uploadCapturedFile.ts) - not
   // fabricated here anymore (docs/ROADMAP.md A3).
   const [method, setMethod] = useState<PodMethod>('photo');
-  const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
+  // A list, because an order can require several photos with named subjects, and
+  // a signature can be required on top of them rather than instead of them.
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
   const [pin, setPin] = useState('');
   const [leftAt, setLeftAt] = useState('front door');
   // PIN completion (docs/ROADMAP.md A4) is verified for real server-side
@@ -158,8 +162,12 @@ export function StopDetailScreen({ route, navigation }: Props) {
 
     await outboxManager.enqueue('complete', stopId, {
       method,
-      photo_url: method === 'photo' ? (capturedUrl ?? undefined) : undefined,
-      signature_url: method === 'signature' ? (capturedUrl ?? undefined) : undefined,
+      // Both, always - the server takes whatever satisfies the order's stated
+      // requirement, and a signature can be needed alongside photos rather than
+      // instead of them. Sending only the one matching `method` is what made a
+      // multi-photo order impossible to complete from here.
+      photo_urls: photoUrls.length > 0 ? photoUrls : undefined,
+      signature_url: signatureUrl ?? undefined,
       left_at: leftAt.trim() || undefined,
     });
     navigation.navigate('Home');
@@ -232,17 +240,32 @@ export function StopDetailScreen({ route, navigation }: Props) {
           <Button label="Confirm delivery" onPress={handlePickupComplete} />
         )}
 
+        {/* Money before proof, in that order on the screen, because it is the thing
+            that has to happen while the customer is still standing there - and
+            because the server refuses a completion with the cash unaccounted for
+            (app/delivery/cod.py), so offering the proof controls first would set a
+            driver up to be refused. */}
+        {action.kind === 'confirmDelivery' && stop.stop_type === 'dropoff' && stop.cod.length > 0 && (
+          <CodPanel stopId={stopId} obligations={stop.cod} onSettled={() => setLoadToken((t) => t + 1)} />
+        )}
+
         {action.kind === 'confirmDelivery' && stop.stop_type === 'dropoff' && (
           <PodCapture
             stopId={stopId}
+            proof={stop.proof}
             method={method}
             onChangeMethod={(m) => {
               setMethod(m);
-              setCapturedUrl(null);
+              // Captures are NOT discarded on a method switch any more. A driver who
+              // took two photos and then realised a signature was also needed would
+              // otherwise lose the photos by tapping across.
               setPinError(null);
             }}
-            captured={capturedUrl !== null}
-            onCapture={setCapturedUrl}
+            photoUrls={photoUrls}
+            signatureUrl={signatureUrl}
+            onCapturePhoto={(url) => setPhotoUrls((prev) => [...prev, url])}
+            onCaptureSignature={setSignatureUrl}
+            onRemoveLastPhoto={() => setPhotoUrls((prev) => prev.slice(0, -1))}
             pin={pin}
             onChangePin={(value) => {
               setPin(value);

@@ -15,8 +15,13 @@ import type { ColorScheme } from '../theme';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'ProfileHome'>;
 
-function isExpired(doc: DriverDocument): boolean {
-  return doc.expires_at < new Date().toISOString().slice(0, 10);
+// A document is a problem unless it is verified AND unexpired against the date an
+// LMX reviewer read off it (R4). Deliberately not the driver's claimed date - the
+// whole point of the review is that the claim is not the fact - and deliberately
+// `!is_usable` rather than an expiry comparison, so this agrees with the
+// go-online gate instead of reimplementing it slightly differently.
+function needsAttention(doc: DriverDocument): boolean {
+  return !doc.is_usable;
 }
 
 // Screen 1r, "Profile". Real data throughout - trip_count is a count of
@@ -44,9 +49,9 @@ export function ProfileScreen({ navigation }: Props) {
     }, []),
   );
 
-  const expiredCount = documents?.filter(isExpired).length ?? 0;
+  const documentsNeedingAttention = documents?.filter(needsAttention).length ?? 0;
   const missingCount = 2 - (documents?.length ?? 0); // license + insurance
-  const documentsNeedAttention = expiredCount > 0 || missingCount > 0;
+  const documentsNeedAttention = documentsNeedingAttention > 0 || missingCount > 0;
 
   const paymentSummary = profile?.payment_bank_last4 ? `•••• ${profile.payment_bank_last4}` : 'Not set';
 
@@ -85,7 +90,7 @@ export function ProfileScreen({ navigation }: Props) {
             <Text style={styles.rowBody}>Documents</Text>
             <Text style={[styles.rowSmall, documentsNeedAttention && styles.warningText]}>
               {documentsNeedAttention
-                ? `${expiredCount + missingCount} need${expiredCount + missingCount === 1 ? 's' : ''} attention`
+                ? `${documentsNeedingAttention + missingCount} need${documentsNeedingAttention + missingCount === 1 ? 's' : ''} attention`
                 : 'Up to date'}
             </Text>
           </View>
