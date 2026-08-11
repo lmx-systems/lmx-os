@@ -145,6 +145,37 @@ export interface ClientSignupBody {
   accepted_terms: boolean
 }
 
+// The terms and privacy policy, as the server declares them. The signup form asks
+// for these rather than holding its own version constant: app/legal/documents.py is
+// the only place a version exists, so a form that asserted one could disagree with
+// the document it is asking someone to accept.
+export interface LegalDocumentView {
+  kind: string
+  version: string
+  title: string
+  effective: string | null
+  path: string
+  published: boolean
+}
+
+export interface LegalDocumentsView {
+  terms: LegalDocumentView
+  privacy: LegalDocumentView
+  // Whether there is a real document behind the checkbox. False while either
+  // document is a draft, so the form can say so instead of collecting assent to
+  // nothing.
+  signup_open: boolean
+}
+
+export interface LegalDocumentBody {
+  kind: string
+  version: string
+  title: string
+  effective: string | null
+  published: boolean
+  body: string
+}
+
 export interface ClientSignupResult {
   status: string
   message: string

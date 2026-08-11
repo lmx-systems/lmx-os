@@ -1,19 +1,32 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api, ApiError } from '../lib/api'
+import type { LegalDocumentsView } from '../lib/types'
 
 interface SignupPageProps {
   onSignedIn: () => void
 }
 
-// Which terms the applicant is agreeing to. Bumped whenever the terms change,
-// so `clients.terms_accepted_version` records what was actually accepted rather
-// than just that a box was ticked.
-//
-// WHAT THE TERMS SAY MUST EXIST BEFORE THIS PAGE GOES LIVE. That is a legal
-// artifact, not an engineering one, and it ties to the privacy policy (R3) and
-// the training-data rights question (W7) that are both still open.
-const TERMS_VERSION = 'v1'
+/** What to tell an applicant when a submission fails, by why it failed. */
+function messageFor(err: unknown): string {
+  if (!(err instanceof ApiError)) {
+    return 'Something went wrong. Please check your details and try again.'
+  }
+  switch (err.status) {
+    case 429:
+      return 'Too many attempts from this network. Please try again later.'
+    case 409:
+      // The terms changed while this page was open, so the box they ticked was
+      // against text they can no longer be said to have read. A reload re-fetches
+      // the version and the links.
+      return 'Our terms have been updated. Please reload the page and read them again before continuing.'
+    case 503:
+      return 'We are not accepting new accounts just now. Please try again shortly.'
+    default:
+      return 'Something went wrong. Please check your details and try again.'
+  }
+}
+
 
 /**
  * The public signup page - this is the URL LMX shares or embeds
@@ -41,8 +54,36 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
 
+  // Which terms this form is presenting, from the server. This page used to hold
+  // the version as a constant and send it up, which meant the record of what an
+  // applicant accepted was written by the applicant's browser. Now
+  // app/legal/documents.py is the only place a version exists; the form asks, shows
+  // the matching links, and echoes the version back so the server can refuse a
+  // submission made against text that has since changed.
+  const [legal, setLegal] = useState<LegalDocumentsView | null>(null)
+  const [legalFailed, setLegalFailed] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api
+      .legalDocuments()
+      .then((d) => {
+        if (live) setLegal(d)
+      })
+      .catch(() => {
+        if (live) setLegalFailed(true)
+      })
+    return () => {
+      live = false
+    }
+  }, [])
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    // Cannot happen through the UI - the button is disabled until `legal` loads -
+    // but the guard is here rather than in a comment because submitting without it
+    // would send an empty version string and get a 409 the applicant cannot act on.
+    if (!legal) return
     setError(null)
     setSubmitting(true)
     try {
@@ -53,16 +94,12 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
         contact_phone: phone || null,
         service_area: serviceArea,
         password,
-        terms_version: TERMS_VERSION,
+        terms_version: legal.terms.version,
         accepted_terms: acceptedTerms,
       })
       setSubmitted(true)
     } catch (err) {
-      setError(
-        err instanceof ApiError && err.status === 429
-          ? 'Too many attempts from this network. Please try again later.'
-          : 'Something went wrong. Please check your details and try again.',
-      )
+      setError(messageFor(err))
     } finally {
       setSubmitting(false)
     }
@@ -124,6 +161,22 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
             hint="At least 10 characters. You'll use this once your account is approved."
           />
 
+          {/* Signup closed because the documents behind the checkbox are still
+              drafts. Said plainly rather than by a dead button: an applicant who
+              cannot tell why the form does nothing assumes it is broken. */}
+          {legal && !legal.signup_open && (
+            <p className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface-sunk,transparent)] px-3 py-2 text-[13px] text-[var(--text-secondary)]">
+              We are not taking new accounts through this page yet. Our terms of service
+              are being finalised, and we will not ask you to agree to something you
+              cannot read.
+            </p>
+          )}
+          {legalFailed && (
+            <p role="alert" className="text-[13px] text-[var(--danger,#b3261e)]">
+              We could not load our terms just now. Please reload the page.
+            </p>
+          )}
+
           <label className="mt-1 flex items-start gap-2 text-[13px] text-[var(--text-secondary)]">
             <input
               type="checkbox"
@@ -133,7 +186,25 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
               className="mt-0.5 accent-[var(--accent)]"
             />
             <span>
-              I agree to LMX's terms of service and privacy policy.
+              I agree to LMX's{' '}
+              <a
+                href={legal ? legal.terms.path : '/terms'}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-[var(--accent)] hover:underline"
+              >
+                terms of service
+              </a>{' '}
+              and{' '}
+              <a
+                href={legal ? legal.privacy.path : '/privacy'}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-[var(--accent)] hover:underline"
+              >
+                privacy policy
+              </a>
+              .
             </span>
           </label>
 
@@ -145,7 +216,7 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || !legal || !legal.signup_open}
             className="mt-1 rounded-[var(--radius)] bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
           >
             {submitting ? 'Sending…' : 'Request an account'}

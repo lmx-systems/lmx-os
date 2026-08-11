@@ -3,21 +3,23 @@ import type {
   ApiKeyCreated,
   ApiKeyView,
   ClientAuthToken,
-  ClientOrderDetailView,
   ClientOrderBatchBody,
   ClientOrderBatchResult,
   ClientOrderBody,
+  ClientOrderDetailView,
   ClientOrderResult,
   ClientOrderSummaryView,
   ClientProfileView,
+  ClientShopView,
   ClientSignupBody,
   ClientSignupResult,
-  ClientShopView,
-  DeadlineChoice,
-  ManifestUploadResult,
   ClientUserView,
+  DeadlineChoice,
   InvoiceDetailView,
   InvoiceSummaryView,
+  LegalDocumentBody,
+  LegalDocumentsView,
+  ManifestUploadResult,
   ReturnItemView,
   TrackingView,
   WebhookDeliveryView,
@@ -150,6 +152,14 @@ export const api = {
   // rate-limited by IP.
   signup: (body: ClientSignupBody) =>
     request<ClientSignupResult>('/public/signup', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Which terms are current, and whether signup is open at all. No token, and
+  // callable before an account exists - it has to be, since it is what the signup
+  // page needs in order to render honestly.
+  legalDocuments: () => request<LegalDocumentsView>('/public/legal'),
+
+  legalDocument: (kind: 'terms' | 'privacy') =>
+    request<LegalDocumentBody>(`/public/legal/${kind}`),
 
   // API keys for inbound order submission (docs/ORDER_API.md). Admin-only: a key
   // can dispatch real vans and bill this client.

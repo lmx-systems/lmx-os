@@ -171,6 +171,21 @@ in the process — a recycled instance loses it, and this sweep is what makes th
 enqueued row a guarantee rather than a hope. Same header, every 5 minutes, safe to
 over-call: a sweep with nothing due is one indexed query.
 
+### 4c. Add the retention sweep to Cloud Scheduler
+
+One more, daily rather than every five minutes: `POST /internal/retention/prune`
+deletes driver location trails past `LOCATION_PING_RETENTION_DAYS`
+(app/legal/retention.py, docs/LEGAL_BRIEF.md).
+
+**This one is a promise, not an optimisation.** The privacy policy states the
+retention period as a fact, so the schedule has to exist before the policy is
+published — a stated period nothing enforces is worse than no statement. Safe to
+over-call and safe to miss for a day: the commitment is a period, not a deadline
+measured in hours.
+
+Nothing pages if this stops. Worth glancing at the returned `deleted` count
+occasionally, which is why the endpoint reports it rather than `ok`.
+
 ### 5. Alert on the deployment itself
 
 The uptime check above also covers total outage — if the service is down, the

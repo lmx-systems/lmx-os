@@ -59,9 +59,14 @@ class ClientSignupBody(BaseModel):
     # approved, so a password existing early grants nothing.
     password: str = Field(min_length=10, max_length=128)
 
-    # Not a checkbox but a record: which version they agreed to. What the terms
-    # actually say has to exist before this form goes live - that is a legal
-    # artifact, not an engineering one, and it ties to R3 and W7.
+    # Which version of the terms the form was DISPLAYING when it was submitted.
+    #
+    # This is not what gets recorded. `app/api/public_routes.py` compares it
+    # against `app/legal/documents.current_terms_version()` and stores the server's
+    # value, because an acceptance record any caller can write is not evidence.
+    # What it is for is the mismatch: if the terms changed while this form was open
+    # the submission is refused rather than silently recorded against the new
+    # version, which the applicant never read.
     terms_version: str = Field(min_length=1, max_length=32)
     accepted_terms: bool
 

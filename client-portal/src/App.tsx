@@ -9,6 +9,7 @@ import type {
   InvoiceSummaryView,
 } from './lib/types'
 import { LoginPage } from './components/LoginPage'
+import { LegalPage } from './components/LegalPage'
 import { SignupPage } from './components/SignupPage'
 import { TrackingPage } from './components/TrackingPage'
 import { WebhooksPanel } from './components/WebhooksPanel'
@@ -61,6 +62,17 @@ export default function App() {
       ? new URLSearchParams(window.location.search).get('token')
       : null,
   )
+  // /terms and /privacy. Public, and checked before every auth branch below for the
+  // same reason the tracking page is: the audience is whoever followed the link from
+  // the signup checkbox, and whether somebody is signed in on this browser has
+  // nothing to do with whether they may read our terms.
+  const [legalKind] = useState<'terms' | 'privacy' | null>(() => {
+    if (typeof window === 'undefined') return null
+    const path = window.location.pathname.replace(/\/$/, '')
+    if (path === '/terms') return 'terms'
+    if (path === '/privacy') return 'privacy'
+    return null
+  })
   const [profile, setProfile] = useState<ClientProfileView | null>(null)
   const [orders, setOrders] = useState<ClientOrderSummaryView[] | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<ClientOrderDetailView | null>(null)
@@ -143,6 +155,10 @@ export default function App() {
   // Before the auth gate AND before the logged-in branches: the audience is a
   // member of the public, and whether some client happens to be signed in on this
   // browser has nothing to do with it.
+  if (legalKind) {
+    return <LegalPage kind={legalKind} />
+  }
+
   if (trackingToken) {
     return <TrackingPage token={trackingToken} />
   }

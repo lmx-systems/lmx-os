@@ -46,6 +46,8 @@ from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.messaging.client_emails import send_password_reset_email, send_signup_received_email
 from app.models.hub import Hub
+from app.legal.documents import DOCUMENTS, current_terms_version, documents_are_published
+from app.schemas.legal import LegalDocumentBody, LegalDocumentView, LegalDocumentsView
 from app.schemas.tracking import DriverPositionView, TrackingView
 from app.tracking.rate_limit import TrackingRateLimiter, TrackingRateLimitExceeded
 from app.tracking.service import TrackingTokenInvalid, resolve_tracking
@@ -81,6 +83,61 @@ def _client_ip(request: Request) -> str:
     return client_ip(request)
 
 
+def _document_view(kind: str) -> LegalDocumentView:
+    doc = DOCUMENTS[kind]
+    return LegalDocumentView(
+        kind=doc.kind,
+        version=doc.version,
+        title=doc.title,
+        effective=doc.effective,
+        path=doc.portal_path,
+        published=doc.is_published,
+    )
+
+
+@router.get("/legal", response_model=LegalDocumentsView)
+async def legal_documents() -> LegalDocumentsView:
+    """Which terms and privacy policy are current, and whether signup is open.
+
+    The signup form calls this on load instead of holding its own version constant.
+    That is the whole point: there is now one place a version is declared, and the
+    form presents whatever the server says rather than asserting it.
+
+    Unauthenticated, and deliberately so - this is what has to be readable before
+    anyone has an account. It exposes nothing but the identity of two public
+    documents.
+    """
+    return LegalDocumentsView(
+        terms=_document_view("terms"),
+        privacy=_document_view("privacy"),
+        # The form's single question, answered here so the portal never has to
+        # reimplement the both-must-be-published rule.
+        signup_open=documents_are_published() or settings.allow_unpublished_terms,
+    )
+
+
+@router.get("/legal/{kind}", response_model=LegalDocumentBody)
+async def legal_document_body(kind: str) -> LegalDocumentBody:
+    """The full text of one document.
+
+    Serves a draft as readily as a published one, with `published` telling the truth
+    about which it is. Refusing to serve a draft would leave the portal's /terms page
+    blank with no explanation, and a reader who has been told "these are not final"
+    is better served than one shown nothing.
+    """
+    doc = DOCUMENTS.get(kind)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="No such document")
+    return LegalDocumentBody(
+        kind=doc.kind,
+        version=doc.version,
+        title=doc.title,
+        effective=doc.effective,
+        published=doc.is_published,
+        body=doc.body,
+    )
+
+
 @router.post("/signup", response_model=ClientSignupResult, status_code=202)
 async def client_signup(
     body: ClientSignupBody,
@@ -92,6 +149,46 @@ async def client_signup(
     202 rather than 201: this accepted an application, it did not create
     something the caller can now use. Nothing is usable until a human approves.
     """
+    # Before the rate limiter, and before anything is written: is there a real
+    # document behind the checkbox?
+    #
+    # Ordering. Everything else in this endpoint is charged to the limiter first so
+    # it cannot become an enumeration oracle, but this check leaks nothing about any
+    # applicant - it is one global fact, identical for every caller - and spending
+    # somebody's signup budget to tell them we are closed would be gratuitous.
+    if not documents_are_published():
+        if not settings.allow_unpublished_terms:
+            logger.error(
+                "signup_rejected_terms_unpublished", terms_version=current_terms_version()
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Signups are temporarily unavailable - please try again later",
+            )
+        # The deliberate escape hatch. Loud, every time, with the version it is
+        # recording, so this never becomes the quiet normal state of a deployment.
+        logger.warning(
+            "signup_accepted_with_unpublished_terms",
+            terms_version=current_terms_version(),
+            reason="settings.allow_unpublished_terms is on - not for production",
+        )
+
+    # Which terms the form was showing. A mismatch means the document changed while
+    # this applicant had the page open, so the tick they made was against text they
+    # can no longer be said to have accepted. Refuse and make them re-read it.
+    #
+    # 409 rather than 400: nothing about the submission is malformed, it is stale.
+    if body.terms_version != current_terms_version():
+        logger.info(
+            "signup_rejected_stale_terms",
+            submitted=body.terms_version,
+            current=current_terms_version(),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="Our terms have been updated. Please reload the page and read them again.",
+        )
+
     limiter = SignupRateLimiter()
     try:
         await limiter.check_and_increment(_client_ip(request))
@@ -121,7 +218,10 @@ async def client_signup(
         signup_status="pending",
         service_area=body.service_area,
         contact_phone=body.contact_phone,
-        terms_accepted_version=body.terms_version,
+        # The server's version, never the caller's. Checked for equality above, so
+        # these agree - but the value written to the evidence column comes from the
+        # document, not from the request body.
+        terms_accepted_version=current_terms_version(),
         terms_accepted_at=now,
     )
     session.add(client)
@@ -161,7 +261,7 @@ async def client_signup(
         client_id=str(client.id),
         company=body.company_name,
         service_area=body.service_area,
-        terms_version=body.terms_version,
+        terms_version=current_terms_version(),
     )
 
     # After the commit, so a mail failure can't roll back a real application -

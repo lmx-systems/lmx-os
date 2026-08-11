@@ -33,6 +33,16 @@ from app.schemas.signup import ApproveRateInput, ApproveSignupBody, ClientSignup
 pytestmark = pytest.mark.integration
 
 
+@pytest.fixture(autouse=True)
+def _signup_open(published_terms):
+    """Every signup in this module runs against published legal documents.
+
+    Without this the endpoint 503s: it will not record assent to a draft. See
+    tests/integration/conftest.py::published_terms, and test_legal_documents.py for
+    the tests of the closed door itself.
+    """
+
+
 class RecordingEmailClient(EmailClient):
     engine_name = "recording"
 

@@ -194,6 +194,25 @@ class Settings(BaseSettings):
     # existed.
     tracking_link_grace_hours: int = 24
 
+    # Legal documents (app/legal/).
+    #
+    # Whether public signup is allowed while the terms or the privacy policy are
+    # still marked `status: draft` in app/legal/content/. Off by default, because a
+    # signup writes `clients.terms_accepted_version` and a version of an unapproved
+    # document records assent to nothing - which is worse than no record, since it
+    # looks like one.
+    #
+    # This exists so a demo or a staging environment can exercise the signup flow
+    # before counsel has finished. Every signup taken this way logs a warning.
+    # DO NOT set this in production: the correct way to open the front door is to
+    # publish the documents.
+    allow_unpublished_terms: bool = False
+
+    # How long a driver's location trail is kept before it is pruned
+    # (app/legal/retention.py). This is the number the privacy policy states, so
+    # changing it here changes a published promise - the two have to move together.
+    location_ping_retention_days: int = 90
+
     # Geocoding (app/geocoding/) - turns a typed address into coordinates so
     # LMX Link's ad-hoc pickup works without anyone pre-registering a shop.
     #

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+from dataclasses import replace
+from datetime import date
 
 import asyncpg
 import pytest
@@ -22,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.db as db_module
+import app.legal.documents as documents
 import app.redis_client as redis_client_module
 from app.config import settings
 from app.db import Base
@@ -162,6 +165,34 @@ async def _reset_global_engine_pool():
     await db_module.engine.dispose()
     yield
     await db_module.engine.dispose()
+
+
+@pytest.fixture
+def published_terms(monkeypatch):
+    """Run a test against published legal documents.
+
+    `POST /public/signup` refuses to take an application while either document is
+    still `status: draft` in app/legal/content/, because a signup writes
+    `clients.terms_accepted_version` and a version of an unapproved document records
+    assent to nothing. Every test that signs somebody up therefore has to say which
+    world it is in.
+
+    This fixture publishes them rather than setting `allow_unpublished_terms`, on
+    purpose: the escape hatch is a demo affordance and the published path is the one
+    that will actually run in production, so that is the one the flow tests should be
+    exercising. The tests for the closed door are in test_legal_documents.py and set
+    the flag themselves.
+    """
+    for name in ("terms", "privacy"):
+        published = replace(
+            documents.DOCUMENTS[name], status="published", effective=date(2026, 8, 11)
+        )
+        monkeypatch.setitem(documents.DOCUMENTS, name, published)
+        # `documents_are_published()` reads the module-level names, and
+        # `current_terms_version()` reads TERMS - both have to move with the dict or
+        # the fixture would publish only half of what the code consults.
+        monkeypatch.setattr(documents, name.upper(), published)
+    return documents.DOCUMENTS
 
 
 async def make_driver_compliant(db_session, driver_id, *, expires_in_days: int = 180):

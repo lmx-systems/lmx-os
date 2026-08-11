@@ -45,7 +45,9 @@ the remote.
 | `docs/ARCHITECTURE.md` | Technical handoff detail, stubs, and best-effort interpretations |
 | `docs/LMX_LINK_PLAN.md` | The order-intake track: contract, design principles, sequence |
 | `docs/DOCUMENT_STYLE.md` | House style for generated documents |
-| `docs/ORDER_API.md`, `docs/WEBHOOKS.md`, `docs/TERMS_V1_DRAFT.md` | External-facing interface and terms |
+| `docs/ORDER_API.md`, `docs/WEBHOOKS.md` | External-facing interfaces |
+| `app/legal/content/*.md` | The terms and privacy policy themselves — served, versioned, and the single copy |
+| `docs/LEGAL_BRIEF.md` | Counsel's covering memo: what each clause depends on, the open decisions, how to publish |
 
 Changing status in one of these means checking the others. All four have
 drifted apart before.

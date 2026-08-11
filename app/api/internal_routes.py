@@ -47,6 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.client_ip import client_ip
 from app.config import settings
 from app.db import get_db
+from app.legal.retention import prune_location_pings
 from app.health.checks import evaluate
 from app.webhooks.delivery import deliver_pending
 from app.learning_loop.service import run_nightly_job
@@ -151,6 +152,25 @@ async def deliver_pending_webhooks(session: AsyncSession = Depends(get_db)) -> d
     counts = await deliver_pending(session)
     logger.info("scheduled_webhook_sweep_complete", **counts)
     return {"attempted": sum(counts.values()), "outcomes": counts}
+
+
+@router.post("/retention/prune", dependencies=[Depends(require_internal_secret)])
+async def prune_retained_data(session: AsyncSession = Depends(get_db)) -> dict:
+    """Delete personal data past the retention period the privacy policy states.
+
+    Currently one table: driver location trails, which are the only personal record
+    that grows without bound (app/legal/retention.py explains why the others are
+    either enforced elsewhere or belong in a storage lifecycle rule).
+
+    **The privacy policy is the specification for this endpoint**, not the other way
+    round. `settings.location_ping_retention_days` is the number printed in
+    app/legal/content/privacy.md, so the two move together or the document is lying.
+
+    Wants a daily schedule. Safe to over-call - a run with nothing due is one indexed
+    count - and safe to miss for a day, since the promise is a retention period rather
+    than a deletion deadline measured in hours.
+    """
+    return await prune_location_pings(session)
 
 
 @router.get("/health/dispatch", dependencies=[Depends(require_internal_secret)])
