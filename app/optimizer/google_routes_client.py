@@ -60,6 +60,11 @@ CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 # will be re-optimized next cycle anyway.
 MODEL_HORIZON = timedelta(hours=8)
 
+
+def _rfc3339(value: datetime) -> str:
+    """What this API wants: RFC 3339 with a literal Z rather than +00:00."""
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
 # Per Section 9's <5s cycle budget and the 4s httpx client timeout below,
 # ask Google's solver to return well inside that window rather than let it
 # consume its default solve budget.
@@ -77,6 +82,33 @@ SOLVE_TIMEOUT = "3s"
 # skipping a T1.
 SLA_TIER_SKIP_PENALTY = {"HOT_SHOT": 1_000_000.0, "T1": 100_000.0, "T2": 10_000.0, "T3": 1_000.0}
 DEFAULT_SKIP_PENALTY = 10_000.0
+
+# Cost per hour of collecting an order LATER than we committed to, by tier.
+#
+# The skip penalty above answers "which orders get served at all". This answers "in what
+# order", which the solver previously had no way to know: it was told a HOT_SHOT must not
+# be dropped and never told when it was due, so it had no reason to schedule one early.
+# The blunt HOT_SHOT hoist in `accept_offer` was the only thing prioritising the premium
+# tier, and it overrides the plan - which is what made the solver's own arrival times
+# unusable as ETAs.
+#
+# **Soft, not hard, for exactly the reason shipments are skippable rather than
+# mandatory.** A hard `endTime` the solver cannot meet makes the shipment infeasible, so
+# it gets skipped - turning a late collection into no collection, which is a far worse
+# outcome for the customer than a late one. A soft window costs lateness instead: the
+# solver hits it when it can and plans the trip anyway when it cannot.
+#
+# PLACEHOLDERS, and deliberately much smaller than the skip penalties: being an hour late
+# must never cost more than abandoning the order entirely, or the solver would rather drop
+# a T3 than deliver it late. Ratios between tiers are what matter here rather than the
+# absolute figures, and both want tuning against real routes (docs/ROADMAP.md E10).
+SLA_TIER_LATENESS_COST_PER_HOUR = {
+    "HOT_SHOT": 5_000.0,
+    "T1": 1_000.0,
+    "T2": 200.0,
+    "T3": 20.0,
+}
+DEFAULT_LATENESS_COST_PER_HOUR = 200.0
 
 # What driving actually costs us, which is the solver's entire objective function.
 #
@@ -204,7 +236,32 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
         raise RouteOptimizationError(message)
 
     @staticmethod
-    def _build_shipment(stop: StopCandidate) -> dict:
+    def _collection_window(
+        stop: StopCandidate, *, horizon_start: datetime, horizon_end: datetime
+    ) -> dict | None:
+        """A soft deadline on the collection leg, or None when we promised nothing.
+
+        Clamped into the request's global window. That is not defensiveness - it is the
+        normal case. The batch-hold queue releases an order **when its deadline passes**,
+        so most orders reach the solver already overdue, and a `softEndTime` in the past
+        is outside `globalStartTime` and would be rejected. Clamping to the start of the
+        horizon says "as early as possible" and lets the per-tier hourly cost decide
+        which overdue order goes first, which is the question that actually matters.
+        """
+        if stop.collect_by is None:
+            return None
+        deadline = min(max(stop.collect_by, horizon_start), horizon_end)
+        return {
+            "softEndTime": _rfc3339(deadline),
+            "costPerHourAfterSoftEndTime": SLA_TIER_LATENESS_COST_PER_HOUR.get(
+                stop.sla_tier, DEFAULT_LATENESS_COST_PER_HOUR
+            ),
+        }
+
+    @staticmethod
+    def _build_shipment(
+        stop: StopCandidate, *, horizon_start: datetime, horizon_end: datetime
+    ) -> dict:
         """One order as a shipment: collect at the shop, drop at the customer.
 
         **This is the mapping defect E1 was most likely to expose.** The request
@@ -233,10 +290,17 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
             "penaltyCost": SLA_TIER_SKIP_PENALTY.get(stop.sla_tier, DEFAULT_SKIP_PENALTY),
         }
 
+        window = GoogleRouteOptimizationClient._collection_window(
+            stop, horizon_start=horizon_start, horizon_end=horizon_end
+        )
+
         if stop.has_delivery_location:
-            shipment["pickups"] = [
-                {"arrivalLocation": {"latitude": stop.lat, "longitude": stop.lng}}
-            ]
+            collection: dict = {
+                "arrivalLocation": {"latitude": stop.lat, "longitude": stop.lng}
+            }
+            if window:
+                collection["timeWindows"] = [window]
+            shipment["pickups"] = [collection]
             shipment["deliveries"] = [
                 {
                     "arrivalLocation": {
@@ -255,9 +319,12 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
                 "costed, so travel time and sequencing for this stop are optimistic"
             ),
         )
-        shipment["deliveries"] = [
-            {"arrivalLocation": {"latitude": stop.lat, "longitude": stop.lng}}
-        ]
+        # One visit, at the shop. It is the collection, so the window belongs on it -
+        # `deliveries` here is the API's slot for "the only visit", not a real drop.
+        lone_visit: dict = {"arrivalLocation": {"latitude": stop.lat, "longitude": stop.lng}}
+        if window:
+            lone_visit["timeWindows"] = [window]
+        shipment["deliveries"] = [lone_visit]
         return shipment
 
     @staticmethod
@@ -266,7 +333,10 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
         horizon_end = now + MODEL_HORIZON
 
         shipments = [
-            GoogleRouteOptimizationClient._build_shipment(stop) for stop in stops
+            GoogleRouteOptimizationClient._build_shipment(
+                stop, horizon_start=now, horizon_end=horizon_end
+            )
+            for stop in stops
         ]
 
         vehicles = [
@@ -289,8 +359,8 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
 
         return {
             "model": {
-                "globalStartTime": now.isoformat().replace("+00:00", "Z"),
-                "globalEndTime": horizon_end.isoformat().replace("+00:00", "Z"),
+                "globalStartTime": _rfc3339(now),
+                "globalEndTime": _rfc3339(horizon_end),
                 "shipments": shipments,
                 "vehicles": vehicles,
             },

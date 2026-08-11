@@ -16,9 +16,11 @@ as ETAs directly, for two remaining reasons rather than the original one:
   - **They are absolute and perishable.** The plan assumes the route starts when it was
     made, and an offer can sit unaccepted for `job_offer_ttl_seconds`. Writing them
     verbatim would quote arrival times computed from a departure that never happened.
-  - **HOT_SHOT legs are still hoisted** in `accept_offer`, because the solver is told a
-    hot shot must not be skipped but never told when it is due - so one override of the
-    plan survives, and any stop after it has moved.
+  - **HOT_SHOT legs are still hoisted** in `accept_offer`, so one override of the plan
+    survives and any stop after it has moved. Since L23 the solver does receive the
+    collection deadline as a soft time window, so the hoist is now waiting on evidence
+    rather than on a missing constraint - `scripts/verify_route_optimization.py` check 5
+    is what retires it.
 
 What is now available and worth having is the *intervals* between planned visits: real
 road-network travel times, which is exactly what `minutes_for_miles` approximates at an

@@ -28,6 +28,15 @@ class StopCandidate(BaseModel):
     delivery_lng: float | None = None
     weight_units: float
     sla_tier: str
+    # When we committed to collecting this order. `Order.hold_deadline`, which is what
+    # `GET /client/orders` reports to the client as `collect_by` - so it is the promise a
+    # counter person actually read off the confirmation screen, not an internal deadline.
+    #
+    # Optional because an order can reach the optimizer through a path that has no
+    # commitment attached (a live-route insertion, a test fixture). Absent means no time
+    # window is sent, which is honest: a window invented from nothing would make the
+    # solver optimise against a promise nobody made.
+    collect_by: datetime | None = None
 
     @property
     def has_delivery_location(self) -> bool:

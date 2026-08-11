@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -5,6 +6,8 @@ import pytest
 
 from app.optimizer import google_routes_client
 from app.optimizer.google_routes_client import (
+    SLA_TIER_LATENESS_COST_PER_HOUR,
+    SLA_TIER_SKIP_PENALTY,
     GoogleRouteOptimizationClient,
     get_route_optimization_client,
 )
@@ -421,8 +424,16 @@ async def test_the_verification_scenario_is_satisfiable():
 
     by_driver = {a.driver_id: set(a.stop_ids) for a in assignments}
     assert not unassigned
-    assert by_driver["driver-west"] == {"order-west-1", "order-west-2"}
+    assert by_driver["driver-west"] == {"order-west-hot", "order-west-later"}
     assert by_driver["driver-east"] == {"order-east-1", "order-east-2"}
+
+    # And the urgency check (L23) is satisfiable too. The stub does not model time at
+    # all, but it does sort by tier, so "the urgent order is collected first" has a
+    # reachable answer - which is what this test exists to establish before anyone spends
+    # a paid API call finding out.
+    west = next(a for a in assignments if a.driver_id == "driver-west")
+    west_pickups = [v.order_id for v in west.visits if v.kind == "pickup"]
+    assert west_pickups[0] == "order-west-hot"
 
 
 def test_the_verification_scenario_sends_both_legs():
@@ -623,3 +634,152 @@ async def test_the_stub_emits_both_legs_for_every_order():
     visits = assignments[0].visits
     assert [v.kind for v in visits] == ["pickup", "pickup", "delivery", "delivery"]
     assert assignments[0].stop_ids == ["A", "B"]
+
+
+# ---------------------------------------------------------------------------
+# Collection time windows (docs/ROADMAP.md L23)
+# ---------------------------------------------------------------------------
+
+
+def _candidate(stop_id, tier, collect_by, *, with_drop=True):
+    return StopCandidate(
+        stop_id=stop_id,
+        order_ids=[stop_id],
+        lat=30.27,
+        lng=-97.74,
+        delivery_lat=30.30 if with_drop else None,
+        delivery_lng=-97.80 if with_drop else None,
+        sla_tier=tier,
+        weight_units=1,
+        collect_by=collect_by,
+    )
+
+
+def _windows(request: dict) -> dict[str, dict | None]:
+    """label -> the collection leg's single time window, if any."""
+    out: dict[str, dict | None] = {}
+    for shipment in request["model"]["shipments"]:
+        leg = (shipment.get("pickups") or shipment["deliveries"])[0]
+        windows = leg.get("timeWindows")
+        out[shipment["label"]] = windows[0] if windows else None
+    return out
+
+
+def _request(stops):
+    drivers = [
+        DriverCandidate(driver_id="d1", lat=30.26, lng=-97.73, capacity_remaining_units=10)
+    ]
+    return GoogleRouteOptimizationClient._build_request(drivers, stops)
+
+
+def test_the_deadline_reaches_the_solver_as_a_window_on_the_collection_leg():
+    """The gap this closes.
+
+    The solver was told a HOT_SHOT must not be skipped (a million-unit penalty) and never
+    told *when* it was due, so it had no reason to schedule one early. The blunt hoist in
+    `accept_offer` was the only thing prioritising the premium tier - and because it
+    overrides the plan, it is also what makes the solver's own arrival times unusable as
+    ETAs.
+    """
+    now = datetime.now(timezone.utc)
+    window = _windows(_request([_candidate("H", "HOT_SHOT", now + timedelta(minutes=20))]))["H"]
+    assert window is not None
+    assert window["softEndTime"].endswith("Z")
+    assert window["costPerHourAfterSoftEndTime"] == SLA_TIER_LATENESS_COST_PER_HOUR["HOT_SHOT"]
+
+
+def test_the_window_is_soft_never_hard():
+    """A hard deadline the solver cannot meet turns a late collection into no collection.
+
+    An unmeetable `endTime` makes the shipment infeasible, so it lands in
+    `skippedShipments` and nobody collects it - far worse for the customer than arriving
+    late. Exactly the reasoning that already makes shipments skippable rather than
+    mandatory, applied to time.
+    """
+    now = datetime.now(timezone.utc)
+    window = _windows(_request([_candidate("A", "T2", now + timedelta(minutes=5))]))["A"]
+    assert "softEndTime" in window
+    assert "endTime" not in window
+    assert "startTime" not in window
+
+
+def test_urgency_is_ordered_by_tier_and_never_outweighs_abandonment():
+    """Two orderings, and the second one matters as much as the first.
+
+    Lateness costs rank HOT_SHOT above T1 above T2 above T3, which is the sequencing
+    signal. They must also stay well below the skip penalties: if being an hour late cost
+    more than dropping the order, the solver would rather abandon a T3 than deliver it
+    late.
+    """
+    tiers = ["HOT_SHOT", "T1", "T2", "T3"]
+    costs = [SLA_TIER_LATENESS_COST_PER_HOUR[t] for t in tiers]
+    assert costs == sorted(costs, reverse=True)
+    for tier in tiers:
+        assert SLA_TIER_LATENESS_COST_PER_HOUR[tier] < SLA_TIER_SKIP_PENALTY[tier]
+
+
+def test_an_already_overdue_order_is_clamped_into_the_horizon():
+    """The normal case, not an edge case.
+
+    The batch-hold queue releases an order *when its deadline passes*, so most orders
+    reach the solver already overdue and their raw deadline sits before
+    `globalStartTime` - which the API rejects. Clamping says "as early as possible" and
+    leaves the per-tier hourly cost to decide which overdue order goes first.
+    """
+    now = datetime.now(timezone.utc)
+    request = _request([_candidate("L", "T1", now - timedelta(hours=3))])
+    window = _windows(request)["L"]
+    assert window["softEndTime"] == request["model"]["globalStartTime"]
+
+
+def test_a_deadline_beyond_the_horizon_is_clamped_too():
+    """A T3 due tomorrow is outside an eight-hour model. Sending it unclamped would put a
+    time window outside the global window and fail the whole request - taking every other
+    order on the cycle down with it."""
+    now = datetime.now(timezone.utc)
+    request = _request([_candidate("F", "T3", now + timedelta(days=5))])
+    assert _windows(request)["F"]["softEndTime"] == request["model"]["globalEndTime"]
+
+
+def test_no_commitment_means_no_window():
+    """Silence rather than invention.
+
+    An order can reach the optimizer with no committed collection time. A window made up
+    from nothing would have the solver optimising against a promise nobody made.
+    """
+    assert _windows(_request([_candidate("N", "T2", None)]))["N"] is None
+
+
+def test_an_order_with_no_drop_location_still_gets_its_window():
+    """`Order.delivery_lat` is nullable, so `_build_shipment` files the single visit under
+    `deliveries`. That visit *is* the collection, so the deadline belongs on it - putting
+    it only on `pickups` would silently drop the constraint for exactly the orders whose
+    routing is already the most approximate."""
+    now = datetime.now(timezone.utc)
+    request = _request([_candidate("S", "HOT_SHOT", now + timedelta(minutes=15), with_drop=False)])
+    shipment = request["model"]["shipments"][0]
+    assert "pickups" not in shipment
+    assert shipment["deliveries"][0]["timeWindows"][0]["costPerHourAfterSoftEndTime"] == (
+        SLA_TIER_LATENESS_COST_PER_HOUR["HOT_SHOT"]
+    )
+
+
+def test_every_window_lies_inside_the_global_window():
+    """The invariant behind both clamps, asserted over a mixed batch rather than one
+    order at a time - a request is rejected as a whole, so one bad window costs the whole
+    cycle."""
+    now = datetime.now(timezone.utc)
+    request = _request(
+        [
+            _candidate("A", "HOT_SHOT", now - timedelta(days=2)),
+            _candidate("B", "T1", now + timedelta(minutes=30)),
+            _candidate("C", "T3", now + timedelta(days=9)),
+            _candidate("D", "T2", None),
+        ]
+    )
+    start = request["model"]["globalStartTime"]
+    end = request["model"]["globalEndTime"]
+    for label, window in _windows(request).items():
+        if window is None:
+            continue
+        assert start <= window["softEndTime"] <= end, label

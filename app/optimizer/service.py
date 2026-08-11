@@ -100,6 +100,11 @@ class DispatchOptimizerService:
                 weight_units=1.0,  # per-order weight isn't in HeldOrder; refined once
                 # the optimizer reads directly from `orders.weight_units` in Phase 1.
                 sla_tier=order.sla_tier,
+                # The committed collection time, so the solver can sequence by urgency
+                # instead of only by distance. This is the same value the client portal
+                # reports as `collect_by`, which is the promise a counter person read off
+                # the confirmation screen.
+                collect_by=order.hold_deadline,
             )
             for order in released_orders
         ]

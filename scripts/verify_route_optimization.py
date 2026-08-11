@@ -44,6 +44,7 @@ import argparse
 import asyncio
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 
 from app.config import settings
 from app.optimizer.google_routes_client import (
@@ -67,18 +68,34 @@ def _scenario() -> tuple[list[DriverCandidate], list[StopCandidate]]:
             driver_id="driver-east", lat=EAST[0], lng=EAST[1], capacity_remaining_units=10
         ),
     ]
+    now = datetime.now(timezone.utc)
     stops = [
         # Deliberately interleaved west/east/west/east in the request, so a solver
         # that just returns input order produces a visibly absurd plan.
-        _stop("order-west-1", WEST, offset=0.004),
-        _stop("order-east-1", EAST, offset=0.004),
-        _stop("order-west-2", WEST, offset=0.008),
-        _stop("order-east-2", EAST, offset=0.008),
+        #
+        # The west pair also carries the urgency test. Both are beside driver-west, so
+        # distance cannot separate them - the only thing that can is the collection
+        # deadline. The HOT_SHOT is due in ten minutes and the T3 in six hours, and
+        # `_build_shipment` sends those as soft windows with per-tier lateness costs.
+        # If the solver honours them, the hot shot is collected first.
+        _stop("order-west-hot", WEST, offset=0.004, tier="HOT_SHOT",
+              collect_by=now + timedelta(minutes=10)),
+        _stop("order-east-1", EAST, offset=0.004, collect_by=now + timedelta(minutes=90)),
+        _stop("order-west-later", WEST, offset=0.008, tier="T3",
+              collect_by=now + timedelta(hours=6)),
+        _stop("order-east-2", EAST, offset=0.008, collect_by=now + timedelta(minutes=90)),
     ]
     return drivers, stops
 
 
-def _stop(label: str, near: tuple[float, float], *, offset: float) -> StopCandidate:
+def _stop(
+    label: str,
+    near: tuple[float, float],
+    *,
+    offset: float,
+    tier: str = "T2",
+    collect_by: datetime | None = None,
+) -> StopCandidate:
     """A collection near `near` with a drop a little further out, so both legs are
     real and the delivery is not the same point as the pickup."""
     return StopCandidate(
@@ -89,7 +106,8 @@ def _stop(label: str, near: tuple[float, float], *, offset: float) -> StopCandid
         delivery_lat=near[0] + offset + 0.006,
         delivery_lng=near[1] + offset + 0.006,
         weight_units=1,
-        sla_tier="T2",
+        sla_tier=tier,
+        collect_by=collect_by,
     )
 
 
@@ -166,7 +184,10 @@ async def main() -> int:
 
     print("\nResults:")
     for assignment in assignments:
-        print(f"  {assignment.driver_id}: {' -> '.join(assignment.stop_ids)}")
+        legs = " -> ".join(
+            f"{v.order_id}({'P' if v.kind == 'pickup' else 'D'})" for v in assignment.visits
+        )
+        print(f"  {assignment.driver_id}: {legs}")
     if unassigned:
         print(f"  unassigned: {', '.join(unassigned)}")
 
@@ -195,7 +216,7 @@ async def main() -> int:
     # vehicle costs are absent or ignored, the solver is indifferent and this is
     # the check that notices - everything above would still pass.
     by_driver = {a.driver_id: set(a.stop_ids) for a in assignments}
-    west_correct = by_driver.get("driver-west") == {"order-west-1", "order-west-2"}
+    west_correct = by_driver.get("driver-west") == {"order-west-hot", "order-west-later"}
     east_correct = by_driver.get("driver-east") == {"order-east-1", "order-east-2"}
     report.check(
         west_correct and east_correct,
@@ -204,19 +225,66 @@ async def main() -> int:
         "objective function - check costPerHour/costPerKilometer on the vehicles.",
     )
 
-    # 4. Both legs were modelled. A shipment with a pickup and a delivery produces
-    # two visits; we dedupe to one order id, so the raw visit count is the evidence
-    # that Google honoured both.
+    # 4. Both legs came back, per order. Since L22 the visits are carried through
+    # rather than deduplicated, so this is now checkable on the response rather than
+    # only on the request we sent.
     report.check(
         all("pickups" in s and "deliveries" in s for s in request_body["model"]["shipments"]),
         "every shipment was sent with both a collection and a drop",
     )
+    legs_by_order: dict[str, set[str]] = {}
+    for assignment in assignments:
+        for visit in assignment.visits:
+            legs_by_order.setdefault(visit.order_id, set()).add(visit.kind)
+    incomplete = {o: sorted(k) for o, k in legs_by_order.items() if k != {"pickup", "delivery"}}
+    report.check(
+        not incomplete,
+        "every assigned order came back with both legs",
+        f"incomplete: {incomplete}",
+    )
+
+    # 5. THE ONE THAT WOULD LET THE HOT_SHOT HOIST GO (docs/ROADMAP.md L23).
+    #
+    # `accept_offer` currently hoists a HOT_SHOT's legs to the front of the route,
+    # overriding the plan - which is also what stops the solver's own arrival times being
+    # usable as ETAs. That override exists because the solver was never told when a
+    # collection was due. It now is, as a soft window with a per-tier lateness cost.
+    #
+    # Both west orders sit beside driver-west, so distance cannot separate them. If the
+    # hot shot is collected first, the windows are doing the work and the hoist can be
+    # deleted. If it is not, the hoist is still the only thing protecting the premium
+    # tier and must stay.
+    west = next((a for a in assignments if a.driver_id == "driver-west"), None)
+    west_pickups = [v.order_id for v in (west.visits if west else []) if v.kind == "pickup"]
+    report.check(
+        west_pickups[:1] == ["order-west-hot"],
+        "the urgent order is collected first (collection windows are honoured)",
+        f"west pickup order: {west_pickups}\n"
+        "         If this fails, leave the HOT_SHOT hoist in accept_offer alone - the "
+        "solver is not sequencing by deadline, and removing it would silently stop "
+        "prioritising a tier customers pay extra for.",
+    )
+
+    # Informational rather than a check: whether this particular geometry produced an
+    # interleaved plan. It is a property of the input, not of the integration, so a
+    # non-interleaved answer here is not a failure.
+    for assignment in assignments:
+        kinds = [v.kind for v in assignment.visits]
+        first_delivery = kinds.index("delivery") if "delivery" in kinds else len(kinds)
+        interleaved = any(k == "pickup" for k in kinds[first_delivery:])
+        print(
+            f"  [info] {assignment.driver_id}: "
+            f"{'interleaved legs' if interleaved else 'collect-all-then-drop-all'}"
+        )
 
     print()
     if report.failures:
         print(f"{len(report.failures)} check(s) failed: {', '.join(report.failures)}")
         return 1
-    print("All checks passed - the request/response mapping is verified (E1).")
+    print(
+        "All checks passed - the request/response mapping is verified (E1), "
+        "visits round-trip (L22), and collection windows are honoured (L23)."
+    )
     return 0
 
 

@@ -2550,12 +2550,22 @@ def _hot_shot_first(
 ) -> list[tuple[uuid.UUID, str]]:
     """HOT_SHOT legs to the front, everything else in planned order.
 
-    **This is an override of the plan, and it is deliberate.** The solver is told a
-    HOT_SHOT matters via `SLA_TIER_SKIP_PENALTY` - a million-unit cost for skipping one -
-    but it is never told *when* the collection is due, because `hold_deadline` is not sent
-    as a `timeWindows` constraint. So it has every reason not to drop a hot shot and no
-    reason to schedule it early, and letting the plan govern unqualified would quietly
-    stop prioritising the tier a customer pays extra for.
+    **This is an override of the plan, and it is deliberate - for now.** The solver is
+    told a HOT_SHOT matters via `SLA_TIER_SKIP_PENALTY`, a million-unit cost for skipping
+    one, and since L23 it is also told *when* the collection is due: `hold_deadline` goes
+    out as a soft `timeWindows` end with a per-tier `costPerHourAfterSoftEndTime`. So the
+    urgency now lives in the model, which is where it belongs.
+
+    **The hoist stays until that is verified against the real solver.** Nothing here has
+    ever made a live `optimizeTours` call (E1), and the stub does not model time at all,
+    so "the windows are honoured" is currently a reasonable expectation rather than an
+    observed fact. Removing the hoist on an expectation would silently stop prioritising a
+    tier customers pay extra for, and the failure would be invisible - a hot shot
+    collected third looks like a normal route.
+
+    `scripts/verify_route_optimization.py` check 5 is the exact evidence needed: two
+    orders beside the same driver, distinguishable only by deadline. When that passes
+    against a real project, delete this function and let the plan govern.
 
     Hoisting both of a hot shot's legs is also strictly better than what this replaced.
     The old construction put every pickup before every dropoff, so a hot shot's *delivery*
