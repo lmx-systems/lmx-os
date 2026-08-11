@@ -19,171 +19,34 @@ is the source of truth for business documents.
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Inches, Pt
 
-BRAND = RGBColor(0x0A, 0x66, 0x44)
-BRAND_HEX = "0A6644"
-TINT_HEX = "E6F1EB"
-INK = RGBColor(0x14, 0x17, 0x1C)
-INK_SOFT = RGBColor(0x3A, 0x41, 0x50)
-INK_MUTED = RGBColor(0x5B, 0x64, 0x72)
-
-REPO = Path(__file__).resolve().parent.parent
-LOGO = REPO / "docs" / "LMX branding " / "lmx-logo-lockup-light.png"
-
-FONT = "Aptos"
-
-
-def _shade(cell, hex_fill: str) -> None:
-    """Table cell background. python-docx has no API for this, so it goes in as XML."""
-    shd = OxmlElement("w:shd")
-    shd.set(qn("w:val"), "clear")
-    shd.set(qn("w:fill"), hex_fill)
-    cell._tc.get_or_add_tcPr().append(shd)
-
-
-def _rule(paragraph, hex_color: str = BRAND_HEX, size: int = 12) -> None:
-    """A coloured rule under a paragraph - used for the masthead and section heads."""
-    pbdr = OxmlElement("w:pBdr")
-    bottom = OxmlElement("w:bottom")
-    bottom.set(qn("w:val"), "single")
-    bottom.set(qn("w:sz"), str(size))
-    bottom.set(qn("w:space"), "4")
-    bottom.set(qn("w:color"), hex_color)
-    pbdr.append(bottom)
-    paragraph._p.get_or_add_pPr().append(pbdr)
-
-
-def _setup(doc: Document) -> None:
-    style = doc.styles["Normal"]
-    style.font.name = FONT
-    style.font.size = Pt(10.5)
-    style.font.color.rgb = INK
-    style.paragraph_format.space_after = Pt(7)
-    style.paragraph_format.line_spacing = 1.22
-    # East-Asian font name too, or Word substitutes for any non-Latin run.
-    style.element.rPr.rFonts.set(qn("w:eastAsia"), FONT)
-
-    for section in doc.sections:
-        section.top_margin = Inches(0.5)
-        section.bottom_margin = Inches(0.5)
-        section.left_margin = Inches(0.5)
-        section.right_margin = Inches(0.5)
-
-
-def _logo(doc: Document) -> None:
-    """The lockup at the top of page one, per house style - not a text label."""
-    if not LOGO.exists():
-        print(f"warning: logo not found at {LOGO} - continuing without it", file=sys.stderr)
-        return
-    p = doc.add_paragraph()
-    p.paragraph_format.space_after = Pt(10)
-    p.add_run().add_picture(str(LOGO), height=Inches(0.30))
-
-
-def _kicker(doc: Document, text: str) -> None:
-    p = doc.add_paragraph()
-    p.paragraph_format.space_after = Pt(2)
-    run = p.add_run(text.upper())
-    run.font.size = Pt(7.5)
-    run.font.bold = True
-    run.font.color.rgb = BRAND
-    run.font.name = FONT
-
-
-def _title(doc: Document, text: str) -> None:
-    p = doc.add_paragraph()
-    p.paragraph_format.space_after = Pt(4)
-    run = p.add_run(text)
-    run.font.size = Pt(21)
-    run.font.bold = True
-    run.font.color.rgb = INK
-    run.font.name = FONT
-
-
-def _byline(doc: Document, text: str) -> None:
-    p = doc.add_paragraph()
-    p.paragraph_format.space_after = Pt(16)
-    run = p.add_run(text)
-    run.font.size = Pt(8.5)
-    run.font.color.rgb = INK_MUTED
-    run.font.name = FONT
-    _rule(p, BRAND_HEX, size=16)
-
-
-def _heading(doc: Document, number: str, text: str) -> None:
-    p = doc.add_paragraph()
-    p.paragraph_format.space_before = Pt(15)
-    p.paragraph_format.space_after = Pt(5)
-    p.paragraph_format.keep_with_next = True
-    n = p.add_run(f"{number}   ")
-    n.font.size = Pt(10)
-    n.font.bold = True
-    n.font.color.rgb = BRAND
-    n.font.name = FONT
-    run = p.add_run(text)
-    run.font.size = Pt(12)
-    run.font.bold = True
-    run.font.color.rgb = INK
-    run.font.name = FONT
-    _rule(p, "D8DCE2", size=6)
-
-
-def _body(doc: Document, text: str, *, lead: bool = False, indent: float = 0.0) -> None:
-    """One paragraph. **bold** spans are honoured; nothing else is parsed - the
-    narrative is prose, and a full markdown renderer here would be more surface than
-    the document needs."""
-    p = doc.add_paragraph()
-    if indent:
-        p.paragraph_format.left_indent = Inches(indent)
-    for i, chunk in enumerate(text.split("**")):
-        if not chunk:
-            continue
-        run = p.add_run(chunk)
-        run.font.name = FONT
-        run.font.size = Pt(11.5 if lead else 10.5)
-        run.font.bold = i % 2 == 1
-        run.font.color.rgb = INK_SOFT if lead else INK
-
-
-def _quote(doc: Document, text: str) -> None:
-    """A pull quote, marked with a left brand rule rather than italics - it is an
-    assertion we want read, not an aside."""
-    p = doc.add_paragraph()
-    p.paragraph_format.left_indent = Inches(0.2)
-    p.paragraph_format.space_before = Pt(8)
-    p.paragraph_format.space_after = Pt(10)
-    bdr = OxmlElement("w:pBdr")
-    left = OxmlElement("w:left")
-    left.set(qn("w:val"), "single")
-    left.set(qn("w:sz"), "18")
-    left.set(qn("w:space"), "8")
-    left.set(qn("w:color"), BRAND_HEX)
-    bdr.append(left)
-    p._p.get_or_add_pPr().append(bdr)
-    run = p.add_run(text)
-    run.font.name = FONT
-    run.font.size = Pt(11)
-    run.font.color.rgb = INK
-
-
-def _sub(doc: Document, text: str) -> None:
-    p = doc.add_paragraph()
-    p.paragraph_format.space_before = Pt(8)
-    p.paragraph_format.space_after = Pt(3)
-    p.paragraph_format.keep_with_next = True
-    run = p.add_run(text)
-    run.font.name = FONT
-    run.font.size = Pt(10.5)
-    run.font.bold = True
-    run.font.color.rgb = INK
+# House style lives in one place now that a second document uses it
+# (scripts/docx_house_style.py). Aliased to the underscore names this script already
+# used, so the build below still reads as a sequence of page statements.
+from docx_house_style import (  # noqa: E402
+    BRAND,
+    FONT,
+    INK,
+    INK_MUTED,
+    REPO,
+    TINT_HEX,
+    body as _body,
+    byline as _byline,
+    heading as _heading,
+    kicker as _kicker,
+    logo as _logo,
+    quote as _quote,
+    setup as _setup,
+    shade as _shade,
+    sub as _sub,
+    table as _table,
+    title as _title,
+)
 
 
 def _screen(doc: Document, where: str, lines: list[str]) -> None:
@@ -253,33 +116,6 @@ def _note(doc: Document, number: int, claim: str, why: str) -> None:
     run.font.name = FONT
     run.font.size = Pt(10)
     run.font.color.rgb = INK_MUTED
-
-
-def _table(doc: Document, headers: list[str], rows: list[list[str]]) -> None:
-    table = doc.add_table(rows=1, cols=len(headers))
-    table.style = "Table Grid"
-    table.alignment = WD_TABLE_ALIGNMENT.LEFT
-    for i, header in enumerate(headers):
-        cell = table.rows[0].cells[i]
-        _shade(cell, BRAND_HEX)
-        cell.text = ""
-        run = cell.paragraphs[0].add_run(header.upper())
-        run.font.name = FONT
-        run.font.size = Pt(7.5)
-        run.font.bold = True
-        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-    for index, row in enumerate(rows):
-        cells = table.add_row().cells
-        for i, value in enumerate(row):
-            if index % 2 == 1:
-                _shade(cells[i], TINT_HEX)
-            cells[i].text = ""
-            run = cells[i].paragraphs[0].add_run(value)
-            run.font.name = FONT
-            run.font.size = Pt(9)
-            run.font.bold = i == 0
-            run.font.color.rgb = INK if i == 0 else INK_SOFT
-    doc.add_paragraph().paragraph_format.space_after = Pt(4)
 
 
 # ---------------------------------------------------------------------------
