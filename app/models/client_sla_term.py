@@ -21,6 +21,8 @@ silently treated as zero** (app/billing/credits.py). "We owe nothing" and "nobod
 down what we promised" are different answers, and only one of them is safe to put on a
 statement.
 """
+from dataclasses import dataclass
+
 from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -58,3 +60,56 @@ class ClientSlaTerm(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # A ceiling, because a contract that credits an unbounded amount on a tier we price
     # low is a liability nobody agreed to.
     credit_maximum_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# PLACEHOLDER terms, for a client whose contract hasn't been negotiated yet
+# ---------------------------------------------------------------------------
+#
+# **These are placeholders in the same sense as PLACEHOLDER_AVERAGE_SPEED_MPH in
+# app/gig_platform/economics.py, and they carry the same warning: they are a reasoned
+# starting point, not something anybody has agreed to.** They exist because the
+# alternative - an empty table - means no breach is ever assessable and the contract is
+# unenforced while looking fine, which is a worse kind of wrong than a number that is
+# openly provisional. Tracked as an open item (docs/ROADMAP.md E11).
+#
+# **The targets are derived; the credits are not.**
+#
+# Targets start from the only tier-timing data that exists, `DEFAULT_HOLD_WINDOW_MINUTES`
+# in app/sla/engine.py (spec-confirmed for T1/T2/T3; HOT_SHOT is that module's own local
+# guess), and add the work that cannot be skipped:
+#
+#     floor = hold window + 2 x 8 min on the ground + travel
+#     travel for a ~5 mile metro run at 18 mph is about 17 min
+#
+#              hold      floor     target      headroom
+#   HOT_SHOT    2 min    ~35 min    60 min       1.7x
+#   T1          8 min    ~41 min    90 min       2.2x
+#   T2         90 min    ~123 min  180 min       1.5x
+#   T3      1,080 min  ~1,113 min 1,440 min      1.3x
+#
+# Two of those three inputs are themselves placeholders, so the floors inherit that -
+# which is exactly why the targets carry headroom rather than sitting on the computed
+# minimum. A target we breach routinely is a credit schedule that bleeds money for a
+# service level nobody sold.
+#
+# **The credit percentages have no derivation at all.** They encode one commercial
+# judgement - the more a client paid for speed, the more of it back when we miss - and
+# T3 deliberately has a target with no teeth, which is an ordinary contract shape and is
+# recorded as a real term rather than an absence. Replace them with what customer #1
+# actually signs (B2).
+
+
+@dataclass(frozen=True)
+class PlaceholderTerm:
+    sla_tier: str
+    delivery_target_minutes: int
+    credit_percent: int
+
+
+PLACEHOLDER_SLA_TERMS: tuple[PlaceholderTerm, ...] = (
+    PlaceholderTerm("HOT_SHOT", 60, 100),
+    PlaceholderTerm("T1", 90, 50),
+    PlaceholderTerm("T2", 180, 25),
+    PlaceholderTerm("T3", 1440, 0),
+)

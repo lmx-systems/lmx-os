@@ -21,7 +21,7 @@ data rather than a constant chosen in a Python file.
     must not move numbers a client has already been quoted.
 """
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -470,7 +470,9 @@ async def test_the_invoice_nets_credits_and_shows_all_three_numbers(
         db_session, hub_id, client_id, shop_id, fee_cents=1_800, requested_minutes_ago=30
     )
 
-    today = date.today()
+    # UTC, not local: delivered_at is UTC and the invoice window is built from this,
+    # so a local date makes these tests pass all afternoon and fail after ~7pm.
+    today = datetime.now(timezone.utc).date()
     invoice = await generate_invoice(
         db_session, client_id, today - timedelta(days=1), today + timedelta(days=1)
     )
@@ -489,7 +491,9 @@ async def test_the_statement_lists_which_orders_were_credited(db_session, real_r
         db_session, hub_id, client_id, shop_id, fee_cents=1_800, requested_minutes_ago=200
     )
 
-    today = date.today()
+    # UTC, not local: delivered_at is UTC and the invoice window is built from this,
+    # so a local date makes these tests pass all afternoon and fail after ~7pm.
+    today = datetime.now(timezone.utc).date()
     invoice = await generate_invoice(
         db_session, client_id, today - timedelta(days=1), today + timedelta(days=1)
     )
@@ -513,7 +517,9 @@ async def test_a_statement_with_no_breaches_is_unchanged(db_session, real_redis_
         db_session, hub_id, client_id, shop_id, fee_cents=1_800, requested_minutes_ago=30
     )
 
-    today = date.today()
+    # UTC, not local: delivered_at is UTC and the invoice window is built from this,
+    # so a local date makes these tests pass all afternoon and fail after ~7pm.
+    today = datetime.now(timezone.utc).date()
     invoice = await generate_invoice(
         db_session, client_id, today - timedelta(days=1), today + timedelta(days=1)
     )
@@ -529,7 +535,9 @@ async def test_the_line_item_carries_its_breakdown(db_session, real_redis_client
     order.fee_breakdown = {"total_cents": 1_400, "components": [], "distance_model": "straight_line"}
     await db_session.commit()
 
-    today = date.today()
+    # UTC, not local: delivered_at is UTC and the invoice window is built from this,
+    # so a local date makes these tests pass all afternoon and fail after ~7pm.
+    today = datetime.now(timezone.utc).date()
     invoice = await generate_invoice(
         db_session, client_id, today - timedelta(days=1), today + timedelta(days=1)
     )
@@ -548,7 +556,9 @@ async def test_credits_do_not_move_after_the_statement_is_issued(
     await _delivered_order(
         db_session, hub_id, client_id, shop_id, fee_cents=1_800, requested_minutes_ago=200
     )
-    today = date.today()
+    # UTC, not local: delivered_at is UTC and the invoice window is built from this,
+    # so a local date makes these tests pass all afternoon and fail after ~7pm.
+    today = datetime.now(timezone.utc).date()
     invoice = await generate_invoice(
         db_session, client_id, today - timedelta(days=1), today + timedelta(days=1)
     )
@@ -605,3 +615,83 @@ async def test_a_contradictory_credit_range_is_refused(db_session, real_redis_cl
             _admin=_admin(),
         )
     assert exc_info.value.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# The placeholder schedule (docs/ROADMAP.md E11)
+# ---------------------------------------------------------------------------
+
+
+def test_every_tier_has_a_placeholder_term():
+    """An empty table means no breach is assessable and the contract goes unenforced while
+    looking fine - a worse kind of wrong than a number that is openly provisional. A tier
+    missing from the set would recreate that hole for that tier alone."""
+    from app.sla.engine import DEFAULT_HOLD_WINDOW_MINUTES
+    from app.models.client_sla_term import PLACEHOLDER_SLA_TERMS
+
+    assert {term.sla_tier for term in PLACEHOLDER_SLA_TERMS} == set(
+        DEFAULT_HOLD_WINDOW_MINUTES
+    )
+
+
+def test_each_placeholder_target_clears_the_work_it_cannot_skip():
+    """**The property that keeps the placeholders from bleeding money.** A target below
+    hold window + time on the ground + travel is breached by physics, so a credit schedule
+    attached to it pays out on every single order for a service level nobody sold.
+
+    Two of the three inputs are themselves placeholders, which is exactly why the targets
+    carry headroom rather than sitting on the computed floor.
+    """
+    from app.gig_platform.economics import (
+        PLACEHOLDER_STOP_SERVICE_MINUTES,
+        minutes_for_miles,
+    )
+    from app.models.client_sla_term import PLACEHOLDER_SLA_TERMS
+    from app.sla.engine import DEFAULT_HOLD_WINDOW_MINUTES
+
+    unavoidable = 2 * PLACEHOLDER_STOP_SERVICE_MINUTES + minutes_for_miles(5.0)
+
+    for term in PLACEHOLDER_SLA_TERMS:
+        floor = DEFAULT_HOLD_WINDOW_MINUTES[term.sla_tier] + unavoidable
+        assert term.delivery_target_minutes > floor, (
+            f"{term.sla_tier}: a {term.delivery_target_minutes} min target is under the "
+            f"{floor:.0f} min floor - it would be breached by physics"
+        )
+
+
+def test_the_placeholder_credits_never_exceed_the_fee():
+    """A percentage over 100 would turn a statement into a payment. `_credit_for` clamps
+    it anyway, but a schedule that relies on the clamp is one nobody has read."""
+    from app.models.client_sla_term import PLACEHOLDER_SLA_TERMS
+
+    assert all(0 <= term.credit_percent <= 100 for term in PLACEHOLDER_SLA_TERMS)
+
+
+async def test_the_placeholder_schedule_makes_breaches_assessable(
+    db_session, real_redis_client
+):
+    """The whole point of shipping provisional numbers: with them in place a late delivery
+    is a credit, and without them it is silently unassessable."""
+    from app.models.client_sla_term import PLACEHOLDER_SLA_TERMS
+
+    hub_id, client_id, shop_id = await _seed(db_session)
+    for placeholder in PLACEHOLDER_SLA_TERMS:
+        db_session.add(
+            ClientSlaTerm(
+                client_id=client_id,
+                sla_tier=placeholder.sla_tier,
+                delivery_target_minutes=placeholder.delivery_target_minutes,
+                credit_percent=placeholder.credit_percent,
+            )
+        )
+    await db_session.commit()
+
+    # T2's placeholder target is 3 hours; this took four.
+    order = await _delivered_order(
+        db_session, hub_id, client_id, shop_id, fee_cents=1_800, requested_minutes_ago=240
+    )
+
+    assessment = await assess_credits(db_session, client_id=client_id, orders=[order])
+
+    assert assessment.unassessable_order_ids == []
+    assert assessment.breaches[0].amount_cents == 450  # 25% of 1800
