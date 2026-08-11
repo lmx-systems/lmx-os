@@ -70,6 +70,13 @@ core never knows where an order came from.** If an adapter needs a change
 inside the SLA engine, hold queue, or optimizer, *the contract is wrong* —
 fix the contract, not the core.
 
+**This is enforced, not just documented.**
+`tests/test_architecture_boundaries.py` parses the tree and fails if the dispatch
+engine (`batch_queue`, `optimizer`, `sla`, `fleet_state`, `delivery`,
+`compliance`) imports any adapter or client-facing package. A new package under
+`app/` must be classified there too, so the boundary can't be dodged by adding a
+directory. If it fails, widen the contract — don't add the import.
+
 `sla_owner` is the field that lets the demand paths coexist:
 - `LMX` — LMX made the promise. The SLA engine classifies urgency and owns
   the clock. (Web form, CSV, REST, Epicor/MAM.)
