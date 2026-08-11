@@ -186,6 +186,75 @@ def _sub(doc: Document, text: str) -> None:
     run.font.color.rgb = INK
 
 
+def _screen(doc: Document, where: str, lines: list[str]) -> None:
+    """A screen rendered as a transcript rather than a picture.
+
+    The web version draws the frames. Word cannot, and a screenshot pasted in would
+    be unreadable at this width - so the screen goes in as what it actually says, in
+    order, which is the part being reviewed anyway. One shaded cell so it reads as a
+    quoted object rather than as more prose."""
+    table = doc.add_table(rows=1, cols=1)
+    table.style = "Table Grid"
+    table.alignment = WD_TABLE_ALIGNMENT.LEFT
+    cell = table.rows[0].cells[0]
+    _shade(cell, TINT_HEX)
+    cell.text = ""
+
+    head = cell.paragraphs[0]
+    head.paragraph_format.space_after = Pt(5)
+    run = head.add_run(where.upper())
+    run.font.name = "Aptos Mono"
+    run.font.size = Pt(7.5)
+    run.font.bold = True
+    run.font.color.rgb = BRAND
+
+    for line in lines:
+        p = cell.add_paragraph()
+        p.paragraph_format.space_after = Pt(1)
+        # A leading tab marks a field's value or hint - one level of indent, so the
+        # label/value relationship survives without a nested table.
+        depth = len(line) - len(line.lstrip("\t"))
+        if depth:
+            p.paragraph_format.left_indent = Inches(0.18 * depth)
+        for i, chunk in enumerate(line.strip().split("**")):
+            if not chunk:
+                continue
+            run = p.add_run(chunk)
+            run.font.name = FONT
+            run.font.size = Pt(9.5 if depth == 0 else 9)
+            run.font.bold = i % 2 == 1
+            run.font.color.rgb = INK if depth == 0 else INK_MUTED
+    doc.add_paragraph().paragraph_format.space_after = Pt(2)
+
+
+def _note(doc: Document, number: int, claim: str, why: str) -> None:
+    """One numbered design decision: the claim in bold, the reasoning under it."""
+    p = doc.add_paragraph()
+    p.paragraph_format.left_indent = Inches(0.32)
+    p.paragraph_format.first_line_indent = Inches(-0.32)
+    p.paragraph_format.space_before = Pt(6)
+    p.paragraph_format.space_after = Pt(0)
+    p.paragraph_format.keep_with_next = True
+    tag = p.add_run(f"{number:>2}  ")
+    tag.font.name = "Aptos Mono"
+    tag.font.size = Pt(9)
+    tag.font.bold = True
+    tag.font.color.rgb = BRAND
+    run = p.add_run(claim)
+    run.font.name = FONT
+    run.font.size = Pt(10.5)
+    run.font.bold = True
+    run.font.color.rgb = INK
+
+    q = doc.add_paragraph()
+    q.paragraph_format.left_indent = Inches(0.32)
+    q.paragraph_format.space_after = Pt(2)
+    run = q.add_run(why)
+    run.font.name = FONT
+    run.font.size = Pt(10)
+    run.font.color.rgb = INK_MUTED
+
+
 def _table(doc: Document, headers: list[str], rows: list[list[str]]) -> None:
     table = doc.add_table(rows=1, cols=len(headers))
     table.style = "Table Grid"
@@ -258,6 +327,224 @@ FAQ = [
      "Four numbers, computed from real records rather than asserted: how long from approving a customer to their first delivery landing, how long a counter person takes to enter an order from their second one onward, how quickly a status change reaches them, and how many orders needed a human at LMX to correct them. The fourth one we cannot measure yet and the system says so rather than reporting a zero."),
     ("What is the biggest thing this does not yet handle?",
      "A partial delivery. Three of four parts is an ordinary situation in this trade and there is currently no way to record it - a driver's only options are delivered or failed. It needs a decision about what gets billed before it can be built, which makes it a question for this review rather than a task."),
+]
+
+# The six screens, carried over and extended from the 7 August annotated review.
+# Notes are numbered continuously across all six because they are cited in argument
+# ("note 14") and a per-screen restart would make two notes share a number.
+SCREENS = [
+    {
+        "title": "1  ·  The page we send a prospect",
+        "caption": "Public, no login, one URL. Submitting it applies for an account. It does not grant one.",
+        "where": "lmx / signup",
+        "lines": [
+            "**Send deliveries with LMX**",
+            "\tTell us about your business - takes a minute",
+            "Company name",
+            "\tMidtown Auto Parts",
+            "Your name",
+            "\tJordan Rivera",
+            "Email",
+            "\tjordan@midtownparts.com",
+            "Phone",
+            "\tOptional",
+            "Where do you deliver?",
+            "\tAustin metro",
+            "\tRoughly where your deliveries go - a city or area is fine.",
+            "Choose a password",
+            "\tAt least 10 characters. You'll use this once your account is approved.",
+            "[ ]  I agree to LMX's terms of service and privacy policy.",
+            "**[ Request an account ]**",
+            "\tAlready have an account? Sign in",
+        ],
+        "notes": [
+            ("Six fields, every one answerable from memory.",
+             "Nothing that needs a contract, a rate negotiation, or their IT department. This is the front "
+             "of the funnel, and it is exactly where one extra required field costs us applicants."),
+            ("\"Where do you deliver?\" is free text, not a dropdown.",
+             "We have no service-area model, so nothing could route an applicant automatically. A person "
+             "reads this and picks the hub at approval. That is honest, and better than a dropdown that "
+             "pretends to know."),
+            ("They choose their own password before we approve them.",
+             "So approving is one click, with no credential to mint and email. The account cannot do "
+             "anything until approval, so a password existing early grants nothing."),
+            ("Submitting says \"we'll be in touch\" and nothing else.",
+             "No reference, no next step - and an email already on our books gets the identical response. "
+             "Otherwise this page becomes a way for anyone to test who our customers are."),
+        ],
+        "ask": "the checkbox names a document. Whatever version an applicant accepts is recorded against "
+               "them, which means the sentence has to be true on the day the page goes live. That is the "
+               "first item in section 9 and it gates this screen specifically.",
+    },
+    {
+        "title": "2  ·  What we do with the application",
+        "caption": "Our side. An application arrives here and waits. Nothing about it can move a van yet.",
+        "where": "lmx ops / signups",
+        "lines": [
+            "**Midtown Auto Parts**                              PENDING",
+            "\tJordan Rivera  ·  jordan@midtownparts.com",
+            "\tDelivers around: Austin metro  ·  Applied 2 hours ago",
+            "Hub",
+            "\tAustin - Braker",
+            "What we charge them, per tier",
+            "\tHot shot $28.00      Urgent $18.00",
+            "\tStandard $12.00      Scheduled $9.50",
+            "**[ Approve and set prices ]**    [ Reject ]",
+        ],
+        "notes": [
+            ("Approval and pricing are the same action.",
+             "You cannot activate a customer without saying what they pay. That single constraint removes "
+             "an entire class of problem downstream: a live customer with no price on file, and an order "
+             "we cannot bill."),
+            ("A rejected applicant and a former customer are different states.",
+             "Tempting to reuse one flag for both. They behave differently - one never had access, one had "
+             "it and lost it - and collapsing them would eventually let the wrong one back in."),
+            ("A person picks the hub.",
+             "The deliberate manual step from note 2. It is the one place where our lack of a service-area "
+             "model surfaces as work, and it is a minute per customer."),
+        ],
+        "ask": "these four prices are the whole commercial relationship, typed once at approval. Do we want "
+               "an approver to be able to set them freely, or should they start from a house rate card that "
+               "has to be deliberately overridden?",
+    },
+    {
+        "title": "3  ·  Sending a delivery",
+        "caption": "The screen a counter person uses with a customer on the phone. Under a minute for the "
+                   "first order, under thirty seconds for the ones after it.",
+        "where": "lmx portal / new order",
+        "lines": [
+            "Deliver to",
+            "\t900 Congress Ave, Austin TX",
+            "Collect from",
+            "\t( 1200 E 6th St )   ( Riverside Depot )   ( Braker Ln )",
+            "\tWe'll remember it - next time it's one tap.",
+            "When",
+            "\tNow - straight there, no waiting        **Within the hour - urgent**",
+            "\tToday - standard                        Tomorrow - scheduled",
+            "Add contact, notes or a reference",
+            "**[ Send this delivery ]**",
+        ],
+        "notes": [
+            ("Three fields on the fast path.",
+             "Where it goes, where it's from, how soon. Contact, notes and reference all exist, collapsed "
+             "behind one line, so they never slow down the order that doesn't need them."),
+            ("Destination first, pickup second.",
+             "Backwards from how we think about it and correct for how they work. The destination is what "
+             "the person on the phone is reading out right now. The pickup is usually their own shop and "
+             "usually one tap."),
+            ("Previous pickups are chips, not a dropdown.",
+             "A distributor collects from the same handful of places forever. Type an address once, it "
+             "becomes a saved location, and the next order to it is a tap. That is where most of the "
+             "thirty seconds comes from."),
+            ("Four choices instead of a date picker.",
+             "Nobody at a counter operates a calendar widget. These map onto our service tiers behind the "
+             "scenes: the client says how urgent it is, we decide what that obliges us to."),
+            ("This form is the smallest of four doors.",
+             "Pasting a list, uploading a spreadsheet, or their own system calling ours all arrive as the "
+             "same order. The form is what a counter uses all day; the others are back-office and machine "
+             "traffic. Deliberately, none of them is privileged."),
+        ],
+        "ask": "the four urgency choices are also, implicitly, four prices. A counter person picking \"Now\" "
+               "out of habit is choosing our most expensive tier. Should the price of the choice be on the "
+               "button?",
+    },
+    {
+        "title": "4  ·  The confirmation",
+        "caption": "The screen with the most riding on it. This is what makes us read as a carrier rather "
+                   "than as a form that swallowed something.",
+        "where": "lmx portal / booked",
+        "lines": [
+            "**Booked - we'll collect by 2:40 PM**",
+            "\tEstimated delivery around 3:25 PM",
+            "\tReference   LMX-7C2A9F",
+            "\tPrice       $18.00",
+            "**[ Send another ]**",
+        ],
+        "notes": [
+            ("A commitment, not a spinner.",
+             "\"We'll collect by 2:40\" is the whole difference between a carrier and a contact form. The "
+             "price sits beside it because a counter person is frequently quoting their customer while "
+             "they type."),
+            ("The two times are deliberately unequal.",
+             "Collection is a promise, derived from the service level they bought, and missing it credits "
+             "their statement automatically. Delivery is an estimate, and it is set quieter and worded as "
+             "one. Nothing on this screen invites a customer to read the second number as the first."),
+            ("\"Send another\" goes straight to an empty form.",
+             "The realistic pattern is three orders in a row, not one and done. Anything that makes the "
+             "second order slower than the first is the wrong shape."),
+        ],
+        "ask": "we show the delivery estimate because warmth is worth something at the counter. The cost of "
+               "being wrong is a customer who read it as a promise. The wording carries that distinction "
+               "today - is wording enough?",
+    },
+    {
+        "title": "5  ·  The driver's stop",
+        "caption": "One screen, in a van, one-handed, sometimes with no signal. The driver never chooses "
+                   "what to do next - the route does.",
+        "where": "driver app / stop 3 of 7",
+        "lines": [
+            "**Drop  ·  Stop 3 of 7**                                ARRIVED",
+            "\t900 Congress Ave, Suite 400",
+            "\tAsk for the service desk",
+            "**Proof needed here**",
+            "\t2 photos - the parcel at the door",
+            "\tPlus a signature or a PIN",
+            "\t( Photo 1 done )   ( Photo 2 )   ( Signature )",
+            "**Collect $142.60 on delivery**",
+            "\tCash or check, in full",
+            "\t( Cash )   ( Check )   ( They won't pay )",
+            "**[ Complete stop ]**",
+        ],
+        "notes": [
+            ("\"Stop 3 of 7\" is the entire navigation.",
+             "No list to browse, no stop to pick. Work is pushed, not chosen. It removes the cherry-picking "
+             "problem before it exists, and it means a new driver's first shift needs no explanation."),
+            ("What counts as proof is set per order, and the screen says so.",
+             "A brake rotor left at a loading dock and a $4,000 ECU handed to a service manager are not the "
+             "same delivery. The customer decides which one they bought; the driver just reads it. Nothing "
+             "completes until the evidence the order asked for actually exists."),
+            ("Cash on delivery has no amount field.",
+             "The driver confirms the amount we already know, or says the customer refused, which raises it "
+             "to a person immediately. A driver typing what they collected turns every shortfall into a "
+             "dispute about arithmetic instead of a dispute about the customer."),
+            ("Every action here works with no signal.",
+             "Photos, signature, completion, cash - all queue locally and sync when the phone reconnects, "
+             "and the driver can see plainly what has gone up and what has not. A parking garage is not an "
+             "outage."),
+        ],
+        "ask": "the driver cannot record a partial delivery - four of six pieces arriving is either a "
+               "completion or an exception. Making it real means deciding what we bill for it, which is a "
+               "commercial question before it is a screen.",
+    },
+    {
+        "title": "6  ·  What the person waiting for the part sees",
+        "caption": "A texted link, no login, no app. Our customer's customer - the only screen here that "
+                   "someone who has never heard of us will look at.",
+        "where": "track.lmx / recipient",
+        "lines": [
+            "**Your delivery from Midtown Auto Parts**",
+            "\tArriving on Congress Ave",
+            "**On the way to you**                               NEXT STOP",
+            "\tExpected around 3:25 PM",
+            "\t[ map - the van, shown only while this drop is next ]",
+            "\tCollected 2:38 PM  ·  Midtown Auto Parts",
+            "\tQuestions about this delivery? Contact Midtown Auto Parts",
+        ],
+        "notes": [
+            ("The van appears only when they are genuinely next.",
+             "A moving dot that is four stops away is worse than no dot - it invites someone to stand "
+             "outside. Position is shown when it means something and withheld when it doesn't."),
+            ("The link stops working shortly after delivery.",
+             "A tracking URL that lives forever is a permanent window into someone's address and order "
+             "history. It expires, and an expired link and a link that never existed are indistinguishable "
+             "from the outside."),
+            ("Our customer's name is on it, not just ours.",
+             "We are the carrier; the relationship is theirs. Questions route back to the distributor. This "
+             "screen is a reason for them to keep sending us work, not a way for us to meet their customers."),
+        ],
+        "ask": "this is the most widely seen screen we have and the only one an outsider judges us on. It is "
+               "also the one with no branding decision behind it yet.",
+    },
 ]
 
 CAPABILITIES = [
@@ -464,7 +751,29 @@ def build(out: Path) -> None:
     ], start=1):
         _body(doc, f"{i}.  {text}", indent=0.2)
 
-    _heading(doc, "A", "Appendix - capabilities at a glance")
+    doc.add_page_break()
+    _heading(doc, "A", "Appendix - the screens, annotated")
+    _body(doc, "Six screens, in the order the work moves through them: the page a prospect lands on, what "
+               "we do with their application, the two screens a counter person lives in, the driver's stop, "
+               "and what the person waiting for the part sees. Beside each one are the design decisions that "
+               "are worth disagreeing with. **Every note is a choice we made and could unmake.**")
+    _body(doc, "Each screen is transcribed rather than pictured - same fields, same order, same copy - "
+               "because the wording and the sequence are what is being reviewed. What would help most is "
+               "not whether they are pretty. It is where someone with a customer on the phone would stop "
+               "to think.")
+
+    counter = 0
+    for screen in SCREENS:
+        _sub(doc, screen["title"])
+        _body(doc, screen["caption"])
+        _screen(doc, screen["where"], screen["lines"])
+        for claim, why in screen["notes"]:
+            counter += 1
+            _note(doc, counter, claim, why)
+        _quote(doc, f"For discussion: {screen['ask']}")
+
+    doc.add_page_break()
+    _heading(doc, "B", "Appendix - capabilities at a glance")
     _body(doc, "For reference during the discussion rather than reading in order.")
     _table(doc, ["Capability", "What it means in practice"], CAPABILITIES)
 
