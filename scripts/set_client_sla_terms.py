@@ -15,12 +15,19 @@ Usage:
 
     .venv/bin/python -m scripts.set_client_sla_terms --client-id <uuid> --list
 
+    .venv/bin/python -m scripts.set_client_sla_terms --client-id <uuid> --placeholders
+
     .venv/bin/python -m scripts.set_client_sla_terms \\
         --client-id <uuid> \\
-        --term HOT_SHOT:90:50 \\
-        --term T1:120:25 \\
-        --term T2:240:15 \\
+        --term HOT_SHOT:60:100 \\
+        --term T1:90:50 \\
+        --term T2:180:25 \\
         --term T3:1440:0
+
+`--placeholders` applies `PLACEHOLDER_SLA_TERMS` - a reasoned starting point nobody has
+agreed to, openly provisional, there because an empty table means no breach is assessable
+and the contract goes unenforced while looking fine. Replace them with what customer #1
+signs (docs/ROADMAP.md E11, B2).
 
 Each --term is TIER:DELIVERY_TARGET_MINUTES:CREDIT_PERCENT, optionally with
 :MIN_CENTS:MAX_CENTS. The target is measured from when the order reached us.
@@ -40,7 +47,7 @@ from sqlalchemy import select
 
 from app.db import session_scope
 from app.models.client import Client
-from app.models.client_sla_term import ClientSlaTerm
+from app.models.client_sla_term import PLACEHOLDER_SLA_TERMS, ClientSlaTerm
 
 
 def _parse_term(raw: str) -> dict:
@@ -143,11 +150,33 @@ def main() -> int:
         type=_parse_term,
         help="TIER:TARGET_MINUTES:CREDIT_PERCENT[:MIN_CENTS[:MAX_CENTS]]",
     )
+    parser.add_argument(
+        "--placeholders",
+        action="store_true",
+        help="apply PLACEHOLDER_SLA_TERMS - provisional, not agreed by anyone (E11)",
+    )
     parser.add_argument("--list", action="store_true", help="show what's on file and exit")
     args = parser.parse_args()
 
+    if args.placeholders:
+        # Explicit terms win, so --placeholders can seed the tiers nobody has negotiated
+        # yet while a real one overrides its tier in the same command.
+        chosen = {term["sla_tier"] for term in args.term}
+        args.term = [
+            {
+                "sla_tier": placeholder.sla_tier,
+                "delivery_target_minutes": placeholder.delivery_target_minutes,
+                "credit_percent": placeholder.credit_percent,
+                "credit_minimum_cents": None,
+                "credit_maximum_cents": None,
+            }
+            for placeholder in PLACEHOLDER_SLA_TERMS
+            if placeholder.sla_tier not in chosen
+        ] + args.term
+        print("Applying PLACEHOLDER terms - provisional, not agreed by anyone (E11).")
+
     if not args.term and not args.list:
-        parser.error("give at least one --term, or --list")
+        parser.error("give at least one --term, --placeholders, or --list")
 
     return asyncio.run(_run(args.client_id, args.term, args.list))
 
