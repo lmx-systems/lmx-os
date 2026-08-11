@@ -236,28 +236,37 @@ async def _driver_position(
 
 
 def _estimated_arrival(
-    order: Order, position: DriverPosition | None
+    order: Order,
+    position: DriverPosition | None,
+    stop_eta: datetime | None = None,
 ) -> datetime | None:
     """When the recipient should expect the driver.
 
-    Two sources, in order of how much they actually know:
+    Three sources, in order of how much they actually know:
 
       - a live position, which gives straight-line distance to the drop at the
         same placeholder speed the gig accept-gate and the client-portal estimate
-        use. Consistent by construction: the recipient must not see a different
-        number from the one their sender was quoted.
-      - `promised_at`, what we committed to, when there is no position.
+        use. Only available while this drop is the driver's current stop (rule 1),
+        which is also the only time it is meaningful - a straight line from four
+        stops away would ignore the three in between and always read early.
+      - **this stop's ETA**, walked along the driver's actual remaining route
+        (app/delivery/eta.py). This is the case that used to fall through to
+        `promised_at`: a recipient who is fourth in line was shown what we
+        committed to rather than when we now expect to arrive, so a route running
+        an hour late told them nothing had changed.
+      - `promised_at`, what we committed to, when there is neither.
 
     Straight-line rather than road-network because there is still no verified
-    travel-time model (E1). Named an estimate everywhere it surfaces, and the page
-    presents it as one.
+    travel-time model (E1) - but it is the same straight line everywhere, so the
+    recipient cannot see a different number from the one their sender was quoted.
+    Named an estimate everywhere it surfaces, and the page presents it as one.
     """
     if position is not None and order.delivery_lat is not None and order.delivery_lng is not None:
         miles = miles_between(
             position.lat, position.lng, float(order.delivery_lat), float(order.delivery_lng)
         )
         return position.recorded_at + timedelta(minutes=minutes_for_miles(miles))
-    return order.promised_at
+    return stop_eta or order.promised_at
 
 
 async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
@@ -288,8 +297,15 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
     headline, detail = _RECIPIENT_STATUS.get(order.status, _FALLBACK_STATUS)
 
     position: DriverPosition | None = None
+    # This drop's own stop ETA, which is route-aware and available whether or not the
+    # recipient is next. Fetched outside the current-stop check below because the two
+    # answer different questions: the ETA is fine to show from any position on the
+    # route, whereas the van's live location is not (rule 1).
+    stop_eta: datetime | None = None
     if order.status not in _PRE_DISPATCH_STATUSES and order.status != OrderStatus.delivered:
         stop = await _dropoff_stop_for(session, order)
+        if stop is not None:
+            stop_eta = stop.eta
         if stop is not None and await _is_the_drivers_current_stop(session, stop):
             position = await _driver_position(session, stop, FleetStateManager())
             if position is not None:
@@ -305,7 +321,7 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
         headline=headline,
         detail=detail,
         destination_hint=_destination_hint(order),
-        estimated_arrival=_estimated_arrival(order, position),
+        estimated_arrival=_estimated_arrival(order, position, stop_eta),
         delivered_at=order.delivered_at,
         driver_position=position,
         is_live=order.status

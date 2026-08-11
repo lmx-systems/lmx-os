@@ -42,10 +42,18 @@ class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # app/models/order.py for why (a real bug this exact mismatch caused,
     # caught by tests/integration/).
     eta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The ETA as first predicted, written once and never refreshed
+    # (app/delivery/eta.py, migration 0040). `eta` above moves as the route
+    # progresses, which is what a driver needs and what makes it worthless as
+    # ground truth - a number recomputed until the moment of arrival is accurate
+    # by construction. `arrived_at - planned_eta` is the real error.
+    planned_eta: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # Ground-truth capture (docs/ROADMAP.md I1): when the driver actually
     # arrived. time-at-stop = completed_at - arrived_at (measurable per
-    # shop), and arrived_at vs `eta` is direct ETA-accuracy ground truth.
-    # Set on the first arrive_at_stop transition, never overwritten.
+    # shop), and arrived_at vs `planned_eta` is direct ETA-accuracy ground
+    # truth. Set on the first arrive_at_stop transition, never overwritten.
     arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

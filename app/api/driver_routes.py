@@ -122,6 +122,7 @@ from app.delivery.cod import (
     record_dispute,
 )
 from app.delivery.en_route import mark_current_stop_en_route
+from app.delivery.eta import refresh_route_etas
 from app.models.cod_collection import CodCollection
 from app.delivery.proof import ProofNotSatisfied, assert_proof_satisfied, resolve_stop_proof
 from app.models.driver_document import REQUIRED_DOC_TYPES, REVIEW_PENDING
@@ -1178,6 +1179,13 @@ async def accept_offer(
     # ever set it.
     await mark_current_stop_en_route(session, route.id)
 
+    # Per-stop ETAs, now that every Stop row exists and is in its final sequence
+    # (app/delivery/eta.py). This is also the only moment `planned_eta` is written, so
+    # it has to run after the HOT_SHOT re-sequencing above rather than during it -
+    # predicting arrival times for an order the driver has not been given yet would
+    # score the wrong plan.
+    await refresh_route_etas(session, route.id)
+
     await session.commit()
 
     # Real PIN issuance (docs/ROADMAP.md A4): text each dropoff's PIN to
@@ -1586,6 +1594,10 @@ async def arrive_at_stop(
     # so a re-marked arrival can't overwrite the real one.
     if stop.arrived_at is None:
         stop.arrived_at = datetime.now(timezone.utc)
+    # An arrival is the strongest signal there is about where this route actually is, so
+    # the remaining stops are re-estimated from it. This stop's own ETA is left alone -
+    # it is finished as a prediction, and `planned_eta` preserves what it was.
+    await refresh_route_etas(session, stop.route_id)
     await session.commit()
     return await _stop_view_after_reload(session, stop)
 
@@ -2088,6 +2100,12 @@ async def complete_stop(
         route = await session.get(Route, stop.route_id)
         route.status = "completed"
 
+    # The strongest re-estimation point on a route: the driver is leaving a known place
+    # at a known time, so every stop after this one is re-walked from here. A route that
+    # ran twenty minutes long stops claiming its original arrival times.
+    if not route_finished:
+        await refresh_route_etas(session, stop.route_id)
+
     await session.commit()
 
     # Real per-delivery instant payout for gig-classified drivers
@@ -2231,6 +2249,9 @@ async def flag_stop_issue(
         # A flagged stop is finished too, so the next one is promoted and the driver is
         # on their way to it (docs/ROADMAP.md L11) - the same signal as a completion.
         await mark_current_stop_en_route(session, stop.route_id)
+        # And it moves the remaining ETAs for the same reason a completion does. A stop
+        # that failed still consumed the drive to it and the time spent at the door.
+        await refresh_route_etas(session, stop.route_id)
 
     await session.commit()
 
