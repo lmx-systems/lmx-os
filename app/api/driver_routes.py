@@ -1988,25 +1988,38 @@ async def complete_stop(
             detail=f"Only {stop.scanned_count}/{stop.parcel_count} parcels scanned",
         )
     if stop.stop_type == "dropoff":
-        # Sequence assignment (accept_offer) always numbers every pickup
-        # stop before every dropoff stop on a route, so "any earlier-
-        # sequenced pickup not yet completed" is exactly "this delivery's
-        # pickup hasn't happened yet."
-        unfinished_pickups = await session.execute(
+        # "Have the parcels for THIS order been collected yet?"
+        #
+        # This used to ask a different question - "is any earlier-sequenced pickup on
+        # this route still open" - and rely on accept_offer numbering every pickup
+        # before every dropoff for the two to mean the same thing. They only mean the
+        # same thing while a route cannot interleave, and the moment it can (collect A,
+        # collect B, drop B, drop A) the proxy blocks a delivery whose own parcels are
+        # already aboard because some unrelated later pickup sits earlier in the list.
+        #
+        # Asking about this order's own pickup stop is exact, needs no assumption about
+        # sequencing, and is correct under either ordering. It is also cheaper to
+        # reason about than the invariant it replaces.
+        pickup_pending = await session.execute(
             select(func.count())
             .select_from(Stop)
+            .join(StopOrder, StopOrder.stop_id == Stop.id)
             .where(
                 Stop.route_id == stop.route_id,
                 Stop.stop_type == "pickup",
-                Stop.sequence < stop.sequence,
-                # notin_ terminal, not != "completed" - a *failed* pickup is
-                # never going to become completed, so treating it as
-                # "unfinished" would block this dropoff from ever completing.
+                StopOrder.order_id.in_(
+                    select(StopOrder.order_id).where(StopOrder.stop_id == stop.id)
+                ),
+                # notin_ terminal, not != "completed" - a *failed* pickup is never going
+                # to become completed, so treating it as "unfinished" would block this
+                # dropoff from ever completing.
                 Stop.status.notin_(_TERMINAL_STOP_STATUSES),
             )
         )
-        if unfinished_pickups.scalar_one() > 0:
-            raise HTTPException(status_code=409, detail="Complete this route's pickup stop(s) first")
+        if pickup_pending.scalar_one() > 0:
+            raise HTTPException(
+                status_code=409, detail="Collect this order before delivering it"
+            )
 
     if body.method == "pin":
         # Real verification (docs/ROADMAP.md A4) - stop.delivery_pin is
