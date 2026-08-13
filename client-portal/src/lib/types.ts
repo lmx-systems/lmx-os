@@ -36,6 +36,18 @@ export interface ClientOrderSummaryView {
   // Failed-delivery visibility (docs/ROADMAP.md R5).
   failure_reason: string | null
   delivery_attempts: number
+  // What we committed to collecting by - the same value the confirmation screen showed.
+  collect_by: string | null
+  // When we now expect it to arrive: the route-aware ETA once it is on a driver's route,
+  // a straight-line estimate before then. An estimate in both cases, never a commitment.
+  estimated_delivery_by: string | null
+}
+
+export interface ClientOrderPage {
+  items: ClientOrderSummaryView[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export interface ClientOrderDetailView extends ClientOrderSummaryView {

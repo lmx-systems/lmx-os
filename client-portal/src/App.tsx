@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from './lib/api'
 import { clearToken, getToken } from './lib/auth'
 import type {
@@ -39,6 +39,8 @@ type View =
   | { name: 'team' }
   | { name: 'integrations' }
 
+const ORDER_PAGE_SIZE = 50
+
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(() => getToken() !== null)
   const [showSignup, setShowSignup] = useState(
@@ -75,6 +77,13 @@ export default function App() {
   })
   const [profile, setProfile] = useState<ClientProfileView | null>(null)
   const [orders, setOrders] = useState<ClientOrderSummaryView[] | null>(null)
+  // Order search (docs/ROADMAP.md W5). A counter person with a customer on the phone is
+  // looking for one order, and the list used to be every order this company had ever
+  // placed - unbounded and unsearchable.
+  const [orderQuery, setOrderQuery] = useState('')
+  const [orderStatus, setOrderStatus] = useState<'open' | 'all'>('all')
+  const [orderOffset, setOrderOffset] = useState(0)
+  const [orderTotal, setOrderTotal] = useState(0)
   const [selectedOrder, setSelectedOrder] = useState<ClientOrderDetailView | null>(null)
   const [invoices, setInvoices] = useState<InvoiceSummaryView[] | null>(null)
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetailView | null>(null)
@@ -82,15 +91,29 @@ export default function App() {
   const [entryMode, setEntryMode] = useState<'single' | 'paste' | 'file'>('single')
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  // One place that knows how to fetch the current page, so the four callers that refresh
+  // after placing orders cannot drift from the search state the user is looking at.
+  const loadOrders = useCallback(async () => {
+    const page = await api.myOrders({
+      q: orderQuery.trim() || undefined,
+      status: orderStatus,
+      limit: ORDER_PAGE_SIZE,
+      offset: orderOffset,
+    })
+    setOrders(page.items)
+    setOrderTotal(page.total)
+  }, [orderQuery, orderStatus, orderOffset])
+
   useEffect(() => {
     if (!loggedIn) return
     let cancelled = false
     setLoadError(null)
-    Promise.all([api.myProfile(), api.myOrders()])
+    Promise.all([api.myProfile(), api.myOrders({ status: 'all', limit: ORDER_PAGE_SIZE })])
       .then(([profileResult, ordersResult]) => {
         if (cancelled) return
         setProfile(profileResult)
-        setOrders(ordersResult)
+        setOrders(ordersResult.items)
+        setOrderTotal(ordersResult.total)
       })
       .catch(() => {
         if (cancelled) return
@@ -103,6 +126,20 @@ export default function App() {
       cancelled = true
     }
   }, [loggedIn])
+
+  // Refetch when the search, the filter or the page changes. Debounced only for the
+  // query - typing should not fire a request per keystroke, but clicking a filter or a
+  // page should feel immediate.
+  const searching = orderQuery.trim().length > 0
+  useEffect(() => {
+    if (!loggedIn || !profile) return
+    const delay = searching ? 250 : 0
+    const timer = setTimeout(() => {
+      loadOrders().catch(() => {})
+    }, delay)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedIn, profile, orderQuery, orderStatus, orderOffset])
 
   useEffect(() => {
     if (view.name !== 'order-detail') return
@@ -313,13 +350,13 @@ export default function App() {
             {entryMode === 'paste' ? (
               <BulkPastePanel
                 onOrdersPlaced={() => {
-                  api.myOrders().then(setOrders).catch(() => {})
+                  loadOrders().catch(() => {})
                 }}
               />
             ) : entryMode === 'file' ? (
               <ManifestUploadPanel
                 onOrdersPlaced={() => {
-                  api.myOrders().then(setOrders).catch(() => {})
+                  loadOrders().catch(() => {})
                 }}
               />
             ) : (
@@ -328,7 +365,7 @@ export default function App() {
                   // Refresh the orders list in the background so switching tabs
                   // shows the new order rather than a stale list - without
                   // yanking the user off the confirmation they just earned.
-                  api.myOrders().then(setOrders).catch(() => {})
+                  loadOrders().catch(() => {})
                 }}
               />
             )}
@@ -337,7 +374,26 @@ export default function App() {
         {view.name === 'orders' && (
           <>
             <h1 className="mb-4 text-[16px] font-semibold text-[var(--text-primary)]">Your orders</h1>
-            <OrdersTable orders={orders} onSelect={(orderId) => setView({ name: 'order-detail', orderId })} />
+            <OrdersTable
+              orders={orders}
+              onSelect={(orderId) => setView({ name: 'order-detail', orderId })}
+              query={orderQuery}
+              onQueryChange={(value) => {
+                setOrderQuery(value)
+                // A new search starts at the beginning. Keeping the offset would show
+                // page three of a two-page result and read as "no matches".
+                setOrderOffset(0)
+              }}
+              status={orderStatus}
+              onStatusChange={(value) => {
+                setOrderStatus(value)
+                setOrderOffset(0)
+              }}
+              total={orderTotal}
+              limit={ORDER_PAGE_SIZE}
+              offset={orderOffset}
+              onOffsetChange={setOrderOffset}
+            />
           </>
         )}
         {view.name === 'order-detail' &&

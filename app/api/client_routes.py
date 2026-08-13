@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import secrets
 import uuid
+from typing import Annotated, Literal
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,7 +57,8 @@ from app.db import get_db
 from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, CLIENT_USER_ROLES, ClientUser
 from app.models.invoice import Invoice
-from app.models.order import Order
+from app.models.order import Order, OrderStatus
+from app.models.stop import Stop, StopOrder
 from app.models.return_item import ReturnItem
 from app.models.shop import Shop
 from app.returns.service import AWAITING_STATUSES, return_views
@@ -80,6 +82,7 @@ from app.schemas.client_auth import (
     ClientAuthToken,
     ClientLoginBody,
     ClientOrderDetailView,
+    ClientOrderPage,
     ClientOrderSummaryView,
     ClientProfileView,
     ClientShopView,
@@ -276,24 +279,142 @@ def _order_summary_view(order: Order, shop_name: str | None) -> ClientOrderSumma
     )
 
 
-@router.get("/orders", response_model=list[ClientOrderSummaryView])
+# Statuses a client would call "still happening". Used by `status=open`, which is what a
+# counter person with a customer on the phone actually wants - the twelve orders in flight,
+# not the four thousand delivered ones.
+_OPEN_ORDER_STATUSES = tuple(
+    status
+    for status in OrderStatus
+    if status
+    not in (OrderStatus.delivered, OrderStatus.cancelled, OrderStatus.returned)
+)
+
+
+def _escape_like(term: str) -> str:
+    """Neutralise LIKE metacharacters in user input.
+
+    Without this, searching for `%` matches every order the client has and `_` matches
+    any single character - so the search box silently stops being a search box. Backslash
+    first, or it would escape the escapes added after it.
+    """
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+async def _delivery_etas(
+    session: AsyncSession, order_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, datetime]:
+    """The route-aware arrival time per order, where one exists.
+
+    `Stop.eta` is walked along the sequence the driver will actually drive
+    (app/delivery/eta.py) and refreshed as the route progresses, which makes it the only
+    arrival number in this system worth showing. One query for the whole page rather than
+    one per order.
+
+    Latest dropoff stop wins. An order can accumulate more than one across a re-plan - an
+    offer declined and re-offered builds fresh stops - and the newest is the live route.
+    """
+    if not order_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(StopOrder.order_id, Stop.eta, Stop.created_at)
+            .join(Stop, Stop.id == StopOrder.stop_id)
+            .where(
+                StopOrder.order_id.in_(order_ids),
+                Stop.stop_type == "dropoff",
+                Stop.eta.is_not(None),
+            )
+            .order_by(StopOrder.order_id, Stop.created_at.desc())
+        )
+    ).all()
+    etas: dict[uuid.UUID, datetime] = {}
+    for order_id, eta, _created in rows:
+        etas.setdefault(order_id, eta)  # first per order = newest, by the ordering above
+    return etas
+
+
+@router.get("/orders", response_model=ClientOrderPage)
 async def list_my_orders(
-    client: AuthedClient = Depends(get_current_client), session: AsyncSession = Depends(get_db)
-) -> list[ClientOrderSummaryView]:
-    result = await session.execute(
-        select(Order)
-        .where(Order.client_id == uuid.UUID(client.client_id))
-        .order_by(Order.requested_at.desc())
+    # Annotated rather than `= Query(default=...)`, so a direct call gets a real Python
+    # default. Every test in this repo calls endpoint functions directly, and with the
+    # older form those callers receive `Query` objects instead of values - which fails
+    # somewhere downstream with an AttributeError rather than at the call.
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=120,
+            description="Free text: our reference, your reference, shop name, contact or address",
+        ),
+    ] = None,
+    status: Annotated[Literal["open", "all"], Query()] = "all",
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> ClientOrderPage:
+    """A client's orders, searchable and paged (docs/ROADMAP.md W5).
+
+    **This used to return every order the client had ever placed**, unbounded and
+    unsearchable - a full scan that grows forever, on the screen a counter person would
+    use all day, with no way to find one order among four thousand.
+
+    `q` matches our reference, *their* reference, the shop, the delivery contact and the
+    address. Their reference matters most of the four: a counter person knows the number
+    on their own paperwork, not ours.
+    """
+    client_id = uuid.UUID(client.client_id)
+
+    # Joined rather than looked up afterwards, because the shop's name is one of the
+    # things `q` searches - filtering on it after the fact would page over the wrong set.
+    base = (
+        select(Order, Shop.name)
+        .outerjoin(Shop, Shop.id == Order.shop_id)
+        .where(Order.client_id == client_id)
     )
-    orders = list(result.scalars().all())
-    if not orders:
-        return []
 
-    shop_ids = {o.shop_id for o in orders}
-    shops_result = await session.execute(select(Shop).where(Shop.id.in_(shop_ids)))
-    shop_names = {s.id: s.name for s in shops_result.scalars().all()}
+    if status == "open":
+        base = base.where(Order.status.in_(_OPEN_ORDER_STATUSES))
 
-    return [_order_summary_view(o, shop_names.get(o.shop_id)) for o in orders]
+    if q and q.strip():
+        pattern = f"%{_escape_like(q.strip())}%"
+        base = base.where(
+            or_(
+                Order.external_order_ref.ilike(pattern),
+                Order.source_order_ref.ilike(pattern),
+                Order.delivery_contact_name.ilike(pattern),
+                Order.delivery_address.ilike(pattern),
+                Shop.name.ilike(pattern),
+            )
+        )
+
+    # Counted over the filtered set, before paging. A total that ignored the filter would
+    # tell the reader "312 orders" while showing them the 3 that matched.
+    total = (
+        await session.execute(
+            select(func.count()).select_from(base.order_by(None).subquery())
+        )
+    ).scalar_one()
+
+    rows = (
+        await session.execute(
+            base.order_by(Order.requested_at.desc()).limit(limit).offset(offset)
+        )
+    ).all()
+
+    orders = [row[0] for row in rows]
+    etas = await _delivery_etas(session, [o.id for o in orders])
+
+    items = []
+    for order, shop_name in rows:
+        view = _order_summary_view(order, shop_name)
+        view.collect_by = order.hold_deadline.isoformat() if order.hold_deadline else None
+        # The live route's number when there is one, the pre-route straight-line estimate
+        # otherwise. Never a promise either way - see the field's comment.
+        eta = etas.get(order.id) or await _estimate_delivery_by(session, order)
+        view.estimated_delivery_by = eta.isoformat() if eta else None
+        items.append(view)
+
+    return ClientOrderPage(items=items, total=int(total), limit=limit, offset=offset)
 
 
 @router.get("/orders/{order_id}", response_model=ClientOrderDetailView)

@@ -265,5 +265,9 @@ async def test_signup_to_delivered(db_session, real_redis_client, monkeypatch):
 
     # ---- 9. The client sees it in their own portal ---------------------
     their_orders = await list_my_orders(client=client, session=db_session)
-    assert len(their_orders) == 1
-    assert their_orders[0].status == "delivered"
+    assert their_orders.total == 1
+    assert their_orders.items[0].status == "delivered"
+    # And the counter person's two numbers came back with it (W5): the commitment we made,
+    # and the arrival estimate - which for a delivered order is behind us, so only the
+    # commitment is asserted here.
+    assert their_orders.items[0].collect_by is not None

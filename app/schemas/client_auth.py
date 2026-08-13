@@ -92,6 +92,34 @@ class ClientOrderSummaryView(BaseModel):
     # unless the current status reflects a failure.
     failure_reason: str | None = None
     delivery_attempts: int = 1
+    # What we committed to collecting by. `Order.hold_deadline` - the same value the
+    # confirmation screen showed as "we'll collect by", so a counter person searching for
+    # an order sees the promise they read out to their customer.
+    collect_by: str | None = None
+    # When we now expect it to arrive. **The route-aware number** once the order is on a
+    # driver's route (`Stop.eta`, walked along the sequence they will actually drive),
+    # falling back to a straight-line estimate from the collection commitment before then.
+    #
+    # Named `estimated_...` in both cases and never `delivery_by`: collection is a
+    # commitment and arrival is not, and the whole point of surfacing one number here is
+    # that a driver, a recipient and a counter person are never shown arrival times
+    # derived three different ways.
+    estimated_delivery_by: str | None = None
+
+
+class ClientOrderPage(BaseModel):
+    """One page of a client's orders.
+
+    An envelope rather than a bare list, because `GET /client/orders` used to return
+    **every order the client had ever placed** with no limit - a full scan that grows
+    forever, on the screen a counter person would use all day. A page is only honest if
+    the reader can tell it is one, so `total` comes back with it.
+    """
+
+    items: list[ClientOrderSummaryView]
+    total: int
+    limit: int
+    offset: int
 
 
 class ClientOrderDetailView(ClientOrderSummaryView):

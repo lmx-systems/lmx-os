@@ -262,12 +262,15 @@ async def test_list_and_get_my_orders_scoped_to_this_client(db_session):
     db_session.add(order)
     await db_session.commit()
 
-    orders = await list_my_orders(client=authed, session=db_session)
-    assert len(orders) == 1
-    assert orders[0].order_id == str(order.id)
-    assert orders[0].shop_name == "Main Branch"
-    assert orders[0].fee_cents == 1_800
-    assert orders[0].delivered_at is not None  # status is already "delivered"
+    # A page now (docs/ROADMAP.md W5) - the endpoint used to return every order the
+    # client had ever placed, unbounded.
+    page = await list_my_orders(client=authed, session=db_session)
+    assert page.total == 1
+    assert len(page.items) == 1
+    assert page.items[0].order_id == str(order.id)
+    assert page.items[0].shop_name == "Main Branch"
+    assert page.items[0].fee_cents == 1_800
+    assert page.items[0].delivered_at is not None  # status is already "delivered"
 
     detail = await get_my_order(str(order.id), client=authed, session=db_session)
     assert detail.delivery_address == "500 Client St"

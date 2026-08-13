@@ -7,8 +7,8 @@ import type {
   ClientOrderBatchResult,
   ClientOrderBody,
   ClientOrderDetailView,
+  ClientOrderPage,
   ClientOrderResult,
-  ClientOrderSummaryView,
   ClientProfileView,
   ClientShopView,
   ClientSignupBody,
@@ -86,7 +86,18 @@ export const api = {
 
   myProfile: () => request<ClientProfileView>('/client/me'),
 
-  myOrders: () => request<ClientOrderSummaryView[]>('/client/orders'),
+  // Searchable and paged (docs/ROADMAP.md W5). This used to return every order the
+  // client had ever placed, which is both a growing full scan and useless for finding
+  // one order among thousands.
+  myOrders: (params: { q?: string; status?: 'open' | 'all'; limit?: number; offset?: number } = {}) => {
+    const search = new URLSearchParams()
+    if (params.q) search.set('q', params.q)
+    if (params.status) search.set('status', params.status)
+    if (params.limit !== undefined) search.set('limit', String(params.limit))
+    if (params.offset !== undefined) search.set('offset', String(params.offset))
+    const query = search.toString()
+    return request<ClientOrderPage>(`/client/orders${query ? `?${query}` : ''}`)
+  },
 
   myOrder: (orderId: string) => request<ClientOrderDetailView>(`/client/orders/${orderId}`),
 
