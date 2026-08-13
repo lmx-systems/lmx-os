@@ -20,23 +20,62 @@ plausible plan. Three specific ways that can happen, all checked below:
      looks most like success.
   3. Pickups and deliveries are not both honoured, so the solver plans half the
      journey and its travel times are optimistic.
+  4. Collection deadlines are ignored, so the premium tier is not prioritised (L23).
+     `accept_offer` currently hoists HOT_SHOT legs to compensate, and **check 5 below
+     is the evidence that retires that hoist** - a hot shot collected third looks like
+     a perfectly normal route, so this cannot be eyeballed.
 
 The scenario is built so the answer is knowable in advance: two drivers well apart,
 four orders clustered two-and-two near each of them. A solver that is genuinely
 minimising cost must give each driver the pair beside them. One that is ignoring
-cost will still return something valid, and check 3 below is what catches it.
+cost will still return something valid, and check 3 below is what catches it. The
+west pair is additionally separated only by its collection deadline, which is what
+check 5 reads.
+
+---
+
+FIRST-TIME SETUP
+================
+
+Route Optimization is **IAM-gated, not an API-key product** - `GOOGLE_MAPS_API_KEY`
+is for the other Maps Platform APIs and will not work here. That is why this client
+uses Application Default Credentials and asks for the `cloud-platform` scope.
+
+On the project (billing must already be enabled):
+
+    gcloud services enable routeoptimization.googleapis.com --project=PROJECT_ID
+    gcloud projects add-iam-policy-binding PROJECT_ID \\
+      --member="user:you@example.com" --role="roles/cloudoptimization.user"
+
+Locally:
+
+    brew install --cask google-cloud-sdk
+    gcloud auth login
+    gcloud auth application-default login
+    gcloud auth application-default set-quota-project PROJECT_ID
+
+**That last line is the one people miss.** ADC user credentials bill against a quota
+project, and without one the call fails with an error that does not obviously say so.
+
+**Do not create a service account key for this.** A downloaded JSON key is a
+long-lived credential that ends up in a backup or a commit, and none is needed: ADC
+covers this local run, and Cloud Run uses its own service account via workload
+identity with the same role and no key file at all. `GOOGLE_APPLICATION_CREDENTIALS`
+remains supported for the case where a key genuinely is the only option.
 
 Usage:
 
-    GOOGLE_CLOUD_PROJECT_ID=your-project \\
-    GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json \\
-    .venv/bin/python -m scripts.verify_route_optimization
+    # GOOGLE_CLOUD_PROJECT_ID in .env, or inline:
+    GOOGLE_CLOUD_PROJECT_ID=your-project .venv/bin/python -m scripts.verify_route_optimization
+
+**Run it as a module.** `python scripts/verify_route_optimization.py` fails with
+`No module named 'app'`, because the repo root is only on `sys.path` under `-m`.
 
 Add --json to dump the full request and response for eyeballing.
 
-Requires the Route Optimization API enabled on the project and
-`roles/cloudoptimization.user` on the credential. If either is missing, the error
-message printed is Google's own, which is usually the fix.
+If the call fails, the message printed is Google's own, which is usually the actual
+fix - API not enabled, credential missing `roles/cloudoptimization.user`, or billing
+off.
 """
 from __future__ import annotations
 
@@ -124,7 +163,13 @@ class _Report:
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        # Raw, so the setup commands in the docstring survive `--help` as something
+        # copy-pasteable. argparse reflows by default, which ran them together into one
+        # unusable line - and this docstring exists precisely to be followed by hand.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--json", action="store_true", help="dump the full request and response"
     )
