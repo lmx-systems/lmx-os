@@ -19,6 +19,9 @@ Three rules worth stating, because each one is a way this could quietly be wrong
    `unassessable` carries the second out to the caller instead of letting it read as clean.
 2. **`promised_at` wins over the computed target.** If we told this customer a specific
    time, that is the promise - a per-tier default cannot override something said out loud.
+   That rule moved to `app/sla/commitment.py` so the client-facing views apply the same
+   one; showing a customer a different target from the one we credit against was the
+   defect that prompted it.
 3. **A credit never exceeds the fee.** Crediting more than an order was billed turns a
    statement into a payment, which is not what a service-level credit is and not something
    this should be able to do by arithmetic.
@@ -27,14 +30,14 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import structlog
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.client_sla_term import ClientSlaTerm
 from app.models.order import Order
+from app.sla.commitment import delivery_commitment, terms_for_client
 
 logger = structlog.get_logger(__name__)
 
@@ -61,13 +64,6 @@ class CreditAssessment:
         return sum(breach.amount_cents for breach in self.breaches)
 
 
-async def _terms_for(session: AsyncSession, client_id: uuid.UUID) -> dict[str, ClientSlaTerm]:
-    result = await session.execute(
-        select(ClientSlaTerm).where(ClientSlaTerm.client_id == client_id)
-    )
-    return {term.sla_tier: term for term in result.scalars().all()}
-
-
 def _credit_for(term: ClientSlaTerm, fee_cents: int) -> int:
     """The credit on one breached order, clamped.
 
@@ -89,7 +85,7 @@ async def assess_credits(
     session: AsyncSession, *, client_id: uuid.UUID, orders: list[Order]
 ) -> CreditAssessment:
     """Which of these delivered orders breached their commitment, and what that costs."""
-    terms = await _terms_for(session, client_id)
+    terms = await terms_for_client(session, client_id)
 
     breaches: list[Breach] = []
     unassessable: list[str] = []
@@ -99,16 +95,15 @@ async def assess_credits(
             continue
 
         term = terms.get(order.sla_tier)
-        # Rule 2: something said out loud beats a per-tier default.
-        if order.promised_at is not None:
-            promised_by = order.promised_at
-        elif term is not None and order.requested_at is not None:
-            promised_by = order.requested_at + timedelta(
-                minutes=term.delivery_target_minutes
-            )
-        else:
+        # Rule 2 lives in app/sla/commitment.py now, not here. The client-facing views
+        # show the same figure from the same function, which is the only way the number
+        # on a statement and the number on a screen cannot drift apart - a customer owed
+        # a credit could previously not see the target it was assessed against.
+        commitment = delivery_commitment(order, term)
+        if commitment.promised_delivery_by is None:
             unassessable.append(str(order.id))
             continue
+        promised_by = commitment.promised_delivery_by
 
         if order.delivered_at <= promised_by:
             continue

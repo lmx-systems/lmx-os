@@ -41,6 +41,12 @@ export interface ClientOrderSummaryView {
   // When we now expect it to arrive: the route-aware ETA once it is on a driver's route,
   // a straight-line estimate before then. An estimate in both cases, never a commitment.
   estimated_delivery_by: string | null
+  // The commitment that carries money - the same target billing assesses a service-level
+  // credit against. Null when no term is on file for this tier and nothing was promised
+  // explicitly, because then there is genuinely nothing owed to state.
+  promised_delivery_by: string | null
+  // When we actually collected. What makes `collect_by` checkable rather than asserted.
+  collected_at: string | null
 }
 
 export interface ClientOrderPage {

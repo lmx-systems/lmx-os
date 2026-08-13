@@ -105,6 +105,17 @@ class ClientOrderSummaryView(BaseModel):
     # that a driver, a recipient and a counter person are never shown arrival times
     # derived three different ways.
     estimated_delivery_by: str | None = None
+    # **The commitment that carries money**, from `app/sla/commitment.py` - the same
+    # function `app/billing/credits.py` assesses a breach against. It was previously
+    # invisible: a client could be owed an automatic credit and had no way to see the
+    # target it was measured from. Null when no term is on file for their tier and we made
+    # no explicit promise, because there is genuinely nothing owed to state.
+    promised_delivery_by: str | None = None
+    # When we actually collected, from the pickup stop. This is what makes `collect_by`
+    # checkable rather than merely asserted - and it will show that `collect_by` runs
+    # optimistic, since that field is the batch-release moment rather than an arrival
+    # (see app/sla/commitment.py's closing note, and E11).
+    collected_at: str | None = None
 
 
 class ClientOrderPage(BaseModel):

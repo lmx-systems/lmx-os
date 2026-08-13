@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import secrets
 import uuid
+from dataclasses import dataclass
 from typing import Annotated, Literal
 from datetime import datetime, timedelta, timezone
 
@@ -57,8 +58,10 @@ from app.db import get_db
 from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, CLIENT_USER_ROLES, ClientUser
 from app.models.invoice import Invoice
+from app.models.client_sla_term import ClientSlaTerm
 from app.models.order import Order, OrderStatus
 from app.models.stop import Stop, StopOrder
+from app.sla.commitment import delivery_commitment, terms_for_client
 from app.models.return_item import ReturnItem
 from app.models.shop import Shop
 from app.returns.service import AWAITING_STATUSES, return_views
@@ -300,37 +303,88 @@ def _escape_like(term: str) -> str:
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-async def _delivery_etas(
+@dataclass
+class _StopFacts:
+    """What this order's own stops know: when we expect to arrive, and when we collected."""
+
+    eta: datetime | None = None
+    collected_at: datetime | None = None
+
+
+async def _stop_facts(
     session: AsyncSession, order_ids: list[uuid.UUID]
-) -> dict[uuid.UUID, datetime]:
-    """The route-aware arrival time per order, where one exists.
+) -> dict[uuid.UUID, _StopFacts]:
+    """Route-aware arrival and actual collection, per order, in one query.
 
     `Stop.eta` is walked along the sequence the driver will actually drive
     (app/delivery/eta.py) and refreshed as the route progresses, which makes it the only
-    arrival number in this system worth showing. One query for the whole page rather than
-    one per order.
+    arrival number in this system worth showing. `completed_at` on the pickup is when we
+    really collected - the fact that turns `collect_by` from an assertion into something a
+    client can check.
 
-    Latest dropoff stop wins. An order can accumulate more than one across a re-plan - an
-    offer declined and re-offered builds fresh stops - and the newest is the live route.
+    Newest stop of each type wins. An order can accumulate more than one across a re-plan
+    - an offer declined and re-offered builds fresh stops - and the newest is the live
+    route.
     """
     if not order_ids:
         return {}
     rows = (
         await session.execute(
-            select(StopOrder.order_id, Stop.eta, Stop.created_at)
+            select(
+                StopOrder.order_id,
+                Stop.stop_type,
+                Stop.eta,
+                Stop.completed_at,
+                Stop.created_at,
+            )
             .join(Stop, Stop.id == StopOrder.stop_id)
             .where(
                 StopOrder.order_id.in_(order_ids),
-                Stop.stop_type == "dropoff",
-                Stop.eta.is_not(None),
+                Stop.stop_type.in_(("pickup", "dropoff")),
             )
             .order_by(StopOrder.order_id, Stop.created_at.desc())
         )
     ).all()
-    etas: dict[uuid.UUID, datetime] = {}
-    for order_id, eta, _created in rows:
-        etas.setdefault(order_id, eta)  # first per order = newest, by the ordering above
-    return etas
+
+    facts: dict[uuid.UUID, _StopFacts] = {}
+    for order_id, stop_type, eta, completed_at, _created in rows:
+        entry = facts.setdefault(order_id, _StopFacts())
+        # First row per (order, type) is the newest, by the ordering above.
+        if stop_type == "dropoff" and entry.eta is None:
+            entry.eta = eta
+        elif stop_type == "pickup" and entry.collected_at is None:
+            entry.collected_at = completed_at
+    return facts
+
+
+async def _annotate_commitments(
+    session: AsyncSession,
+    view: ClientOrderSummaryView,
+    order: Order,
+    terms: dict[str, ClientSlaTerm],
+    facts: _StopFacts | None,
+) -> None:
+    """Fill in the four time fields a client actually asks about.
+
+    One function for the list and the detail view, because they were the two places most
+    likely to answer "when is my order coming" differently.
+    """
+    facts = facts or _StopFacts()
+
+    view.collect_by = order.hold_deadline.isoformat() if order.hold_deadline else None
+    view.collected_at = facts.collected_at.isoformat() if facts.collected_at else None
+
+    # The promise that carries money, computed by the same function billing credits
+    # against (app/sla/commitment.py).
+    commitment = delivery_commitment(order, terms.get(order.sla_tier))
+    view.promised_delivery_by = (
+        commitment.promised_delivery_by.isoformat() if commitment.exists else None
+    )
+
+    # The live route's arrival when there is one, the pre-route straight-line estimate
+    # otherwise. An estimate either way - never a promise, unlike the field above.
+    eta = facts.eta or await _estimate_delivery_by(session, order)
+    view.estimated_delivery_by = eta.isoformat() if eta else None
 
 
 @router.get("/orders", response_model=ClientOrderPage)
@@ -402,16 +456,14 @@ async def list_my_orders(
     ).all()
 
     orders = [row[0] for row in rows]
-    etas = await _delivery_etas(session, [o.id for o in orders])
+    facts = await _stop_facts(session, [o.id for o in orders])
+    # One query for the client's contract terms, not one per order.
+    terms = await terms_for_client(session, client_id)
 
     items = []
     for order, shop_name in rows:
         view = _order_summary_view(order, shop_name)
-        view.collect_by = order.hold_deadline.isoformat() if order.hold_deadline else None
-        # The live route's number when there is one, the pre-route straight-line estimate
-        # otherwise. Never a promise either way - see the field's comment.
-        eta = etas.get(order.id) or await _estimate_delivery_by(session, order)
-        view.estimated_delivery_by = eta.isoformat() if eta else None
+        await _annotate_commitments(session, view, order, terms, facts.get(order.id))
         items.append(view)
 
     return ClientOrderPage(items=items, total=int(total), limit=limit, offset=offset)
@@ -432,6 +484,13 @@ async def get_my_order(
 
     shop = await session.get(Shop, order.shop_id)
     summary = _order_summary_view(order, shop.name if shop else None)
+    await _annotate_commitments(
+        session,
+        summary,
+        order,
+        await terms_for_client(session, uuid.UUID(client.client_id)),
+        (await _stop_facts(session, [order.id])).get(order.id),
+    )
     return ClientOrderDetailView(
         **summary.model_dump(),
         delivery_address=order.delivery_address,

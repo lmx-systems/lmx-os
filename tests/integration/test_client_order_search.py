@@ -417,3 +417,176 @@ async def test_an_order_with_no_geocoded_drop_has_no_estimate(db_session):
     view = (await _search(db_session, client_id)).items[0]
     assert view.estimated_delivery_by is None
     assert view.collect_by is not None
+
+
+# ---------------------------------------------------------------------------
+# The promise that carries money (docs/ROADMAP.md W11)
+# ---------------------------------------------------------------------------
+
+
+async def _term(db_session, client_id, tier="T2", *, target_minutes=180, percent=25):
+    from app.models.client_sla_term import ClientSlaTerm
+
+    db_session.add(
+        ClientSlaTerm(
+            client_id=client_id,
+            sla_tier=tier,
+            delivery_target_minutes=target_minutes,
+            credit_percent=percent,
+        )
+    )
+    await db_session.commit()
+
+
+async def test_the_shown_promise_is_the_credited_promise(db_session):
+    """The defect this closes, stated as one assertion.
+
+    `credits.py` charged us against a target computed from contract data. The client saw
+    `hold_deadline` - a number that module's own docstring calls "ours and internal". So a
+    client could be owed an automatic credit with no way to see the target it was measured
+    from, and nothing forced the two figures to agree.
+
+    Both now come from `app/sla/commitment.py`, and this compares them directly rather
+    than trusting that they match.
+    """
+    from app.billing.credits import assess_credits
+
+    hub_id, client_id = await _seed(db_session)
+    shop_id = await _shop(db_session, client_id, "Midtown Auto Parts")
+    await _term(db_session, client_id, target_minutes=180)
+
+    order = await _order(db_session, hub_id, client_id, shop_id, age_minutes=600)
+    order.status = OrderStatus.delivered
+    order.delivered_at = order.requested_at + timedelta(hours=9)  # far past the target
+    order.fee_cents = 1_800
+    await db_session.commit()
+
+    shown = (await _search(db_session, client_id)).items[0].promised_delivery_by
+    assessment = await assess_credits(db_session, client_id=client_id, orders=[order])
+
+    assert assessment.breaches, "a 9-hour delivery against a 3-hour target is a breach"
+    assert shown == assessment.breaches[0].promised_by.isoformat()
+
+
+async def test_an_explicit_promise_beats_the_tier_default_in_both_places(db_session):
+    """Something said out loud outranks a contract default - and the client is shown that
+    same value, not the default it overrode."""
+    from app.billing.credits import assess_credits
+
+    hub_id, client_id = await _seed(db_session)
+    shop_id = await _shop(db_session, client_id, "Midtown Auto Parts")
+    await _term(db_session, client_id, target_minutes=180)
+
+    order = await _order(db_session, hub_id, client_id, shop_id, age_minutes=600)
+    spoken = order.requested_at + timedelta(minutes=45)
+    order.promised_at = spoken
+    order.status = OrderStatus.delivered
+    order.delivered_at = order.requested_at + timedelta(hours=9)
+    order.fee_cents = 1_800
+    await db_session.commit()
+
+    shown = (await _search(db_session, client_id)).items[0].promised_delivery_by
+    assessment = await assess_credits(db_session, client_id=client_id, orders=[order])
+    assert shown == spoken.isoformat()
+    assert assessment.breaches[0].promised_by == spoken
+
+
+async def test_no_term_on_file_shows_no_promise_rather_than_a_guess(db_session):
+    """"Nobody wrote down what we owe this client" is not a time.
+
+    Inventing one would either credit us against a number nobody agreed, or tell a
+    customer we owe them something we never promised. `credits.py` reports these as
+    unassessable for the same reason.
+    """
+    from app.billing.credits import assess_credits
+
+    hub_id, client_id = await _seed(db_session)
+    shop_id = await _shop(db_session, client_id, "Midtown Auto Parts")
+    # Deliberately no ClientSlaTerm.
+
+    order = await _order(db_session, hub_id, client_id, shop_id)
+    order.status = OrderStatus.delivered
+    order.delivered_at = datetime.now(timezone.utc)
+    order.fee_cents = 1_800
+    await db_session.commit()
+
+    assert (await _search(db_session, client_id)).items[0].promised_delivery_by is None
+    assessment = await assess_credits(db_session, client_id=client_id, orders=[order])
+    assert assessment.unassessable_order_ids == [str(order.id)]
+    assert not assessment.breaches
+
+
+async def test_the_collection_commitment_becomes_checkable(db_session):
+    """`collect_by` was asserted and never measured. Now the actual sits beside it.
+
+    This is also how the gap gets seen: `collect_by` is the batch-release moment, so real
+    collection lands after it by however long the drive took. The field exists so that is
+    visible rather than theoretical (E11).
+    """
+    hub_id, client_id = await _seed(db_session)
+    shop_id = await _shop(db_session, client_id, "Midtown Auto Parts")
+    order = await _order(db_session, hub_id, client_id, shop_id, status=OrderStatus.picked_up)
+
+    from app.models.driver import Driver
+
+    driver_id = uuid.uuid4()
+    db_session.add(
+        Driver(
+            id=driver_id,
+            hub_id=hub_id,
+            name="Sam O.",
+            phone=f"+1512555{uuid.uuid4().int % 9000:04d}",
+        )
+    )
+    await db_session.flush()
+    route = Route(hub_id=hub_id, driver_id=driver_id, status="active")
+    db_session.add(route)
+    await db_session.flush()
+
+    collected = order.hold_deadline + timedelta(minutes=14)
+    pickup = Stop(
+        route_id=route.id,
+        shop_id=shop_id,
+        sequence=0,
+        stop_type="pickup",
+        status="completed",
+        parcel_count=1,
+        completed_at=collected,
+    )
+    db_session.add(pickup)
+    await db_session.flush()
+    db_session.add(StopOrder(stop_id=pickup.id, order_id=order.id))
+    await db_session.commit()
+
+    view = (await _search(db_session, client_id)).items[0]
+    assert view.collected_at == collected.isoformat()
+    # And the comparison the system could not previously make.
+    assert view.collected_at > view.collect_by
+
+
+async def test_an_uncollected_order_reports_no_collection_time(db_session):
+    hub_id, client_id = await _seed(db_session)
+    shop_id = await _shop(db_session, client_id, "Midtown Auto Parts")
+    await _order(db_session, hub_id, client_id, shop_id)
+
+    view = (await _search(db_session, client_id)).items[0]
+    assert view.collected_at is None
+    assert view.collect_by is not None
+
+
+async def test_the_detail_view_answers_the_same_way_as_the_list(db_session):
+    """Two endpoints, one annotator. They were the two places most likely to answer
+    "when is my order coming" differently."""
+    from app.api.client_routes import get_my_order
+
+    hub_id, client_id = await _seed(db_session)
+    shop_id = await _shop(db_session, client_id, "Midtown Auto Parts")
+    await _term(db_session, client_id, target_minutes=180)
+    order = await _order(db_session, hub_id, client_id, shop_id)
+
+    listed = (await _search(db_session, client_id)).items[0]
+    detail = await get_my_order(
+        order_id=str(order.id), client=_authed(client_id), session=db_session
+    )
+    for field in ("collect_by", "collected_at", "promised_delivery_by", "estimated_delivery_by"):
+        assert getattr(listed, field) == getattr(detail, field), field

@@ -53,9 +53,42 @@ export function OrderDetail({ order, onBack }: OrderDetailProps) {
             <dt className="text-xs text-[var(--text-muted)]">Requested</dt>
             <dd className="mt-0.5 text-[var(--text-secondary)]">{formatDate(order.requested_at)}</dd>
           </div>
+          {/* The four times a client actually argues about, in the order they happen.
+              Two are commitments and two are not, and they are labelled so that reads
+              off the screen - the previous version showed a collect-by with no way to
+              check it and never showed the delivery target that a service-level credit
+              is assessed against. */}
           <div>
-            <dt className="text-xs text-[var(--text-muted)]">Delivered</dt>
-            <dd className="mt-0.5 text-[var(--text-secondary)]">{formatDate(order.delivered_at)}</dd>
+            <dt className="text-xs text-[var(--text-muted)]">Collect by</dt>
+            <dd className="mt-0.5 text-[var(--text-secondary)]">{formatDate(order.collect_by)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-[var(--text-muted)]">Collected</dt>
+            <dd className="mt-0.5 text-[var(--text-secondary)]">{formatDate(order.collected_at)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-[var(--text-muted)]">Delivery promised by</dt>
+            <dd className="mt-0.5 text-[var(--text-secondary)]">
+              {order.promised_delivery_by ? (
+                formatDate(order.promised_delivery_by)
+              ) : (
+                <span title="No service level is on file for this tier, so nothing is promised.">
+                  —
+                </span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-[var(--text-muted)]">
+              {order.delivered_at ? 'Delivered' : 'Expected'}
+            </dt>
+            <dd className="mt-0.5 text-[var(--text-secondary)]">
+              {order.delivered_at
+                ? formatDate(order.delivered_at)
+                : order.estimated_delivery_by
+                  ? `~${formatDate(order.estimated_delivery_by)}`
+                  : '—'}
+            </dd>
           </div>
           <div className="col-span-2">
             <dt className="text-xs text-[var(--text-muted)]">Delivery address</dt>
