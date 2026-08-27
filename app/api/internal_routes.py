@@ -1,19 +1,25 @@
 """
-Endpoints a scheduler can call (docs/ROADMAP.md; Cloud Run deployment).
+Endpoints a scheduler can call (docs/ROADMAP.md, docs/ALERTING.md).
 
 **Why these exist.** Dispatch is event-driven: `app/events/bus.py` runs an
 in-process poll loop, started at app startup, and `app/optimizer/event_trigger.py`
 binds the optimizer to it. That is the right design and it depends on the process
-staying alive between requests - which a serverless platform does not guarantee.
-Cloud Run throttles CPU to near-zero between requests and scales to zero when
-idle, so the loop can stop running and orders sit in the hold queue with nothing
-to release them.
+staying alive between requests.
 
-The primary fix is deployment config (CPU always allocated, min-instances 1), not
-this. These endpoints are the **safety net**: a low-frequency scheduler ping that
-guarantees a cycle happens even if an instance dies, the loop wedges, or someone
-changes the CPU setting without knowing what it was holding up. Running a cycle
-that had nothing to do is cheap; not running one is an order that never moves.
+**The original reason was platform-specific and no longer applies.** This was written
+against a Cloud Run deployment, where CPU is throttled to near-zero between requests
+and the service scales to zero when idle, so the loop could simply stop running while
+orders sat in the hold queue. The actual deployment target is ECS Fargate
+(`infra/`), whose tasks do not suspend - and the loop is already safe across replicas
+via the `events:running:{hub_id}` Redis lock in `app/events/bus.py`, which lets only
+one task run a cycle per hub at a time.
+
+So these are now **redundancy rather than the mechanism**: a low-frequency ping that
+guarantees a cycle happens even if every task dies at once, the loop wedges, or a
+future deployment lands somewhere that does suspend. Running a cycle that had nothing
+to do is cheap; not running one is an order that never moves. They are also what
+`docs/ALERTING.md`'s `dispatch_liveness` check tells you to reach for by hand when
+diagnosing a stalled queue.
 
 **Why they aren't just the existing ops endpoints.** `POST /optimizer/{hub}/run-cycle`
 already does this, but it sits behind the ops-user JWT middleware
@@ -183,7 +189,7 @@ async def prune_retained_data(session: AsyncSession = Depends(get_db)) -> dict:
 async def dispatch_health(response: Response) -> dict:
     """200 when the fleet is fine, 503 when something is worth waking up for.
 
-    **This endpoint IS the alert rule.** A Cloud Monitoring uptime check hitting
+    **This endpoint IS the alert rule.** A scheduled probe hitting
     this URL on a timer, with an alert policy on check failure, is the whole
     alerting stack - no Prometheus server, no sidecar collector, no time-series
     database. `app/health/checks.py` explains why that is the right shape here
@@ -197,8 +203,11 @@ async def dispatch_health(response: Response) -> dict:
     nothing and takes the API down with it.
 
     Behind the internal token like everything else on this router: hub ids, queue
-    depths and late-order counts are operational intelligence. Cloud Monitoring
-    uptime checks can send a custom header, so this costs nothing to reach.
+    depths and late-order counts are operational intelligence. That does constrain
+    what can probe it - a Route 53 health check cannot send a custom header, so it
+    would see this router fail closed with a 404 and report permanently unhealthy.
+    A scripted probe (a CloudWatch Synthetics canary) can, which is why
+    docs/ALERTING.md specifies one.
 
     **The response body is written for whoever the alert wakes.** The status code
     fires the alert; `failing` and each check's `detail` say what broke and

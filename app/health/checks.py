@@ -5,12 +5,12 @@ The conditions worth waking someone up for, evaluated server-side
 **Why this is not "scrape the Prometheus metrics".** `app/metrics.py` exists and
 is correct, but nothing can usefully alert on it as deployed:
 
-  1. Prometheus counters and gauges live in PROCESS MEMORY. Cloud Run autoscales
+  1. Prometheus counters and gauges live in PROCESS MEMORY. The app service autoscales
      and recycles instances, so `lmx_orders_ingested_total` resets on every cold
      start and differs per instance - and a scrape of the service URL reaches
      whichever instance the load balancer picked. `rate()` over a counter that
      resets and jumps between instances is noise, not a signal.
-  2. Nothing is scraping. Managed Prometheus on Cloud Run needs a sidecar
+  2. Nothing is scraping. Amazon Managed Prometheus would need a collector
      collector, and it would inherit problem 1.
   3. **The thing we most need to know is an absence, not a value.** "Dispatch
      stopped" is not a number anywhere; it is the non-arrival of something.

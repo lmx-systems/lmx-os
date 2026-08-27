@@ -246,7 +246,7 @@ class Settings(BaseSettings):
     #
     # dispatch_stale_after_seconds: how long orders may sit in the hold queue
     # with no dispatch cycle before that is an outage rather than batching.
-    # **This MUST be comfortably larger than the Cloud Scheduler interval that
+    # **This MUST be comfortably larger than the scheduled interval that
     # calls /internal/dispatch/run-all.** That scheduler is the safety net, so it
     # bounds how stale a healthy system can look; setting this below the interval
     # means the check fires between every scheduled run and gets muted within a

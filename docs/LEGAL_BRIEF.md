@@ -172,7 +172,7 @@ lists is a column that exists.
 5. Bump `version` if the text changed materially since anything was recorded against it.
 6. Update `tests/test_legal_documents.py::test_shipped_documents_are_still_drafts`,
    which exists to make sure step 4 is deliberate.
-7. Schedule `POST /internal/retention/prune` daily (Cloud Scheduler, same pattern as the
+7. Schedule `POST /internal/retention/prune` daily (EventBridge, same pattern as the
    webhook sweep in `docs/ALERTING.md`). **Do this before publishing, not after** — the
    policy states a retention period from the moment it is in force.
 8. Leave `allow_unpublished_terms` unset. Publishing is how the door opens; the flag is
