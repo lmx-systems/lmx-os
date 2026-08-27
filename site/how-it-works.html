@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How it works — Last Mile X</title>
+<meta name="description" content="LMX is the orchestrator that builds the network for industrial last mile autonomy. Priced per drop. There is no software to buy.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;family=Source+Serif+4:opsz,wght@8..60,600&amp;display=swap" rel="stylesheet">
+<style>
+  html, body { margin:0; padding:0; background:#FAFAF8; }
+  * { box-sizing:border-box; }
+  a { color:#1F3864; text-decoration:none; }
+  a:hover { color:#1A1A1A; }
+  ::selection { background:#D9D6CE; }
+  :focus-visible { outline:2px solid #1F3864; outline-offset:2px; }
+  @keyframes lmxFade { from { opacity:0 } to { opacity:1 } }
+  @keyframes lmxTape { from { transform:translateX(0) } to { transform:translateX(-50%) } }
+  @keyframes lmxBlink { 0%,60% { opacity:1 } 61%,100% { opacity:0.15 } }
+  .lmx-tape:hover .lmx-tape-track { animation-play-state:paused; }
+</style>
+<style>
+  .lmx-cta:hover { filter:brightness(0.9); }
+  .lmx-tape:hover .lmx-tape-track { animation-play-state:paused; }
+  main { animation:lmxFade 200ms ease; }
+  .lmx-map .leaflet-tile-pane { filter:grayscale(1) contrast(0.9) brightness(1.06); }
+</style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
+</head>
+<body>
+
+
+<div style="font-family:Archivo, sans-serif; color:#1A1A1A; background:#FAFAF8; min-height:100vh;">
+
+  <nav style="border-bottom:1px solid #D9D6CE; background:#FAFAF8; position:sticky; top:0; z-index:10;">
+    <div style="max-width:1120px; margin:0 auto; padding:0 40px; height:76px; display:flex; align-items:center; justify-content:space-between; gap:40px;">
+      
+      <a href="index.html" style="font-size: 40px; font-weight: 600; letter-spacing: -0.01em; line-height: 1; color: #1A1A1A; white-space: nowrap; display: flex; flex-direction: column; align-items: flex-start; gap: 4px;"><span>LM<span style="color: #1F7A4D;">X</span></span><span style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; font-size:10px; letter-spacing:0.14em; color:#6B6B66; line-height:1;">Last Mile X</span></a><div style="display:flex; gap:32px; align-items:center; overflow-x:auto;">
+        <a href="index.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #6B6B66; border-bottom-color: transparent;">Home</a>
+        <a href="how-it-works.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #1A1A1A; border-bottom-color: #D97706;">How it works</a>
+        <a href="autonomy-partners.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #6B6B66; border-bottom-color: transparent;">For autonomy partners</a>
+        <a href="company.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #6B6B66; border-bottom-color: transparent;">Company</a>
+        <a href="careers.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #6B6B66; border-bottom-color: transparent;">Careers</a>
+      </div>
+    </div>
+  </nav>
+  <main>
+
+  <main style="">
+    <div style="max-width:1120px; margin:0 auto; padding:0 40px 120px;">
+
+      <section style="padding: 96px 0 0; max-width:680px;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">For distributors</div>
+        <h1 style="font-size:44px; font-weight:600; line-height:1.08; letter-spacing:-0.02em; margin:0 0 28px;">You stop running delivery.</h1>
+        <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0; text-wrap:pretty;">LMX replaces the drivers, the vehicles, and the dispatcher with a single contract and a committed delivery promise. You pay per completed drop. There are no software fees and no per-seat licenses.</p>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">What changes</div>
+        <h2 style="font-size:29px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; margin:0 0 56px; max-width:680px;">The operation you hand over, line by line.</h2>
+        <table style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left; font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; padding:0 32px 14px 0; border-bottom:1px solid #1A1A1A; width:50%;">Today</th>
+              <th style="text-align:left; font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; padding:0 0 14px; border-bottom:1px solid #1A1A1A; width:50%;">With LMX</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="font-size:17px; line-height:1.5; color:#6B6B66; padding:20px 32px 20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Your drivers, your vehicles, your insurance</td>
+              <td style="font-size:17px; line-height:1.5; padding:20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">LMX drivers, LMX vehicles, LMX liability</td>
+            </tr>
+            <tr>
+              <td style="font-size:17px; line-height:1.5; color:#6B6B66; padding:20px 32px 20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">A dispatcher deciding routes by phone and memory</td>
+              <td style="font-size:17px; line-height:1.5; padding:20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Automated dispatch, re-planned continuously</td>
+            </tr>
+            <tr>
+              <td style="font-size:17px; line-height:1.5; color:#6B6B66; padding:20px 32px 20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Fixed cost whether you run three drops or thirty</td>
+              <td style="font-size:17px; line-height:1.5; padding:20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Variable cost, per completed drop</td>
+            </tr>
+            <tr>
+              <td style="font-size:17px; line-height:1.5; color:#6B6B66; padding:20px 32px 20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">No delivery commitment you can offer a customer</td>
+              <td style="font-size:17px; line-height:1.5; padding:20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">A committed window by urgency tier, measured and reported</td>
+            </tr>
+            <tr>
+              <td style="font-size:17px; line-height:1.5; color:#6B6B66; padding:20px 32px 20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Shops calling your counter to ask where the part is</td>
+              <td style="font-size:17px; line-height:1.5; padding:20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Shops notified automatically, with a live arrival time</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">How a delivery runs</div>
+        <h2 style="font-size:29px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; margin:0 0 56px; max-width:680px;">Five decisions, made for you, every drop.</h2>
+        <div style="max-width:680px;">
+          <div style="display:grid; grid-template-columns:56px 1fr; gap:24px; padding:0 0 28px; border-bottom:1px solid #D9D6CE;">
+            <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; color:#6B6B66; padding-top:5px;">01</div>
+            <div>
+              <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 8px;">The order arrives</h3>
+              <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">LMX connects to the system you already use. Orders flow to us automatically. Nobody re-types anything.</p>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:56px 1fr; gap:24px; padding:28px 0; border-bottom:1px solid #D9D6CE;">
+            <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; color:#6B6B66; padding-top:5px;">02</div>
+            <div>
+              <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 8px;">We decide how urgent it is</h3>
+              <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">Every order is classified by how quickly it has to land, based on the part, the customer, and the commitment we've made to you.</p>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:56px 1fr; gap:24px; padding:28px 0; border-bottom:1px solid #D9D6CE;">
+            <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; color: #D97706; padding-top:5px;">03</div>
+            <div>
+              <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 8px;">We decide when to send it</h3>
+              <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">This is the part that makes the difference, and it runs against instinct — see below.</p>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:56px 1fr; gap:24px; padding:28px 0; border-bottom:1px solid #D9D6CE;">
+            <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; color:#6B6B66; padding-top:5px;">04</div>
+            <div>
+              <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 8px;">We decide how it travels</h3>
+              <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">A human-driven vehicle today. As autonomous capacity becomes available and the economics work, the same system routes the drop to a machine instead. You do not choose, and you do not have to care. The delivery promise is the same either way.</p>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:56px 1fr; gap:24px; padding:28px 0 0;">
+            <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; color:#6B6B66; padding-top:5px;">05</div>
+            <div>
+              <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 8px;">The shop is told, and it is proven</h3>
+              <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">A notification when the part is on its way, an arrival time that updates as it moves, and a photographed confirmation when it lands.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">The counterintuitive part</div>
+        <h2 style="font-size:29px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; margin:0 0 32px; max-width:680px;">Why holding an order makes it faster</h2>
+        <div style="max-width:680px; margin-bottom:56px;">
+          <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0 0 20px; text-wrap:pretty;">Most dispatch works one way: an order comes in, it goes out. It feels fast, and it is the reason the industry runs at the efficiency it does.</p>
+          <p style="font-size:17px; line-height:1.65; margin:0 0 20px; text-wrap:pretty;">LMX does the opposite on purpose. We hold an order for as long as we safely can, because a short wait lets us send it alongside others going the same direction. One driver, one run, several stops — instead of three separate trips.</p>
+          <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0; text-wrap:pretty;">Doing that safely requires knowing exactly how much time each order actually has, and re-checking that across the entire fleet every few seconds as traffic and new orders change the picture. That is what our system does, and it is the whole reason we can commit to delivery times when the operation we replace could not.</p>
+        </div>
+
+        <div style="background: #FFFFFF; border: 1px solid #D9D6CE; border-top: 1px solid #D9D6CE; padding:32px;">
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:40px;">
+            <div>
+              <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; padding-bottom:16px; border-bottom:1px solid #1A1A1A;">Immediate dispatch — three trips</div>
+              <svg viewBox="0 0 320 200" style="display:block; width:100%; height:auto; aspect-ratio:320 / 200;" role="img" aria-label="Three separate one-stop trips leaving the depot, each returning before the next departs.">
+                <rect x="8" y="86" width="28" height="28" fill="#1F3864"></rect>
+                <path d="M36 100 L150 44" stroke="#6B6B66" stroke-width="1"></path>
+                <path d="M36 100 L150 100" stroke="#6B6B66" stroke-width="1"></path>
+                <path d="M36 100 L150 156" stroke="#6B6B66" stroke-width="1"></path>
+                <circle cx="150" cy="44" r="5" fill="none" stroke="#1F3864" stroke-width="1.5"></circle>
+                <circle cx="150" cy="100" r="5" fill="none" stroke="#1F3864" stroke-width="1.5"></circle>
+                <circle cx="150" cy="156" r="5" fill="none" stroke="#1F3864" stroke-width="1.5"></circle>
+                <text x="168" y="48" font-family="IBM Plex Mono, monospace" font-size="11" fill="#6B6B66">Trip 1 · 1 stop</text>
+                <text x="168" y="104" font-family="IBM Plex Mono, monospace" font-size="11" fill="#6B6B66">Trip 2 · 1 stop</text>
+                <text x="168" y="160" font-family="IBM Plex Mono, monospace" font-size="11" fill="#6B6B66">Trip 3 · 1 stop</text>
+                <text x="8" y="136" font-family="IBM Plex Mono, monospace" font-size="11" fill="#6B6B66">Depot</text>
+              </svg>
+              <div style="display:flex; gap:32px; margin-top:16px; padding-top:16px; border-top:1px solid #D9D6CE; font-family:'IBM Plex Mono', monospace;">
+                <div><div style="font-size:27px; color:#1F3864;">3</div><div style="font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-top:8px;">Runs</div></div>
+                <div><div style="font-size:27px; color:#1F3864;">3</div><div style="font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-top:8px;">Driver hours</div></div>
+              </div>
+            </div>
+            <div>
+              <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; padding-bottom:16px; border-bottom:1px solid #1A1A1A;">Batch hold — one trip</div>
+              <svg viewBox="0 0 320 200" style="display:block; width:100%; height:auto; aspect-ratio:320 / 200;" role="img" aria-label="One three-stop run leaving the depot after a short hold, serving all three drops in sequence.">
+                <rect x="8" y="86" width="28" height="28" fill="#1F3864"></rect>
+                <path d="M36 100 L150 44 L214 100 L150 156 L36 100" stroke="#D97706" stroke-width="2" fill="none"></path>
+                <circle cx="150" cy="44" r="5" fill="#D97706"></circle>
+                <circle cx="214" cy="100" r="5" fill="#D97706"></circle>
+                <circle cx="150" cy="156" r="5" fill="#D97706"></circle>
+                <text x="230" y="48" font-family="IBM Plex Mono, monospace" font-size="11" fill="#6B6B66">Stop 1</text>
+                <text x="230" y="104" font-family="IBM Plex Mono, monospace" font-size="11" fill="#6B6B66">Stop 2</text>
+                <text x="230" y="160" font-family="IBM Plex Mono, monospace" font-size="11" fill="#6B6B66">Stop 3</text>
+                <text x="8" y="136" font-family="IBM Plex Mono, monospace" font-size="11" fill="#6B6B66">Depot</text>
+              </svg>
+              <div style="display:flex; gap:32px; margin-top:16px; padding-top:16px; border-top:1px solid #D9D6CE; font-family:'IBM Plex Mono', monospace;">
+                <div><div style="font-size:27px; color:#D97706;">1</div><div style="font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-top:8px;">Run</div></div>
+                <div><div style="font-size:27px; color:#D97706;">1.4</div><div style="font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-top:8px;">Driver hours</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-top:16px; line-height:1.8; max-width:680px;">Fig. 05 — Batch hold against immediate dispatch on the same three orders. Every drop still lands inside its committed window. Modeled.</div>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">Stop time</div>
+        <h2 style="font-size:29px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; margin:0 0 32px; max-width:680px;">A drop takes longer than dispatch assumes.</h2>
+        <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0 0 56px; max-width:680px; text-wrap:pretty;">Holding an order safely depends on knowing how long a stop actually takes. Planning against an average is how commitments get missed — the tail is where the misses live.</p>
+        <div style="background: #FFFFFF; border: 1px solid #D9D6CE; border-top: 1px solid #D9D6CE; padding:32px;">
+          <div style="display:flex; align-items:flex-end; gap:8px; height:220px; border-bottom:1px solid #1A1A1A;">
+            <div style="flex:1; height:12%; background:#1F3864;"></div>
+            <div style="flex:1; height:34%; background:#1F3864;"></div>
+            <div style="flex:1; height:62%; background:#1F3864;"></div>
+            <div style="flex:1; height:88%; background:#1F3864;"></div>
+            <div style="flex:1; height:100%; background:#1F3864;"></div>
+            <div style="flex:1; height:82%; background: #D97706;"></div>
+            <div style="flex:1; height:58%; background:#1F3864;"></div>
+            <div style="flex:1; height:41%; background:#1F3864;"></div>
+            <div style="flex:1; height:28%; background:#1F3864;"></div>
+            <div style="flex:1; height:19%; background:#1F3864;"></div>
+            <div style="flex:1; height:14%; background:#1F3864;"></div>
+            <div style="flex:1; height:9%; background:#1F3864;"></div>
+          </div>
+          <div style="display:flex; gap:8px; margin-top:12px; font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; color:#6B6B66;">
+            <div style="flex:1;">1</div><div style="flex:1;">3</div><div style="flex:1;">5</div><div style="flex:1;">7</div><div style="flex:1;">9</div><div style="flex:1;">11</div><div style="flex:1;">13</div><div style="flex:1;">15</div><div style="flex:1;">17</div><div style="flex:1;">19</div><div style="flex:1;">21</div><div style="flex:1;">23</div>
+          </div>
+          <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-top:12px;">Minutes at the stop</div>
+        </div>
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-top:16px; line-height:1.8; max-width:680px;">Fig. 06 — Stop-time distribution from ride-along logs. Amber marks the assumption most dispatch runs on; a fifth of stops sit to the right of it. Modeled.</div>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">The delivery promise</div>
+        <div style="max-width:680px;">
+          <p style="font-size:17px; line-height:1.65; margin:0 0 20px; text-wrap:pretty;">Orders are committed by urgency tier and measured at the order level, not averaged into a monthly report. Performance is visible to you as it happens. When we miss, it is recorded with a reason and reviewed. Sustained failure against the thresholds in your contract triggers credits.</p>
+        </div>
+        <div style="margin:56px 0 0; padding: 80px 0; border-top:1px solid #D9D6CE; border-bottom:1px solid #D9D6CE;">
+          <div style="font-size:23px; font-weight:500; line-height:1.4; color:#1F3864; max-width:680px; text-wrap:pretty;">For the first time, you have a delivery operation whose payment depends on whether parts actually arrive on time.</div>
+        </div>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">Getting started</div>
+        <h2 style="font-size:29px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; margin:0 0 56px; max-width:680px;">Three phases, and nothing moves until you've compared.</h2>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px;">
+          <div style="background: #FFFFFF; border: 1px solid #D9D6CE; border-top: 1px solid #D9D6CE; padding:32px;">
+            <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:20px;">Phase 01</div>
+            <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 12px;">Connect</h3>
+            <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">We integrate with your order system, map your customers, and set delivery zones and default urgency. Nothing moves yet.</p>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #D9D6CE; border-top: 1px solid #D9D6CE; padding:32px;">
+            <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:20px;">Phase 02</div>
+            <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 12px;">Run in parallel</h3>
+            <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">We shadow your existing operation on the same orders, so both sides can compare before anything changes hands.</p>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #D9D6CE; border-top: 1px solid #D9D6CE; padding:32px;">
+            <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:20px;">Phase 03</div>
+            <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 12px;">Cut over</h3>
+            <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">LMX takes the operation. Your dispatcher's job becomes an exception queue that most days stays empty.</p>
+          </div>
+        </div>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">Pricing</div>
+        <h2 style="font-size:29px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; margin:0 0 32px; max-width:680px;">One number, per completed delivery.</h2>
+        <div style="max-width:680px; margin-bottom:48px;">
+          <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0 0 20px; text-wrap:pretty;">No software fee, no seat license, no separate charge for notifications or reporting.</p>
+          <p style="font-size:17px; line-height:1.65; margin:0; text-wrap:pretty;">The rate is set at contract signing against your geography, volume, and part mix. Before that conversation, we will work out what your delivery actually costs you today — including driver wages, vehicle depreciation, insurance, fuel, and dispatcher time. Most distributors have never calculated it. That number is usually what makes the decision obvious.</p>
+        </div>
+        <a href="mailto:contact@lmxit.com" style="display:inline-block; font-size:16px; font-weight:500; color: #FFFFFF; background: #1F3864; border:1px solid #1F3864; border-radius:4px; padding:14px 24px; transition:filter 200ms ease;" class="lmx-cta">Talk to us about your operation</a>
+      </section>
+
+    </div>
+  </main>
+  
+  </main>
+<footer style="border-top:1px solid #D9D6CE; background:#FAFAF8;">
+    <div style="max-width:1120px; margin:0 auto; padding:64px 40px;">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:40px;">
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:flex-start;">
+          <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:8px;">Pages</div>
+          <a href="index.html" style="font-size:15px; color:#1A1A1A;">Home</a>
+          <a href="how-it-works.html" style="font-size:15px; color:#1A1A1A;">How it works</a>
+          <a href="autonomy-partners.html" style="font-size:15px; color:#1A1A1A;">For autonomy partners</a>
+          <a href="company.html" style="font-size:15px; color:#1A1A1A;">Company</a>
+          <a href="careers.html" style="font-size:15px; color:#1A1A1A;">Careers</a>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:flex-start;">
+          <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:8px;">Contact</div>
+          <a href="mailto:contact@lmxit.com" style="font-size:15px; color:#1A1A1A;">contact@lmxit.com</a>
+          <div style="font-size:15px; color:#6B6B66;">LMX, Inc.</div>
+          <div style="font-size:15px; color:#6B6B66;">Austin, Texas</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:flex-start;">
+          <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:8px;">Legal</div>
+          <a href="#" style="font-size:15px; color:#1A1A1A;">Privacy</a>
+          <a href="#" style="font-size:15px; color:#1A1A1A;">Terms</a>
+          <div style="font-size:15px; color:#6B6B66;">© 2026 LMX, Inc.</div>
+        </div>
+      </div>
+    </div>
+  </footer>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="image-slot.js"></script>
+<script src="site.js"></script>
+</body>
+</html>

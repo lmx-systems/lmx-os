@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Company — Last Mile X</title>
+<meta name="description" content="LMX is the orchestrator that builds the network for industrial last mile autonomy. Priced per drop. There is no software to buy.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;family=Source+Serif+4:opsz,wght@8..60,600&amp;display=swap" rel="stylesheet">
+<style>
+  html, body { margin:0; padding:0; background:#FAFAF8; }
+  * { box-sizing:border-box; }
+  a { color:#1F3864; text-decoration:none; }
+  a:hover { color:#1A1A1A; }
+  ::selection { background:#D9D6CE; }
+  :focus-visible { outline:2px solid #1F3864; outline-offset:2px; }
+  @keyframes lmxFade { from { opacity:0 } to { opacity:1 } }
+  @keyframes lmxTape { from { transform:translateX(0) } to { transform:translateX(-50%) } }
+  @keyframes lmxBlink { 0%,60% { opacity:1 } 61%,100% { opacity:0.15 } }
+  .lmx-tape:hover .lmx-tape-track { animation-play-state:paused; }
+</style>
+<style>
+  .lmx-cta:hover { filter:brightness(0.9); }
+  .lmx-tape:hover .lmx-tape-track { animation-play-state:paused; }
+  main { animation:lmxFade 200ms ease; }
+  .lmx-map .leaflet-tile-pane { filter:grayscale(1) contrast(0.9) brightness(1.06); }
+</style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
+</head>
+<body>
+
+
+<div style="font-family:Archivo, sans-serif; color:#1A1A1A; background:#FAFAF8; min-height:100vh;">
+
+  <nav style="border-bottom:1px solid #D9D6CE; background:#FAFAF8; position:sticky; top:0; z-index:10;">
+    <div style="max-width:1120px; margin:0 auto; padding:0 40px; height:76px; display:flex; align-items:center; justify-content:space-between; gap:40px;">
+      
+      <a href="index.html" style="font-size: 40px; font-weight: 600; letter-spacing: -0.01em; line-height: 1; color: #1A1A1A; white-space: nowrap; display: flex; flex-direction: column; align-items: flex-start; gap: 4px;"><span>LM<span style="color: #1F7A4D;">X</span></span><span style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; font-size:10px; letter-spacing:0.14em; color:#6B6B66; line-height:1;">Last Mile X</span></a><div style="display:flex; gap:32px; align-items:center; overflow-x:auto;">
+        <a href="index.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #6B6B66; border-bottom-color: transparent;">Home</a>
+        <a href="how-it-works.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #6B6B66; border-bottom-color: transparent;">How it works</a>
+        <a href="autonomy-partners.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #6B6B66; border-bottom-color: transparent;">For autonomy partners</a>
+        <a href="company.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #1A1A1A; border-bottom-color: #D97706;">Company</a>
+        <a href="careers.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #6B6B66; border-bottom-color: transparent;">Careers</a>
+      </div>
+    </div>
+  </nav>
+  <main>
+
+  <main style="">
+    <div style="max-width:1120px; margin:0 auto; padding:0 40px 120px;">
+
+      <section style="padding: 96px 0 0; max-width:680px;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">The company</div>
+        <h1 style="font-size:44px; font-weight:600; line-height:1.08; letter-spacing:-0.02em; margin:0 0 32px;">We worked in this before we built for it.</h1>
+        <p style="font-size:17px; line-height:1.65; margin:0 0 20px; text-wrap:pretty;">Three founders, a decade of putting autonomous systems into operations that were never designed to receive them. Every time, the technology worked and the operation around it did not exist.</p>
+        <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0; text-wrap:pretty;">Industrial last mile is that gap at scale. We are building the layer autonomy plugs into, and running the deliveries ourselves while we do.</p>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:20px;">Founders</div>
+        <div style="border-top:1px solid #1A1A1A;">
+          <div style="display:grid; grid-template-columns:96px minmax(0,1fr); gap:28px; align-items:start; padding:24px 0; border-bottom:1px solid #D9D6CE;">
+            <div style="aspect-ratio:1 / 1; background:#FFFFFF;">
+              <image-slot slot-id="lmx-founder-1" shape="rect" placeholder="Matan Yemini — portrait"></image-slot>
+            </div>
+            <div style="max-width:560px;">
+              <h3 style="font-size:19px; font-weight:600; line-height:1.35; margin:0 0 4px;">Matan Yemini</h3>
+              <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:10px;">Chief Executive Officer</div>
+              <p style="font-size:16px; line-height:1.6; color:#6B6B66; margin:0; text-wrap:pretty;">General manager of Amazon Prime Air's drone delivery operations. VP of global operations at Airobotics and Fieldin.</p>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:96px minmax(0,1fr); gap:28px; align-items:start; padding:24px 0; border-bottom:1px solid #D9D6CE;">
+            <div style="aspect-ratio:1 / 1; background:#FFFFFF;">
+              <image-slot slot-id="lmx-founder-2" shape="rect" placeholder="Richard Sparks — portrait"></image-slot>
+            </div>
+            <div style="max-width:560px;">
+              <h3 style="font-size:19px; font-weight:600; line-height:1.35; margin:0 0 4px;">Richard Sparks</h3>
+              <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:10px;">Chief Operating Officer</div>
+              <p style="font-size:16px; line-height:1.6; color:#6B6B66; margin:0; text-wrap:pretty;">Deployment strategy for Amazon Robotics; data collection for Amazon Prime Air. Aviation, robotics and autonomous systems at scale.</p>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:96px minmax(0,1fr); gap:28px; align-items:start; padding:24px 0; border-bottom:1px solid #D9D6CE;">
+            <div style="aspect-ratio:1 / 1; background:#FFFFFF;">
+              <image-slot slot-id="lmx-founder-3" shape="rect" placeholder="Sourabh Miglani — portrait"></image-slot>
+            </div>
+            <div style="max-width:560px;">
+              <h3 style="font-size:19px; font-weight:600; line-height:1.35; margin:0 0 4px;">Sourabh Miglani</h3>
+              <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:10px;">Chief Technology Officer</div>
+              <p style="font-size:16px; line-height:1.6; color:#6B6B66; margin:0; text-wrap:pretty;">Product and engineering across Amazon Prime Air, Amazon Ads and AWS AI. Drove parts routes as a contract driver before writing a line of code.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:20px;">Where we operate</div>
+        <p style="font-size:19px; line-height:1.55; margin:0 0 28px; max-width:560px;">Hub one is in Austin. The engineering team is distributed.</p>
+        <a href="mailto:contact@lmxit.com" style="font-size:16px; font-weight:500; color:#1F3864; border-bottom:2px solid #D97706; padding-bottom:3px;">contact@lmxit.com</a>
+      </section>
+
+    </div>
+  </main>
+  
+  </main>
+<footer style="border-top:1px solid #D9D6CE; background:#FAFAF8;">
+    <div style="max-width:1120px; margin:0 auto; padding:64px 40px;">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:40px;">
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:flex-start;">
+          <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:8px;">Pages</div>
+          <a href="index.html" style="font-size:15px; color:#1A1A1A;">Home</a>
+          <a href="how-it-works.html" style="font-size:15px; color:#1A1A1A;">How it works</a>
+          <a href="autonomy-partners.html" style="font-size:15px; color:#1A1A1A;">For autonomy partners</a>
+          <a href="company.html" style="font-size:15px; color:#1A1A1A;">Company</a>
+          <a href="careers.html" style="font-size:15px; color:#1A1A1A;">Careers</a>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:flex-start;">
+          <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:8px;">Contact</div>
+          <a href="mailto:contact@lmxit.com" style="font-size:15px; color:#1A1A1A;">contact@lmxit.com</a>
+          <div style="font-size:15px; color:#6B6B66;">LMX, Inc.</div>
+          <div style="font-size:15px; color:#6B6B66;">Austin, Texas</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:flex-start;">
+          <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:8px;">Legal</div>
+          <a href="#" style="font-size:15px; color:#1A1A1A;">Privacy</a>
+          <a href="#" style="font-size:15px; color:#1A1A1A;">Terms</a>
+          <div style="font-size:15px; color:#6B6B66;">© 2026 LMX, Inc.</div>
+        </div>
+      </div>
+    </div>
+  </footer>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="image-slot.js"></script>
+<script src="site.js"></script>
+</body>
+</html>

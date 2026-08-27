@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>For autonomy partners — Last Mile X</title>
+<meta name="description" content="LMX is the orchestrator that builds the network for industrial last mile autonomy. Priced per drop. There is no software to buy.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;family=Source+Serif+4:opsz,wght@8..60,600&amp;display=swap" rel="stylesheet">
+<style>
+  html, body { margin:0; padding:0; background:#FAFAF8; }
+  * { box-sizing:border-box; }
+  a { color:#1F3864; text-decoration:none; }
+  a:hover { color:#1A1A1A; }
+  ::selection { background:#D9D6CE; }
+  :focus-visible { outline:2px solid #1F3864; outline-offset:2px; }
+  @keyframes lmxFade { from { opacity:0 } to { opacity:1 } }
+  @keyframes lmxTape { from { transform:translateX(0) } to { transform:translateX(-50%) } }
+  @keyframes lmxBlink { 0%,60% { opacity:1 } 61%,100% { opacity:0.15 } }
+  .lmx-tape:hover .lmx-tape-track { animation-play-state:paused; }
+</style>
+<style>
+  .lmx-cta:hover { filter:brightness(0.9); }
+  .lmx-tape:hover .lmx-tape-track { animation-play-state:paused; }
+  main { animation:lmxFade 200ms ease; }
+  .lmx-map .leaflet-tile-pane { filter:grayscale(1) contrast(0.9) brightness(1.06); }
+</style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
+</head>
+<body>
+
+
+<div style="font-family:Archivo, sans-serif; color:#1A1A1A; background:#FAFAF8; min-height:100vh;">
+
+  <nav style="border-bottom:1px solid #D9D6CE; background:#FAFAF8; position:sticky; top:0; z-index:10;">
+    <div style="max-width:1120px; margin:0 auto; padding:0 40px; height:76px; display:flex; align-items:center; justify-content:space-between; gap:40px;">
+      
+      <a href="index.html" style="font-size: 40px; font-weight: 600; letter-spacing: -0.01em; line-height: 1; color: #1A1A1A; white-space: nowrap; display: flex; flex-direction: column; align-items: flex-start; gap: 4px;"><span>LM<span style="color: #1F7A4D;">X</span></span><span style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; font-size:10px; letter-spacing:0.14em; color:#6B6B66; line-height:1;">Last Mile X</span></a><div style="display:flex; gap:32px; align-items:center; overflow-x:auto;">
+        <a href="index.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #6B6B66; border-bottom-color: transparent;">Home</a>
+        <a href="how-it-works.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #6B6B66; border-bottom-color: transparent;">How it works</a>
+        <a href="autonomy-partners.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #1A1A1A; border-bottom-color: #D97706;">For autonomy partners</a>
+        <a href="company.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #6B6B66; border-bottom-color: transparent;">Company</a>
+        <a href="careers.html" style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; padding:6px 0; border-bottom:2px solid transparent; color: #6B6B66; border-bottom-color: transparent;">Careers</a>
+      </div>
+    </div>
+  </nav>
+  <main>
+
+  <main style="">
+    <div style="max-width:1120px; margin:0 auto; padding:0 40px 120px;">
+
+      <section style="padding: 96px 0 0; max-width:680px;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">For autonomy partners</div>
+        <h1 style="font-size:44px; font-weight:600; line-height:1.08; letter-spacing:-0.02em; margin:0 0 28px;">The industrial demand you cannot aggregate yourself.</h1>
+        <p style="font-size:23px; font-weight:500; line-height:1.4; color:#1F3864; margin:0;">You built the vehicle. We run the operation it needs to plug into.</p>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">The problem from your side</div>
+        <h2 style="font-size:29px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; margin:0 0 32px; max-width:680px;">It is not a technology limit. It is an aggregation limit.</h2>
+        <div style="max-width:680px; margin-bottom:64px;">
+          <p style="font-size:17px; line-height:1.65; margin:0 0 20px; text-wrap:pretty;">Industrial last mile is thousands of independent distributors, each with modest volume, no shared infrastructure, and no way to integrate with you. Going direct means a separate commercial relationship, a separate integration, and a separate depot for every one of them. The unit economics never close.</p>
+          <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0; text-wrap:pretty;">That is why the autonomy programs scaling today are consumer programs.</p>
+        </div>
+        <div style="border-left: 2px solid #D97706; padding-left:28px; max-width:680px;">
+          <div style="font-size:21px; line-height:1.5; text-wrap:pretty;">We want the drone service layer on top of an existing, aggregated supply network.</div>
+          <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-top:20px;">Chief executive, autonomous delivery operator</div>
+        </div>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">What LMX brings</div>
+        <h2 style="font-size:29px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; margin:0 0 56px; max-width:680px;">One relationship, one integration, committed volume.</h2>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:16px;">
+          <div style="background: #FFFFFF; border: 1px solid #D9D6CE; border-top: 1px solid #D9D6CE; padding:28px;">
+            <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 12px;">Aggregated demand</h3>
+            <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">One commercial relationship and one integration, reaching many distributors.</p>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #D9D6CE; border-top: 1px solid #D9D6CE; padding:28px;">
+            <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 12px;">Daytime volume</h3>
+            <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">Industrial delivery peaks in the morning and midday. Consumer delivery peaks in the evening. The two fill each other's gaps.</p>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #D9D6CE; border-top: 1px solid #D9D6CE; padding:28px;">
+            <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 12px;">Established routes and depots</h3>
+            <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">Fixed origins, known destinations, repeat geography. Not one-off consumer trips.</p>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #D9D6CE; border-top: 1px solid #D9D6CE; padding:28px;">
+            <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 12px;">We own the delivery promise</h3>
+            <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">The commitment to the customer is ours. When your vehicle can't run — weather, availability, an exception — our system substitutes a van automatically. You are not exposed to our customer's expectations.</p>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #D9D6CE; border-top: 1px solid #D9D6CE; padding:28px;">
+            <h3 style="font-size:21px; font-weight:600; line-height:1.35; margin:0 0 12px;">Real operating data</h3>
+            <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0;">We run the deliveries, so we know which drops are actually addressable by which vehicle class, from live operations rather than estimates.</p>
+          </div>
+        </div>
+
+        <div style="margin-top:64px; background: #FFFFFF; border: 1px solid #D9D6CE; border-top: 1px solid #D9D6CE; padding:32px;">
+          <div style="display:flex; gap:32px; margin-bottom:24px; font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66;">
+            <div style="display:flex; align-items:center; gap:10px;"><span style="width:14px; height:14px; background:#1F3864; display:inline-block;"></span>Industrial</div>
+            <div style="display:flex; align-items:center; gap:10px;"><span style="width:14px; height:14px; background:#D97706; display:inline-block;"></span>Consumer</div>
+          </div>
+          <div style="display:flex; align-items:flex-end; gap:10px; height:240px; border-bottom:1px solid #1A1A1A;">
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; gap:2px;"><div style="background:#D97706; height:6%;"></div><div style="background:#1F3864; height:34%;"></div></div>
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; gap:2px;"><div style="background:#D97706; height:8%;"></div><div style="background:#1F3864; height:72%;"></div></div>
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; gap:2px;"><div style="background:#D97706; height:12%;"></div><div style="background:#1F3864; height:88%;"></div></div>
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; gap:2px;"><div style="background:#D97706; height:26%;"></div><div style="background:#1F3864; height:74%;"></div></div>
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; gap:2px;"><div style="background:#D97706; height:22%;"></div><div style="background:#1F3864; height:81%;"></div></div>
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; gap:2px;"><div style="background:#D97706; height:24%;"></div><div style="background:#1F3864; height:66%;"></div></div>
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; gap:2px;"><div style="background:#D97706; height:34%;"></div><div style="background:#1F3864; height:44%;"></div></div>
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; gap:2px;"><div style="background:#D97706; height:58%;"></div><div style="background:#1F3864; height:22%;"></div></div>
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; gap:2px;"><div style="background:#D97706; height:82%;"></div><div style="background:#1F3864; height:10%;"></div></div>
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; gap:2px;"><div style="background:#D97706; height:74%;"></div><div style="background:#1F3864; height:4%;"></div></div>
+            <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%; gap:2px;"><div style="background:#D97706; height:46%;"></div><div style="background:#1F3864; height:2%;"></div></div>
+          </div>
+          <div style="display:flex; gap:10px; margin-top:12px; font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; color:#6B6B66;">
+            <div style="flex:1;">7</div><div style="flex:1;">8</div><div style="flex:1;">9</div><div style="flex:1;">11</div><div style="flex:1;">12</div><div style="flex:1;">14</div><div style="flex:1;">16</div><div style="flex:1;">18</div><div style="flex:1;">19</div><div style="flex:1;">20</div><div style="flex:1;">21</div>
+          </div>
+          <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-top:12px;">Hour of day</div>
+        </div>
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-top:16px; line-height:1.8; max-width:680px;">Fig. 07 — Demand by hour. Industrial volume concentrates between 8am and 3pm; consumer volume peaks after 6pm. The same vehicle can serve both. Modeled.</div>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">Where we actually are</div>
+        <h2 style="font-size:29px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; margin:0 0 32px; max-width:680px;">Human-driven vehicles today, built multi-modal from the ground up.</h2>
+        <div style="max-width:680px; margin-bottom:64px;">
+          <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0 0 20px; text-wrap:pretty;">Direct about status, because you will find out anyway.</p>
+          <p style="font-size:17px; line-height:1.65; margin:0 0 20px; text-wrap:pretty;">LMX operates human-driven vehicles today. Our system is built multi-modality from the ground up — every order carries the data needed to evaluate whether a machine could carry it, and we evaluate that on live deliveries whether or not one is available.</p>
+          <p style="font-size:17px; line-height:1.65; color:#6B6B66; margin:0; text-wrap:pretty;">Autonomous capacity scales into the network as service availability and cost clear the threshold where it improves the operation rather than complicating it. We are not waiting for that to build the layer underneath it.</p>
+        </div>
+
+        <div style="background: #FFFFFF; border: 1px solid #D9D6CE; border-top: 1px solid #D9D6CE; padding:32px;">
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:16px; align-items:stretch;">
+            <div style="border:1px solid #D9D6CE; padding:20px;">
+              <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:10px;">Step 01</div>
+              <div style="font-size:17px; line-height:1.5;">Order enters with weight, dimensions, window, destination class</div>
+            </div>
+            <div style="border:1px solid #D9D6CE; padding:20px;">
+              <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:10px;">Step 02</div>
+              <div style="font-size:17px; line-height:1.5;">Eligibility check against every vehicle class in the network</div>
+            </div>
+            <div style="border:1px solid #D9D6CE; padding:20px;">
+              <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:10px;">Step 03</div>
+              <div style="font-size:17px; line-height:1.5;">Machine if available and economic, human-driven vehicle otherwise</div>
+            </div>
+            <div style="border:1px solid #D9D6CE; padding:20px;">
+              <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:10px;">Step 04</div>
+              <div style="font-size:17px; line-height:1.5;">Fallback timer runs; clean release swaps to a human-driven vehicle automatically</div>
+            </div>
+            <div style="border:1px solid #D97706; padding:20px;">
+              <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#D97706; margin-bottom:10px;">Outcome</div>
+              <div style="font-size:17px; line-height:1.5;">The same delivery promise, whichever carried it</div>
+            </div>
+          </div>
+        </div>
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-top:16px; line-height:1.8; max-width:680px;">Fig. 08 — Modality decision flow. Every order is evaluated for autonomous carriage whether or not capacity exists.</div>
+      </section>
+
+      <section style="padding: 120px 0 0;">
+        <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:28px;">Integration</div>
+        <h2 style="font-size:29px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; margin:0 0 56px; max-width:680px;">What we need from your API.</h2>
+        <table style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left; font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; padding:0 32px 14px 0; border-bottom:1px solid #1A1A1A; width:36%;">Capability</th>
+              <th style="text-align:left; font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; padding:0 0 14px; border-bottom:1px solid #1A1A1A;">Why we need it</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="font-size:17px; line-height:1.5; padding:20px 32px 20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Availability and quote</td>
+              <td style="font-size:17px; line-height:1.5; color:#6B6B66; padding:20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Our system cannot assign a drop without knowing whether you can take it and when</td>
+            </tr>
+            <tr>
+              <td style="font-size:17px; line-height:1.5; padding:20px 32px 20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Create and cancel a trip</td>
+              <td style="font-size:17px; line-height:1.5; color:#6B6B66; padding:20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Cancel matters as much as create — clean release is what lets us fall back to a van</td>
+            </tr>
+            <tr>
+              <td style="font-size:17px; line-height:1.5; padding:20px 32px 20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Trip status events</td>
+              <td style="font-size:17px; line-height:1.5; color:#6B6B66; padding:20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">We key our fallback timers off pickup and arrival status</td>
+            </tr>
+            <tr>
+              <td style="font-size:17px; line-height:1.5; padding:20px 32px 20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Recipient handoff</td>
+              <td style="font-size:17px; line-height:1.5; color:#6B6B66; padding:20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">An unlock or a forwardable link. We already reach the receiving business by text.</td>
+            </tr>
+            <tr>
+              <td style="font-size:17px; line-height:1.5; padding:20px 32px 20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Delivery evidence</td>
+              <td style="font-size:17px; line-height:1.5; color:#6B6B66; padding:20px 0; border-bottom:1px solid #D9D6CE; vertical-align:top;">Photograph and timestamp. Proof of delivery is a contractual commitment on our side.</td>
+            </tr>
+          </tbody>
+        </table>
+        <a href="mailto:contact@lmxit.com" style="display:inline-block; margin-top:56px; font-size:16px; font-weight:500; color: #FFFFFF; background: #1F3864; border:1px solid #1F3864; border-radius:4px; padding:14px 24px; transition:filter 200ms ease;" class="lmx-cta">Start a conversation</a>
+      </section>
+
+    </div>
+  </main>
+  
+  </main>
+<footer style="border-top:1px solid #D9D6CE; background:#FAFAF8;">
+    <div style="max-width:1120px; margin:0 auto; padding:64px 40px;">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:40px;">
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:flex-start;">
+          <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:8px;">Pages</div>
+          <a href="index.html" style="font-size:15px; color:#1A1A1A;">Home</a>
+          <a href="how-it-works.html" style="font-size:15px; color:#1A1A1A;">How it works</a>
+          <a href="autonomy-partners.html" style="font-size:15px; color:#1A1A1A;">For autonomy partners</a>
+          <a href="company.html" style="font-size:15px; color:#1A1A1A;">Company</a>
+          <a href="careers.html" style="font-size:15px; color:#1A1A1A;">Careers</a>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:flex-start;">
+          <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:8px;">Contact</div>
+          <a href="mailto:contact@lmxit.com" style="font-size:15px; color:#1A1A1A;">contact@lmxit.com</a>
+          <div style="font-size:15px; color:#6B6B66;">LMX, Inc.</div>
+          <div style="font-size:15px; color:#6B6B66;">Austin, Texas</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:12px; align-items:flex-start;">
+          <div style="font-family:'IBM Plex Mono', monospace; font-size:12px; font-weight:500; letter-spacing:0.08em; text-transform:uppercase; color:#6B6B66; margin-bottom:8px;">Legal</div>
+          <a href="#" style="font-size:15px; color:#1A1A1A;">Privacy</a>
+          <a href="#" style="font-size:15px; color:#1A1A1A;">Terms</a>
+          <div style="font-size:15px; color:#6B6B66;">© 2026 LMX, Inc.</div>
+        </div>
+      </div>
+    </div>
+  </footer>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="image-slot.js"></script>
+<script src="site.js"></script>
+</body>
+</html>
