@@ -159,3 +159,32 @@ def documents_are_published() -> bool:
     Both, not either. The terms incorporate the privacy policy by reference.
     """
     return TERMS.is_published and PRIVACY.is_published
+
+
+def acceptance_is_current(accepted_version: str | None) -> bool:
+    """Whether a client who accepted `accepted_version` is still up to date.
+
+    The gap this closes. `POST /public/signup` compares an applicant's version against
+    the current one and refuses a stale submission, so publishing a new version closes
+    the front door until people accept it. Nothing did the equivalent for clients who
+    were **already through it** - so a version bump left existing clients placing orders
+    under terms they had never seen, which is the one case the version column exists to
+    make impossible.
+
+    Clause 11 of the terms is the authority for gating rather than merely prompting:
+    *"we may ask you to accept the new version before you place further orders."*
+
+    Three answers, and the first is the one worth stating:
+
+      - **Drafts oblige nobody.** While either document is unpublished there is nothing
+        legitimate to accept, so this returns True and no client is prompted. Demanding
+        assent to a draft is the same defect as recording it, which
+        `documents_are_published` already refuses at signup.
+      - A matching version is current.
+      - Anything else is stale, **including `None`** - a client onboarded by ops through
+        `POST /admin/clients` never accepted anything, and treating an absent record as
+        satisfied would let exactly those clients order under no terms at all.
+    """
+    if not documents_are_published():
+        return True
+    return accepted_version == TERMS.version

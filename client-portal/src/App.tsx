@@ -7,6 +7,7 @@ import type {
   ClientProfileView,
   InvoiceDetailView,
   InvoiceSummaryView,
+  TermsAcceptanceView,
 } from './lib/types'
 import { LoginPage } from './components/LoginPage'
 import { LegalPage } from './components/LegalPage'
@@ -17,6 +18,7 @@ import { ResetPasswordPage } from './components/ResetPasswordPage'
 import { NewOrderForm } from './components/NewOrderForm'
 import { BulkPastePanel } from './components/BulkPastePanel'
 import { ManifestUploadPanel } from './components/ManifestUploadPanel'
+import { TermsBanner } from './components/TermsBanner'
 import { TopBar } from './components/TopBar'
 import { OrdersTable } from './components/OrdersTable'
 import { OrderDetail } from './components/OrderDetail'
@@ -76,6 +78,10 @@ export default function App() {
     return null
   })
   const [profile, setProfile] = useState<ClientProfileView | null>(null)
+  // Terms re-acceptance (docs/ROADMAP.md L8). Fetched alongside the profile so the
+  // banner is up before the first order can be attempted, rather than appearing after a
+  // refusal the user has already seen.
+  const [termsState, setTermsState] = useState<TermsAcceptanceView | null>(null)
   const [orders, setOrders] = useState<ClientOrderSummaryView[] | null>(null)
   // Order search (docs/ROADMAP.md W5). A counter person with a customer on the phone is
   // looking for one order, and the list used to be every order this company had ever
@@ -108,12 +114,19 @@ export default function App() {
     if (!loggedIn) return
     let cancelled = false
     setLoadError(null)
-    Promise.all([api.myProfile(), api.myOrders({ status: 'all', limit: ORDER_PAGE_SIZE })])
-      .then(([profileResult, ordersResult]) => {
+    Promise.all([
+      api.myProfile(),
+      api.myOrders({ status: 'all', limit: ORDER_PAGE_SIZE }),
+      // Never fatal: a portal that refused to load because it could not read the terms
+      // state would be worse than one that loads without the banner.
+      api.myTermsAcceptance().catch(() => null),
+    ])
+      .then(([profileResult, ordersResult, termsResult]) => {
         if (cancelled) return
         setProfile(profileResult)
         setOrders(ordersResult.items)
         setOrderTotal(ordersResult.total)
+        setTermsState(termsResult)
       })
       .catch(() => {
         if (cancelled) return
@@ -233,6 +246,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[var(--bg-page)]">
+      {termsState && <TermsBanner state={termsState} onAccepted={setTermsState} />}
       <TopBar profile={profile} onLogout={handleLogout} />
       <main className="mx-auto max-w-5xl px-6 py-6">
         <nav className="mb-5 flex gap-1 border-b border-[var(--border)] print:hidden">

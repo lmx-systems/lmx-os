@@ -145,7 +145,7 @@ and a payments-processor relationship joins the sub-processor list.
 | 8 — Operational data | `W7`. Decision 2 above |
 | 9 — Liability | `R1`. Decision 1 above |
 | 10 — Suspension and ending | `clients.signup_status` supports withdrawal of approval |
-| 11 — Changes | `terms_accepted_version` and `terms_accepted_at` are recorded per client, so versioned re-acceptance is supportable. **The re-acceptance flow is not built** — today a version bump would close signup to new applicants until they accept, but would not prompt existing clients |
+| 11 — Changes | `terms_accepted_version` and `terms_accepted_at` are recorded per client, and **the re-acceptance flow is now built (August 2026)**. A version bump closes signup to new applicants *and* requires existing clients to accept before sending further orders — through the portal and over an API key alike, since this clause says "further orders" without distinguishing how they arrive. Reads stay open: a client mid-shift can still watch deliveries in flight and pull an invoice. Acceptance is **admin-only**, on the strength of clause 1's "on behalf of your business". **Please confirm gating rather than merely notifying is what this clause intends** — we read "we may ask you to accept the new version before you place further orders" as authorising it |
 
 ### Privacy policy
 

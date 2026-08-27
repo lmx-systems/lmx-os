@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.client_api.rate_limit import ApiKeyRateLimiter, ApiRateLimitExceeded
 from app.db import get_db
+from app.legal.documents import acceptance_is_current
 from app.models.client import Client
 from app.models.client_api_key import ClientApiKey, hash_api_key
 
@@ -82,6 +83,37 @@ async def get_api_client(
             signup_status=client.signup_status,
         )
         raise HTTPException(status_code=401, detail=_UNAUTHORIZED)
+
+    # Terms re-acceptance (docs/ROADMAP.md L8), gated on the same rule as the portal:
+    # clause 11 says "before you place further orders" without distinguishing how they
+    # arrive, and gating only the portal would leave the exposure open for exactly the
+    # highest-volume clients.
+    #
+    # **After the inactive check, not before.** That branch answers with the same 401 as
+    # an unknown key on purpose, so a live key for a pending or deactivated account is
+    # indistinguishable from a fake one. A distinguishable 409 ahead of it would have
+    # confirmed to a key-holder that their key is real and the account exists - the
+    # enumeration property this whole dependency is arranged around. By here the caller
+    # has proven a valid key for an active client, so telling them why is not a
+    # disclosure to a stranger.
+    #
+    # 409 rather than 403, worded for a developer reading a log rather than a counter
+    # person: the integration is correct and the key is valid, so the message has to say
+    # what changed and who can fix it.
+    if not acceptance_is_current(client.terms_accepted_version):
+        logger.warning(
+            "api_key_rejected_stale_terms",
+            client_id=str(client.id),
+            accepted_version=client.terms_accepted_version,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Our terms have been updated and this account has not accepted the new "
+                "version. An administrator can accept them in the client portal, after "
+                "which this key resumes working unchanged."
+            ),
+        )
 
     try:
         # Charged after authentication, unlike the public signup limiter. There is no

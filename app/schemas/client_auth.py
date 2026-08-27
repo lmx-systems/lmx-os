@@ -120,6 +120,27 @@ class ClientOrderSummaryView(BaseModel):
     collected_at: str | None = None
 
 
+class TermsAcceptanceView(BaseModel):
+    """Where this company stands on the current terms (docs/ROADMAP.md L8).
+
+    `can_accept` is on the payload rather than left to the portal to infer from a role
+    string, so the button's existence and the endpoint's authorisation are decided by
+    the same fact. A portal that guessed would eventually offer a counter person a
+    button that 403s.
+    """
+
+    current_version: str
+    accepted_version: str | None
+    accepted_at: datetime | None
+    # True when the company must accept before sending more orders.
+    acceptance_required: bool
+    # Whether *this* signed-in user may do it. Admin only - binding the company to a
+    # contract is not the same act as reading an order.
+    can_accept: bool
+    terms_path: str
+    privacy_path: str
+
+
 class ClientOrderPage(BaseModel):
     """One page of a client's orders.
 

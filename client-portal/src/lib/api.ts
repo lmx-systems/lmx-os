@@ -21,6 +21,7 @@ import type {
   LegalDocumentsView,
   ManifestUploadResult,
   ReturnItemView,
+  TermsAcceptanceView,
   TrackingView,
   WebhookDeliveryView,
   WebhookEndpointBody,
@@ -89,6 +90,13 @@ export const api = {
   // Searchable and paged (docs/ROADMAP.md W5). This used to return every order the
   // client had ever placed, which is both a growing full scan and useless for finding
   // one order among thousands.
+  // Terms re-acceptance (docs/ROADMAP.md L8). Readable by any signed-in user so a
+  // counter person can be told why an order was refused; accepting is admin-only.
+  myTermsAcceptance: () => request<TermsAcceptanceView>('/client/terms-acceptance'),
+
+  acceptTerms: () =>
+    request<TermsAcceptanceView>('/client/terms-acceptance', { method: 'POST' }),
+
   myOrders: (params: { q?: string; status?: 'open' | 'all'; limit?: number; offset?: number } = {}) => {
     const search = new URLSearchParams()
     if (params.q) search.set('q', params.q)

@@ -58,6 +58,12 @@ from app.db import get_db
 from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, CLIENT_USER_ROLES, ClientUser
 from app.models.invoice import Invoice
+from app.legal.documents import (
+    DOCUMENTS,
+    acceptance_is_current,
+    current_terms_version,
+    documents_are_published,
+)
 from app.models.client_sla_term import ClientSlaTerm
 from app.models.delivery_rating import RECIPIENT, DeliveryRating
 from app.models.order import Order, OrderStatus
@@ -89,6 +95,7 @@ from app.schemas.client_auth import (
     ClientOrderPage,
     ClientOrderSummaryView,
     DeliveryRatingView,
+    TermsAcceptanceView,
     ClientProfileView,
     ClientShopView,
     ClientUserCreateBody,
@@ -389,6 +396,65 @@ async def _annotate_commitments(
     view.estimated_delivery_by = eta.isoformat() if eta else None
 
 
+@router.get("/terms-acceptance", response_model=TermsAcceptanceView)
+async def my_terms_acceptance(
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> TermsAcceptanceView:
+    """Whether this company owes an acceptance, and who can give it.
+
+    Readable by any signed-in user, including a `member`, so the portal can show a
+    counter person *why* their order was refused rather than leaving them with a 409 and
+    no route out. Acting on it is admin-only; knowing about it is not.
+    """
+    row = await session.get(Client, uuid.UUID(client.client_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return _acceptance_view(row, role=client.role)
+
+
+@router.post("/terms-acceptance", response_model=TermsAcceptanceView)
+async def accept_current_terms(
+    client: AuthedClient = Depends(require_client_admin),
+    session: AsyncSession = Depends(get_db),
+) -> TermsAcceptanceView:
+    """Accept the current terms on behalf of the company.
+
+    **Admin only, and that is the substance of this endpoint rather than a convention.**
+    A `member` is a counter person with read access to their company's orders; binding
+    the company to a new contract is not the same kind of act as looking one up, and
+    clause 1 of the terms has the accepting party agreeing "on behalf of your business".
+    The role line C4 already draws is exactly that distinction.
+
+    Records the **server's** version, never a value from the request - the same rule
+    signup follows, for the same reason: an acceptance record a caller can write is not
+    evidence.
+    """
+    row = await session.get(Client, uuid.UUID(client.client_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    if not documents_are_published():
+        # Nothing legitimate to accept. Refusing is the same call
+        # `documents_are_published` makes at signup, for the same reason - recording
+        # assent to a draft is worse than recording nothing, because it looks like
+        # something.
+        raise HTTPException(
+            status_code=409, detail="There is no current version to accept just now."
+        )
+
+    row.terms_accepted_version = current_terms_version()
+    row.terms_accepted_at = datetime.now(timezone.utc)
+    await session.commit()
+    logger.info(
+        "client_terms_accepted",
+        client_id=str(row.id),
+        client_user_id=client.client_user_id,
+        version=row.terms_accepted_version,
+    )
+    return _acceptance_view(row, role=client.role)
+
+
 @router.get("/orders", response_model=ClientOrderPage)
 async def list_my_orders(
     # Annotated rather than `= Query(default=...)`, so a direct call gets a real Python
@@ -650,6 +716,19 @@ async def list_my_returns(
 # ---------------------------------------------------------------------------
 
 
+def _acceptance_view(row: Client, *, role: str) -> TermsAcceptanceView:
+    doc = DOCUMENTS["terms"]
+    return TermsAcceptanceView(
+        current_version=doc.version,
+        accepted_version=row.terms_accepted_version,
+        accepted_at=row.terms_accepted_at,
+        acceptance_required=not acceptance_is_current(row.terms_accepted_version),
+        can_accept=role == CLIENT_ADMIN_ROLE,
+        terms_path=doc.portal_path,
+        privacy_path=DOCUMENTS["privacy"].portal_path,
+    )
+
+
 async def _require_approved_client(session: AsyncSession, client: AuthedClient) -> Client:
     """Load the client and refuse if they aren't approved yet.
 
@@ -667,6 +746,23 @@ async def _require_approved_client(session: AsyncSession, client: AuthedClient) 
         raise HTTPException(
             status_code=403,
             detail="Your account is still being reviewed - you'll be able to send orders once it's approved.",
+        )
+    # Terms re-acceptance (docs/ROADMAP.md L8). Signup already refuses a stale version;
+    # without this, publishing a new one closed the front door while everyone already
+    # inside kept ordering under terms they had never seen.
+    #
+    # **Gates order creation and nothing else.** Every read stays open - a client whose
+    # terms went stale mid-shift must still be able to watch the deliveries already in
+    # flight, find an order a customer is ringing about, and download an invoice.
+    # Withholding those would be punishing them for our change, and the order is the
+    # transaction the terms actually govern.
+    if not acceptance_is_current(row.terms_accepted_version):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Our terms have been updated. An administrator on your account needs to "
+                "accept the new version before you can send more orders."
+            ),
         )
     return row
 

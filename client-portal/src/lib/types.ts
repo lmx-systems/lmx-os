@@ -349,3 +349,16 @@ export interface ManifestUploadResult {
   // Every line of the file, exactly once.
   results: ManifestRowResult[]
 }
+
+// Where this company stands on the current terms (docs/ROADMAP.md L8). `can_accept`
+// comes from the server rather than being inferred from the role here, so the button's
+// existence and the endpoint's authorisation are decided by the same fact.
+export interface TermsAcceptanceView {
+  current_version: string
+  accepted_version: string | null
+  accepted_at: string | null
+  acceptance_required: boolean
+  can_accept: boolean
+  terms_path: string
+  privacy_path: string
+}
