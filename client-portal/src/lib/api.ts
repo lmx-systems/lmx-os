@@ -211,6 +211,14 @@ export const api = {
   trackDelivery: (token: string) =>
     request<TrackingView>(`/public/track/${encodeURIComponent(token)}`),
 
+  // Rate the delivery you received (docs/ROADMAP.md F13). Returns the whole tracking
+  // view, so the page moves to its thank-you state without a second fetch.
+  rateDelivery: (token: string, score: number, comment?: string) =>
+    request<TrackingView>(`/public/track/${encodeURIComponent(token)}/rating`, {
+      method: 'POST',
+      body: JSON.stringify({ score, comment: comment?.trim() || null }),
+    }),
+
   // Bulk paste (§2.2 principle 5). Deliberately not all-or-nothing - the
   // response reports per line, because one unfindable address among six must
   // not discard the five that were fine.

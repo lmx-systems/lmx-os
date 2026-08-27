@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from app.models.delivery_rating import MAX_COMMENT_LENGTH, MAX_SCORE, MIN_SCORE
+
+from pydantic import BaseModel, Field
 
 
 class DriverPositionView(BaseModel):
@@ -22,6 +24,21 @@ class DriverPositionView(BaseModel):
     # timestamp reads as a live one, which is worse than showing no dot: a
     # recipient watching a frozen marker concludes the driver is parked outside.
     recorded_at: datetime
+
+
+class RecipientRatingView(BaseModel):
+    """Whether this reader can rate the delivery, and what they said if they have.
+
+    **Both fields are about the reader's own action**, which is what makes them
+    admissible on a payload this file calls a privacy boundary. `can_rate` follows from
+    the delivery status the page already shows, and `score`/`comment` are what this same
+    link submitted - so nothing here tells a holder anything they did not either see
+    already or type themselves. No driver identity, no comparison, no aggregate.
+    """
+
+    can_rate: bool
+    score: int | None = None
+    comment: str | None = None
 
 
 class TrackingView(BaseModel):
@@ -42,3 +59,19 @@ class TrackingView(BaseModel):
     # Whether the page should keep polling. False on a finished delivery, so a
     # forgotten open tab stops hitting the endpoint forever.
     is_live: bool
+    # Ratings (docs/ROADMAP.md F13). A deliberate addition to this boundary - see
+    # RecipientRatingView for why it discloses nothing new.
+    rating: RecipientRatingView
+
+
+class SubmitRatingBody(BaseModel):
+    """One tap, and optionally a sentence.
+
+    Validated here as well as in `app/tracking/ratings.py` and by a CHECK on the table.
+    Three layers is not redundancy for its own sake: this one returns a 422 with a
+    useful message, the service protects callers that are not this endpoint, and the
+    constraint is what stays true if a row is ever written by hand.
+    """
+
+    score: int = Field(ge=MIN_SCORE, le=MAX_SCORE)
+    comment: str | None = Field(default=None, max_length=MAX_COMMENT_LENGTH)

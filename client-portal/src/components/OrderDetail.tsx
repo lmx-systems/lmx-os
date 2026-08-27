@@ -90,6 +90,24 @@ export function OrderDetail({ order, onBack }: OrderDetailProps) {
                   : '—'}
             </dd>
           </div>
+          {/* Their customer's own words, when there are any. Shown as a score out of
+              five and the comment verbatim - React escapes it, and it arrives from an
+              unauthenticated page, so it is never rendered as markup. */}
+          {order.rating && (
+            <div className="col-span-2">
+              <dt className="text-xs text-[var(--text-muted)]">
+                Recipient rating &middot; {formatDate(order.rating.submitted_at)}
+              </dt>
+              <dd className="mt-0.5 text-[var(--text-secondary)]">
+                <span className="font-medium text-[var(--text-primary)]">
+                  {order.rating.score} / 5
+                </span>
+                {order.rating.comment && (
+                  <span className="mt-1 block italic">&ldquo;{order.rating.comment}&rdquo;</span>
+                )}
+              </dd>
+            </div>
+          )}
           <div className="col-span-2">
             <dt className="text-xs text-[var(--text-muted)]">Delivery address</dt>
             <dd className="mt-0.5 text-[var(--text-secondary)]">{order.delivery_address ?? '—'}</dd>

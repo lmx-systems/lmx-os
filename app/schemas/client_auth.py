@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -133,6 +135,22 @@ class ClientOrderPage(BaseModel):
     offset: int
 
 
+class DeliveryRatingView(BaseModel):
+    """What the recipient said about this delivery (docs/ROADMAP.md F13).
+
+    On the detail view rather than the list. A column of scores invites reading the
+    list as a scoreboard, and an average per driver or per shop is `I4`'s analytics
+    work with the framing conversation `W4` asks for - not something that should fall
+    out of showing a client one order.
+    """
+
+    score: int
+    comment: str | None
+    submitted_at: datetime
+
+
 class ClientOrderDetailView(ClientOrderSummaryView):
     delivery_address: str | None
     delivery_contact_name: str | None
+    # What the recipient thought, when they told us. Null when they haven't.
+    rating: DeliveryRatingView | None = None

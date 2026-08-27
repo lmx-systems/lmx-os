@@ -6,6 +6,7 @@ from app.models.client_sla_term import ClientSlaTerm
 from app.models.client_api_key import ClientApiKey
 from app.models.client_user import ClientUser
 from app.models.client_webhook import ClientWebhookEndpoint, WebhookDelivery
+from app.models.delivery_rating import DeliveryRating
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.driver_document import DriverDocument
@@ -34,6 +35,7 @@ __all__ = [
     "Client",
     "ClientRate",
     "ClientUser",
+    "DeliveryRating",
     "Driver",
     "DriverDocument",
     "DriverLocationPing",

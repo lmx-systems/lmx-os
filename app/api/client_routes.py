@@ -59,6 +59,7 @@ from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, CLIENT_USER_ROLES, ClientUser
 from app.models.invoice import Invoice
 from app.models.client_sla_term import ClientSlaTerm
+from app.models.delivery_rating import RECIPIENT, DeliveryRating
 from app.models.order import Order, OrderStatus
 from app.models.stop import Stop, StopOrder
 from app.sla.commitment import delivery_commitment, terms_for_client
@@ -87,6 +88,7 @@ from app.schemas.client_auth import (
     ClientOrderDetailView,
     ClientOrderPage,
     ClientOrderSummaryView,
+    DeliveryRatingView,
     ClientProfileView,
     ClientShopView,
     ClientUserCreateBody,
@@ -491,10 +493,30 @@ async def get_my_order(
         await terms_for_client(session, uuid.UUID(client.client_id)),
         (await _stop_facts(session, [order.id])).get(order.id),
     )
+    # What their customer thought of the delivery (F13). One query, detail view only -
+    # see DeliveryRatingView for why this is not a column in the list.
+    rating_row = (
+        await session.execute(
+            select(DeliveryRating).where(
+                DeliveryRating.order_id == order.id,
+                DeliveryRating.rated_by == RECIPIENT,
+            )
+        )
+    ).scalar_one_or_none()
+
     return ClientOrderDetailView(
         **summary.model_dump(),
         delivery_address=order.delivery_address,
         delivery_contact_name=order.delivery_contact_name,
+        rating=(
+            DeliveryRatingView(
+                score=rating_row.score,
+                comment=rating_row.comment,
+                submitted_at=rating_row.first_submitted_at,
+            )
+            if rating_row is not None
+            else None
+        ),
     )
 
 

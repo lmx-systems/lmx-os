@@ -114,6 +114,8 @@ export function TrackingPage({ token }: TrackingPageProps) {
 
       <Arrival view={view} />
 
+      <RatingPrompt token={token} view={view} onRated={setView} />
+
       {view.driver_position ? (
         <DriverMap position={view.driver_position} />
       ) : (
@@ -133,6 +135,108 @@ export function TrackingPage({ token }: TrackingPageProps) {
         </p>
       )}
     </Shell>
+  )
+}
+
+/**
+ * One tap to rate the delivery, and a sentence if they want to (docs/ROADMAP.md F13).
+ *
+ * Only appears once the delivery has landed - `can_rate` comes from the server, so the
+ * page never has to reason about which statuses qualify. It stays visible after
+ * submission with the score selected, because a recipient who taps four stars and then
+ * wants to explain why should not have to hunt for a way back in.
+ *
+ * The comment box is revealed by choosing a score rather than shown alongside it. The
+ * ask is one tap; presenting an empty textarea up front makes it look like homework and
+ * costs the response rate the whole feature depends on.
+ */
+function RatingPrompt({
+  token,
+  view,
+  onRated,
+}: {
+  token: string
+  view: TrackingView
+  onRated: (view: TrackingView) => void
+}) {
+  const { can_rate, score, comment } = view.rating
+  const [draftComment, setDraftComment] = useState(comment ?? '')
+  const [saving, setSaving] = useState(false)
+  const [failed, setFailed] = useState(false)
+
+  if (!can_rate) return null
+
+  async function submit(nextScore: number, nextComment?: string) {
+    setSaving(true)
+    setFailed(false)
+    try {
+      onRated(await api.rateDelivery(token, nextScore, nextComment))
+    } catch {
+      // The rating is worth far less than the tracking page it sits on, so a failure
+      // here says so and changes nothing else.
+      setFailed(true)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mt-8 border-t border-slate-200 pt-6">
+      <p className="text-sm font-medium text-slate-900">
+        {score ? 'Thanks for the feedback.' : 'How was this delivery?'}
+      </p>
+
+      <div className="mt-3 flex gap-1.5" role="group" aria-label="Rate this delivery">
+        {[1, 2, 3, 4, 5].map((value) => (
+          <button
+            key={value}
+            type="button"
+            disabled={saving}
+            aria-label={`${value} out of 5`}
+            aria-pressed={score === value}
+            onClick={() => submit(value, draftComment)}
+            className={`h-10 w-10 rounded-lg border text-base transition-colors disabled:opacity-50 ${
+              score !== null && value <= score
+                ? 'border-slate-900 bg-slate-900 text-white'
+                : 'border-slate-200 bg-white text-slate-400 hover:border-slate-400'
+            }`}
+          >
+            {value}
+          </button>
+        ))}
+      </div>
+
+      {score !== null && (
+        <div className="mt-4">
+          <label htmlFor="rating-comment" className="text-xs text-slate-500">
+            Anything you want us to know? (optional)
+          </label>
+          <textarea
+            id="rating-comment"
+            value={draftComment}
+            maxLength={500}
+            rows={3}
+            onChange={(e) => setDraftComment(e.target.value)}
+            placeholder="Driver couldn't find the loading dock…"
+            className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-sm text-slate-900 placeholder:text-slate-400"
+          />
+          <button
+            type="button"
+            disabled={saving || draftComment.trim() === (comment ?? '')}
+            onClick={() => submit(score, draftComment)}
+            className="mt-2 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+          >
+            {saving ? 'Saving…' : comment ? 'Update' : 'Send'}
+          </button>
+        </div>
+      )}
+
+      {failed && (
+        <p role="alert" className="mt-2 text-xs text-amber-700">
+          We couldn&rsquo;t save that just now. Your delivery is unaffected.
+        </p>
+      )}
+    </div>
   )
 }
 

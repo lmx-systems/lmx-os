@@ -59,6 +59,13 @@ export interface ClientOrderPage {
 export interface ClientOrderDetailView extends ClientOrderSummaryView {
   delivery_address: string | null
   delivery_contact_name: string | null
+  // What the recipient thought of the delivery (docs/ROADMAP.md F13). Null until they
+  // say. Detail view only - see DeliveryRatingView in the backend schema for why.
+  rating: {
+    score: number
+    comment: string | null
+    submitted_at: string
+  } | null
 }
 
 // Mirrors app/schemas/billing.py's response models exactly - shared
@@ -255,6 +262,13 @@ export interface TrackingView {
   driver_position: DriverPositionView | null
   // False on a finished delivery, so a forgotten open tab stops polling.
   is_live: boolean
+  // Ratings (docs/ROADMAP.md F13). Both fields are about this reader's own action -
+  // whether they may rate, and what they said if they already did.
+  rating: {
+    can_rate: boolean
+    score: number | null
+    comment: string | null
+  }
 }
 
 // Outbound status webhooks (docs/ROADMAP.md F4).

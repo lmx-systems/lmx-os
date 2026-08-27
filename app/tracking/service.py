@@ -48,6 +48,7 @@ from app.config import settings
 from app.fleet_state.manager import FleetStateManager
 from app.gig_platform.economics import minutes_for_miles
 from app.models.order import Order, OrderStatus
+from app.tracking.ratings import RatingState, rating_state
 from app.models.route import Route
 from app.models.stop import Stop, StopOrder
 
@@ -123,6 +124,9 @@ class TrackingView:
     # Tells the page whether to keep polling, so a delivered order stops hitting
     # the endpoint every few seconds forever.
     is_live: bool
+    # Whether this holder may rate the delivery, and what they said if they have
+    # (docs/ROADMAP.md F13, app/tracking/ratings.py).
+    rating: RatingState
 
 
 class TrackingTokenInvalid(Exception):
@@ -316,6 +320,8 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
                 # showing a moving van under the words "Collected" reads as a bug.
                 headline, detail = _RECIPIENT_STATUS[OrderStatus.en_route_drop]
 
+    rating = await rating_state(session, order)
+
     return TrackingView(
         status=order.status.value,
         headline=headline,
@@ -324,6 +330,7 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
         estimated_arrival=_estimated_arrival(order, position, stop_eta),
         delivered_at=order.delivered_at,
         driver_position=position,
+        rating=rating,
         is_live=order.status
         not in (OrderStatus.delivered, OrderStatus.cancelled, OrderStatus.delivery_failed),
     )

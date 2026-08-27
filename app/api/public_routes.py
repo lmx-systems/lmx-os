@@ -46,10 +46,17 @@ from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.messaging.client_emails import send_password_reset_email, send_signup_received_email
 from app.models.hub import Hub
+from app.models.order import Order
 from app.legal.documents import DOCUMENTS, current_terms_version, documents_are_published
 from app.schemas.legal import LegalDocumentBody, LegalDocumentView, LegalDocumentsView
-from app.schemas.tracking import DriverPositionView, TrackingView
+from app.schemas.tracking import (
+    DriverPositionView,
+    RecipientRatingView,
+    SubmitRatingBody,
+    TrackingView,
+)
 from app.tracking.rate_limit import TrackingRateLimiter, TrackingRateLimitExceeded
+from app.tracking.ratings import RatingNotAllowed, submit_rating
 from app.tracking.service import TrackingTokenInvalid, resolve_tracking
 from app.schemas.signup import (
     ClientSignupBody,
@@ -439,6 +446,92 @@ async def track_delivery(
             )
             if view.driver_position is not None
             else None
+        ),
+        rating=RecipientRatingView(
+            can_rate=view.rating.can_rate,
+            score=view.rating.score,
+            comment=view.rating.comment,
+        ),
+        is_live=view.is_live,
+    )
+
+
+@router.post("/track/{token}/rating", response_model=TrackingView)
+async def rate_delivery(
+    token: str,
+    body: SubmitRatingBody,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> TrackingView:
+    """Rate the delivery you just received (docs/ROADMAP.md F13).
+
+    The second unauthenticated write on this router, and the narrowest. The token is
+    the credential, it already expires `tracking_link_grace_hours` after delivery, and
+    the only row it can touch is one rating attached to the one order it names - so the
+    worst a stolen link buys is an opinion about a delivery its holder could already
+    read about.
+
+    **404 for an unknown or expired token, identical body, same reasoning as the read.**
+    A distinguishable response would confirm a guess. **409 when the delivery has not
+    happened**, because that is a real state a legitimate holder can be in and telling
+    them so is the helpful answer - they already saw the status on the page.
+
+    Returns the whole tracking view rather than an acknowledgement, so the page moves to
+    its thank-you state in one round trip instead of submitting and then re-fetching.
+    """
+    limiter = TrackingRateLimiter()
+    try:
+        # Charged first, exactly as on the read. A write is the more attractive thing to
+        # probe, so it gets the same budget rather than a more generous one.
+        await limiter.check_and_increment(_client_ip(request))
+    except TrackingRateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+    # Resolved through the same function as the read, so the token rules - unknown,
+    # expired, grace window - are enforced in one place and cannot drift between the
+    # two endpoints.
+    try:
+        await resolve_tracking(session, token)
+    except TrackingTokenInvalid:
+        raise HTTPException(
+            status_code=404, detail="We couldn't find that delivery"
+        ) from None
+
+    order = (
+        await session.execute(select(Order).where(Order.tracking_token == token))
+    ).scalar_one()
+
+    try:
+        await submit_rating(session, order, score=body.score, comment=body.comment)
+    except RatingNotAllowed as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    await session.commit()
+
+    # Re-resolved after the commit so the response reflects what was stored rather than
+    # what was submitted - if anything normalised the comment, the page shows the
+    # normalised version instead of quietly disagreeing with the database.
+    view = await resolve_tracking(session, token)
+    return TrackingView(
+        status=view.status,
+        headline=view.headline,
+        detail=view.detail,
+        destination_hint=view.destination_hint,
+        estimated_arrival=view.estimated_arrival,
+        delivered_at=view.delivered_at,
+        driver_position=(
+            DriverPositionView(
+                lat=view.driver_position.lat,
+                lng=view.driver_position.lng,
+                recorded_at=view.driver_position.recorded_at,
+            )
+            if view.driver_position is not None
+            else None
+        ),
+        rating=RecipientRatingView(
+            can_rate=view.rating.can_rate,
+            score=view.rating.score,
+            comment=view.rating.comment,
         ),
         is_live=view.is_live,
     )
