@@ -26,3 +26,35 @@ class MeasurementView(BaseModel):
 class LinkScorecardView(BaseModel):
     generated_at: datetime
     measurements: list[MeasurementView]
+
+
+class RateView(BaseModel):
+    """One proportion, with its arithmetic visible.
+
+    `numerator`/`denominator` are part of the answer: "100% on time" means something
+    entirely different at n=1 and n=400, and `is_thin` says which side of that a reader
+    is looking at rather than leaving them to work it out.
+    """
+
+    name: str
+    target: str
+    numerator: int
+    denominator: int
+    percentage: float | None
+    is_thin: bool
+    not_measured: str | None
+
+
+class OperationsScorecardView(BaseModel):
+    """Descriptive analytics on captured ground truth (docs/ROADMAP.md I4).
+
+    Before a pilot has run, the honest content of this is four `not_measured` reasons -
+    which is a correct answer rather than an empty response, and the distinction the
+    whole reporting vocabulary exists to preserve.
+    """
+
+    generated_at: datetime
+    window_days: int
+    window_start: datetime
+    measurements: list[MeasurementView]
+    rates: list[RateView]

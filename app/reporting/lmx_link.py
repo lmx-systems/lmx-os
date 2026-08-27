@@ -23,6 +23,10 @@ whoever asks.
 **Percentiles, not averages.** A mean entry time is dominated by the one order
 somebody left open over lunch; the target is about what entry normally feels like, so
 the median is the honest headline and p90 is where the tail shows up.
+
+`Measurement` and the percentile helper now live in `app/reporting/measurement.py`,
+shared with the operations scorecard - including the part that matters, which is that a
+metric may refuse to answer rather than report a zero.
 """
 from __future__ import annotations
 
@@ -36,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.client import Client
 from app.models.client_webhook import DELIVERY_DELIVERED, WebhookDelivery
 from app.models.order import Order, OrderStatus
+from app.reporting.measurement import Measurement, percentiles as _percentiles
 
 logger = structlog.get_logger(__name__)
 
@@ -52,48 +57,9 @@ _HUMAN_ENTRY_SOURCES = ("client_portal",)
 
 
 @dataclass(frozen=True)
-class Measurement:
-    """One metric, or an honest account of why there isn't one."""
-
-    name: str
-    target: str
-    median: float | None = None
-    p90: float | None = None
-    sample_size: int = 0
-    unit: str = "seconds"
-    # Set instead of the numbers when the metric cannot be computed. The distinction
-    # between "no data yet" and "we don't record this" matters: the first resolves
-    # itself with traffic, the second needs somebody to build something.
-    not_measured: str | None = None
-
-    @property
-    def meets_target(self) -> bool | None:
-        return None
-
-
-@dataclass(frozen=True)
 class LinkScorecard:
     generated_at: datetime
     measurements: list[Measurement] = field(default_factory=list)
-
-
-async def _percentiles(session: AsyncSession, expression, where) -> tuple[float | None, float | None, int]:
-    """(median, p90, n) for a numeric expression, or (None, None, 0) with no rows."""
-    result = await session.execute(
-        select(
-            func.percentile_cont(0.5).within_group(expression.asc()),
-            func.percentile_cont(0.9).within_group(expression.asc()),
-            func.count(),
-        ).where(where)
-    )
-    median, p90, count = result.one()
-    if not count:
-        return None, None, 0
-    return (
-        float(median) if median is not None else None,
-        float(p90) if p90 is not None else None,
-        int(count),
-    )
 
 
 async def _entry_time(session: AsyncSession) -> Measurement:

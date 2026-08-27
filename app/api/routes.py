@@ -7,7 +7,9 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from fastapi import APIRouter, Depends, Response
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,8 +28,14 @@ from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.last_cycle_store import LastCycleStore
 from app.optimizer.service import DispatchOptimizerService
 from app.reporting.lmx_link import build_scorecard
+from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_operations_scorecard
 from app.schemas.batch_queue import HeldOrderView
-from app.schemas.reporting import LinkScorecardView, MeasurementView
+from app.schemas.reporting import (
+    LinkScorecardView,
+    MeasurementView,
+    OperationsScorecardView,
+    RateView,
+)
 from app.schemas.fleet import DriverLocation, DriverState
 from app.schemas.hub import HubSummary
 from app.schemas.learning_loop import NightlyJobResult, ProposedRuleSummary
@@ -82,6 +90,59 @@ async def lmx_link_scorecard(
                 not_measured=m.not_measured,
             )
             for m in scorecard.measurements
+        ],
+    )
+
+
+@router.get("/operations/scorecard", response_model=OperationsScorecardView)
+async def operations_scorecard(
+    window_days: Annotated[int, Query(ge=1, le=365)] = DEFAULT_WINDOW_DAYS,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> OperationsScorecardView:
+    """What the captured ground truth actually says (docs/ROADMAP.md I4).
+
+    Four questions the records could always have answered and nobody was asking:
+    deliveries per hour, service-level hit rate by tier, how often a hold window drew a
+    "held wrong" flag, and ETA error. `Stop.planned_eta` was added specifically to make
+    the last one possible and was read nowhere until this existed.
+
+    **Expect `not_measured` before a pilot has run**, and read that as the correct answer
+    rather than a broken endpoint. Each reason distinguishes "no data yet", which traffic
+    fixes, from "nothing records this", which needs somebody to build something.
+
+    Ops-admin only. These are fleet-wide operational figures, and the per-driver view
+    that could be derived from the same rows is deliberately not built here - see
+    `_deliveries_per_hour` and `W4`.
+    """
+    scorecard = await build_operations_scorecard(session, window_days=window_days)
+    return OperationsScorecardView(
+        generated_at=scorecard.generated_at,
+        window_days=scorecard.window_days,
+        window_start=scorecard.window_start,
+        measurements=[
+            MeasurementView(
+                name=m.name,
+                target=m.target,
+                unit=m.unit,
+                median=m.median,
+                p90=m.p90,
+                sample_size=m.sample_size,
+                not_measured=m.not_measured,
+            )
+            for m in scorecard.measurements
+        ],
+        rates=[
+            RateView(
+                name=r.name,
+                target=r.target,
+                numerator=r.numerator,
+                denominator=r.denominator,
+                percentage=r.percentage,
+                is_thin=r.is_thin,
+                not_measured=r.not_measured,
+            )
+            for r in scorecard.rates
         ],
     )
 
