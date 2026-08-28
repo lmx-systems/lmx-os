@@ -104,7 +104,7 @@ def _window_start(window_days: int, now: datetime | None = None) -> datetime:
 
 
 async def _on_duty_seconds_by_driver_day(
-    session: AsyncSession, since: datetime
+    session: AsyncSession, since: datetime, *, hub_id: uuid.UUID | None = None
 ) -> dict[tuple[uuid.UUID, date], float]:
     """How long each driver was on duty, per day, from their shift transitions.
 
@@ -122,7 +122,12 @@ async def _on_duty_seconds_by_driver_day(
         (
             await session.execute(
                 select(DriverShiftEvent)
-                .where(DriverShiftEvent.occurred_at >= since)
+                .where(
+                    DriverShiftEvent.occurred_at >= since,
+                    *(
+                        [DriverShiftEvent.hub_id == hub_id] if hub_id is not None else []
+                    ),
+                )
                 .order_by(DriverShiftEvent.driver_id, DriverShiftEvent.occurred_at)
             )
         )
@@ -147,7 +152,7 @@ async def _on_duty_seconds_by_driver_day(
 
 
 async def _deliveries_by_driver_day(
-    session: AsyncSession, since: datetime
+    session: AsyncSession, since: datetime, *, hub_id: uuid.UUID | None = None
 ) -> dict[tuple[uuid.UUID, date], int]:
     """Completed dropoff stops per driver per day.
 
@@ -175,7 +180,10 @@ async def _deliveries_by_driver_day(
     drivers = dict(
         (
             await session.execute(
-                select(Route.id, Route.driver_id).where(Route.id.in_(route_ids))
+                select(Route.id, Route.driver_id).where(
+                    Route.id.in_(route_ids),
+                    *([Route.hub_id == hub_id] if hub_id is not None else []),
+                )
             )
         ).all()
     )
@@ -189,7 +197,13 @@ async def _deliveries_by_driver_day(
     return counts
 
 
-async def _deliveries_per_hour(session: AsyncSession, since: datetime) -> Measurement:
+async def _deliveries_per_hour(
+    session: AsyncSession,
+    since: datetime,
+    *,
+    driver_id: uuid.UUID | None = None,
+    hub_id: uuid.UUID | None = None,
+) -> Measurement:
     """DPH across driver-days, as a distribution.
 
     **A distribution rather than one number, and that is not a presentation choice.**
@@ -198,12 +212,14 @@ async def _deliveries_per_hour(session: AsyncSession, since: datetime) -> Measur
     average to something plausible while describing neither. The median driver-day is
     what an operator would recognise.
 
-    **Deliberately not reported per named driver.** The same arithmetic keyed by driver
-    is a performance ranking, which is the "camera pointed at me" `W4` warns about, and
-    that view should follow the conversation `W4` frames rather than arrive as a side
-    effect of `E9` being answered. `F13` made the same call about ratings.
+    `driver_id` narrows the same computation to one driver, which is how `W4` gets to say
+    the driver sees the identical metric rather than a reduced one - there is one
+    implementation and a filter, not two functions that have to be kept in step. The
+    fleet-wide report deliberately never passes it: keyed by driver, this is a performance
+    ranking, and that view belongs to `W4`'s trust conversation rather than arriving as a
+    side effect of answering `E9`.
     """
-    on_duty = await _on_duty_seconds_by_driver_day(session, since)
+    on_duty = await _on_duty_seconds_by_driver_day(session, since, hub_id=hub_id)
     if not on_duty:
         return no_data(
             "Deliveries per hour",
@@ -211,7 +227,16 @@ async def _deliveries_per_hour(session: AsyncSession, since: datetime) -> Measur
             detail="no completed shifts recorded in the window",
         )
 
-    deliveries = await _deliveries_by_driver_day(session, since)
+    deliveries = await _deliveries_by_driver_day(session, since, hub_id=hub_id)
+
+    if driver_id is not None:
+        on_duty = {k: v for k, v in on_duty.items() if k[0] == driver_id}
+        if not on_duty:
+            return no_data(
+                "Deliveries per hour",
+                f"{ASSUMED_DELIVERIES_PER_HOUR} assumed (E9)",
+                detail="no completed shifts recorded for you in the window",
+            )
 
     # Only driver-days with real on-duty time. A day with deliveries and no recorded
     # shift is a data gap, not an infinite rate, and dividing by zero to get a headline
@@ -401,7 +426,13 @@ async def _hold_window_flag_rate(session: AsyncSession, since: datetime) -> Rate
 # ---------------------------------------------------------------------------
 
 
-async def _eta_accuracy(session: AsyncSession, since: datetime) -> Measurement:
+async def _eta_accuracy(
+    session: AsyncSession,
+    since: datetime,
+    *,
+    driver_id: uuid.UUID | None = None,
+    hub_id: uuid.UUID | None = None,
+) -> Measurement:
     """`arrived_at` against `planned_eta` - the comparison `planned_eta` exists for.
 
     **Against `planned_eta`, never `eta`.** `eta` is refreshed as the route progresses,
@@ -418,15 +449,22 @@ async def _eta_accuracy(session: AsyncSession, since: datetime) -> Measurement:
     delta = cast(
         func.extract("epoch", Stop.arrived_at - Stop.planned_eta), Float
     )
-    median, p90, count = await percentiles(
-        session,
-        delta,
-        (
-            (Stop.arrived_at.is_not(None))
-            & (Stop.planned_eta.is_not(None))
-            & (Stop.arrived_at >= since)
-        ),
+    where = (
+        (Stop.arrived_at.is_not(None))
+        & (Stop.planned_eta.is_not(None))
+        & (Stop.arrived_at >= since)
     )
+    if driver_id is not None or hub_id is not None:
+        # Through the route, which is where both the driver and the hub live. Same
+        # expression, same percentiles - only the population changes.
+        from app.models.route import Route
+
+        route_filter = select(Route.id).where(
+            *([Route.driver_id == driver_id] if driver_id is not None else []),
+            *([Route.hub_id == hub_id] if hub_id is not None else []),
+        )
+        where = where & Stop.route_id.in_(route_filter)
+    median, p90, count = await percentiles(session, delta, where)
     if not count:
         return no_data(
             "ETA error (actual minus predicted)",
@@ -481,3 +519,116 @@ async def build_operations_scorecard(
         not_measured=[m.name for m in measurements if m.not_measured is not None],
     )
     return scorecard
+
+
+# ---------------------------------------------------------------------------
+# The driver's own view (docs/ROADMAP.md W4)
+# ---------------------------------------------------------------------------
+
+# How many OTHER drivers must contribute before a fleet median is shown to a driver.
+#
+# **This is a privacy guard between colleagues, not a statistical one.** With one other
+# driver, "the fleet median" plus your own number is that person's number - so showing it
+# would quietly turn a trust feature into a way to read a colleague's performance. Three
+# others is where a median stops being attributable to any individual.
+#
+# It also happens to be where the number becomes worth reading, but that is a bonus
+# rather than the reason: a thin median is misleading, whereas a two-person median is a
+# disclosure.
+MIN_OTHER_DRIVERS_FOR_COMPARISON = 3
+
+
+@dataclass(frozen=True)
+class DriverScorecard:
+    """What one driver sees about their own work, beside the same figure for the fleet.
+
+    `fleet_*` is None when there are too few colleagues for a median to be non-
+    identifying - see MIN_OTHER_DRIVERS_FOR_COMPARISON. The driver's own numbers are
+    always shown; it is only the comparison that can be withheld.
+    """
+
+    generated_at: datetime
+    window_days: int
+    window_start: datetime
+    own_deliveries_per_hour: Measurement
+    own_eta_error: Measurement
+    fleet_deliveries_per_hour: Measurement | None
+    fleet_eta_error: Measurement | None
+    comparison_withheld: str | None = None
+
+
+async def _other_driver_count(
+    session: AsyncSession, since: datetime, *, hub_id: uuid.UUID, driver_id: uuid.UUID
+) -> int:
+    """How many drivers other than this one were on duty in the window."""
+    on_duty = await _on_duty_seconds_by_driver_day(session, since, hub_id=hub_id)
+    return len({key[0] for key in on_duty} - {driver_id})
+
+
+async def build_driver_scorecard(
+    session: AsyncSession,
+    *,
+    driver_id: uuid.UUID,
+    hub_id: uuid.UUID,
+    window_days: int = DEFAULT_WINDOW_DAYS,
+    now: datetime | None = None,
+) -> DriverScorecard:
+    """A driver's own DPH and ETA accuracy, beside the same figures for their hub.
+
+    **The same computation, not a reduced one**, which is the requirement `W4` actually
+    states. `_deliveries_per_hour` and `_eta_accuracy` are the functions the operations
+    scorecard calls; this passes a `driver_id` and they narrow. There is no second
+    implementation to drift, and a test asserts the driver's own figure equals what the
+    fleet-wide computation produces for that driver.
+
+    **The fleet median includes this driver.** Excluding them would make the comparison
+    "everyone except you", which is a subtly adversarial number and not what a shared
+    standard means - and it would also be more identifying, since the driver could
+    subtract their own contribution.
+
+    **Ratings and flag rates are deliberately absent.** Both exist and both could be
+    keyed by driver; showing a recipient rating back to a driver is the sharpest edge in
+    this data, because a single bad rating lands hard and recipients rate for reasons
+    outside a driver's control. That is a decision to take deliberately rather than by
+    including everything available.
+
+    Scoped to the driver's hub, because density and geography differ between hubs and
+    comparing across them is not a shared standard - it is a comparison to a different
+    job.
+    """
+    reference = now or datetime.now(timezone.utc)
+    since = _window_start(window_days, reference)
+
+    own_dph = await _deliveries_per_hour(session, since, driver_id=driver_id, hub_id=hub_id)
+    own_eta = await _eta_accuracy(session, since, driver_id=driver_id, hub_id=hub_id)
+
+    others = await _other_driver_count(session, since, hub_id=hub_id, driver_id=driver_id)
+    if others < MIN_OTHER_DRIVERS_FOR_COMPARISON:
+        logger.info(
+            "driver_scorecard_comparison_withheld",
+            driver_id=str(driver_id),
+            other_drivers=others,
+        )
+        return DriverScorecard(
+            generated_at=reference,
+            window_days=window_days,
+            window_start=since,
+            own_deliveries_per_hour=own_dph,
+            own_eta_error=own_eta,
+            fleet_deliveries_per_hour=None,
+            fleet_eta_error=None,
+            comparison_withheld=(
+                "Too few drivers on shift to show a team average without it pointing at "
+                "one person."
+            ),
+        )
+
+    return DriverScorecard(
+        generated_at=reference,
+        window_days=window_days,
+        window_start=since,
+        own_deliveries_per_hour=own_dph,
+        own_eta_error=own_eta,
+        fleet_deliveries_per_hour=await _deliveries_per_hour(session, since, hub_id=hub_id),
+        fleet_eta_error=await _eta_accuracy(session, since, hub_id=hub_id),
+    )

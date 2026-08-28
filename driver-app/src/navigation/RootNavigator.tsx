@@ -16,6 +16,7 @@ import { SignInScreen } from '../screens/SignInScreen';
 import { StopDetailScreen } from '../screens/StopDetailScreen';
 import { TodayRouteScreen } from '../screens/TodayRouteScreen';
 import { SupportScreen } from '../screens/SupportScreen';
+import { ScorecardScreen } from '../screens/ScorecardScreen';
 import { TripHistoryScreen } from '../screens/TripHistoryScreen';
 import { VehicleSetupScreen } from '../screens/VehicleSetupScreen';
 import { VerifyCodeScreen } from '../screens/VerifyCodeScreen';
@@ -82,6 +83,7 @@ function EarningsNavigator() {
     <EarningsStack.Navigator screenOptions={{ headerShown: true }}>
       <EarningsStack.Screen name="EarningsHome" component={EarningsScreen} options={{ title: 'Earnings' }} />
       <EarningsStack.Screen name="TripHistory" component={TripHistoryScreen} options={{ title: 'Trip history' }} />
+      <EarningsStack.Screen name="Scorecard" component={ScorecardScreen} options={{ title: 'Your numbers' }} />
     </EarningsStack.Navigator>
   );
 }

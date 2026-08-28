@@ -406,3 +406,36 @@ class TripSummaryView(BaseModel):
     completed_at: datetime
     stop_count: int
     hours: float
+
+
+class ScorecardMetricView(BaseModel):
+    """One figure on the driver's scorecard, with the team's beside it.
+
+    `fleet_median` is None when the comparison is withheld - see the scorecard's
+    `comparison_withheld`. The driver's own number is never withheld; only the
+    comparison can be.
+    """
+
+    name: str
+    unit: str
+    own_median: float | None
+    own_p90: float | None
+    own_sample_size: int
+    fleet_median: float | None
+    not_measured: str | None
+
+
+class DriverScorecardView(BaseModel):
+    """What a driver sees about their own work (docs/ROADMAP.md W4).
+
+    Two metrics, each beside the same figure for their hub: how many deliveries an hour
+    they complete, and how close their arrivals land to the predicted time. Computed by
+    the same functions that produce the fleet-wide report, narrowed to this driver -
+    which is what makes it a shared standard rather than a separate, reduced view.
+    """
+
+    window_days: int
+    generated_at: datetime
+    metrics: list[ScorecardMetricView]
+    # Set when there are too few colleagues for a team median to be non-identifying.
+    comparison_withheld: str | None = None

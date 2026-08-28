@@ -519,3 +519,219 @@ async def test_the_scorecard_reports_its_own_window(db_session):
     assert scorecard.window_days == 7
     assert scorecard.window_start == NOW - timedelta(days=7)
     assert scorecard.generated_at == NOW
+
+
+# ---------------------------------------------------------------------------
+# The driver's own view (docs/ROADMAP.md W4)
+# ---------------------------------------------------------------------------
+
+
+async def _driver_in(db_session, hub_id, name="Extra"):
+    driver_id = uuid.uuid4()
+    db_session.add(
+        Driver(
+            id=driver_id,
+            hub_id=hub_id,
+            name=name,
+            phone=f"+1512555{uuid.uuid4().int % 9000:04d}",
+        )
+    )
+    await db_session.commit()
+    return driver_id
+
+
+async def _colleagues(db_session, hub_id, *, how_many, start):
+    """`how_many` other drivers, each with a finished shift and some deliveries."""
+    ids = []
+    for i in range(how_many):
+        other = await _driver_in(db_session, hub_id, name=f"Colleague {i}")
+        await _shift(db_session, other, hub_id, start=start, end=start + timedelta(hours=2))
+        await _delivered_stops(
+            db_session, hub_id, other, count=2 + i, at=start + timedelta(hours=1)
+        )
+        ids.append(other)
+    return ids
+
+
+async def test_the_driver_sees_the_identical_computation_not_a_reduced_one(db_session):
+    """The requirement W4 actually states, asserted rather than claimed.
+
+    The driver's own DPH must equal what the fleet-wide computation produces when
+    narrowed to them - which is only guaranteed because there is one implementation and a
+    filter, not two functions kept in step by hand.
+    """
+    from app.reporting.operations import _deliveries_per_hour, build_driver_scorecard
+
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    start = NOW - timedelta(days=1)
+    await _shift(db_session, driver_id, hub_id, start=start, end=start + timedelta(hours=2))
+    await _delivered_stops(db_session, hub_id, driver_id, count=5, at=start + timedelta(hours=1))
+    await _colleagues(db_session, hub_id, how_many=3, start=start)
+
+    card = await build_driver_scorecard(
+        db_session, driver_id=driver_id, hub_id=hub_id, now=NOW
+    )
+    direct = await _deliveries_per_hour(
+        db_session, NOW - timedelta(days=30), driver_id=driver_id, hub_id=hub_id
+    )
+    assert card.own_deliveries_per_hour.median == direct.median
+    assert card.own_deliveries_per_hour.median == pytest.approx(2.5, abs=0.01)
+
+
+async def test_the_fleet_median_includes_the_driver(db_session):
+    """"Everyone except you" is a subtly adversarial number and not a shared standard.
+
+    Four drivers at 2, 3, 4 and 5 deliveries over two hours each -> rates 1.0, 1.5, 2.0,
+    2.5. A median including all four sits above one that dropped this driver's own 1.0,
+    so the two are distinguishable.
+    """
+    from app.reporting.operations import build_driver_scorecard
+
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    start = NOW - timedelta(days=1)
+    await _shift(db_session, driver_id, hub_id, start=start, end=start + timedelta(hours=2))
+    await _delivered_stops(db_session, hub_id, driver_id, count=2, at=start + timedelta(hours=1))
+    await _colleagues(db_session, hub_id, how_many=3, start=start)
+
+    card = await build_driver_scorecard(
+        db_session, driver_id=driver_id, hub_id=hub_id, now=NOW
+    )
+    assert card.fleet_deliveries_per_hour is not None
+    assert card.fleet_deliveries_per_hour.sample_size == 4, "all four driver-days counted"
+
+
+async def test_the_comparison_is_withheld_when_it_would_point_at_one_person(db_session):
+    """A privacy guard between colleagues, not a statistical one.
+
+    With one other driver, the team median plus your own figure IS that person's figure -
+    so showing it turns a trust feature into a way to read a colleague's performance.
+    """
+    from app.reporting.operations import build_driver_scorecard
+
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    start = NOW - timedelta(days=1)
+    await _shift(db_session, driver_id, hub_id, start=start, end=start + timedelta(hours=2))
+    await _delivered_stops(db_session, hub_id, driver_id, count=4, at=start + timedelta(hours=1))
+    await _colleagues(db_session, hub_id, how_many=1, start=start)
+
+    card = await build_driver_scorecard(
+        db_session, driver_id=driver_id, hub_id=hub_id, now=NOW
+    )
+    assert card.fleet_deliveries_per_hour is None
+    assert card.fleet_eta_error is None
+    assert "one person" in card.comparison_withheld
+
+    # Their OWN numbers still show. Only the comparison is withheld.
+    assert card.own_deliveries_per_hour.not_measured is None
+    assert card.own_deliveries_per_hour.median == pytest.approx(2.0, abs=0.01)
+
+
+async def test_the_comparison_appears_once_there_are_enough_colleagues(db_session):
+    from app.reporting.operations import (
+        MIN_OTHER_DRIVERS_FOR_COMPARISON,
+        build_driver_scorecard,
+    )
+
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    start = NOW - timedelta(days=1)
+    await _shift(db_session, driver_id, hub_id, start=start, end=start + timedelta(hours=2))
+    await _delivered_stops(db_session, hub_id, driver_id, count=4, at=start + timedelta(hours=1))
+    await _colleagues(
+        db_session, hub_id, how_many=MIN_OTHER_DRIVERS_FOR_COMPARISON, start=start
+    )
+
+    card = await build_driver_scorecard(
+        db_session, driver_id=driver_id, hub_id=hub_id, now=NOW
+    )
+    assert card.comparison_withheld is None
+    assert card.fleet_deliveries_per_hour is not None
+
+
+async def test_a_driver_never_sees_another_hubs_numbers(db_session):
+    """Density and geography differ between hubs, so comparing across them is not a
+    shared standard - it is a comparison to a different job."""
+    from app.reporting.operations import build_driver_scorecard
+
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    other_hub, _, _, _ = await _hub_client_driver(db_session)
+    start = NOW - timedelta(days=1)
+
+    await _shift(db_session, driver_id, hub_id, start=start, end=start + timedelta(hours=2))
+    await _delivered_stops(db_session, hub_id, driver_id, count=2, at=start + timedelta(hours=1))
+    # A busy crowd at the other hub - enough to satisfy the threshold if it leaked in.
+    await _colleagues(db_session, other_hub, how_many=5, start=start)
+
+    card = await build_driver_scorecard(
+        db_session, driver_id=driver_id, hub_id=hub_id, now=NOW
+    )
+    assert card.comparison_withheld is not None, "the other hub's drivers must not count"
+
+
+async def test_a_new_driver_sees_an_honest_refusal_not_a_zero(db_session):
+    """Someone who has not finished a shift yet has no DPH.
+
+    Reporting 0.0 would tell a brand-new driver they are performing at zero, which is
+    both false and exactly the reading W4 is trying to avoid.
+    """
+    from app.reporting.operations import build_driver_scorecard
+
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    start = NOW - timedelta(days=1)
+    await _colleagues(db_session, hub_id, how_many=3, start=start)
+
+    card = await build_driver_scorecard(
+        db_session, driver_id=driver_id, hub_id=hub_id, now=NOW
+    )
+    assert card.own_deliveries_per_hour.median is None
+    assert "for you" in card.own_deliveries_per_hour.not_measured
+
+
+async def test_the_endpoint_takes_the_driver_from_the_token(db_session, real_redis_client):
+    """There is deliberately no way to ask for somebody else's scorecard.
+
+    Same rule the public order API follows for deriving a client from its key rather than
+    from the request.
+    """
+    import inspect
+
+    from app.api.driver_routes import get_my_scorecard
+
+    params = set(inspect.signature(get_my_scorecard).parameters)
+    assert "driver_id" not in params, "the driver must come from the token, not a parameter"
+    assert "driver" in params
+
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    start = NOW - timedelta(days=1)
+    await _shift(db_session, driver_id, hub_id, start=start, end=start + timedelta(hours=2))
+    await _delivered_stops(db_session, hub_id, driver_id, count=4, at=start + timedelta(hours=1))
+
+    from app.driver_auth.dependencies import AuthedDriver
+
+    view = await get_my_scorecard(
+        driver=AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="d"),
+        session=db_session,
+    )
+    assert [m.name for m in view.metrics] == [
+        "Deliveries per hour",
+        "ETA error (actual minus predicted)",
+    ]
+    # Two drivers is not enough for a comparison, so it is withheld here.
+    assert view.comparison_withheld is not None
+    assert all(m.fleet_median is None for m in view.metrics)
+
+
+async def test_ratings_and_flag_rates_are_absent_from_the_driver_view(db_session):
+    """Deliberate, and worth pinning down so it is not added casually.
+
+    Both exist per driver. A recipient rating shown back to a driver is the sharpest edge
+    in this data - one bad rating lands hard, and recipients rate for reasons outside a
+    driver's control. Adding either belongs to a decision, not to a refactor.
+    """
+    from app.reporting.operations import build_driver_scorecard
+
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    card = await build_driver_scorecard(
+        db_session, driver_id=driver_id, hub_id=hub_id, now=NOW
+    )
+    fields = set(card.__dataclass_fields__)
+    assert not {f for f in fields if "rating" in f or "flag" in f}

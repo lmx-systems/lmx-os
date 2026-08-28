@@ -202,3 +202,43 @@ export interface Call {
   created_at: string;
   duration_seconds: number | null;
 }
+
+// The driver's own numbers beside their hub's (docs/ROADMAP.md W4). `fleet_median` is
+// null when there are too few colleagues on shift for a team median to point at anyone
+// but one person - the driver's own figures still show.
+export interface ScorecardMetric {
+  name: string;
+  unit: string;
+  own_median: number | null;
+  own_p90: number | null;
+  own_sample_size: number;
+  fleet_median: number | null;
+  not_measured: string | null;
+}
+
+export interface DriverScorecard {
+  window_days: number;
+  generated_at: string;
+  metrics: ScorecardMetric[];
+  comparison_withheld: string | null;
+}
+
+// The driver's own numbers beside their hub's (docs/ROADMAP.md W4). `fleet_median` is
+// null when there are too few colleagues on shift for a team median to point at anyone
+// but one person - the driver's own figures still show either way.
+export interface ScorecardMetric {
+  name: string;
+  unit: string;
+  own_median: number | null;
+  own_p90: number | null;
+  own_sample_size: number;
+  fleet_median: number | null;
+  not_measured: string | null;
+}
+
+export interface DriverScorecard {
+  window_days: number;
+  generated_at: string;
+  metrics: ScorecardMetric[];
+  comparison_withheld: string | null;
+}

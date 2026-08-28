@@ -94,6 +94,9 @@ export function EarningsScreen({ navigation }: Props) {
       )}
 
       <Button label="View trip history" variant="outline" onPress={() => navigation.navigate('TripHistory')} />
+      {/* W4: the same metrics the dispatch team sees. Under Earnings because it is a
+          fact about the work done, which is what this tab already is. */}
+      <Button label="Your numbers" variant="outline" onPress={() => navigation.navigate('Scorecard')} />
     </ScreenContainer>
   );
 }

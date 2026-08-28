@@ -8,6 +8,7 @@ import type {
   DriverCompliance,
   DriverDocument,
   DriverProfile,
+  DriverScorecard,
   Earnings,
   FlagReasonCode,
   JobOffer,
@@ -218,6 +219,10 @@ export const api = {
     }),
 
   getEarnings: () => request<Earnings>('/driver/me/earnings'),
+
+  // The driver's own scorecard (docs/ROADMAP.md W4). No driver id in the request - the
+  // server takes it from the token, so there is no way to ask for anyone else's.
+  getMyScorecard: () => request<DriverScorecard>('/driver/me/scorecard'),
 
   getTrips: () => request<TripSummary[]>('/driver/me/trips'),
 

@@ -41,6 +41,9 @@ export type ProfileStackParamList = {
 export type EarningsStackParamList = {
   EarningsHome: undefined;
   TripHistory: undefined;
+  // The driver's own scorecard (docs/ROADMAP.md W4). Under Earnings rather than Profile:
+  // it is a fact about the work done, which is what the rest of this tab is.
+  Scorecard: undefined;
 };
 
 // Typed as nested navigator params rather than `undefined` so a screen in one

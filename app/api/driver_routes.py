@@ -14,7 +14,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
@@ -65,6 +67,9 @@ from app.returns.service import return_views
 from app.schemas.returns import CollectReturnBody, ReturnItemView
 from app.schemas.driver_app import (
     CallView,
+    CodDisputeBody,
+    CodObligationView,
+    CollectCodBody,
     CompleteStopBody,
     DeclineOfferBody,
     DriverAvailabilityUpdate,
@@ -76,20 +81,19 @@ from app.schemas.driver_app import (
     DriverLocationPingBody,
     DriverProfileUpdate,
     DriverProfileView,
+    DriverScorecardView,
     EarningsView,
     FlagStopBody,
     JobOfferView,
     MessageView,
-    ParcelView,
     OfferStopSummary,
+    ParcelView,
     PaymentMethodUpdate,
     RouteView,
     ScanParcelBody,
     ScanParcelsBody,
+    ScorecardMetricView,
     SendMessageBody,
-    CodDisputeBody,
-    CodObligationView,
-    CollectCodBody,
     StopProofRequirementView,
     StopView,
     TripSummaryView,
@@ -123,6 +127,8 @@ from app.delivery.cod import (
 )
 from app.delivery.en_route import mark_current_stop_en_route
 from app.delivery.eta import refresh_route_etas
+from app.reporting.measurement import Measurement
+from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_driver_scorecard
 from app.models.cod_collection import CodCollection
 from app.delivery.proof import ProofNotSatisfied, assert_proof_satisfied, resolve_stop_proof
 from app.models.driver_document import REQUIRED_DOC_TYPES, REVIEW_PENDING
@@ -2422,6 +2428,66 @@ def _route_hours(route: Route) -> float:
     # (last touched, which for a completed route is when its last stop
     # finished - see complete_stop above).
     return max((route.updated_at - route.created_at).total_seconds() / 3600, 0.0)
+
+
+@router.get("/me/scorecard", response_model=DriverScorecardView)
+async def get_my_scorecard(
+    window_days: Annotated[int, Query(ge=1, le=365)] = DEFAULT_WINDOW_DAYS,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> DriverScorecardView:
+    """The driver's own numbers, beside the same numbers for their hub (W4, story DR-10).
+
+    **The driver id comes from the token, never from a parameter.** There is deliberately
+    no way to ask for somebody else's scorecard - the same rule the public order API
+    follows for deriving a client from its key rather than from the request.
+
+    `W4` frames this as a trust decision rather than a feature: *"a shared standard, not a
+    camera pointed at me."* Three things follow from taking that seriously.
+
+    The figures are produced by the **same functions** as the fleet-wide operations report
+    (`app/reporting/operations.py`), narrowed by a driver id. Not a parallel
+    implementation that could quietly diverge into a more flattering or harsher version.
+
+    The comparison is **the hub median including this driver**, because "everyone except
+    you" is a subtly adversarial number and not what a shared standard means.
+
+    And the comparison is **withheld entirely when too few colleagues are on shift**,
+    because with one other driver a team median plus your own figure is that person's
+    figure. Their own numbers still show; only the comparison goes.
+
+    Deliberately absent: recipient ratings and flag rates. Both exist per driver and both
+    were left out on purpose - see `build_driver_scorecard`.
+    """
+    scorecard = await build_driver_scorecard(
+        session,
+        driver_id=uuid.UUID(driver.driver_id),
+        hub_id=uuid.UUID(driver.hub_id),
+        window_days=window_days,
+    )
+
+    def _metric(own: Measurement, fleet: Measurement | None) -> ScorecardMetricView:
+        return ScorecardMetricView(
+            name=own.name,
+            unit=own.unit,
+            own_median=own.median,
+            own_p90=own.p90,
+            own_sample_size=own.sample_size,
+            # Only a measured fleet figure is a comparison. A fleet metric that itself
+            # refused to answer must not arrive as a null that reads like a zero.
+            fleet_median=fleet.median if fleet is not None and fleet.not_measured is None else None,
+            not_measured=own.not_measured,
+        )
+
+    return DriverScorecardView(
+        window_days=scorecard.window_days,
+        generated_at=scorecard.generated_at,
+        metrics=[
+            _metric(scorecard.own_deliveries_per_hour, scorecard.fleet_deliveries_per_hour),
+            _metric(scorecard.own_eta_error, scorecard.fleet_eta_error),
+        ],
+        comparison_withheld=scorecard.comparison_withheld,
+    )
 
 
 @router.get("/me/earnings", response_model=EarningsView)
