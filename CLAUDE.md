@@ -73,7 +73,7 @@ fix the contract, not the core.
 **This is enforced, not just documented.**
 `tests/test_architecture_boundaries.py` parses the tree and fails if the dispatch
 engine (`batch_queue`, `optimizer`, `sla`, `fleet_state`, `delivery`,
-`compliance`) imports any adapter or client-facing package. A new package under
+`compliance`) imports any adapter, client-facing package, or demand path. A new package under
 `app/` must be classified there too, so the boundary can't be dodged by adding a
 directory. If it fails, widen the contract — don't add the import.
 

@@ -642,10 +642,7 @@ def test_each_placeholder_target_clears_the_work_it_cannot_skip():
     Two of the three inputs are themselves placeholders, which is exactly why the targets
     carry headroom rather than sitting on the computed floor.
     """
-    from app.gig_platform.economics import (
-        PLACEHOLDER_STOP_SERVICE_MINUTES,
-        minutes_for_miles,
-    )
+    from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES, minutes_for_miles
     from app.models.client_sla_term import PLACEHOLDER_SLA_TERMS
     from app.sla.engine import DEFAULT_HOLD_WINDOW_MINUTES
 

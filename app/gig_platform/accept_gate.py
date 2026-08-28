@@ -41,8 +41,8 @@ from datetime import datetime, timedelta, timezone
 from app.gig_platform.economics import (
     MarginalEconomics,
     evaluate_marginal_economics,
-    minutes_for_miles,
 )
+from app.travel import minutes_for_miles
 from app.models.gig_job import GigJob
 from app.batch_queue.clustering import miles_between
 

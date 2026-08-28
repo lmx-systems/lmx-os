@@ -71,13 +71,13 @@ EDGE = (
 #   orders      - the contract itself. The canonical state machine and the sink
 #                 fan-out, imported from both sides by design. Guarded separately
 #                 below, because sinks.py reaches Edge-ward and has to stay lazy.
-#   gig_platform- a demand path, but `economics.py` inside it holds the travel-time
-#                 model (`minutes_for_miles`, `PLACEHOLDER_STOP_SERVICE_MINUTES`) that
-#                 the accept-gate, the portal estimate, the tracking page and
-#                 app/delivery/eta.py all share. The sharing is correct; the location
-#                 is not. Listed here rather than in EDGE so this test stays green,
-#                 and named in `test_the_travel_model_wart_is_still_only_a_wart` so it
-#                 cannot quietly become a real dependency.
+#   gig_platform- a demand path. It used to hold the shared travel-time model, which
+#                 made the core depend on it; that moved to `app/travel.py`, and
+#                 `test_the_core_does_not_depend_on_a_demand_path` now forbids the
+#                 dependency rather than capping it. What is left here is genuinely
+#                 gig economics - vehicle cost per mile, driver cost per hour, the
+#                 reposition fraction - which only this path asks about. In neither
+#                 list because it is a demand path rather than an adapter.
 #   payroll,
 #   storage,
 #   health,
@@ -230,25 +230,47 @@ def test_the_sink_fan_out_stays_lazy():
     )
 
 
-def test_the_travel_model_wart_is_still_only_a_wart():
-    """`app/delivery/` may import `gig_platform` for the travel model and nothing else.
+def test_the_core_does_not_depend_on_a_demand_path():
+    """`app/delivery/` must not import `app/gig_platform/`, at all.
 
-    `PLACEHOLDER_AVERAGE_SPEED_MPH` and friends live in `app/gig_platform/economics.py`
-    and are shared by four surfaces, which is correct - a driver, a recipient and a
-    counter person must never see numbers derived three different ways. What is wrong is
-    where they live: a demand-path package. Until that moves somewhere neutral, this
-    test bounds the damage to the one module, so the dependency cannot quietly grow into
-    the core depending on a demand path.
+    This replaces a test that *bounded* that dependency rather than forbidding it. The
+    travel-time model four surfaces share used to live in
+    `app/gig_platform/economics.py`, so the dispatch core depended on one particular way
+    of getting work for a primitive that has nothing to do with gig platforms. The
+    sharing was right and the address was wrong; it now lives in `app/travel.py` and the
+    dependency is gone rather than merely capped.
+
+    `gig_platform` stays out of CORE and EDGE both - it is a demand path, and what
+    remains in it (vehicle cost per mile, driver cost per hour, the reposition fraction)
+    answers "is this job worth taking", which only that path asks.
     """
-    modules = {
-        node.module
+    reaching = {
+        f"app/delivery/{path.relative_to(APP / 'delivery')}:{line}"
         for path in _files("delivery")
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-        if isinstance(node, ast.ImportFrom)
-        and node.module
-        and node.module.startswith("app.gig_platform")
+        for module, line in _app_imports(path)
+        if module == "gig_platform"
     }
-    assert modules <= {"app.gig_platform.economics"}, (
-        f"app/delivery/ now imports {sorted(modules)}. Only the travel model was ever "
-        "meant to cross here; anything else means the core depends on a demand path."
+    assert not reaching, (
+        "app/delivery/ imports app/gig_platform/ again:\n  " + "\n  ".join(sorted(reaching))
     )
+
+
+def test_the_shared_travel_model_has_exactly_one_home():
+    """Four surfaces quote a customer or a driver a time from these numbers.
+
+    A second definition anywhere is the bug this guards: a driver, a recipient and a
+    counter person reading three different arrival times for the same delivery.
+    """
+    import re
+
+    offenders = []
+    for path in sorted(APP.rglob("*.py")):
+        if "__pycache__" in path.parts or path.name == "travel.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        # A *definition*, not a use. `= 18.0` or `def minutes_for_miles`.
+        if re.search(r"^\s*PLACEHOLDER_AVERAGE_SPEED_MPH\s*=", text, re.M):
+            offenders.append(f"{path.relative_to(APP)} redefines PLACEHOLDER_AVERAGE_SPEED_MPH")
+        if re.search(r"^\s*def minutes_for_miles\b", text, re.M):
+            offenders.append(f"{path.relative_to(APP)} redefines minutes_for_miles")
+    assert not offenders, "the travel model must live only in app/travel.py:\n  " + "\n  ".join(offenders)

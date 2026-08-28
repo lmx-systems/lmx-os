@@ -33,6 +33,7 @@ from dataclasses import dataclass
 # incidental - importing it here is not a dependency on the hold-queue logic,
 # which is explicitly not involved in the gig path at all.
 from app.batch_queue.clustering import miles_between
+from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES, minutes_for_miles
 
 # PLACEHOLDER. Fuel, maintenance, tyres and depreciation for a delivery van,
 # per mile driven, paid or unpaid. Roughly the ballpark of the IRS business
@@ -45,34 +46,11 @@ PLACEHOLDER_VEHICLE_COST_PER_MILE_CENTS = 67
 # strands the driver in traffic is still a bad job.
 PLACEHOLDER_DRIVER_COST_PER_HOUR_CENTS = 2500
 
-# PLACEHOLDER. Average speed used to turn miles into minutes. Metro surface
-# streets with stops, deliberately not highway speed.
-PLACEHOLDER_AVERAGE_SPEED_MPH = 18.0
-
-# PLACEHOLDER. Fixed time on the ground at each end - parking, finding the
-# counter, waiting, paperwork, proof of delivery. Two of these per job.
-PLACEHOLDER_STOP_SERVICE_MINUTES = 8.0
-
 # How much of the return trip is charged to this job. Not 100%: a driver
 # finishing a job somewhere useful has not really incurred a full trip back,
 # and charging the whole thing would reject almost everything. Not 0% either,
 # which is the error the headline rates make. PLACEHOLDER.
 REPOSITION_CHARGE_FRACTION = 0.5
-
-
-def minutes_for_miles(miles: float) -> float:
-    """Drive time at the placeholder average speed.
-
-    A crude estimate on purpose. The real ETA source is Google Route
-    Optimization, which has never made one live call (E1, blocked on a
-    Google Cloud account) - and the accept-gate needs an answer in seconds
-    regardless, so a straight-line estimate is the right shape even once a
-    real routing API exists. Same "unconfigured -> usable stub" convention
-    as every other external dependency in this codebase.
-    """
-    if PLACEHOLDER_AVERAGE_SPEED_MPH <= 0:
-        return 0.0
-    return (miles / PLACEHOLDER_AVERAGE_SPEED_MPH) * 60.0
 
 
 @dataclass(frozen=True)

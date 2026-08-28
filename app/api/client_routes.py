@@ -26,7 +26,7 @@ from app.batch_queue.store import HoldQueueStore
 from app.billing.invoice_pdf import render_invoice_pdf
 from app.billing.service import invoice_detail_view, invoice_summary_view
 from app.geocoding import get_geocoder
-from app.gig_platform.economics import minutes_for_miles
+from app.travel import minutes_for_miles
 from app.ingestion.service import (
     DestinationUnresolvableError,
     OriginUnresolvableError,

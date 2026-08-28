@@ -28,8 +28,8 @@ assumed speed. Shifting the walk onto those is the next step, and it is bounded 
 sending `timeWindows` to the solver so the HOT_SHOT hoist can go away.
 
 **One travel model, shared.** `minutes_for_miles` and `PLACEHOLDER_STOP_SERVICE_MINUTES`
-from `app/gig_platform/economics.py` - the same placeholders the accept-gate, the client
-portal's estimate and the recipient tracking page already use. The point is not that the
+from `app/travel.py` - the same placeholders the accept-gate, the client portal's
+estimate and the recipient tracking page already use. The point is not that the
 model is good; it is that a driver, a recipient and a counter person must never be shown
 numbers derived three different ways.
 
@@ -55,7 +55,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.batch_queue.clustering import miles_between
-from app.gig_platform.economics import PLACEHOLDER_STOP_SERVICE_MINUTES, minutes_for_miles
+from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES, minutes_for_miles
 from app.models.driver_location_ping import DriverLocationPing
 from app.models.hub import Hub
 from app.models.order import Order

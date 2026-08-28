@@ -46,7 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.batch_queue.clustering import miles_between
 from app.config import settings
 from app.fleet_state.manager import FleetStateManager
-from app.gig_platform.economics import minutes_for_miles
+from app.travel import minutes_for_miles
 from app.models.order import Order, OrderStatus
 from app.tracking.ratings import RatingState, rating_state
 from app.models.route import Route
