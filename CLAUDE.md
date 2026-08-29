@@ -32,9 +32,13 @@ This repo moves fast — a stale local clone has previously caused a full
 roadmap audit to report shipped work as unbuilt. Verify item status against
 the code, not against memory or a PR title.
 
-**Claude cannot push.** No SSH keys or credentials in the sandbox. Commit
-locally, then hand over the exact push command. Never assume a commit reached
-the remote.
+**Pushing works — but verify it.** SSH credentials are present and functional
+in the sandbox; the previous rule here ("Claude cannot push. No SSH keys or
+credentials in the sandbox") was stale and was corrected in August 2026 after a
+push to a feature branch succeeded. Push feature branches freely. **Never push
+to `main`**, never force-push, never merge — a change reaches `main` through a
+PR that a human reviews. Never assume a commit reached the remote: confirm with
+`git rev-parse HEAD origin/<branch>` and hand over the PR link.
 
 ## Where things live
 
