@@ -21,6 +21,7 @@ import { ManifestUploadPanel } from './components/ManifestUploadPanel'
 import { TermsBanner } from './components/TermsBanner'
 import { TopBar } from './components/TopBar'
 import { OrdersTable } from './components/OrdersTable'
+import { PerformancePanel } from './components/PerformancePanel'
 import { OrderDetail } from './components/OrderDetail'
 import { InvoicesTable } from './components/InvoicesTable'
 import { InvoiceDetail } from './components/InvoiceDetail'
@@ -36,6 +37,7 @@ type View =
   | { name: 'orders' }
   | { name: 'order-detail'; orderId: string }
   | { name: 'invoices' }
+  | { name: 'performance' }
   | { name: 'invoice-detail'; invoiceId: string }
   | { name: 'returns' }
   | { name: 'team' }
@@ -236,6 +238,7 @@ export default function App() {
   const onNewOrderTab = view.name === 'new-order'
   const onOrdersTab = view.name === 'orders' || view.name === 'order-detail'
   const onInvoicesTab = view.name === 'invoices' || view.name === 'invoice-detail'
+  const onPerformanceTab = view.name === 'performance'
   const onReturnsTab = view.name === 'returns'
   const onTeamTab = view.name === 'team'
   const onIntegrationsTab = view.name === 'integrations'
@@ -279,6 +282,16 @@ export default function App() {
             }`}
           >
             Invoices
+          </button>
+          <button
+            onClick={() => setView({ name: 'performance' })}
+            className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
+              onPerformanceTab
+                ? 'border-[var(--accent)] text-[var(--text-primary)]'
+                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            Performance
           </button>
           <button
             onClick={() => setView({ name: 'returns' })}
@@ -438,6 +451,7 @@ export default function App() {
           ) : (
             <div className="text-sm text-[var(--text-muted)]">Loading invoice…</div>
           ))}
+        {view.name === 'performance' && <PerformancePanel />}
         {view.name === 'returns' && <ReturnsPanel />}
         {view.name === 'team' && isAdmin && <UsersPanel profile={profile} />}
         {view.name === 'integrations' && isAdmin && <WebhooksPanel />}

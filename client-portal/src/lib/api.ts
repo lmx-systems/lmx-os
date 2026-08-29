@@ -9,6 +9,7 @@ import type {
   ClientOrderDetailView,
   ClientOrderPage,
   ClientOrderResult,
+  ClientPerformanceView,
   ClientProfileView,
   ClientShopView,
   ClientSignupBody,
@@ -92,6 +93,12 @@ export const api = {
   // one order among thousands.
   // Terms re-acceptance (docs/ROADMAP.md L8). Readable by any signed-in user so a
   // counter person can be told why an order was refused; accepting is admin-only.
+  // How we have performed for them (docs/ROADMAP.md F7). Readable by any signed-in user
+  // at the client, member included - a counter person fielding "are they any good" needs
+  // the answer as much as the owner.
+  myPerformance: (windowDays = 30) =>
+    request<ClientPerformanceView>(`/client/performance?window_days=${windowDays}`),
+
   myTermsAcceptance: () => request<TermsAcceptanceView>('/client/terms-acceptance'),
 
   acceptTerms: () =>

@@ -362,3 +362,22 @@ export interface TermsAcceptanceView {
   terms_path: string
   privacy_path: string
 }
+
+// How LMX has actually performed for this client (docs/ROADMAP.md F7). Their own figures
+// only - there is deliberately no benchmark against other clients, which would tell a
+// distributor something about our other customers.
+export interface PerformanceRateView {
+  name: string
+  numerator: number
+  denominator: number
+  percentage: number | null
+  is_thin: boolean
+  not_measured: string | null
+}
+
+export interface ClientPerformanceView {
+  window_days: number
+  generated_at: string
+  delivered_count: number
+  hit_rates: PerformanceRateView[]
+}

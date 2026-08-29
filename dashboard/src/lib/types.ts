@@ -229,3 +229,40 @@ export interface DriverDocumentReviewResult {
   driver_can_go_on_shift: boolean
   outstanding_problems: string[]
 }
+
+// The measurement endpoints (docs/ROADMAP.md I4, L17 §3.4). Both have existed with no
+// consumer - the data layer was built twice and nothing surfaced it.
+export interface MeasurementView {
+  name: string
+  target: string
+  unit: string
+  median: number | null
+  p90: number | null
+  sample_size: number
+  not_measured: string | null
+}
+
+export interface RateView {
+  name: string
+  target: string
+  numerator: number
+  denominator: number
+  percentage: number | null
+  // True when the denominator is too small for the percentage to mean much. Shown as a
+  // caveat rather than hidden, because "100%" on one delivery reads as a result.
+  is_thin: boolean
+  not_measured: string | null
+}
+
+export interface OperationsScorecard {
+  generated_at: string
+  window_days: number
+  window_start: string
+  measurements: MeasurementView[]
+  rates: RateView[]
+}
+
+export interface LinkScorecard {
+  generated_at: string
+  measurements: MeasurementView[]
+}

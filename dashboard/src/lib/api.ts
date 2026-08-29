@@ -8,7 +8,9 @@ import type {
   HeldOrderView,
   HubSummary,
   LastCycleSnapshot,
+  LinkScorecard,
   NightlyJobResult,
+  OperationsScorecard,
   OpsAuthToken,
   OpsProfileView,
   OptimizationResult,
@@ -16,8 +18,8 @@ import type {
   PendingDriverDocumentView,
   PendingSignupView,
   ProposedRuleApprovalResult,
-  SignupDecisionResult,
   ProposedRuleView,
+  SignupDecisionResult,
   UrgencyRuleBody,
   UrgencyRuleView,
 } from './types'
@@ -107,6 +109,13 @@ export const api = {
 
   runOptimizerCycle: (hubId: string) =>
     request<OptimizationResult>(`/optimizer/${hubId}/run-cycle`, { method: 'POST' }),
+
+  // Measurement (docs/ROADMAP.md I4, F7). Ops-admin only, and not hub-scoped: these are
+  // fleet-wide distributions over durable rows.
+  operationsScorecard: (windowDays = 30) =>
+    request<OperationsScorecard>(`/operations/scorecard?window_days=${windowDays}`),
+
+  linkScorecard: () => request<LinkScorecard>('/lmx-link/scorecard'),
 
   runLearningLoopJob: (hubId: string) =>
     request<NightlyJobResult>(`/learning-loop/${hubId}/run-nightly-job`, { method: 'POST' }),

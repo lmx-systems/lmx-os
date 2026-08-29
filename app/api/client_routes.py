@@ -58,6 +58,7 @@ from app.db import get_db
 from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, CLIENT_USER_ROLES, ClientUser
 from app.models.invoice import Invoice
+from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_client_performance
 from app.legal.documents import (
     DOCUMENTS,
     acceptance_is_current,
@@ -94,6 +95,8 @@ from app.schemas.client_auth import (
     ClientOrderDetailView,
     ClientOrderPage,
     ClientOrderSummaryView,
+    ClientPerformanceView,
+    PerformanceRateView,
     DeliveryRatingView,
     TermsAcceptanceView,
     ClientProfileView,
@@ -394,6 +397,48 @@ async def _annotate_commitments(
     # otherwise. An estimate either way - never a promise, unlike the field above.
     eta = facts.eta or await _estimate_delivery_by(session, order)
     view.estimated_delivery_by = eta.isoformat() if eta else None
+
+
+@router.get("/performance", response_model=ClientPerformanceView)
+async def my_performance(
+    window_days: Annotated[int, Query(ge=1, le=365)] = DEFAULT_WINDOW_DAYS,
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> ClientPerformanceView:
+    """How we have actually performed for this client (docs/ROADMAP.md F7).
+
+    Readable by any signed-in user at the client, `member` included: a counter person
+    fielding "are they any good" from their own customer needs the answer as much as the
+    owner does, and this is the company's own record rather than an account setting.
+
+    **The client id comes from the token**, so there is no way to ask for another
+    distributor's numbers - and there is deliberately no benchmark against other clients
+    for the same reason.
+
+    On-time is computed by the same function as our internal operations report, which in
+    turn reads the same commitment `app/billing/credits.py` credits a breach against. A
+    client's dashboard, our dashboard, and their invoice are three views of one
+    computation rather than three chances to disagree.
+    """
+    performance = await build_client_performance(
+        session, client_id=uuid.UUID(client.client_id), window_days=window_days
+    )
+    return ClientPerformanceView(
+        window_days=performance.window_days,
+        generated_at=performance.generated_at,
+        delivered_count=performance.delivered_count,
+        hit_rates=[
+            PerformanceRateView(
+                name=r.name,
+                numerator=r.numerator,
+                denominator=r.denominator,
+                percentage=r.percentage,
+                is_thin=r.is_thin,
+                not_measured=r.not_measured,
+            )
+            for r in performance.hit_rates
+        ],
+    )
 
 
 @router.get("/terms-acceptance", response_model=TermsAcceptanceView)

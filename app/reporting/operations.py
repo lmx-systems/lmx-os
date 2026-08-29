@@ -88,6 +88,24 @@ class OperationsScorecard:
     rates: list[Rate] = field(default_factory=list)
 
 
+def _tier_label(tier) -> str:
+    """The tier as a plain string, whichever form it arrives in.
+
+    **`Order.sla_tier` is not consistently one type**, which is the trap here. A row
+    loaded from Postgres carries an `SLATier` member; an `Order` constructed in Python
+    and not yet reloaded carries whatever string was assigned. `SLATier` subclasses str,
+    so both compare and hash identically and the difference is invisible - until an
+    f-string renders the member as "SLATier.T2" and ships that to an API reader as the
+    tier's name.
+
+    `.value` alone fixes the member and breaks the string. `getattr` handles both, which
+    is what a value that can legitimately be either requires.
+    """
+    if tier is None:
+        return "unspecified"
+    return getattr(tier, "value", tier)
+
+
 def _window_start(window_days: int, now: datetime | None = None) -> datetime:
     """UTC, always.
 
@@ -274,8 +292,15 @@ async def _deliveries_per_hour(
 # ---------------------------------------------------------------------------
 
 
-async def _sla_hit_rates(session: AsyncSession, since: datetime) -> list[Rate]:
+async def _sla_hit_rates(
+    session: AsyncSession, since: datetime, *, client_id: uuid.UUID | None = None
+) -> list[Rate]:
     """Delivered on time, by tier.
+
+    `client_id` narrows the same computation to one client, which is how `F7` shows a
+    distributor their own on-time rate. One implementation and a filter, for the same
+    reason `W4`'s driver view works that way: a client's dashboard, our dashboard and
+    their invoice can then never disagree about whether we were late.
 
     **Measured against `app/sla/commitment.py`**, which is the same function
     `app/billing/credits.py` assesses a breach against. That sharing is the point: a hit
@@ -294,6 +319,7 @@ async def _sla_hit_rates(session: AsyncSession, since: datetime) -> list[Rate]:
                     Order.status == OrderStatus.delivered,
                     Order.delivered_at.is_not(None),
                     Order.delivered_at >= since,
+                    *([Order.client_id == client_id] if client_id is not None else []),
                 )
             )
         )
@@ -322,10 +348,7 @@ async def _sla_hit_rates(session: AsyncSession, since: datetime) -> list[Rate]:
         if order.client_id not in terms_by_client:
             terms_by_client[order.client_id] = await terms_for_client(session, order.client_id)
 
-        # `.value`, not the member. `SLATier` subclasses str, so it compares and hashes
-        # as one - but an f-string of the member renders "SLATier.T2", which would have
-        # shipped that to an API reader as the tier's name.
-        tier = order.sla_tier.value if order.sla_tier is not None else "unspecified"
+        tier = _tier_label(order.sla_tier)
         commitment = delivery_commitment(order, terms_by_client[order.client_id].get(order.sla_tier))
         if not commitment.exists:
             unassessable += 1
@@ -631,4 +654,75 @@ async def build_driver_scorecard(
         own_eta_error=own_eta,
         fleet_deliveries_per_hour=await _deliveries_per_hour(session, since, hub_id=hub_id),
         fleet_eta_error=await _eta_accuracy(session, since, hub_id=hub_id),
+    )
+
+
+# ---------------------------------------------------------------------------
+# The client's own view (docs/ROADMAP.md F7)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ClientPerformance:
+    """What a distributor sees about the service they are buying.
+
+    `F7` calls this the retention proof rather than an ops nicety, and that is the right
+    read: a distributor who has moved to per-drop pricing has given up their own
+    visibility of a fleet they used to run, so "how are you actually doing for me" is a
+    question they will ask whether or not there is a screen for it.
+
+    Deliberately their **own** numbers and no comparison to anyone else's. A distributor
+    benchmarked against other distributors would learn something about our other
+    customers, and there is no version of that a client should be able to read.
+    """
+
+    generated_at: datetime
+    window_days: int
+    window_start: datetime
+    delivered_count: int
+    hit_rates: list[Rate]
+
+
+async def build_client_performance(
+    session: AsyncSession,
+    *,
+    client_id: uuid.UUID,
+    window_days: int = DEFAULT_WINDOW_DAYS,
+    now: datetime | None = None,
+) -> ClientPerformance:
+    """One client's delivery volume and on-time rate.
+
+    On-time comes from `_sla_hit_rates` narrowed to this client - the same function the
+    operations report uses and, through `app/sla/commitment.py`, the same promise
+    `app/billing/credits.py` assesses a breach against. So the number on a client's
+    dashboard, the number on ours, and the credit on their invoice are three views of one
+    computation rather than three chances to disagree.
+
+    Volume is a plain count of delivered orders, which is the other half of what `F7`
+    names. It is reported even when the hit rate cannot be - "we delivered 40 things for
+    you and we cannot yet say how many were on time" is a coherent and honest answer,
+    whereas suppressing both would look like an outage.
+    """
+    reference = now or datetime.now(timezone.utc)
+    since = _window_start(window_days, reference)
+
+    delivered = (
+        await session.execute(
+            select(func.count())
+            .select_from(Order)
+            .where(
+                Order.client_id == client_id,
+                Order.status == OrderStatus.delivered,
+                Order.delivered_at.is_not(None),
+                Order.delivered_at >= since,
+            )
+        )
+    ).scalar_one()
+
+    return ClientPerformance(
+        generated_at=reference,
+        window_days=window_days,
+        window_start=since,
+        delivered_count=int(delivered),
+        hit_rates=await _sla_hit_rates(session, since, client_id=client_id),
     )

@@ -5,6 +5,7 @@ import { OrderPipeline } from './components/OrderPipeline'
 import { HoldQueueTable } from './components/HoldQueueTable'
 import { FleetMap } from './components/FleetMap'
 import { FleetRoster } from './components/FleetRoster'
+import { MeasurementPanel } from './components/MeasurementPanel'
 import { OperationsPanel } from './components/OperationsPanel'
 import { OnboardClientForm } from './components/OnboardClientForm'
 import { UrgencyRulesPanel } from './components/UrgencyRulesPanel'
@@ -170,6 +171,10 @@ function App() {
                     <OnboardClientForm hubId={hubId} onToast={showToast} />
                     <UrgencyRulesPanel key={`urgency-${hubId}`} hubId={hubId} onToast={showToast} />
                     <ProposedRulesPanel key={`proposed-${hubId}`} hubId={hubId} onToast={showToast} />
+                    {/* No hub key: these are fleet-wide distributions over durable
+                        rows, so they do not change when the hub picker does. Both
+                        endpoints had existed with no consumer at all (F7). */}
+                    <MeasurementPanel />
                   </>
                 )}
               </div>

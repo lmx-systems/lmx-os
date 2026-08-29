@@ -175,3 +175,36 @@ class ClientOrderDetailView(ClientOrderSummaryView):
     delivery_contact_name: str | None
     # What the recipient thought, when they told us. Null when they haven't.
     rating: DeliveryRatingView | None = None
+
+
+class PerformanceRateView(BaseModel):
+    """One on-time rate, with the arithmetic visible.
+
+    `numerator`/`denominator` travel with the percentage because "100% on time" means
+    something entirely different at n=1 and n=400, and `is_thin` tells the reader which
+    they are looking at instead of leaving them to work it out.
+    """
+
+    name: str
+    numerator: int
+    denominator: int
+    percentage: float | None
+    is_thin: bool
+    not_measured: str | None
+
+
+class ClientPerformanceView(BaseModel):
+    """How LMX has actually performed for this client (docs/ROADMAP.md F7).
+
+    A distributor on per-drop pricing has given up their own view of a fleet they used to
+    run, so this is the answer to "how are you doing for me" - computed from the same
+    function that produces our internal report and that billing credits a breach against.
+
+    Their own figures only. There is deliberately no benchmark against other clients:
+    that would tell a distributor something about our other customers.
+    """
+
+    window_days: int
+    generated_at: datetime
+    delivered_count: int
+    hit_rates: list[PerformanceRateView]

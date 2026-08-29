@@ -735,3 +735,157 @@ async def test_ratings_and_flag_rates_are_absent_from_the_driver_view(db_session
     )
     fields = set(card.__dataclass_fields__)
     assert not {f for f in fields if "rating" in f or "flag" in f}
+
+
+# ---------------------------------------------------------------------------
+# The client's own view (docs/ROADMAP.md F7)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_client_sees_only_their_own_deliveries(db_session):
+    """The scoping property, and the one that would be worst to get wrong.
+
+    A distributor reading another distributor's volume is a disclosure about a customer,
+    not a reporting bug.
+    """
+    from app.reporting.operations import build_client_performance
+
+    hub_id, client_id, _, shop_id = await _hub_client_driver(db_session)
+    other_hub, other_client, _, other_shop = await _hub_client_driver(db_session)
+
+    db_session.add(
+        ClientSlaTerm(
+            client_id=client_id, sla_tier="T2", delivery_target_minutes=180, credit_percent=25
+        )
+    )
+    await db_session.commit()
+
+    await _delivered_order(db_session, hub_id, client_id, shop_id, tier="T2", late_by_minutes=-10)
+    for _ in range(5):
+        await _delivered_order(
+            db_session, other_hub, other_client, other_shop, tier="T2", late_by_minutes=-10
+        )
+
+    mine = await build_client_performance(db_session, client_id=client_id, now=NOW)
+    assert mine.delivered_count == 1, "the other client's five must not appear"
+
+
+async def test_the_client_figure_equals_the_one_billing_credits_against(db_session):
+    """One computation, three readers.
+
+    The client's dashboard, our dashboard and their invoice all resolve on-time through
+    `app/sla/commitment.py`. This asserts the first two agree by construction - a client
+    must never be looking at 98% while being credited for a breach.
+    """
+    from app.billing.credits import assess_credits
+    from app.reporting.operations import build_client_performance
+
+    hub_id, client_id, _, shop_id = await _hub_client_driver(db_session)
+    db_session.add(
+        ClientSlaTerm(
+            client_id=client_id, sla_tier="T2", delivery_target_minutes=180, credit_percent=25
+        )
+    )
+    await db_session.commit()
+
+    on_time = await _delivered_order(
+        db_session, hub_id, client_id, shop_id, tier="T2", late_by_minutes=-20
+    )
+    late = await _delivered_order(
+        db_session, hub_id, client_id, shop_id, tier="T2", late_by_minutes=60
+    )
+    late.fee_cents = 1_800
+    await db_session.commit()
+
+    perf = await build_client_performance(db_session, client_id=client_id, now=NOW)
+    rate = next(r for r in perf.hit_rates if "T2" in r.name)
+    assert (rate.numerator, rate.denominator) == (1, 2)
+
+    # And billing agrees about which one was late.
+    assessment = await assess_credits(
+        db_session, client_id=client_id, orders=[on_time, late]
+    )
+    assert len(assessment.breaches) == 1
+    assert assessment.breaches[0].order.id == late.id
+
+
+async def test_volume_is_reported_even_when_on_time_cannot_be(db_session):
+    """"We delivered 3 things for you and cannot yet say how many were on time" is a
+    coherent answer. Suppressing both would look like an outage."""
+    from app.reporting.operations import build_client_performance
+
+    hub_id, client_id, _, shop_id = await _hub_client_driver(db_session)
+    # Deliberately no ClientSlaTerm, so nothing is assessable.
+    for _ in range(3):
+        await _delivered_order(
+            db_session, hub_id, client_id, shop_id, tier="T2", late_by_minutes=5
+        )
+
+    perf = await build_client_performance(db_session, client_id=client_id, now=NOW)
+    assert perf.delivered_count == 3
+    assert all(r.not_measured for r in perf.hit_rates)
+
+
+async def test_a_client_with_no_deliveries_gets_a_reason_not_a_zero_percent(db_session):
+    """Showing "0% on time" to a client who has sent us nothing would be a false
+    accusation against ourselves, and the kind of number that gets screenshotted."""
+    from app.reporting.operations import build_client_performance
+
+    _, client_id, _, _ = await _hub_client_driver(db_session)
+    perf = await build_client_performance(db_session, client_id=client_id, now=NOW)
+
+    assert perf.delivered_count == 0
+    assert all(r.percentage is None and r.not_measured for r in perf.hit_rates)
+
+
+async def test_the_endpoint_takes_the_client_from_the_token(db_session, real_redis_client):
+    """No parameter can name another distributor."""
+    import inspect
+
+    from app.api.client_routes import my_performance
+    from app.client_auth.dependencies import AuthedClient
+    from app.models.client_user import CLIENT_MEMBER_ROLE
+
+    params = set(inspect.signature(my_performance).parameters)
+    assert "client_id" not in params
+    assert "client" in params
+
+    hub_id, client_id, _, shop_id = await _hub_client_driver(db_session)
+    db_session.add(
+        ClientSlaTerm(
+            client_id=client_id, sla_tier="T2", delivery_target_minutes=180, credit_percent=25
+        )
+    )
+    await db_session.commit()
+    await _delivered_order(db_session, hub_id, client_id, shop_id, tier="T2", late_by_minutes=-5)
+
+    # A member, not an admin: a counter person fielding "are they any good" needs this.
+    view = await my_performance(
+        client=AuthedClient(
+            client_id=str(client_id),
+            client_user_id=str(uuid.uuid4()),
+            email="counter@example.com",
+            name="Alex",
+            role=CLIENT_MEMBER_ROLE,
+        ),
+        session=db_session,
+    )
+    assert view.delivered_count == 1
+    assert next(r for r in view.hit_rates if "T2" in r.name).percentage == 100.0
+
+
+async def test_the_tier_label_survives_both_forms_of_sla_tier(db_session):
+    """`Order.sla_tier` is an SLATier member when loaded from Postgres and a plain string
+    on an object built in Python and not reloaded.
+
+    Both compare and hash the same because SLATier subclasses str, so the difference is
+    invisible until an f-string renders the member as "SLATier.T2" - or until `.value`
+    is called on the string and raises. This caught the second case in a test that passed
+    an in-memory order straight to the scorecard.
+    """
+    from app.models.order import SLATier
+    from app.reporting.operations import _tier_label
+
+    assert _tier_label(SLATier.T2) == "T2"
+    assert _tier_label("T2") == "T2"
+    assert _tier_label(None) == "unspecified"
