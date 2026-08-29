@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
 
 import { api } from '../lib/api'
-import type { LinkScorecard, MeasurementView, OperationsScorecard, RateView } from '../lib/types'
+import type {
+  CreditExposure,
+  LinkScorecard,
+  MeasurementView,
+  OperationsScorecard,
+  RateView,
+} from '../lib/types'
 
 /**
  * The measurement endpoints, finally on a screen (docs/ROADMAP.md F7).
@@ -25,15 +31,17 @@ import type { LinkScorecard, MeasurementView, OperationsScorecard, RateView } fr
 export function MeasurementPanel() {
   const [ops, setOps] = useState<OperationsScorecard | null>(null)
   const [link, setLink] = useState<LinkScorecard | null>(null)
+  const [credits, setCredits] = useState<CreditExposure | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
-    Promise.all([api.operationsScorecard(), api.linkScorecard()])
-      .then(([o, l]) => {
+    Promise.all([api.operationsScorecard(), api.linkScorecard(), api.creditExposure()])
+      .then(([o, l, c]) => {
         if (!live) return
         setOps(o)
         setLink(l)
+        setCredits(c)
       })
       .catch(() => {
         if (live) setError('Could not load the scorecards.')
@@ -46,12 +54,14 @@ export function MeasurementPanel() {
   if (error) {
     return <p className="text-sm text-[var(--danger,#b3261e)]">{error}</p>
   }
-  if (!ops || !link) {
+  if (!ops || !link || !credits) {
     return <p className="text-sm text-[var(--text-muted)]">Loading measurements…</p>
   }
 
   return (
     <div className="flex flex-col gap-6">
+      <CreditsSection exposure={credits} />
+
       <section>
         <header className="mb-2 flex items-baseline justify-between">
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">Operations</h2>
@@ -150,5 +160,111 @@ function RateRow({ rate }: { rate: RateView }) {
         </p>
       )}
     </Shell>
+  )
+}
+
+
+function money(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`
+}
+
+/**
+ * What the service-level credits are costing (docs/ROADMAP.md W3, E11).
+ *
+ * First on the panel because it is money going out, and until now it was invisible: a
+ * credit appeared on one invoice, for one client, after billing ran - so a month of
+ * breaches read as zero until somebody generated a statement.
+ *
+ * **Accruing is the figure to read.** It is delivered work not yet invoiced that would
+ * breach if it were, computed by the same function invoicing calls, so it is a forecast
+ * of the bill rather than an opinion about it.
+ *
+ * Each tier shows the credit percentage that produced its number, because E11 is an open
+ * decision about exactly those placeholders and the useful input is what they have cost.
+ */
+function CreditsSection({ exposure }: { exposure: CreditExposure }) {
+  return (
+    <section>
+      <header className="mb-2 flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+          Service-level credits
+        </h2>
+        <span className="text-xs text-[var(--text-muted)]">
+          last {exposure.window_days} days
+        </span>
+      </header>
+
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+          <p className="text-xs text-[var(--text-muted)]">Accruing (not yet invoiced)</p>
+          <p className="text-lg font-semibold text-[var(--text-primary)]">
+            {money(exposure.accruing_cents)}
+          </p>
+        </div>
+        <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+          <p className="text-xs text-[var(--text-muted)]">Already credited</p>
+          <p className="text-lg font-semibold text-[var(--text-primary)]">
+            {money(exposure.issued_cents)}
+          </p>
+        </div>
+      </div>
+
+      {exposure.by_tier
+        .filter((t) => t.delivered_count > 0)
+        .map((tier) => (
+          <div
+            key={tier.sla_tier}
+            className="mb-1 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+              <span className="text-sm text-[var(--text-primary)]">{tier.sla_tier}</span>
+              <span className="text-xs text-[var(--text-muted)]">
+                {/* The knob beside the money - see the component docstring. */}
+                {tier.credit_percent === null
+                  ? 'mixed credit terms'
+                  : `${tier.credit_percent}% of fee`}
+              </span>
+            </div>
+            <p className="text-sm text-[var(--text-secondary)]">
+              <span className="font-semibold text-[var(--text-primary)]">
+                {money(tier.credit_cents)}
+              </span>
+              <span className="text-[var(--text-muted)]">
+                {' · '}
+                {tier.breach_count} of {tier.delivered_count} late
+                {tier.breach_rate_percent !== null && ` (${tier.breach_rate_percent}%)`}
+              </span>
+            </p>
+          </div>
+        ))}
+
+      {exposure.by_client.length > 0 && (
+        <div className="mt-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+          <p className="mb-1 text-xs text-[var(--text-muted)]">By client</p>
+          {exposure.by_client.map((c) => (
+            <p key={c.client_id} className="text-sm text-[var(--text-secondary)]">
+              {c.client_name}
+              <span className="text-[var(--text-muted)]">
+                {' — '}
+                {money(c.total_cents)}
+                {c.accruing_cents > 0 && ` (${money(c.accruing_cents)} not yet invoiced)`}
+              </span>
+            </p>
+          ))}
+        </div>
+      )}
+
+      {(exposure.unassessable_orders > 0 || exposure.unpriced_orders > 0) && (
+        /* Named rather than folded into the total. An order with no commitment is an
+           UNKNOWN cost, not a zero one, and one with no price will never be billed at
+           all - a bigger problem than the credit it did not produce. */
+        <p className="mt-2 text-xs text-[var(--text-muted)]">
+          {exposure.unassessable_orders > 0 &&
+            `${exposure.unassessable_orders} delivered order(s) have no commitment on file, so their exposure is unknown. `}
+          {exposure.unpriced_orders > 0 &&
+            `${exposure.unpriced_orders} have no price and will never be billed.`}
+        </p>
+      )}
+    </section>
   )
 }

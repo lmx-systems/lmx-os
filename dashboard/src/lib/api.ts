@@ -2,6 +2,7 @@ import { clearToken, getToken } from './auth'
 import type {
   ClientOnboardingBody,
   ClientOnboardingResult,
+  CreditExposure,
   DriverDocumentReviewBody,
   DriverDocumentReviewResult,
   DriverState,
@@ -116,6 +117,10 @@ export const api = {
     request<OperationsScorecard>(`/operations/scorecard?window_days=${windowDays}`),
 
   linkScorecard: () => request<LinkScorecard>('/lmx-link/scorecard'),
+
+  // What the SLA credits are costing (docs/ROADMAP.md W3, E11).
+  creditExposure: (windowDays = 30) =>
+    request<CreditExposure>(`/operations/credit-exposure?window_days=${windowDays}`),
 
   runLearningLoopJob: (hubId: string) =>
     request<NightlyJobResult>(`/learning-loop/${hubId}/run-nightly-job`, { method: 'POST' }),

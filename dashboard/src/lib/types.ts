@@ -266,3 +266,36 @@ export interface LinkScorecard {
   generated_at: string
   measurements: MeasurementView[]
 }
+
+// What the service-level credits are costing (docs/ROADMAP.md W3, E11). `accruing` is the
+// half that matters: delivered work not yet invoiced that would breach if it were.
+export interface TierExposureView {
+  sla_tier: string
+  // Null when clients disagree about it - the report declines to pick one.
+  credit_percent: number | null
+  credit_cents: number
+  breach_count: number
+  delivered_count: number
+  breach_rate_percent: number | null
+}
+
+export interface ClientExposureView {
+  client_id: string
+  client_name: string
+  issued_cents: number
+  accruing_cents: number
+  total_cents: number
+}
+
+export interface CreditExposure {
+  generated_at: string
+  window_days: number
+  window_start: string
+  issued_cents: number
+  accruing_cents: number
+  total_cents: number
+  by_tier: TierExposureView[]
+  by_client: ClientExposureView[]
+  unassessable_orders: number
+  unpriced_orders: number
+}

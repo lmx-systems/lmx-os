@@ -28,13 +28,18 @@ from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.last_cycle_store import LastCycleStore
 from app.optimizer.service import DispatchOptimizerService
 from app.reporting.lmx_link import build_scorecard
+from app.reporting.credit_exposure import DEFAULT_WINDOW_DAYS as CREDIT_WINDOW_DAYS
+from app.reporting.credit_exposure import build_credit_exposure
 from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_operations_scorecard
 from app.schemas.batch_queue import HeldOrderView
 from app.schemas.reporting import (
+    ClientExposureView,
+    CreditExposureView,
     LinkScorecardView,
     MeasurementView,
     OperationsScorecardView,
     RateView,
+    TierExposureView,
 )
 from app.schemas.fleet import DriverLocation, DriverState
 from app.schemas.hub import HubSummary
@@ -144,6 +149,62 @@ async def operations_scorecard(
             )
             for r in scorecard.rates
         ],
+    )
+
+
+@router.get("/operations/credit-exposure", response_model=CreditExposureView)
+async def credit_exposure(
+    window_days: Annotated[int, Query(ge=1, le=365)] = CREDIT_WINDOW_DAYS,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> CreditExposureView:
+    """What the service-level credits are costing us (docs/ROADMAP.md W3, E11).
+
+    `W3` made a missed commitment credit a client's statement automatically. Nothing made
+    the total visible - a credit shows up on one invoice, for one client, after billing
+    runs, so a month of breaches reads as zero until somebody generates an invoice.
+
+    **`accruing` is the half worth looking at**: delivered work not yet invoiced that
+    would breach if it were, computed by calling the same `assess_credits` invoicing
+    calls on the same candidate set. What ops sees is what will hit the statement.
+
+    Each tier carries its **configured credit percentage** beside the money, because
+    `E11` is an open decision about exactly those numbers and the useful input is what
+    the current placeholders have already cost.
+
+    Ops-admin only: this is a cross-client view of money owed.
+    """
+    exposure = await build_credit_exposure(session, window_days=window_days)
+    return CreditExposureView(
+        generated_at=exposure.generated_at,
+        window_days=exposure.window_days,
+        window_start=exposure.window_start,
+        issued_cents=exposure.issued_cents,
+        accruing_cents=exposure.accruing_cents,
+        total_cents=exposure.total_cents,
+        by_tier=[
+            TierExposureView(
+                sla_tier=t.sla_tier,
+                credit_percent=t.credit_percent,
+                credit_cents=t.credit_cents,
+                breach_count=t.breach_count,
+                delivered_count=t.delivered_count,
+                breach_rate_percent=t.breach_rate_percent,
+            )
+            for t in exposure.by_tier
+        ],
+        by_client=[
+            ClientExposureView(
+                client_id=c.client_id,
+                client_name=c.client_name,
+                issued_cents=c.issued_cents,
+                accruing_cents=c.accruing_cents,
+                total_cents=c.total_cents,
+            )
+            for c in exposure.by_client
+        ],
+        unassessable_orders=exposure.unassessable_orders,
+        unpriced_orders=exposure.unpriced_orders,
     )
 
 

@@ -58,3 +58,46 @@ class OperationsScorecardView(BaseModel):
     window_start: datetime
     measurements: list[MeasurementView]
     rates: list[RateView]
+
+
+class TierExposureView(BaseModel):
+    """Credits for one tier, with the placeholder percentage that produced them.
+
+    `credit_percent` is null when clients disagree about it - the report says so rather
+    than picking one, because "what does this tier cost us" has no single answer then.
+    """
+
+    sla_tier: str
+    credit_percent: int | None
+    credit_cents: int
+    breach_count: int
+    delivered_count: int
+    breach_rate_percent: float | None
+
+
+class ClientExposureView(BaseModel):
+    client_id: str
+    client_name: str
+    issued_cents: int
+    accruing_cents: int
+    total_cents: int
+
+
+class CreditExposureView(BaseModel):
+    """What service-level credits are costing (docs/ROADMAP.md W3, E11).
+
+    `issued` is already on statements. `accruing` is delivered work not yet invoiced that
+    would breach if it were - which is the half that matters, because credits are
+    otherwise invisible until somebody runs billing.
+    """
+
+    generated_at: datetime
+    window_days: int
+    window_start: datetime
+    issued_cents: int
+    accruing_cents: int
+    total_cents: int
+    by_tier: list[TierExposureView]
+    by_client: list[ClientExposureView]
+    unassessable_orders: int
+    unpriced_orders: int
