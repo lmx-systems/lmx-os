@@ -242,3 +242,13 @@ export interface DriverScorecard {
   metrics: ScorecardMetric[];
   comparison_withheld: string | null;
 }
+
+// Why a driver turned an offer down (docs/ROADMAP.md I1, I4). Mirrors DECLINE_REASONS in
+// app/schemas/driver_app.py - short on purpose, because this is asked at the one moment
+// a driver is under time pressure.
+export type DeclineReason =
+  | 'too_far'
+  | 'pay_too_low'
+  | 'vehicle_unsuitable'
+  | 'ending_shift'
+  | 'other';

@@ -8,6 +8,7 @@ import type {
   DriverCompliance,
   DriverDocument,
   DriverProfile,
+  DeclineReason,
   DriverScorecard,
   Earnings,
   FlagReasonCode,
@@ -159,6 +160,16 @@ export const api = {
 
   declineOffer: (offerId: string) =>
     request<{ ok: boolean }>(`/driver/offers/${offerId}/decline`, { method: 'POST' }),
+
+  // Attached AFTER the decline, never as part of it. The decline releases the orders
+  // immediately; making a driver pick a reason first would leave the work held while they
+  // hesitated, and an offer that expires instead of being declined is worse for dispatch
+  // than one declined without a reason.
+  setDeclineReason: (offerId: string, reason: DeclineReason) =>
+    request<void>(`/driver/offers/${offerId}/decline-reason`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
 
   getMyRoute: () => request<Route | null>('/driver/me/route'),
 

@@ -326,6 +326,35 @@ class FlagStopBody(BaseModel):
     note: str | None = None
 
 
+# Why a driver turned an offer down (docs/ROADMAP.md I1, I4). A defined vocabulary
+# rather than free text, because the question this answers - "is there a pattern" - needs
+# values that group, and 200 drivers typing "too far away" five different ways answers
+# nothing.
+#
+# **The column stays a free string** (`RouteOffer.decline_reason`, 64 chars) and the API
+# still accepts anything: the decline endpoint predates this list, and rejecting an
+# unrecognised value would break a caller to gain nothing - an unexpected reason is still
+# a reason, and the report groups whatever arrives.
+#
+# Kept deliberately short. A driver has about two minutes to respond to an offer and a
+# long list is friction on the one interaction that must not be slow. `pay_too_low` is
+# included even though it only means something on the gig track, because a reason nobody
+# offers is a reason nobody reports - and the whole point is to find out.
+DECLINE_TOO_FAR = "too_far"
+DECLINE_PAY_TOO_LOW = "pay_too_low"
+DECLINE_VEHICLE_UNSUITABLE = "vehicle_unsuitable"
+DECLINE_ENDING_SHIFT = "ending_shift"
+DECLINE_OTHER = "other"
+
+DECLINE_REASONS = (
+    DECLINE_TOO_FAR,
+    DECLINE_PAY_TOO_LOW,
+    DECLINE_VEHICLE_UNSUITABLE,
+    DECLINE_ENDING_SHIFT,
+    DECLINE_OTHER,
+)
+
+
 class DeclineOfferBody(BaseModel):
     # Optional ground-truth capture (docs/ROADMAP.md I1) - why the driver
     # declined, for the eventual offer-acceptance model. Optional so the

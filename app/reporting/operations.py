@@ -47,6 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.learning_loop.detection import HOLD_TOO_LONG_FLAG, HOLD_TOO_SHORT_FLAG
 from app.models.driver_shift_event import DriverShiftEvent
 from app.models.order import Order, OrderStatus
+from app.models.route_offer import RouteOffer
 from app.models.stop import Stop, StopFlag
 from app.reporting.measurement import (
     Measurement,
@@ -526,7 +527,11 @@ async def build_operations_scorecard(
         await _deliveries_per_hour(session, since),
         await _eta_accuracy(session, since),
     ]
-    rates = [*await _sla_hit_rates(session, since), await _hold_window_flag_rate(session, since)]
+    rates = [
+        *await _sla_hit_rates(session, since),
+        await _hold_window_flag_rate(session, since),
+        *await _offer_outcomes(session, since),
+    ]
 
     scorecard = OperationsScorecard(
         generated_at=reference,
@@ -726,3 +731,113 @@ async def build_client_performance(
         delivered_count=int(delivered),
         hit_rates=await _sla_hit_rates(session, since, client_id=client_id),
     )
+
+
+# ---------------------------------------------------------------------------
+# 5. What happens to offers (docs/ROADMAP.md I1 -> I4)
+# ---------------------------------------------------------------------------
+
+
+async def _offer_outcomes(session: AsyncSession, since: datetime) -> list[Rate]:
+    """How offers end, and why drivers turn them down.
+
+    **Two questions, and the second was uncollectable until now.**
+    `RouteOffer.decline_reason` was written only if a caller supplied one and the driver
+    app never did - so the column was dead end to end, and the reason a driver says no
+    was a thing this system had a place for and no way to learn.
+
+    *Expired* is reported beside *declined* on purpose, because they mean opposite things
+    and get confused. A decline is an answer: the driver saw the work and did not want
+    it. An expiry is silence - most likely they never saw the offer at all, which at the
+    moment is the likelier failure given push notifications are stubbed. A high decline
+    rate is a pricing or routing problem; a high expiry rate is a delivery problem, and
+    reading one as the other sends you to fix the wrong thing.
+
+    Reasons are counted over declines rather than over all offers, since that is the
+    population that could have given one - a rate over every offer would make the reasons
+    look rarer the more offers were accepted.
+    """
+    outcomes = dict(
+        (
+            await session.execute(
+                select(RouteOffer.status, func.count())
+                .where(RouteOffer.offered_at >= since)
+                .group_by(RouteOffer.status)
+            )
+        ).all()
+    )
+    total = sum(outcomes.values())
+    if not total:
+        return [
+            Rate(
+                name="Offers accepted",
+                target="higher is better",
+                not_measured="no offers made in the window",
+            )
+        ]
+
+    rates = [
+        Rate(
+            name="Offers accepted",
+            target="higher is better",
+            numerator=int(outcomes.get("accepted", 0)),
+            denominator=total,
+        ),
+        Rate(
+            name="Offers declined",
+            target="lower is better",
+            numerator=int(outcomes.get("declined", 0)),
+            denominator=total,
+        ),
+        Rate(
+            # Silence, not an answer - see the docstring.
+            name="Offers expired unanswered",
+            target="lower is better",
+            numerator=int(outcomes.get("expired", 0)),
+            denominator=total,
+        ),
+    ]
+
+    declined = int(outcomes.get("declined", 0))
+    if not declined:
+        return rates
+
+    reasons = dict(
+        (
+            await session.execute(
+                select(RouteOffer.decline_reason, func.count())
+                .where(
+                    RouteOffer.offered_at >= since,
+                    RouteOffer.status == "declined",
+                    RouteOffer.decline_reason.is_not(None),
+                )
+                .group_by(RouteOffer.decline_reason)
+            )
+        ).all()
+    )
+    given = sum(reasons.values())
+    if not given:
+        rates.append(
+            Rate(
+                name="Declines with a reason given",
+                target="higher is better",
+                numerator=0,
+                denominator=declined,
+                not_measured=(
+                    "no driver has given a reason yet - the prompt appears after a "
+                    "decline and answering it is optional"
+                ),
+            )
+        )
+        return rates
+
+    rates.extend(
+        Rate(
+            name=f"Declined: {reason}",
+            target="pattern, not a target",
+            numerator=int(count),
+            denominator=declined,
+        )
+        for reason, count in sorted(reasons.items(), key=lambda kv: -kv[1])
+    )
+    return rates

@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 import structlog
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
@@ -989,6 +989,50 @@ async def list_my_offers(
         )
     await session.commit()
     return live
+
+
+@router.post("/offers/{offer_id}/decline-reason", status_code=204)
+async def annotate_decline_reason(
+    offer_id: str,
+    body: DeclineOfferBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    """Say why, after the decline has already happened (docs/ROADMAP.md I1, I4).
+
+    **Separate from the decline on purpose, and the reason is operational rather than
+    tidy.** A driver has `job_offer_ttl_seconds` - about two minutes - to answer an offer,
+    and the orders on it are held until they do. If picking a reason were part of
+    declining, a driver who tapped decline and then hesitated over a list would leave the
+    offer open until it expired, and those orders would sit unassigned for the rest of the
+    TTL. Trading dispatch latency for a data point is the wrong trade.
+
+    So `POST /decline` still fires on one tap and releases the work immediately, and this
+    attaches the reason afterwards if the driver bothers. An abandoned prompt costs
+    nothing: the result is a decline with no reason, which is exactly today's behaviour.
+
+    Only on an offer this driver actually declined. Not on one they accepted, not on one
+    that expired without them - an expiry means they never answered, and a reason attached
+    to it would be somebody claiming to have made a decision they did not make.
+
+    Idempotent-ish: a second call overwrites, because the only caller is the driver
+    correcting their own answer and there is nothing to protect.
+    """
+    offer = await _get_owned_offer(session, offer_id, driver)
+    if offer.status != "declined":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Offer is {offer.status} - only a declined offer can carry a reason",
+        )
+    offer.decline_reason = body.reason
+    await session.commit()
+    logger.info(
+        "offer_decline_reason_recorded",
+        offer_id=offer_id,
+        driver_id=driver.driver_id,
+        reason=body.reason,
+    )
+    return Response(status_code=204)
 
 
 @router.post("/offers/{offer_id}/decline")

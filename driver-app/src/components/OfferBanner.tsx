@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { api, ApiError } from '../api/client';
-import type { JobOffer, Route } from '../api/types';
+import type { DeclineReason, JobOffer, Route } from '../api/types';
 import { spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
 import { Button } from './Button';
@@ -23,12 +23,27 @@ function msRemaining(expiresAt: string): number {
 // job offer is something you see and act on right on the home screen, not
 // a separate accept/decline screen). Still owns the accept-window
 // countdown and the accept/decline calls verbatim from that old screen.
+// Wording a driver would use, not the enum. "Doesn't pay enough" is the honest label for
+// pay_too_low, and softening it would defeat the point of asking.
+const REASON_LABELS: [DeclineReason, string][] = [
+  ['too_far', 'Too far'],
+  ['pay_too_low', "Doesn't pay enough"],
+  ['vehicle_unsuitable', "Won't fit my vehicle"],
+  ['ending_shift', 'Finishing my shift'],
+  ['other', 'Something else'],
+];
+
 export function OfferBanner({ offer, onAccept, onDecline }: OfferBannerProps) {
   const colors = useThemeColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Shown only AFTER the decline has already fired and the work has been released - see
+  // handleDecline. Purely optional: if the driver ignores it or the app is backgrounded,
+  // the result is a decline with no reason, which is exactly the old behaviour.
+  const [askingWhy, setAskingWhy] = useState(false);
+  const [reasonSent, setReasonSent] = useState<DeclineReason | null>(null);
 
   useEffect(() => {
     const tick = () => setSecondsLeft(Math.max(0, Math.floor(msRemaining(offer.expires_at) / 1000)));
@@ -54,8 +69,10 @@ export function OfferBanner({ offer, onAccept, onDecline }: OfferBannerProps) {
     setBusy(true);
     setError(null);
     try {
+      // Releases the orders straight away. The reason prompt below happens after this
+      // resolves, so a driver who hesitates over it costs dispatch nothing.
       await api.declineOffer(offer.offer_id);
-      onDecline();
+      setAskingWhy(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'This offer is no longer available.');
     } finally {
@@ -63,7 +80,44 @@ export function OfferBanner({ offer, onAccept, onDecline }: OfferBannerProps) {
     }
   }
 
+  async function sendReason(reason: DeclineReason) {
+    setReasonSent(reason);
+    try {
+      await api.setDeclineReason(offer.offer_id, reason);
+    } catch {
+      // Swallowed deliberately. The decline already succeeded; failing to record why is
+      // not something to put in front of a driver who has moved on.
+    }
+    onDecline();
+  }
+
   const shopName = offer.stops[0]?.shop_name || 'Pickup';
+
+  if (askingWhy) {
+    return (
+      <Card style={styles.card}>
+        <Text style={styles.headerTitle}>Declined</Text>
+        <Text style={styles.cardBody}>
+          {reasonSent ? 'Thanks — that helps.' : 'Anything we should know? (optional)'}
+        </Text>
+        {!reasonSent && (
+          <View style={styles.reasonWrap}>
+            {REASON_LABELS.map(([reason, label]) => (
+              <Button
+                key={reason}
+                label={label}
+                variant="outline"
+                onPress={() => sendReason(reason)}
+              />
+            ))}
+            {/* Leaving is a first-class option, not a hidden one. A driver owes us
+                nothing here and the offer is already released. */}
+            <Button label="Skip" variant="outline" onPress={onDecline} />
+          </View>
+        )}
+      </Card>
+    );
+  }
 
   return (
     <Card style={styles.card}>
@@ -115,4 +169,5 @@ const makeStyles = (colors: ColorScheme) =>
     error: { color: colors.danger, marginTop: spacing.sm, fontSize: 13 },
     buttonRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
     buttonHalf: { flex: 1 },
+    reasonWrap: { gap: spacing.sm, marginTop: spacing.md },
   });

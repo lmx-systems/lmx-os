@@ -889,3 +889,146 @@ async def test_the_tier_label_survives_both_forms_of_sla_tier(db_session):
     assert _tier_label(SLATier.T2) == "T2"
     assert _tier_label("T2") == "T2"
     assert _tier_label(None) == "unspecified"
+
+
+# ---------------------------------------------------------------------------
+# Offer outcomes and decline reasons (docs/ROADMAP.md I1 -> I4)
+# ---------------------------------------------------------------------------
+
+
+async def _offer(db_session, hub_id, driver_id, *, status, reason=None, offered_ago_hours=1):
+    from app.models.route_offer import RouteOffer
+
+    at = NOW - timedelta(hours=offered_ago_hours)
+    offer = RouteOffer(
+        hub_id=hub_id,
+        driver_id=driver_id,
+        status=status,
+        stop_payload=[],
+        offered_at=at,
+        expires_at=at + timedelta(minutes=2),
+        responded_at=at + timedelta(seconds=20) if status != "offered" else None,
+        decline_reason=reason,
+    )
+    db_session.add(offer)
+    await db_session.commit()
+    return offer
+
+
+async def test_declined_and_expired_are_reported_separately(db_session):
+    """They mean opposite things and get confused.
+
+    A decline is an answer - the driver saw the work and did not want it. An expiry is
+    silence, most likely because they never saw the offer at all, which is the likelier
+    failure while push notifications are stubbed. A high decline rate is a pricing or
+    routing problem; a high expiry rate is a delivery problem. Reading one as the other
+    sends you to fix the wrong thing.
+    """
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    await _offer(db_session, hub_id, driver_id, status="accepted")
+    await _offer(db_session, hub_id, driver_id, status="declined", reason="too_far")
+    await _offer(db_session, hub_id, driver_id, status="expired")
+    await _offer(db_session, hub_id, driver_id, status="expired")
+
+    scorecard = await build_operations_scorecard(db_session, now=NOW)
+    accepted = _find(scorecard, "Offers accepted")
+    declined = _find(scorecard, "Offers declined")
+    expired = _find(scorecard, "expired unanswered")
+
+    assert (accepted.numerator, accepted.denominator) == (1, 4)
+    assert (declined.numerator, declined.denominator) == (1, 4)
+    assert (expired.numerator, expired.denominator) == (2, 4)
+
+
+async def test_decline_reasons_are_rated_over_declines_not_over_all_offers(db_session):
+    """Otherwise the reasons look rarer the more offers get accepted, which is backwards -
+    the population that could have given a reason is the declines."""
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    for _ in range(6):
+        await _offer(db_session, hub_id, driver_id, status="accepted")
+    await _offer(db_session, hub_id, driver_id, status="declined", reason="too_far")
+    await _offer(db_session, hub_id, driver_id, status="declined", reason="too_far")
+    await _offer(db_session, hub_id, driver_id, status="declined", reason="pay_too_low")
+
+    scorecard = await build_operations_scorecard(db_session, now=NOW)
+    too_far = _find(scorecard, "Declined: too_far")
+    assert (too_far.numerator, too_far.denominator) == (2, 3), "3 declines, not 9 offers"
+    assert too_far.percentage == pytest.approx(66.7, abs=0.1)
+
+
+async def test_declines_without_a_reason_are_reported_as_such(db_session):
+    """The prompt is optional and appears after the decline, so "nobody has said yet" is
+    the expected state - and it is a different message from "nobody declines"."""
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    await _offer(db_session, hub_id, driver_id, status="declined")
+    await _offer(db_session, hub_id, driver_id, status="declined")
+
+    scorecard = await build_operations_scorecard(db_session, now=NOW)
+    given = _find(scorecard, "Declines with a reason")
+    assert given.not_measured is not None
+    assert "optional" in given.not_measured
+
+
+async def test_no_offers_reports_a_reason_rather_than_zero_percent(db_session):
+    scorecard = await build_operations_scorecard(db_session, now=NOW)
+    assert _find(scorecard, "Offers accepted").not_measured is not None
+
+
+# ---------------------------------------------------------------------------
+# The endpoint that records a reason
+# ---------------------------------------------------------------------------
+
+
+async def test_a_reason_can_be_attached_after_the_decline(db_session, real_redis_client):
+    """The whole design: the decline releases the work on one tap, and the reason arrives
+    separately if the driver bothers."""
+    from app.api.driver_routes import annotate_decline_reason
+    from app.driver_auth.dependencies import AuthedDriver
+    from app.schemas.driver_app import DECLINE_TOO_FAR, DeclineOfferBody
+
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    offer = await _offer(db_session, hub_id, driver_id, status="declined")
+
+    await annotate_decline_reason(
+        offer_id=str(offer.id),
+        body=DeclineOfferBody(reason=DECLINE_TOO_FAR),
+        driver=AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="d"),
+        session=db_session,
+    )
+    await db_session.refresh(offer)
+    assert offer.decline_reason == DECLINE_TOO_FAR
+
+
+async def test_a_reason_cannot_be_attached_to_an_expired_offer(db_session, real_redis_client):
+    """An expiry means the driver never answered. A reason on it would be somebody
+    claiming a decision they did not make."""
+    from fastapi import HTTPException
+
+    from app.api.driver_routes import annotate_decline_reason
+    from app.driver_auth.dependencies import AuthedDriver
+    from app.schemas.driver_app import DeclineOfferBody
+
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    offer = await _offer(db_session, hub_id, driver_id, status="expired")
+
+    with pytest.raises(HTTPException) as exc:
+        await annotate_decline_reason(
+            offer_id=str(offer.id),
+            body=DeclineOfferBody(reason="too_far"),
+            driver=AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="d"),
+            session=db_session,
+        )
+    assert exc.value.status_code == 409
+    await db_session.refresh(offer)
+    assert offer.decline_reason is None
+
+
+async def test_declining_still_works_with_no_reason_at_all(db_session, real_redis_client):
+    """The constraint that shaped this: a driver has about two minutes and the orders are
+    held until they answer, so the decline path must not have grown a required field."""
+    import inspect
+
+    from app.api.driver_routes import decline_offer
+
+    body = inspect.signature(decline_offer).parameters["body"]
+    assert body.default is None, "a reason must never be required to decline"
