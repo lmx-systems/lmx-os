@@ -144,6 +144,30 @@ export const api = {
     URL.revokeObjectURL(url)
   },
 
+  // Their whole order history as CSV (docs/ROADMAP.md F7). Same bearer-token problem
+  // as the invoice PDF above and the same fix - a plain <a href> cannot carry the
+  // header, so the bytes are fetched with auth and downloaded from a blob.
+  downloadOrdersCsv: async (): Promise<void> => {
+    const token = getToken()
+    const response = await fetch(`${API_BASE_URL}/client/orders/export.csv`, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    })
+    if (response.status === 401) clearToken()
+    if (!response.ok) {
+      const body = await response.text().catch(() => '')
+      throw new ApiError(response.status, body || response.statusText)
+    }
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `lmx-orders-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
+
   // User management (admin only, docs/ROADMAP.md C4) - the API 403s a
   // member, so the Team tab is only shown to an admin in the first place.
   listUsers: () => request<ClientUserView[]>('/client/users'),

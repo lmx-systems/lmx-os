@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { api } from '../lib/api'
 import type { ClientOrderSummaryView } from '../lib/types'
 import { formatCents, formatDate, formatFailureReason, formatStatus, isFailedStatus } from '../lib/format'
 import { TierBadge } from './TierBadge'
@@ -39,6 +41,8 @@ export function OrdersTable({
   offset,
   onOffsetChange,
 }: OrdersTableProps) {
+  const [exporting, setExporting] = useState(false)
+  const [exportFailed, setExportFailed] = useState(false)
   const showing = orders.length
   const from = total === 0 ? 0 : offset + 1
   const to = offset + showing
@@ -53,6 +57,22 @@ export function OrdersTable({
         aria-label="Search orders"
         className="min-w-[16rem] flex-1 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
       />
+      {/* Exports the whole history rather than what is on screen - a page of a ledger
+          is not a ledger, and a client asking for their data means all of it. */}
+      <button
+        type="button"
+        onClick={() => {
+          setExporting(true)
+          api
+            .downloadOrdersCsv()
+            .catch(() => setExportFailed(true))
+            .finally(() => setExporting(false))
+        }}
+        disabled={exporting}
+        className="rounded-[var(--radius)] border border-[var(--border)] px-3 py-2 text-sm text-[var(--text-secondary)] disabled:opacity-50"
+      >
+        {exporting ? 'Preparing…' : 'Export CSV'}
+      </button>
       <div className="flex overflow-hidden rounded-[var(--radius)] border border-[var(--border)]">
         {(['open', 'all'] as const).map((value) => (
           <button
@@ -72,6 +92,12 @@ export function OrdersTable({
       </div>
     </div>
   )
+
+  const exportError = exportFailed ? (
+    <p role="alert" className="mb-2 text-xs text-[var(--danger,#b3261e)]">
+      We couldn&rsquo;t build that export. Please try again.
+    </p>
+  ) : null
 
   const pager =
     total > limit ? (
@@ -106,6 +132,7 @@ export function OrdersTable({
     return (
       <div>
         {controls}
+        {exportError}
         <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-8 text-center text-sm text-[var(--text-muted)]">
           {/* Three different empty states, because "no orders yet" told a counter person
               whose search simply missed that their company has never sent us anything. */}
@@ -122,6 +149,7 @@ export function OrdersTable({
   return (
     <div>
       {controls}
+      {exportError}
       <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
       <table className="w-full text-left text-sm">
         <thead>

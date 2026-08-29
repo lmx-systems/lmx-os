@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,6 +59,7 @@ from app.db import get_db
 from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, CLIENT_USER_ROLES, ClientUser
 from app.models.invoice import Invoice
+from app.reporting.csv_export import stream_client_orders_csv
 from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_client_performance
 from app.legal.documents import (
     DOCUMENTS,
@@ -397,6 +399,49 @@ async def _annotate_commitments(
     # otherwise. An estimate either way - never a promise, unlike the field above.
     eta = facts.eta or await _estimate_delivery_by(session, order)
     view.estimated_delivery_by = eta.isoformat() if eta else None
+
+
+@router.get("/orders/export.csv")
+async def export_my_orders_csv(
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """A client's whole order history as CSV (docs/ROADMAP.md F7).
+
+    Their data, in a form they can put in a spreadsheet or a BI tool without asking us
+    for it - which is the half of `F7` that is about a distributor keeping their own
+    visibility after handing us the fleet. It is also the honest answer to the data
+    portability question an enterprise security review asks.
+
+    **Everything, not a page.** `GET /client/orders` is paged because a screen must be
+    bounded; an export is read as a ledger and silently truncating one is worse than a
+    slow download. Streamed rather than assembled, so the whole history never lands in
+    memory at once - see `app/reporting/csv_export.py`, including why the generator opens
+    its own session rather than borrowing this request's.
+
+    Scoped by the token like every other read here. The client id is never a parameter.
+    """
+    client_id = uuid.UUID(client.client_id)
+    # Checked before streaming starts: once a StreamingResponse has begun, a raised
+    # exception cannot become a clean status code - the client would get a truncated file
+    # with a 200 already on the wire, which is exactly the silent-truncation failure this
+    # endpoint is written to avoid.
+    row = await session.get(Client, client_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    # UTC, matching every timestamp inside the file and the `_utc` suffix on those
+    # columns. It means someone downloading at 5pm in Austin gets tomorrow's date on the
+    # filename, which looks odd for a second - but a local filename wrapped around UTC
+    # contents is the version that actually misleads, and the portal's own fallback name
+    # is UTC too, so the two agree.
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    filename = f"lmx-orders-{stamp}.csv"
+    return StreamingResponse(
+        stream_client_orders_csv(client_id),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/performance", response_model=ClientPerformanceView)
