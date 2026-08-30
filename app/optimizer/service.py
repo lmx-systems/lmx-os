@@ -36,7 +36,13 @@ from app.optimizer.google_routes_client import RouteOptimizationClient, get_rout
 from app.optimizer.last_cycle_store import LastCycleStore
 from app.redis_client import get_client
 from app.schemas.fleet import DriverState
-from app.schemas.optimizer import DriverCandidate, LastCycleSnapshot, OptimizationResult, StopCandidate
+from app.schemas.optimizer import (
+    CyclePlan,
+    DriverCandidate,
+    LastCycleSnapshot,
+    OptimizationResult,
+    StopCandidate,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -54,8 +60,20 @@ class DispatchOptimizerService:
         self._route_client = route_client or get_route_optimization_client()
         self._last_cycle_store = last_cycle_store or LastCycleStore()
 
-    async def run_cycle(self, hub_id: str) -> OptimizationResult:
-        cycle_start = time.perf_counter()
+    async def plan_cycle(self, hub_id: str) -> CyclePlan:
+        """Decide what this cycle would do, and change nothing (W9).
+
+        Everything `run_cycle` used to do up to and including the solver call, with
+        every mutation left to the caller: no hold-queue removals, no `Order.status`
+        writes, no `RouteOffer` rows, no push notifications, no mid-route insertion.
+        Safe to call at any time against live state, which is what lets shadow mode
+        run beside a human-dispatched scaffold without touching it.
+
+        **Read-only is a property of this method, not a convention.** Adding a write
+        here silently turns shadow mode into a second dispatcher fighting the real one
+        for the same drivers - `tests/test_shadow_plan_cycle.py` asserts the absence.
+        """
+        plan_start = time.perf_counter()
         now = datetime.now(timezone.utc)
 
         # Don't dispatch for a hub that isn't operating today (R6). Return
@@ -64,13 +82,20 @@ class DispatchOptimizerService:
         async with session_scope() as session:
             if await is_hub_closed_at(session, hub_id, now):
                 logger.info("optimizer_cycle_skipped_hub_closed", hub_id=hub_id)
-                return OptimizationResult(
+                return CyclePlan(
                     hub_id=hub_id,
+                    planned_at=now,
+                    hub_closed=True,
+                    held_order_count=0,
+                    released_order_ids=[],
+                    shop_name_by_order_id={},
+                    fleet_snapshot=[],
+                    stops=[],
+                    drivers=[],
                     assignments=[],
                     unassigned_stop_ids=[],
                     engine=self._route_client.engine_name,
-                    duration_seconds=round(time.perf_counter() - cycle_start, 3),
-                    over_budget=False,
+                    plan_duration_seconds=round(time.perf_counter() - plan_start, 3),
                 )
 
         fleet_snapshot = await self._fleet_state.get_fleet_snapshot(hub_id)
@@ -130,6 +155,44 @@ class DispatchOptimizerService:
         else:
             assignments, unassigned = [], [s.stop_id for s in stops]
 
+        return CyclePlan(
+            hub_id=hub_id,
+            planned_at=now,
+            hub_closed=False,
+            held_order_count=len(held_orders),
+            released_order_ids=[o.order_id for o in released_orders],
+            shop_name_by_order_id={o.order_id: o.shop_name for o in released_orders},
+            fleet_snapshot=fleet_snapshot,
+            stops=stops,
+            drivers=drivers,
+            assignments=assignments,
+            unassigned_stop_ids=unassigned,
+            engine=self._route_client.engine_name,
+            plan_duration_seconds=round(time.perf_counter() - plan_start, 3),
+        )
+
+    async def run_cycle(self, hub_id: str) -> OptimizationResult:
+        cycle_start = time.perf_counter()
+
+        plan = await self.plan_cycle(hub_id)
+
+        if plan.hub_closed:
+            return OptimizationResult(
+                hub_id=hub_id,
+                assignments=[],
+                unassigned_stop_ids=[],
+                engine=plan.engine,
+                duration_seconds=round(time.perf_counter() - cycle_start, 3),
+                over_budget=False,
+            )
+
+        # Named to match what the commit half below already called them, so this
+        # extraction stayed a move rather than a rewrite.
+        stops = plan.stops
+        assignments = plan.assignments
+        unassigned = list(plan.unassigned_stop_ids)
+        fleet_snapshot = plan.fleet_snapshot
+
         # Live route-change push: anything still unassigned after the
         # normal idle-driver matching above gets a shot at an already-
         # active route with spare capacity, rather than sitting held
@@ -178,7 +241,7 @@ class DispatchOptimizerService:
         # actually driving them.
         if assignments:
             stops_by_id = {s.stop_id: s for s in stops}
-            shop_name_by_order_id = {o.order_id: o.shop_name for o in released_orders}
+            shop_name_by_order_id = plan.shop_name_by_order_id
             fleet_by_id = {d.driver_id: d for d in fleet_snapshot}
             offer_time = datetime.now(timezone.utc)
             # (driver_id, stop_count) pairs to push-notify after the offers
@@ -266,7 +329,7 @@ class DispatchOptimizerService:
                 hub_id=hub_id,
                 duration_seconds=round(duration, 3),
                 budget_seconds=settings.optimizer_cycle_budget_seconds,
-                driver_count=len(drivers),
+                driver_count=len(plan.drivers),
                 stop_count=len(stops),
             )
 
