@@ -66,13 +66,34 @@ def _check_services_available() -> str | None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _skip_if_services_unavailable() -> None:
+def _skip_if_services_unavailable(request: pytest.FixtureRequest) -> None:
     reason = _check_services_available()
-    if reason:
-        pytest.skip(
-            f"Skipping integration tests - {reason}. Start a real Postgres + Redis "
-            "and point DATABASE_URL/REDIS_URL at them to run this suite."
+    if not reason:
+        return
+
+    message = (
+        f"Skipping integration tests - {reason}. Start a real Postgres + Redis "
+        "and point DATABASE_URL/REDIS_URL at them to run this suite."
+    )
+
+    # Recorded on the config object - not imported across conftest modules, since
+    # `tests/` is not a package - so tests/conftest.py's pytest_terminal_summary can
+    # say, loudly and at the end, that this suite did not run. A skip is otherwise
+    # indistinguishable from a pass at a glance, and identical in the exit code.
+    request.config.lmx_integration_skip_reason = message  # type: ignore[attr-defined]
+
+    # Opt-in hard failure, for anyone who would rather not have the choice: a
+    # local pre-push hook, or a second line of defence in CI beside the grep in
+    # .github/workflows/ci.yml. Off by default, because skipping when the services
+    # genuinely are not there is the deliberate behaviour this file was built with.
+    if os.environ.get("LMX_REQUIRE_INTEGRATION"):
+        pytest.fail(
+            f"{message} LMX_REQUIRE_INTEGRATION is set, so this is a failure "
+            "rather than a skip.",
+            pytrace=False,
         )
+
+    pytest.skip(message)
 
 
 @pytest.fixture(scope="session")
