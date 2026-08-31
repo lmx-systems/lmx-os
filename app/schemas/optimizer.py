@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.schemas.fleet import DriverState
+
 
 class StopCandidate(BaseModel):
     """A released order (or cluster of commingled orders) waiting for a route assignment."""
@@ -100,6 +102,52 @@ class OptimizationResult(BaseModel):
     engine: str  # "google_route_optimization" | "stub_nearest_neighbor"
     duration_seconds: float
     over_budget: bool
+
+
+class CyclePlan(BaseModel):
+    """What a dispatch cycle *decided*, before anything was done about it (W9).
+
+    `run_cycle` used to decide and act in one pass, which made the decision
+    unobservable: the only way to learn what the optimizer would do was to let it
+    do it. Shadow mode needs exactly that - LMX OS deciding in parallel on the same
+    orders while a human-run scaffold dispatches for real - so the decision half is
+    now `plan_cycle`, returning this, and `run_cycle` is that call plus the commit.
+
+    **The point of sharing it is that shadow mode is worthless otherwise.** A second
+    implementation that reproduced the decision would drift from the live one, and
+    every divergence it reported would then be ambiguous: a real disagreement between
+    LMX OS and the scaffold, or just the shadow path having fallen behind. One
+    implementation and two callers is what makes a divergence mean something.
+
+    Nothing here is persisted directly. `app/shadow/` records a durable projection of
+    it; this is the in-memory hand-off.
+    """
+
+    hub_id: str
+    planned_at: datetime
+
+    # A closed hub decides nothing rather than deciding to dispatch nothing, and the
+    # difference matters to the scorecard's data-completeness metric: a quiet Sunday
+    # must not read as the optimizer having had a chance and taken it.
+    hub_closed: bool
+
+    held_order_count: int
+    released_order_ids: list[str]
+
+    # Carried rather than re-read by the caller. `run_cycle` used to hold these in
+    # locals; re-fetching them after planning would be a second round-trip against
+    # state that can move underneath it, so the plan owns the snapshot it decided on.
+    shop_name_by_order_id: dict[str, str]
+    fleet_snapshot: list[DriverState]
+
+    stops: list[StopCandidate]
+    drivers: list[DriverCandidate]
+
+    assignments: list[RouteAssignment]
+    unassigned_stop_ids: list[str]
+
+    engine: str
+    plan_duration_seconds: float
 
 
 class LastCycleSnapshot(BaseModel):

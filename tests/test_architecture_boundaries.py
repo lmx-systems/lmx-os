@@ -62,6 +62,11 @@ EDGE = (
     "tracking",
     "returns",
     "learning_loop",
+    # Shadow mode reads the core's decisions to compare them against a scaffold's.
+    # Edge, not core: it calls `plan_cycle` and must never be reachable from inside
+    # the dispatch engine, or a comparison harness would become a dispatch dependency
+    # - and the whole point is that shadow mode cannot affect what it observes.
+    "shadow",
     "api",
 )
 
