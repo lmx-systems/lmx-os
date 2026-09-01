@@ -31,12 +31,16 @@
 > exclusions in §2.3 — client login, and per-client SLA terms — are **built**. §4.4's
 > metrics are now partly measured by `L17`.
 >
-> **The third is more than a documentation fix.** §2.3's revised row makes invoice
-> generation, collection, dunning and ledger a **bought** commodity. `C3`, `F5` and `W3`
-> already shipped invoice generation, rate tables and automatic SLA credits, and
-> `app/billing/service.py` runs today — so that code now needs a disposition (retire,
-> or keep as the interim until the bought stack is live). **That decision is not
-> recorded anywhere yet**, and it belongs in the decision log rather than here.
+> **A decision reversed itself here, and the reversal is the useful record.** The
+> 2026-08-31 revision made invoice generation a **bought** commodity. Reviewing it against
+> the code found that `C3`, `F5` and `W3` had already shipped invoice generation, rate
+> tables and automatic SLA-breach credits, and that `app/billing/service.py` runs today —
+> so buying it would have meant retiring working software to purchase the same capability.
+> **Decided 2026-09-01: invoicing is built, not bought.** Collection, dunning, the ledger
+> and every rail that moves money stay bought, unchanged, because §3.2's hard rule is
+> about money movement rather than about invoices. **QuickBooks Online is under
+> consideration for reconciliation only** — matching what LMX OS invoiced against what the
+> books recorded — and that is not yet decided.
 >
 > **What held.** §1.1's one principle is no longer a convention — it is enforced by
 > `tests/test_architecture_boundaries.py`, which fails the build if the dispatch engine
@@ -172,11 +176,12 @@ The original three fields are insufficient once pricing is distance-tiered. Revi
 | Client login and full dashboard | The status link covers the real need at pilot scale | Phase 1 proper, as already planned | **Built** — `client-portal/`, per-user accounts with roles (`C4`). Orders, invoices, returns and team management |
 | Multi-client commingling | Needs more than one live client on the front door | Phase 2, as planned | Still excluded, still for the same reason |
 | Per-client SLA terms configuration | Hardcode the Design Partner's terms; the data model already supports more | Phase 1 proper | **Built** — `client_sla_terms` per client and tier (`W3`). Nothing is hardcoded; the numbers in it are openly provisional pending `E11` |
-| **Invoice generation, collection, dunning, ledger** | Commodity. Bought, per the locked build-vs-buy decision | Never built | **Already built, and now superseded by the buy decision.** `C3` ships `app/billing/service.py` (invoice generation, gross/credits/net), `F5` ships rate tables and `W3` ships automatic SLA-breach credits. **Needs a disposition** — retire, or keep as the interim until the bought stack is live. Not recorded anywhere yet |
+| **Collection, dunning, ledger** | Commodity, and it moves money. Bought, per the locked build-vs-buy decision | Never built | Unchanged. §3.2's hard rule is the reason: LMX OS computes amounts, bought systems execute against them |
+| ~~**Invoice generation**~~ | ~~Commodity. Bought~~ | ~~Never built~~ | **Reversed 2026-09-01 — built, not bought.** `C3` ships `app/billing/service.py` (invoice generation, gross/credits/net), `F5` ships rate tables, `W3` ships automatic SLA-breach credits. It was already built when the buy decision was written. **QuickBooks Online is under consideration for reconciliation only** — see §3.3 J1 |
 | ~~Pricing, invoicing, billing~~ | ~~Contract-level, handled outside the system at this scale~~ | **Partially reversed — see below** | Superseded by the row above |
 | EDI | Buy it when a signed enterprise deal exists. Never build | On demand | Still excluded. Still buy, never build |
 
-> **Decision change, 2026-08-31.** The original exclusion assumed one flat rate per client, where "handled outside the system" was true. The 2026-08-29 pricing decision replaces that with five distance zones and three volume-discount tiers, which means **every drop needs a price computed from its distance at intake**. No human at a parts counter does that arithmetic. Rating and statement generation therefore move into v1 as milestone T2.5. Invoice documents, collection, dunning and the general ledger remain excluded permanently — they are the commodity layer the locked build-vs-buy decision says to buy. Logged in `02_DECISION_LOG.md`.
+> **Decision change, 2026-08-31.** The original exclusion assumed one flat rate per client, where "handled outside the system" was true. The 2026-08-29 pricing decision replaces that with five distance zones and three volume-discount tiers, which means **every drop needs a price computed from its distance at intake**. No human at a parts counter does that arithmetic. Rating and statement generation therefore move into v1 as milestone T2.5. ~~Invoice documents, collection, dunning and the general ledger remain excluded permanently~~ — **amended 2026-09-01: invoice documents are built, not bought** (`C3`, `F5`, `W3` already ship them; see §3.1). Collection, dunning and the general ledger do remain excluded permanently — they are the commodity layer the locked build-vs-buy decision says to buy, and they move money, which §3.2 forbids LMX OS from doing. Logged in `02_DECISION_LOG.md` — **note that path does not resolve**; see the companion-docs line at the top.
 
 ---
 
@@ -194,12 +199,28 @@ The original three fields are insufficient once pricing is distance-tiered. Revi
    order → delivery → SLA record       │
         → rated at intake              │
         → credits and adjustments      │
-        → PRICED STATEMENT  ───────────┼──→ invoice → cash → general ledger
-                                       │    QuickBooks · Bill.com · ADP/Gusto
-                                       │    · ACH rails · controller
+        → PRICED STATEMENT             │
+        → INVOICE  ────────────────────┼──→ cash → general ledger
+                                       │    Bill.com · ADP/Gusto
+             ▲                         │    · ACH rails · controller
+             └── reconciliation ───────┼──→ QuickBooks Online  (under
+                    (under review)     │       consideration, not decided)
 ```
 
-This is not a new decision. It is the July locked build-vs-buy rule applied to money: **buy the commodity layer, build Layer 2 intelligence.** Rating against an SLA is Layer 2. Producing a PDF and chasing a payment is commodity.
+**Revised 2026-09-01: invoicing is built, not bought.** The line moved one step to the
+right. LMX OS produces the invoice as well as the priced statement, because `C3`, `F5`
+and `W3` already ship exactly that — invoice generation with gross, credits and net, rate
+tables, and automatic SLA-breach credits — and retiring working software to buy the same
+capability is a cost with no return. QuickBooks Online is now under consideration for
+**reconciliation only**: matching what LMX OS invoiced against what the accounting system
+recorded. That is a decision to make, not one made.
+
+**The rest of the boundary is unchanged, and §3.2's hard rule is why.** Cash, the general
+ledger, AP, dunning, collection, ACH rails and payroll all stay bought. Generating an
+invoice computes a number; collecting against it moves money, and LMX OS still never does
+that. The July build-vs-buy rule holds in its original form — **buy the commodity layer,
+build Layer 2 intelligence** — this decision reclassifies where invoicing sits, having
+found we had already built it.
 
 ### 3.2 Two hard rules
 
@@ -303,7 +324,22 @@ Gated on a signed autonomy partner. Nothing here starts before one exists.
 
 #### I — Bought, never built
 
-General ledger · accounts payable · invoice document generation and delivery · dunning and collection · ACH and payment rails · payroll execution · fuel, toll and spend card feeds · bank feeds · tax filing.
+General ledger · accounts payable · ~~invoice document generation and delivery~~ · dunning and collection · ACH and payment rails · payroll
+
+**Invoice generation and delivery moved out of this list on 2026-09-01** — it is built, and
+was already built before the list was written (`C3`, `F5`, `W3`). Everything still named
+here moves money or keeps the books, which is the line §3.2 draws.
+
+#### J — Reconciliation *(under consideration)*
+
+| # | Feature | Phase |
+|---|---|---|
+| J1 | Match LMX OS invoices against what the accounting system recorded, and report the differences | **Not scheduled — QuickBooks Online is under consideration, not decided** |
+
+**Why this is a row rather than a decision.** Once LMX OS issues the invoice, two systems
+hold a number that must agree, and nothing checks that they do. Reconciliation is the
+control that catches the disagreement. Naming the vendor is premature; naming the gap is
+not. execution · fuel, toll and spend card feeds · bank feeds · tax filing.
 
 ### 3.4 What T2.5 deliberately does not do
 
@@ -459,7 +495,8 @@ reopens them; `docs/ROADMAP.md` remains the live backlog for the engineering ite
 | ~~Confirm the reading of "design for all three"~~ | Sourabh + Matan | This week | Confirmed and held: contract designed for three, adapters sequenced T1/T3/T5 |
 | **Resource decision — CTO builds, contractor, or pull the Full-Stack hire forward (§4.3)** | **Matan** | **Overdue since 2026-08-06** | For T0–T5 this resolved by default — the CTO built it. It is **still open for T2.5 and T6**, and `B1` is still unhired, so the bus factor this row named is now a property of the whole system |
 | **Decide the tiered rate card values** so T2.5 has real configuration | **Rich + Matan** | This week | Open. Overlaps `E11`, which needs the SLA delivery targets and credit percentages for the same reason |
-| **Decide what happens to the billing code already shipped** — retire it, or keep it as the interim until the bought stack is live | **Sourabh + Matan** | With the T2.5 spec | **New, surfaced by this merge.** §2.3 now says invoicing is bought and never built; `app/billing/service.py` exists and runs (`C3`, `F5`, `W3`) |
+| ~~Decide what happens to the billing code already shipped~~ | Sourabh + Matan | With the T2.5 spec | **Closed 2026-09-01: it stays.** Surfaced by this merge — §2.3 had made invoicing bought while `app/billing/service.py` was already running (`C3`, `F5`, `W3`). Decision: invoicing is built, not bought |
+| **Decide whether to reconcile against QuickBooks Online**, and if so scope §3.3's J1 | **Sourabh + Matan** | Not scheduled | Open. Two systems will hold a number that must agree and nothing checks it; the vendor is unchosen |
 | Write the T2.5 spec — rate card schema and versioning, zone assignment, credit rules, statement export fields | Sourabh | 1 week | Open |
 | Trim `08` Part 6 so it points at T2.5 rather than naming a separate Phase 1 backlog | Sourabh | With the T2.5 spec | Open |
 | Confirm the DPH proof runs in parallel and is not waiting on LMX Link | **Rich** | This week | Open. `E9` is the roadmap row; it is gated on `B2` either way |
