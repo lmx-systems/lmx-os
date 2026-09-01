@@ -320,8 +320,8 @@ async def _price_order(
     lmx: LMXOrder,
     order: Order,
     shop: Shop,
-) -> tuple[int | None, dict | None]:
-    """(fee_cents, breakdown) for this order, from the client's rate for this tier.
+) -> tuple[int | None, dict | None, uuid.UUID | None]:
+    """(fee_cents, breakdown, rate_version_id) for this order, from the client's rate.
 
     Returns (None, None) when the client has no ClientRate for this tier yet -
     `Order.fee_cents`' docstring is explicit that null must never look like a free
@@ -333,10 +333,20 @@ async def _price_order(
     retroactively reprice work already taken, and with a distance term it would move
     numbers a client has already been quoted.
     """
+    # The version in force *now* - the newest one whose effective date has passed (T2.5 A1).
+    # A card with a future `effective_from` is a scheduled change and must not price today's
+    # order, which is the whole point of being able to enter a negotiated increase when it
+    # is agreed rather than on the morning it starts.
+    now = datetime.now(timezone.utc)
     result = await session.execute(
-        select(ClientRate).where(
-            ClientRate.client_id == uuid.UUID(client_id), ClientRate.sla_tier == sla_tier
+        select(ClientRate)
+        .where(
+            ClientRate.client_id == uuid.UUID(client_id),
+            ClientRate.sla_tier == sla_tier,
+            ClientRate.effective_from <= now,
         )
+        .order_by(ClientRate.effective_from.desc())
+        .limit(1)
     )
     rate = result.scalar_one_or_none()
     if rate is None:
@@ -344,7 +354,7 @@ async def _price_order(
             "client_rate_missing", client_id=client_id, sla_tier=sla_tier,
             detail="No ClientRate configured for this client/tier - fee_cents left null.",
         )
-        return None, None
+        return None, None, None
 
     priced = price_drop(
         rate,
@@ -357,7 +367,7 @@ async def _price_order(
         pieces=len(lmx.line_items),
         weight_units=float(order.weight_units or 0),
     )
-    return priced.fee_cents, priced.breakdown
+    return priced.fee_cents, priced.breakdown, rate.id
 
 
 def _lmx_from_normalized(normalized: NormalizedOrder, payload: dict) -> LMXOrder:
@@ -513,7 +523,7 @@ async def ingest_lmx_order(
     # logged as a missing rate, which would be misleading - there is no rate to
     # be missing.
     if lmx.client_id:
-        order.fee_cents, order.fee_breakdown = await _price_order(
+        order.fee_cents, order.fee_breakdown, order.rate_version_id = await _price_order(
             session,
             client_id=lmx.client_id,
             sla_tier=sla_tier,
@@ -522,7 +532,7 @@ async def ingest_lmx_order(
             shop=shop,
         )
     else:
-        order.fee_cents, order.fee_breakdown = None, None
+        order.fee_cents, order.fee_breakdown, order.rate_version_id = None, None, None
     order.status = OrderStatus.held
     await session.commit()
     metrics.ORDERS_INGESTED.labels(hub_id=lmx.hub_id, source_system=lmx.source_system).inc()

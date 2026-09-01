@@ -167,6 +167,8 @@ async def onboard_client(
                 client_id=client.id,
                 sla_tier=rate_input.sla_tier,
                 rate_per_drop_cents=rate_input.rate_per_drop_cents,
+                # The first version, effective immediately (T2.5 A1).
+                effective_from=datetime.now(timezone.utc),
             )
         )
 
@@ -796,6 +798,8 @@ async def approve_signup(
                 client_id=client.id,
                 sla_tier=rate.sla_tier,
                 rate_per_drop_cents=rate.rate_per_drop_cents,
+                # The first version, effective immediately (T2.5 A1).
+                effective_from=datetime.now(timezone.utc),
             )
         )
 
@@ -1068,11 +1072,27 @@ async def list_client_rates(
     session: AsyncSession = Depends(get_db),
     _admin: AuthedOpsUser = Depends(require_admin),
 ) -> list[ClientRateView]:
+    # The rate *in force now*, one per tier - not every version (T2.5 A1). Since 0045 a
+    # tier has a history, and returning all of it here would read as duplicate rates to
+    # anyone looking at the list, including the dashboard. A future version is excluded
+    # for the same reason pricing excludes it: a scheduled change is not today's rate.
+    #
+    # Ordered newest-first and de-duplicated in Python rather than with a window function,
+    # because at pilot scale a client has a handful of tiers and a handful of versions, and
+    # the obvious query is easier to be sure of than a clever one.
+    now = datetime.now(timezone.utc)
     result = await session.execute(
         select(ClientRate)
-        .where(ClientRate.client_id == uuid.UUID(client_id))
-        .order_by(ClientRate.sla_tier)
+        .where(
+            ClientRate.client_id == uuid.UUID(client_id),
+            ClientRate.effective_from <= now,
+        )
+        .order_by(ClientRate.sla_tier, ClientRate.effective_from.desc())
     )
+    current: dict[str, ClientRate] = {}
+    for rate in result.scalars().all():
+        current.setdefault(rate.sla_tier, rate)
+
     return [
         ClientRateView(
             rate_id=str(rate.id),
@@ -1083,7 +1103,7 @@ async def list_client_rates(
             rate_per_weight_unit_cents=rate.rate_per_weight_unit_cents,
             minimum_charge_cents=rate.minimum_charge_cents,
         )
-        for rate in result.scalars().all()
+        for rate in sorted(current.values(), key=lambda r: r.sla_tier)
     ]
 
 
@@ -1094,22 +1114,45 @@ async def upsert_client_rate(
     session: AsyncSession = Depends(get_db),
     _admin: AuthedOpsUser = Depends(require_admin),
 ) -> ClientRateView:
-    """Set or change one tier's rate (docs/ROADMAP.md F5).
+    """Set one tier's rate, as a new version (docs/ROADMAP.md F5, T2.5 A1).
 
     **Changing a rate does not reprice anything already taken.** `fee_cents` and
     `fee_breakdown` are frozen on the order at ingestion, so a card edited mid-month
     affects the next order and not the last hundred - which is what keeps a quote a quote.
     Worth knowing when a client asks why today's edit didn't change this month's statement.
+
+    **This inserts rather than overwrites, since migration 0045.** It used to UPDATE the
+    single row for the pair, which left the orders correct and destroyed the card's own
+    history: after an edit, nothing could say what the rate had been the week before, or
+    which version priced a given drop. Both are the audit trail `H1` asks for. Every edit
+    is now a new row, and the previous version stays exactly as it applied.
+
+    Still a PUT, and still idempotent in the sense that matters - the current rate for a
+    tier is whatever this endpoint was last called with. What changed is that the earlier
+    answers survive.
     """
-    result = await session.execute(
-        select(ClientRate).where(
-            ClientRate.client_id == uuid.UUID(client_id),
-            ClientRate.sla_tier == body.sla_tier,
+    effective_from = datetime.now(timezone.utc)
+
+    # Guard the one case the unique constraint would otherwise reject with a 500: two
+    # edits to the same tier inside the same clock tick. Treated as a correction to the
+    # version just written rather than a second version, because two rates for one tier
+    # starting at the same instant is a contradiction, not history.
+    existing = (
+        await session.execute(
+            select(ClientRate).where(
+                ClientRate.client_id == uuid.UUID(client_id),
+                ClientRate.sla_tier == body.sla_tier,
+                ClientRate.effective_from == effective_from,
+            )
         )
+    ).scalar_one_or_none()
+
+    rate = existing or ClientRate(
+        client_id=uuid.UUID(client_id),
+        sla_tier=body.sla_tier,
+        effective_from=effective_from,
     )
-    rate = result.scalar_one_or_none()
-    if rate is None:
-        rate = ClientRate(client_id=uuid.UUID(client_id), sla_tier=body.sla_tier)
+    if existing is None:
         session.add(rate)
 
     rate.rate_per_drop_cents = body.rate_per_drop_cents
@@ -1120,7 +1163,11 @@ async def upsert_client_rate(
     await session.commit()
 
     logger.info(
-        "client_rate_set", client_id=client_id, sla_tier=body.sla_tier, rate_id=str(rate.id)
+        "client_rate_version_created",
+        client_id=client_id,
+        sla_tier=body.sla_tier,
+        rate_id=str(rate.id),
+        effective_from=effective_from.isoformat(),
     )
     return ClientRateView(rate_id=str(rate.id), **body.model_dump())
 

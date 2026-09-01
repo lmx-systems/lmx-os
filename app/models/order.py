@@ -249,6 +249,23 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # card that may since have changed is not an answer.
     fee_breakdown: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # Which version of the client's rate card produced `fee_cents` (T2.5 A1, migration
+    # 0045). `fee_breakdown` records the arithmetic; this records the *source*, which is
+    # the half that was missing - the breakdown says "base 800 + 12.4 miles x 150" without
+    # saying which card that came from, and once cards have versions those are different
+    # questions.
+    #
+    # A real foreign key with no cascade, matching the reasoning in app/legal/retention.py:
+    # Postgres then refuses to delete a rate version that priced an order, which is the
+    # last line of defence for pricing evidence.
+    #
+    # Null for every order priced before 0045, and for any order the client had no
+    # configured rate for. Null here never means "free" - `fee_cents` carries that
+    # distinction and is null too.
+    rate_version_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("client_rates.id"), nullable=True
+    )
+
     # Autonomy eligibility, captured from the first van so the first partner
     # conversation starts with a measured addressable share of real order flow
     # rather than a projection. Carried now, used later.
