@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.api.admin_routes import upsert_client_rate, upsert_client_sla_term
+from app.api.admin_routes import list_client_rates, upsert_client_rate, upsert_client_sla_term
 from app.billing.credits import assess_credits
 from app.billing.rates import distance_between, price_drop
 from app.billing.service import generate_invoice, invoice_detail_view
@@ -595,8 +595,18 @@ async def test_a_rate_can_be_set_and_changed(db_session, real_redis_client):
         _admin=_admin(),
     )
 
-    assert created.rate_id == updated.rate_id, "upsert, not a second row"
+    # **This assertion was inverted by T2.5 A1 (migration 0045), deliberately.** It used to
+    # read `created.rate_id == updated.rate_id, "upsert, not a second row"`, which pinned
+    # the behaviour that destroyed the rate card's history: an edit overwrote the row, so
+    # nothing could later say what the rate had been, or which version priced a given drop.
+    # A change is now a new version and the old one survives - see
+    # tests/integration/test_client_rate_versioning.py.
+    assert created.rate_id != updated.rate_id, "a change is a new version, not an overwrite"
     assert updated.rate_per_mile_cents == 175
+
+    # The endpoint still answers with the rate in force, which is the part callers rely on.
+    current = await list_client_rates(str(client_id), session=db_session, _admin=_admin())
+    assert [(r.sla_tier, r.rate_per_drop_cents) for r in current] == [("T2", 900)]
 
 
 async def test_a_contradictory_credit_range_is_refused(db_session, real_redis_client):
