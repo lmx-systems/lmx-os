@@ -67,6 +67,13 @@ EDGE = (
     # the dispatch engine, or a comparison harness would become a dispatch dependency
     # - and the whole point is that shadow mode cannot affect what it observes.
     "shadow",
+    # Historical baseline analysis reads two flat files a vendor exported and reduces
+    # them to the control group W9's scorecard is scored against. Edge for both of the
+    # usual reasons: its input shape is negotiated with somebody outside this company
+    # (it is a file format we do not control), and it is a measurement concern that must
+    # never become something the dispatch engine depends on - the baseline exists to
+    # judge the core, so the core cannot be allowed to reach it.
+    "baseline",
     "api",
 )
 
