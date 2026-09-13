@@ -38,3 +38,13 @@ docs/*.zip
 docs/LMX branding */
 docs/~$*
 
+# lmx-dwell/ is a separate analysis project that happens to sit inside this
+# checkout. It is not part of LMX OS and must never be committed here, for a
+# reason worth stating plainly: it holds the design partner's raw operational
+# exports - their company name, their towns, their customers, invoice numbers
+# and revenue - and **this repository is public**. Nothing in the rules above
+# catches a .csv, so without this line a bare `git add .` publishes all of it.
+# See the customer-naming rule in CLAUDE.md, which covers code, tests, fixtures
+# and logs alike.
+lmx-dwell/
+
