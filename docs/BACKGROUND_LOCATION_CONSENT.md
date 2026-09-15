@@ -274,7 +274,7 @@ something the new sensor makes untrue.
 
 | # | Change | Why |
 |---|---|---|
-| 1 | **`app/legal/content/privacy.md` §3** currently reads *"the app records your position at regular intervals."* It must distinguish the two sensors and state that between-stop position is not recorded in the background. | The policy is served and versioned. Shipping the permission against this text means the published statement is wrong on the exact point the permission turns on. |
+| 1 | ~~**`app/legal/content/privacy.md` §3** reads *"the app records your position at regular intervals."*~~ **Done.** §3 now separates the two sensors, states that between-stop position is not recorded in the background, and says a driver may refuse the permission without losing the app. Stop-event retention is a bracketed placeholder. | The policy is versioned and will be served. Shipping the permission against the old text would have made the published statement wrong on the exact point the permission turns on. See the publication-order row in §7. |
 | 2 | **Retention decision: geofence stop events.** `driver_location_pings` is pruned at `location_ping_retention_days` (90) by `app/legal/retention.py`. Stop events are a different object — arrival and departure times are part of the delivery record, and §5.3 above proposes retaining them with it. **Someone has to decide**, and `app/legal/retention.py` needs the answer. | `LEGAL_BRIEF.md` §3 lists retention as a live decision. This adds one. A stated period nothing enforces is the defect that section exists to prevent. |
 | 3 | **`app.json` permission strings** replaced with §4.3. | The current when-in-use string was written before this decision and reads as a different product. |
 | 4 | Add the Play declaration to **0.8's definition of done** in `ROADMAP_1.5.md`. | 0.8 names App Store only. Play's requirement is independent and equally blocking. |
@@ -292,7 +292,8 @@ the text can change.
 |---|---|---|
 | Does the design partner accept §5.1–5.3 as drafted? | Matan | **0.4** — the whole of it |
 | Counsel review of §5 | Rich + counsel | 0.4 sign-off |
-| Retention period for stop events (§6, row 2) | Sourabh + Rich | `app/legal/retention.py`, privacy policy §3 |
+| Retention period for stop events (§6, row 2) | Sourabh + Rich | `app/legal/retention.py`, and publication of the privacy policy |
+| **Publication order.** §3 of the privacy policy now describes the geofence sensor, so the policy must not be published, or given an `effective:` date, until `DRV-2` actually ships. The stop-event placeholder blocks that today — **but it stops blocking the moment the retention row above is answered**, and nothing then checks whether the sensor exists. | Sourabh | publishing the privacy policy |
 | Apple developer account and `eas init` | Sourabh | **`A6`** — and therefore any device testing of `DRV-1`/`DRV-2`, plus `A1` |
 | Play Console account and background-location declaration | Sourabh | Android release |
 
