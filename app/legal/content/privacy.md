@@ -70,18 +70,39 @@ which are checked by a person before you can go on shift. Your shifts, the
 deliveries you made, the proof you captured, exceptions you reported, and payments
 made to you.
 
-**Location.** While you are on duty, the app records your position at regular
-intervals so that we can dispatch work sensibly, give recipients an accurate
-arrival time, and evidence what happened on a delivery. **We do not record your
-location when you are off duty.**
+**Location.** The app records two different things, and the difference between
+them matters more than either on its own.
+
+While you are on duty and the app is open on your screen, it records where you
+are — about every half-minute while you are moving. This is how dispatch sees
+the fleet and offers you the work nearest to you.
+
+Separately, it records the time you arrive at each delivery address on your
+route and the time you leave. It does this automatically, from the addresses
+already on your route, and it keeps doing it while the app is in your pocket
+rather than on your screen. If it only worked on screen it would record the
+deliveries you happened to be looking at the app for, which is not a record of
+your day.
+
+**What we do not record.** Where you are between deliveries while the app is
+not on your screen. Your route is not traced. **Nothing is recorded when you are
+off duty.**
+
+You can refuse the second one, or turn it off later in your phone's settings,
+without losing access to the app. You would go back to marking your arrivals by
+hand.
 
 **Why.** To verify you are entitled to drive and insured, to route and dispatch
-work, to pay you, and to resolve disputes about a delivery.
+work, to tell a recipient accurately when you will arrive, to pay you, and to
+resolve disputes about a delivery.
 
-**How long.** Your location history is kept for ninety days and then deleted
-automatically. Your licence and insurance documents are kept while you drive for us and
-then for **[DRIVER DOCUMENT RETENTION — pending a storage lifecycle rule]**. Delivery and
-payment records are kept for seven years.
+**How long.** Your position history is kept for ninety days and then deleted
+automatically. The times you arrived at and left a delivery belong to the record
+of that delivery, and are kept for **[STOP EVENT RETENTION — pending a decision
+on whether arrival times follow the seven-year delivery record or the ninety-day
+position period]**. Your licence and insurance documents are kept while you drive
+for us and then for **[DRIVER DOCUMENT RETENTION — pending a storage lifecycle
+rule]**. Delivery and payment records are kept for seven years.
 
 ## 4. Text messages and calls
 
