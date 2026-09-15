@@ -370,3 +370,54 @@ async def test_a_superseded_confirmation_cannot_be_reverted(db_session):
         )
     )
     assert len(unmerged) == 1
+
+
+async def test_reverting_a_transitive_merge_undoes_that_merge_and_not_an_earlier_one(db_session):
+    """Regression: the audit row must name the docks the merge actually touched.
+
+    Found in review. `_apply` resolves both sides through their alias chains, so
+    confirming a queued proposal can act on a dock other than the one named when
+    it was queued - routine, because the detector queues every pair up front and
+    a person confirms them in sequence.
+
+    If only `target_location_id` is written back, the row keeps a stale source,
+    and reverting it clears the alias of the *first* merge while leaving the
+    second in place - then repoints shops at a dock that never owned them. The
+    two merges quietly swap places and nothing downstream can see it.
+    """
+    ops_user_id = await _seed_ops_user(db_session)
+    client_id = await _seed_client(db_session)
+
+    x = await resolve_location(db_session, address="1 Real St, Austin, TX")
+    y = await resolve_location(db_session, address="2 Real St, Austin, TX")
+    z = await resolve_location(db_session, address="3 Real St, Austin, TX")
+
+    shop = Shop(
+        client_id=client_id, name="Rides along", address="1 Real St, Austin, TX",
+        lat=30.0, lng=-97.0, location_id=x.id,
+    )
+    db_session.add(shop)
+    await db_session.flush()
+
+    # Both proposals are queued before either is decided - the batch flow.
+    first = await propose_merge(db_session, source=x, target=y, reason="queued first")
+    second = await propose_merge(db_session, source=x, target=z, reason="queued second")
+
+    await confirm_merge(db_session, first, ops_user_id=ops_user_id)
+    applied = await confirm_merge(db_session, second, ops_user_id=ops_user_id)
+
+    # The second merge actually acted on y (x's canonical), not on x.
+    assert applied.source_location_id == y.id, (
+        "the audit row still names the dock the proposal was queued against"
+    )
+    await db_session.refresh(y)
+    assert y.merged_into_id == z.id
+
+    await revert_merge(db_session, applied, ops_user_id=ops_user_id)
+
+    await db_session.refresh(x)
+    await db_session.refresh(y)
+    await db_session.refresh(shop)
+    assert y.merged_into_id is None, "the merge that was reverted should be undone"
+    assert x.merged_into_id == y.id, "the earlier merge must survive untouched"
+    assert shop.location_id == y.id, "the shop goes back where the reverted merge found it"

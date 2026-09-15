@@ -68,7 +68,13 @@ async def propose_duplicate_locations(
     """
     locations = list(
         await session.scalars(
-            select(Location).where(Location.merged_into_id.is_(None)).limit(limit)
+            select(Location)
+            .where(Location.merged_into_id.is_(None))
+            # Ordered because of the limit: without it, a book with more docks
+            # than `limit` hands back a different arbitrary subset each run, so
+            # some duplicate pairs would never reach the queue at all.
+            .order_by(Location.created_at, Location.id)
+            .limit(limit)
         )
     )
     decided = await _already_considered(session)
@@ -326,6 +332,10 @@ async def _apply(
 
     source.merged_into_id = target.id
 
+    # Both sides are written back, not just the target. `_apply` may have
+    # resolved either through an alias chain, and a row that names a dock the
+    # merge did not touch makes `revert_merge` undo the wrong merge.
+    proposal.source_location_id = source.id
     proposal.target_location_id = target.id
     proposal.status = STATUS_APPLIED
     proposal.decision_source = decision_source

@@ -60,7 +60,7 @@ SOURCE_HUMAN = "human"
 _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         NODE_CLASS_WAREHOUSE,
-        (r"warehouse", r"\bdistribution\b", r"\bdc\b", r"fulfil?lment", r"\bdepot\b"),
+        (r"\bwarehouse\b", r"\bdistribution\b", r"\bdc\b", r"\bfulfil?lment\b", r"\bdepot\b"),
     ),
     (
         NODE_CLASS_TRANSFER,
@@ -68,7 +68,7 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         NODE_CLASS_BODY_SHOP,
-        (r"body\s*shop", r"\bcollision\b", r"\bautobody\b", r"\bauto\s+body\b",
+        (r"\bbody\s*shop\b", r"\bcollision\b", r"\bautobody\b", r"\bauto\s+body\b",
          r"\bpaint\s*(?:&|and)\s*body\b"),
     ),
     (
@@ -110,9 +110,9 @@ def infer_node_class(*texts: str | None) -> tuple[str, str] | None:
     what the machine keyed on - "classified dealer on 'ford'" is checkable in a
     second, "classified dealer" is not.
 
-    Pass the account name first and the address second: a street called Warehouse
-    Road should not outrank a business called Smith Collision, and first-match
-    ordering across arguments is what prevents that.
+    Pass account names. **Do not pass an address** - see
+    `classify_unlabelled_locations`. Multiple names are tried in order and the
+    first match wins, so pass them in a deterministic order.
     """
     for text in texts:
         if not text:
@@ -150,11 +150,22 @@ async def classify_unlabelled_locations(
     for location in unlabelled:
         names = list(
             await session.scalars(
-                select(Shop.name).where(Shop.location_id == location.id)
+                select(Shop.name)
+                .where(Shop.location_id == location.id)
+                # Ordered so a dock with two accounts gets the same label every
+                # run. Unordered, "Main Street Shop" and "Smith Collision" would
+                # label the dock `shop` or `body_shop` depending on heap order.
+                .order_by(Shop.created_at, Shop.id)
             )
         )
-        # Account name first, address second - see infer_node_class.
-        guess = infer_node_class(*names, location.address)
+        # Names only. The address is deliberately NOT classified: the rules
+        # contain place-shaped tokens, and a street or city will trip them.
+        # "1200 K St NW, Washington, DC" matches `\bdc\b` and would be labelled
+        # a warehouse - the class PRD-1 treats as +195-271% batch value against
+        # +3-7% for a shop. Napa CA would become a parts store, a street named
+        # Ford a dealership. A street name is weak evidence of what trades on it
+        # and the downside is not symmetric, so it is not evidence we use.
+        guess = infer_node_class(*names)
         if guess is None:
             continue
         location.node_class, location.node_class_evidence = guess

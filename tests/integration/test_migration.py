@@ -3,6 +3,7 @@ Verifies the hand-written migration (migrations/versions/0001_initial_schema.py)
 actually runs cleanly against a real Postgres - never exercised before this.
 """
 import os
+from datetime import datetime, timezone
 
 import pytest
 from alembic import command
@@ -181,14 +182,21 @@ def test_0046_backfills_one_dock_per_distinct_shop_address(_migration_applied):
             for index, address in enumerate(addresses):
                 await conn.execute(
                     text(
-                        "INSERT INTO shop_profiles (id, client_id, name, address, lat, lng) "
-                        "VALUES (:id, :client, :name, :address, 30.26, -97.73)"
+                        "INSERT INTO shop_profiles "
+                        "(id, client_id, name, address, lat, lng, created_at) "
+                        "VALUES (:id, :client, :name, :address, 30.26, -97.73, :created)"
                     ),
                     {
                         "id": uuid.uuid4(),
                         "client": client_id,
                         "name": f"Shop {index}",
                         "address": address,
+                        # Explicit and increasing. These all insert in one
+                        # transaction, and Postgres gives every row in a
+                        # transaction the same now(), so without this "the first
+                        # shop wins" has no defined winner and the display-address
+                        # assertion below would pass or fail on scan order.
+                        "created": datetime(2026, 1, 1, 12, index, tzinfo=timezone.utc),
                     },
                 )
 
@@ -216,6 +224,11 @@ def test_0046_backfills_one_dock_per_distinct_shop_address(_migration_applied):
                 text("DELETE FROM shop_profiles WHERE client_id = :client"),
                 {"client": client_id},
             )
+            # Re-running the upgrade back-filled every shop in the database, not
+            # only the ones planted here, so other rows may point at locations
+            # too. Detach them first: an unscoped DELETE would hit the foreign
+            # key and raise inside this `finally`, masking the real failure.
+            await conn.execute(text("UPDATE shop_profiles SET location_id = NULL"))
             await conn.execute(text("DELETE FROM locations"))
             await conn.execute(text("DELETE FROM clients WHERE id = :id"), {"id": client_id})
             await conn.execute(text("DELETE FROM hubs WHERE id = :id"), {"id": hub_id})

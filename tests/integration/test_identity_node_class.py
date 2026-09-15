@@ -111,9 +111,9 @@ def test_an_unrecognisable_name_is_left_alone():
     assert infer_node_class(None) is None
 
 
-def test_the_account_name_outranks_the_street_name():
-    """A business on Warehouse Road is not a warehouse."""
-    guess = infer_node_class("Smith Collision", "1200 Warehouse Road, Austin, TX")
+def test_the_first_name_given_wins():
+    """Multiple accounts at one dock: order decides, so the caller must order."""
+    guess = infer_node_class("Smith Collision", "Main Street Shop")
     assert guess[0] == NODE_CLASS_BODY_SHOP
 
 
@@ -239,3 +239,59 @@ async def test_a_merged_dock_is_not_classified_twice(db_session):
     assert result["considered"] == 1, "the alias should not have been considered"
     await db_session.refresh(alias)
     assert alias.node_class is None
+
+
+
+async def test_the_address_is_never_classified(db_session):
+    """Regression, found in review.
+
+    The rules contain place-shaped tokens, and an address will trip them. A dock
+    in Washington DC matched `\\bdc\\b` and was labelled a warehouse - the class
+    PRD-1 treats as +195-271% batch value against +3-7% for a shop, so the
+    mislabel lands on the most expensive possible distinction. Napa CA became a
+    parts store and a street named Ford a dealership.
+
+    The classifier now reads account names only.
+    """
+    client_id = await _seed_client(db_session)
+    for name, address in [
+        ("Acme Holdings", "1200 K St NW, Washington, DC 20005"),
+        ("Bartlett LLC", "55 Vineyard Way, Napa, CA 94558"),
+        ("Cromwell Inc", "1 Ford Road, Austin, TX"),
+    ]:
+        await _seed_shop(db_session, client_id, name, address)
+
+    result = await classify_unlabelled_locations(db_session)
+
+    assert result["labelled"] == 0, "an address was classified"
+    unlabelled = list(
+        await db_session.scalars(select(Location).where(Location.node_class.is_not(None)))
+    )
+    assert unlabelled == []
+
+
+async def test_a_dock_with_two_accounts_labels_the_same_way_every_run(db_session):
+    """Regression: the name query had no ORDER BY, so heap order picked the class."""
+    client_id = await _seed_client(db_session)
+    address = "77 Shared Dock Rd, Austin, TX"
+    location = await resolve_location(db_session, address=address)
+    for name in ("Main Street Shop", "Smith Collision"):
+        db_session.add(
+            Shop(client_id=client_id, name=name, address=address, lat=30.0, lng=-97.0,
+                 location_id=location.id)
+        )
+    await db_session.flush()
+
+    await classify_unlabelled_locations(db_session)
+    await db_session.refresh(location)
+    first_answer = location.node_class
+
+    # Clear only the label and run again; the same input must give the same answer.
+    location.node_class = None
+    location.node_class_source = None
+    location.node_class_evidence = None
+    await db_session.flush()
+    await classify_unlabelled_locations(db_session)
+    await db_session.refresh(location)
+
+    assert location.node_class == first_answer

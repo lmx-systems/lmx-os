@@ -135,7 +135,11 @@ def _backfill() -> None:
 
     bind = op.get_bind()
     shops = bind.execute(
-        sa.text("SELECT id, address, lat, lng FROM shop_profiles ORDER BY created_at")
+        # `, id` matters: created_at defaults to now(), which in Postgres is the
+        # TRANSACTION timestamp, so a bulk import shares one value across every
+        # row. Without a tiebreak, which spelling becomes the dock's display
+        # address - and whose coordinates it inherits - is decided by scan order.
+        sa.text("SELECT id, address, lat, lng FROM shop_profiles ORDER BY created_at, id")
     ).fetchall()
 
     # normalized address -> location id, so the second shop at a dock reuses the

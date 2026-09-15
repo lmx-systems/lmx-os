@@ -94,17 +94,20 @@ async def resolve_location(
         return await canonical_location(session, existing)
 
     location = Location(normalized_address=key, address=address, lat=lat, lng=lng)
-    session.add(location)
     try:
-        # Flush rather than commit: resolution is almost always one step inside a
-        # larger unit of work (onboarding a shop, ingesting an order), and the
-        # caller owns the transaction boundary.
-        await session.flush()
+        # A SAVEPOINT, not a plain flush. Resolution is almost always one step
+        # inside a larger unit of work - onboarding writes a Client and a Shop
+        # and then asks for the dock - and the caller owns the transaction
+        # boundary. Losing the race below must undo this INSERT and nothing
+        # else; a session-wide rollback here would silently discard the caller's
+        # own writes and hand back a Location as though all was well.
+        async with session.begin_nested():
+            session.add(location)
+            await session.flush()
     except IntegrityError:
         # Another transaction created the same dock between the SELECT and the
         # INSERT. The unique constraint is what makes that a conflict instead of
         # a duplicate, and the right answer is theirs, not a second row.
-        await session.rollback()
         conflicting = await session.scalar(
             select(Location).where(Location.normalized_address == key)
         )
@@ -112,15 +115,21 @@ async def resolve_location(
             # The IntegrityError was not the race we assumed. Surfacing it beats
             # returning something invented.
             raise
-        return conflicting
+        # Through the chain, same as the hit above: the dock that won the race
+        # may itself be an alias, and handing back an alias is the one thing
+        # this module exists to prevent.
+        return await canonical_location(session, conflicting)
 
     return location
 
 
-# A merge chain longer than this is a bug, not a deep hierarchy. Merges are
-# rare, human-confirmed for the founding set, and `merge_locations` already
-# collapses the source's own aliases onto the target - so a chain of any real
-# depth means something is writing `merged_into_id` directly.
+# Chains are real and grow through ordinary use: applying A->B and then B->C
+# leaves A->B->C, because `_apply` repoints shops but deliberately does not
+# repoint other aliases. Flattening them would be cheaper to read but would
+# break reversibility - a revert of B->C could no longer tell which rows it had
+# collapsed. So chains stay, and this is a sanity bound rather than a promise
+# that they are short: merges are rare and human-confirmed for the founding set,
+# so a chain of 16 means something is writing `merged_into_id` directly.
 _MAX_ALIAS_DEPTH = 16
 
 
