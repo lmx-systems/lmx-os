@@ -16,16 +16,28 @@ from app.identity.merge import (
     reject_merge,
     revert_merge,
 )
+from app.identity.node_class import (
+    NODE_CLASSES,
+    classification_coverage,
+    classify_unlabelled_locations,
+    infer_node_class,
+    set_node_class,
+)
 from app.identity.resolution import canonical_location, resolve_location
 
 __all__ = [
+    "NODE_CLASSES",
     "canonical_location",
+    "classification_coverage",
+    "classify_unlabelled_locations",
     "confirm_merge",
+    "infer_node_class",
     "merge_locations",
     "pending_merges",
     "propose_duplicate_locations",
     "propose_merge",
     "reject_merge",
     "resolve_location",
+    "set_node_class",
     "revert_merge",
 ]

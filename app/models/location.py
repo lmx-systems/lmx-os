@@ -78,6 +78,28 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ForeignKey("locations.id"), nullable=True, index=True
     )
 
+    # What kind of place this is (IDN-3): shop, parts store, dealer, body shop,
+    # warehouse, transfer, municipal. Nullable because an unlabelled dock is an
+    # honest state - IDN-3's target is under 2% unlabelled, not zero.
+    #
+    # It lives on Location rather than Shop because it describes the place, not
+    # the billing relationship: two accounts at one dock are the same kind of
+    # place. PRD-1 groups by this, and the gap it is there to expose is large -
+    # +3-7% batch value at high-frequency shops against +195-271% at warehouse
+    # and transfer nodes.
+    node_class: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
+
+    # Whether a person set this or the classifier guessed it. An inferred label
+    # is never allowed to overwrite a human one, so the two have to be
+    # distinguishable.
+    node_class_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    # For an inferred label, the text the classifier matched on. A reviewer
+    # correcting a label needs to see what it keyed on - "dealer, on 'ford'" is
+    # checkable at a glance, "dealer" is not. Null for a human label, which is
+    # its own evidence.
+    node_class_evidence: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     @property
     def geocoded(self) -> bool:
         return self.lat is not None and self.lng is not None
