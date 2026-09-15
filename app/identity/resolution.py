@@ -91,7 +91,7 @@ async def resolve_location(
         select(Location).where(Location.normalized_address == key)
     )
     if existing is not None:
-        return existing
+        return await canonical_location(session, existing)
 
     location = Location(normalized_address=key, address=address, lat=lat, lng=lng)
     session.add(location)
@@ -115,3 +115,43 @@ async def resolve_location(
         return conflicting
 
     return location
+
+
+# A merge chain longer than this is a bug, not a deep hierarchy. Merges are
+# rare, human-confirmed for the founding set, and `merge_locations` already
+# collapses the source's own aliases onto the target - so a chain of any real
+# depth means something is writing `merged_into_id` directly.
+_MAX_ALIAS_DEPTH = 16
+
+
+async def canonical_location(session: AsyncSession, location: Location) -> Location:
+    """Follow the alias chain to the dock that is actually the place.
+
+    IDN-2. A merged `Location` keeps its row so its address stays a live lookup
+    key; this is what turns that row into an alias rather than a dead end.
+
+    Raises `RuntimeError` on a cycle or an implausibly long chain instead of
+    looping. A cycle means two docks have been merged into each other, which no
+    code path here can produce and which would otherwise hang a request - the
+    loud failure is the point.
+    """
+    seen = {location.id}
+    current = location
+    for _ in range(_MAX_ALIAS_DEPTH):
+        if current.merged_into_id is None:
+            return current
+        nxt = await session.get(Location, current.merged_into_id)
+        if nxt is None:
+            # The FK makes this unreachable short of manual surgery. Returning
+            # the last good dock beats raising, but it is worth not pretending
+            # the chain resolved cleanly.
+            return current
+        if nxt.id in seen:
+            raise RuntimeError(
+                f"alias cycle in locations: {nxt.id} is reachable from itself"
+            )
+        seen.add(nxt.id)
+        current = nxt
+    raise RuntimeError(
+        f"alias chain from {location.id} exceeded {_MAX_ALIAS_DEPTH} hops"
+    )

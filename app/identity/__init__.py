@@ -7,6 +7,25 @@ Classified UNCLASSIFIED in `tests/test_architecture_boundaries.py` - see the
 reason recorded there. In short: this is reference data, not an adapter, and
 the dispatch engine is expected to read it once IDN-4 exists.
 """
-from app.identity.resolution import resolve_location
+from app.identity.merge import (
+    confirm_merge,
+    merge_locations,
+    pending_merges,
+    propose_duplicate_locations,
+    propose_merge,
+    reject_merge,
+    revert_merge,
+)
+from app.identity.resolution import canonical_location, resolve_location
 
-__all__ = ["resolve_location"]
+__all__ = [
+    "canonical_location",
+    "confirm_merge",
+    "merge_locations",
+    "pending_merges",
+    "propose_duplicate_locations",
+    "propose_merge",
+    "reject_merge",
+    "resolve_location",
+    "revert_merge",
+]

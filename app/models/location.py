@@ -32,7 +32,8 @@ over-normalizing silently fuses two real places that differ by a house number,
 and nothing downstream can detect it. A duplicate is visible; a bad merge is
 not. Per §2.2(c) the founding set is merged by a person for exactly this reason.
 """
-from sqlalchemy import Float, String
+from sqlalchemy import Float, ForeignKey, String
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -66,6 +67,21 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lng: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Set when this dock has been declared the same place as another (IDN-2).
+    # The row is kept rather than deleted, and that is the alias map: its
+    # `normalized_address` stays a live lookup key, so the next shop that arrives
+    # spelled this way lands on the canonical dock instead of recreating this one.
+    #
+    # Deleting the absorbed row would undo the merge on the next import, which is
+    # how de-duplication efforts usually fail.
+    merged_into_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("locations.id"), nullable=True, index=True
+    )
+
     @property
     def geocoded(self) -> bool:
         return self.lat is not None and self.lng is not None
+
+    @property
+    def is_merged(self) -> bool:
+        return self.merged_into_id is not None
