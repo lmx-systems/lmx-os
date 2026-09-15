@@ -217,6 +217,7 @@ The app exists and is good. Its location layer is pointed at the wrong job: `src
 | ID | Feature | Status | Done when |
 |---|---|---|---|
 | **DEC-0** | Shadow-mode runner | `RESHAPE` | `app/shadow/recorder.py` records; it does not run a full parallel plan. A full day produces a plan and a recorded delta with zero operational change |
+| **EXP-0** | Historical baseline from the customer's own prior exports | `BUILT` | `app/baseline/` + `scripts/analyze_baseline.py`, merged. Reduces a driver-activity and a stop-invoice export to drops per driver-hour, miles per drop, on-time rate, batch rate, cost per billed stop and a two-file reconciliation. **Strictly weaker than `EXP-1` and superseded by it** — a historical comparison is confounded by season, mix and volume, so this sizes a prospect and seeds `STL-2`; it is not the counterfactual a savings statement rests on |
 | **EXP-1** | Control-arm randomiser — 5–10% dispatched as the customer would have | `NEW` | Arm assigned at intake, immutable, **in the contract before the code** |
 | **EXP-2** | Exploration policy and per-receiver caps | `NEW` | No single dock absorbs more than its share; fragile accounts excludable |
 | **EXP-3** | Arm integrity monitor | `NEW` | A skewed or contaminated arm alerts before a statement is generated |
@@ -303,6 +304,7 @@ app/
   ingestion/      ING-1..4   RESHAPE  adapter registry, router, manifest
   identity/       IDN-1..4   NEW      canonical location_id, alias map, node class
   shadow/         DEC-0      RESHAPE  recorder exists; runner does not
+  baseline/       EXP-0      BUILT    historical control group from vendor exports
   experiment/     EXP-1..3   NEW      control arm, exploration policy, integrity
   learning_loop/  PRD-1..8   RESHAPE  repoint at per-domain predictors (§2.1) — one model per
                                        predictor per vertical, never one model across them
