@@ -3,7 +3,7 @@
 Conventions and hard rules for anyone (human or Claude) working in this repo.
 Kept deliberately short: this is the stuff that is expensive to rediscover or
 costly to get wrong, not a summary of the plan. For the plan, read
-`docs/ROADMAP.md`.
+`docs/ROADMAP_1.5.md` first, then `docs/ROADMAP_RECONCILIATION.md`.
 
 ## Absolute rules
 
@@ -44,7 +44,11 @@ PR that a human reviews. Never assume a commit reached the remote: confirm with
 
 | File | Role |
 |---|---|
-| `docs/ROADMAP.md` | The map — every open item, the decision log, the phased plan. Source of truth for status |
+| `docs/ROADMAP_1.5.md` | **The spine. Source of truth for what is being built and in what order.** Phases, gates, feature IDs (IDN/ING/REC/DRV/EXP/PRD/STL/DEC/CON/TEN/ONB/SUP) |
+| `docs/ROADMAP_RECONCILIATION.md` | **Authority for whether a 1.0 item is still live.** Every lettered item tagged CARRIED / SUPERSEDED / RETIRED / BLOCKED, plus the ~60 already done |
+| `docs/MODEL_AND_DATA_BRIEF.md` | **Authority for what each model is, which library, and what data trains it.** M1–M5, the label economy, collection order. `ROADMAP_1.5.md` §2.1 defers to it |
+| `docs/ROADMAP_SEED_RECONCILIATION.md` | **Authority for how the build maps onto the seed narrative.** Rich's commercial chain (S0–S4) against the build phases (0–5). Read it before quoting a phase number to anyone outside the repo — **the two numbering schemes do not line up** |
+| `docs/ROADMAP.md` | The 1.0 item store and the archaeology — item detail and the three founder decision logs. Source of truth for item **history**, not for what to build next. Check the reconciliation before acting on anything here |
 | `docs/NEXT_STEPS.md` | Row-by-row punch list, updated in place |
 | `docs/ARCHITECTURE.md` | Technical handoff detail, stubs, and best-effort interpretations |
 | `docs/LMX_LINK_PLAN.md` | The order-intake track: contract, design principles, sequence |
@@ -55,6 +59,33 @@ PR that a human reviews. Never assume a commit reached the remote: confirm with
 
 Changing status in one of these means checking the others. All four have
 drifted apart before.
+
+**Reading order for "what should I work on".** `ROADMAP_1.5.md` for the phase
+and its gate → `ROADMAP_RECONCILIATION.md` to see whether a 1.0 item still
+applies → `ROADMAP.md` for the item's detail and history. An item that reads
+"open" in `ROADMAP.md` but `RETIRED` in the reconciliation is **not** work.
+For anything model-shaped, `MODEL_AND_DATA_BRIEF.md` decides the algorithm and
+the library — not a preference expressed anywhere else.
+
+**Jurisdiction, in one line each.** `ROADMAP_1.5.md` says what to build and
+when. `MODEL_AND_DATA_BRIEF.md` says what the models are. `ROADMAP_RECONCILIATION.md`
+says whether a 1.0 item survived. `ROADMAP_SEED_RECONCILIATION.md` says how any
+of it maps onto what the founders tell investors. When two disagree, the one
+whose jurisdiction it is wins, and the other gets corrected in the same change.
+
+**Phase numbers are ambiguous outside this repo.** The seed framework has its
+own phases. In this repo "Phase 2" always means the build phase. Say "seed gate
+S2" for the other one.
+
+**Name the lens.** Every proposed feature serves the investor lens or the
+go-to-market lens (`ROADMAP_1.5.md` §1.1). Naming one is necessary, not
+sufficient — the governing rule below still applies, and §6 forbids several
+things that would pass the lens test comfortably.
+
+**The governing rule for new work:** nothing gets built that does not close a
+gate or produce a measurement. Of the eight gaps standing between us and a
+credible business, two are engineering and both are the same engineering. If
+a task does not trace to a phase gate in `ROADMAP_1.5.md`, stop and ask.
 
 ## Roadmap item prefixes
 
