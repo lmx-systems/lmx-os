@@ -13,6 +13,7 @@ from app.models.driver_document import DriverDocument
 from app.models.driver_location_ping import DriverLocationPing
 from app.models.driver_shift_event import DriverShiftEvent
 from app.models.geocoded_address import GeocodedAddress
+from app.models.location import Location
 from app.models.gig_job import GigJob
 from app.models.gig_payout import GigPayout
 from app.models.hub import Hub
@@ -41,6 +42,7 @@ __all__ = [
     "DriverDocument",
     "DriverLocationPing",
     "GeocodedAddress",
+    "Location",
     "GigJob",
     "GigPayout",
     "Hub",
