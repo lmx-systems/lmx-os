@@ -15,6 +15,7 @@ from app.models.driver_shift_event import DriverShiftEvent
 from app.models.geocoded_address import GeocodedAddress
 from app.models.location import Location
 from app.models.location_merge import LocationMerge
+from app.models.receiver_profile import ReceiverProfile
 from app.models.gig_job import GigJob
 from app.models.gig_payout import GigPayout
 from app.models.hub import Hub
@@ -45,6 +46,7 @@ __all__ = [
     "GeocodedAddress",
     "Location",
     "LocationMerge",
+    "ReceiverProfile",
     "GigJob",
     "GigPayout",
     "Hub",
