@@ -1,0 +1,23 @@
+# Model-training dependencies. Deliberately NOT in requirements.txt.
+#
+# The API container has no business carrying a gradient boosting library for a
+# model that is trained offline, on a schedule, months from now. Keeping these
+# out is what lets `ml/` stay importable-by-nobody and the service image stay
+# small - and it means a training script cannot quietly become a runtime
+# dependency, because the runtime would not have the import.
+#
+# Install separately:  pip install -r requirements-ml.txt
+-r requirements-dev.txt
+
+# MODEL_AND_DATA_BRIEF.md §M2: gradient-boosted binary classifier plus isotonic
+# calibration. LightGBM rather than CatBoost - the founders vetoed a
+# Russian-origin dependency in a company that intends to sell to US enterprise
+# distributors, and the veto stands without argument.
+lightgbm>=4.3.0
+scikit-learn>=1.5.0
+
+# M1b's censored dwell uses survival:aft, which has no LightGBM equivalent.
+xgboost>=2.0.0
+
+numpy>=1.26.0
+pandas>=2.2.0

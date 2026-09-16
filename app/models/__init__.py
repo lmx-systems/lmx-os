@@ -20,6 +20,7 @@ from app.models.location_merge import LocationMerge
 from app.models.receiver_profile import ReceiverProfile
 from app.models.gig_job import GigJob
 from app.models.gig_payout import GigPayout
+from app.models.experiment_assignment import ExperimentAssignment
 from app.models.hub import Hub
 from app.models.hub_closure import HubClosure
 from app.models.invoice import Invoice
@@ -55,6 +56,7 @@ __all__ = [
     "ReceiverProfile",
     "GigJob",
     "GigPayout",
+    "ExperimentAssignment",
     "Hub",
     "HubClosure",
     "Invoice",

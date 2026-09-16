@@ -48,3 +48,11 @@ docs/~$*
 # and logs alike.
 lmx-dwell/
 
+
+# Generated M2 corpora. Synthetic and harmless - no customer data, no real
+# geography - but 78,000 rows is several megabytes of invented deliveries, and
+# a CSV that large sitting in a public repo is the kind of thing somebody
+# eventually opens and mistakes for a book of real orders. The seed reproduces
+# it exactly (scripts/generate_m2_corpus.py), so there is nothing to keep.
+ml/out/
+m2_corpus*.csv
