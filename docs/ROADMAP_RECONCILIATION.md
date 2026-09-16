@@ -18,7 +18,7 @@ Scope: **132 lettered items** across 14 prefixes. Roughly **60 are already done*
 
 | Item | Doc's own words | Maps to |
 |---|---|---|
-| **W9** shadow-mode comparison engine + cutover scorecard | *"fully specified and buildable now"* | `DEC-0` + `STL-1` |
+| **W9** shadow-mode comparison engine + cutover scorecard | *"fully specified and buildable now"* | `DEC-0` + `STL-1` + `EXP-0` |
 | **I3** broaden the annotation vocabulary — parking difficulty, gate/access codes, dock quirks | *"the one remaining pre-pilot item here… buildable since July"* | `IDN-4` |
 | **E1** verify the optimizer against a live Google project | *"one command away"* | `DEC-3` |
 
