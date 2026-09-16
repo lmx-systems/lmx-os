@@ -80,7 +80,12 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         NODE_CLASS_MUNICIPAL,
-        (r"\bcity\s+of\b", r"\bcounty\s+of\b", r"\bmunicipal\b", r"\bpublic\s+works\b",
+        # `dpw`, `boro` and a bare `county`/`township` come from the real
+        # account book - a municipal fleet is written the way the town writes
+        # it, not the way a taxonomy would. "County of X" never appears; "X
+        # County DPW" does.
+        (r"\bcity\s+of\b", r"\bcounty\s+of\b", r"\bcounty\b", r"\bdpw\b",
+         r"\bboro(?:ugh)?\b", r"\btownship\b", r"\bmunicipal\b", r"\bpublic\s+works\b",
          r"\bfire\s+dep(?:t|artment)\b", r"\bpolice\s+dep(?:t|artment)\b",
          r"\bschool\s+district\b", r"\bstate\s+of\b", r"\btransit\s+authority\b"),
     ),
@@ -91,8 +96,14 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         NODE_CLASS_SHOP,
+        # A bare `auto` or `service` lands here rather than in a more specific
+        # class precisely because it is bare: "X Auto Body" and "X Auto Parts"
+        # have already matched above, so anything still carrying `auto` at this
+        # point is a general shop. Order is doing the work - see the note on
+        # _RULES.
         (r"\bshop\b", r"\bgarage\b", r"\bservice\s+cent(?:er|re)\b", r"\brepair\b",
-         r"\btire\b", r"\btyre\b", r"\bmuffler\b", r"\btransmission\b", r"\blube\b"),
+         r"\btire\b", r"\btyre\b", r"\bmuffler\b", r"\btransmission\b", r"\blube\b",
+         r"\bauto\b", r"\bservice\b", r"\bmarine\b"),
     ),
 )
 

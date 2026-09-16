@@ -24,6 +24,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.identity.account_signals import (
+    TIER_HIGH,
+    TIER_WEAK,
+    why_these_accounts_might_be_one_place,
+)
 from app.identity.resolution import canonical_location
 from app.models.location import Location
 from app.models.location_merge import (
@@ -52,51 +57,67 @@ COORDINATE_EPSILON = 0.0003
 
 
 async def propose_duplicate_locations(
-    session: AsyncSession, *, limit: int = 500
+    session: AsyncSession, *, limit: int = 2000
 ) -> list[LocationMerge]:
     """Find dock pairs worth a person's review and queue them.
 
-    Two signals, deliberately simple: near-identical normalized addresses, and
-    near-identical coordinates. Both are things a reviewer can check in a second
-    by looking at the two rows, which matters more than sophistication - a
-    proposal a human cannot quickly verify is a proposal they will rubber-stamp.
+    Compares **accounts**, not addresses. The first version of this compared
+    normalized addresses and coordinates, which turned out to be the wrong
+    signal entirely: on the design partner's real export, address
+    normalisation collapses 230 accounts to 229 and there are no coordinates at
+    all. What does carry the signal is the distributor's own account id, the
+    name, and the postcode - see `account_signals.py` for the rules and where
+    they came from.
 
-    Already-merged docks are skipped as sources, and a pair that has been
-    proposed, rejected or merged before is not proposed again: re-asking a
-    question somebody already answered is how a review queue becomes noise that
-    gets cleared without reading.
+    Address similarity is kept as a last resort, for the case where two records
+    share no account structure but plainly name the same street. It fires
+    rarely and is tiered accordingly.
+
+    Already-merged docks are skipped, and a pair that has been proposed,
+    rejected or merged before is not proposed again: re-asking a question
+    somebody already answered is how a review queue becomes noise that gets
+    cleared without being read.
     """
-    locations = list(
-        await session.scalars(
-            select(Location)
+    # One row per (shop, its dock). A dock reached by several accounts appears
+    # several times, which is correct - the account is what carries the signal.
+    rows = (
+        await session.execute(
+            select(Shop, Location)
+            .join(Location, Shop.location_id == Location.id)
             .where(Location.merged_into_id.is_(None))
-            # Ordered because of the limit: without it, a book with more docks
-            # than `limit` hands back a different arbitrary subset each run, so
-            # some duplicate pairs would never reach the queue at all.
-            .order_by(Location.created_at, Location.id)
+            .order_by(Shop.created_at, Shop.id)
             .limit(limit)
         )
-    )
+    ).all()
     decided = await _already_considered(session)
 
     proposals: list[LocationMerge] = []
-    for index, left in enumerate(locations):
-        for right in locations[index + 1 :]:
-            # Deterministic direction: the older row is the target, so two runs
-            # propose the same pair the same way round and the dedup below works.
-            source, target = _order_pair(left, right)
+    for index, (shop_a, loc_a) in enumerate(rows):
+        for shop_b, loc_b in rows[index + 1 :]:
+            if loc_a.id == loc_b.id:
+                continue  # already the same dock
+
+            source, target = _order_pair(loc_a, loc_b)
             if (source.id, target.id) in decided:
                 continue
 
-            reason = _why_these_might_be_one_place(source, target)
-            if reason is None:
+            verdict = why_these_accounts_might_be_one_place(
+                ref_a=shop_a.external_ref, name_a=shop_a.name, address_a=shop_a.address,
+                ref_b=shop_b.external_ref, name_b=shop_b.name, address_b=shop_b.address,
+            )
+            if verdict is None:
+                verdict = _why_these_addresses_might_match(source, target)
+            if verdict is None:
                 continue
 
+            tier, reason = verdict
             proposal = LocationMerge(
                 source_location_id=source.id,
                 target_location_id=target.id,
                 status=STATUS_PROPOSED,
-                reason=reason,
+                # Tier first, so a reviewer can work the confident ones before
+                # the ambiguous ones. A flat queue gets cleared, not read.
+                reason=f"{tier} - {reason}"[:255],
             )
             session.add(proposal)
             proposals.append(proposal)
@@ -105,6 +126,33 @@ async def propose_duplicate_locations(
     if proposals:
         await session.flush()
     return proposals
+
+
+def _why_these_addresses_might_match(
+    source: Location, target: Location
+) -> tuple[str, str] | None:
+    """The original signals, demoted to a fallback.
+
+    Coordinates are absent from the export we have, and address similarity
+    barely fires on it - but neither will always be true. A geocoded book, or a
+    customer who writes addresses consistently, makes these useful again, and
+    deleting them would mean rediscovering them later.
+    """
+    if (
+        source.geocoded
+        and target.geocoded
+        and abs(source.lat - target.lat) < COORDINATE_EPSILON
+        and abs(source.lng - target.lng) < COORDINATE_EPSILON
+    ):
+        return TIER_HIGH, "same coordinates to within ~30m"
+
+    ratio = SequenceMatcher(
+        None, source.normalized_address, target.normalized_address
+    ).ratio()
+    if ratio >= SIMILARITY_THRESHOLD:
+        return TIER_WEAK, f"addresses {ratio:.2f} similar"
+
+    return None
 
 
 def _order_pair(left: Location, right: Location) -> tuple[Location, Location]:
@@ -117,25 +165,6 @@ def _order_pair(left: Location, right: Location) -> tuple[Location, Location]:
     if (left.created_at, str(left.id)) <= (right.created_at, str(right.id)):
         return right, left
     return left, right
-
-
-def _why_these_might_be_one_place(source: Location, target: Location) -> str | None:
-    """The sentence a reviewer reads, or None if the pair is not a candidate."""
-    if (
-        source.geocoded
-        and target.geocoded
-        and abs(source.lat - target.lat) < COORDINATE_EPSILON
-        and abs(source.lng - target.lng) < COORDINATE_EPSILON
-    ):
-        return "same coordinates to within ~30m"
-
-    ratio = SequenceMatcher(
-        None, source.normalized_address, target.normalized_address
-    ).ratio()
-    if ratio >= SIMILARITY_THRESHOLD:
-        return f"addresses {ratio:.2f} similar"
-
-    return None
 
 
 async def _already_considered(session: AsyncSession) -> set[tuple[UUID, UUID]]:
