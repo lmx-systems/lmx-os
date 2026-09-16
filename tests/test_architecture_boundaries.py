@@ -98,6 +98,12 @@ EDGE = (
 #   hub_calendar - infrastructure and internal operations, not order-shaped.
 #   events      - the in-process hub event bus. Foundation: core publishes to it, edge
 #                 subscribes, and it knows nothing about either.
+#   experiment  - EXP-1..3's control arm. Labels an order at intake; the
+#                 dispatch engine reads the label and this never plans a route,
+#                 so the dependency runs one way. Not Edge - nothing about its
+#                 shape is negotiated outside - and not Core, because a
+#                 measurement apparatus the dispatcher depended on could not be
+#                 switched off for a customer who declined it.
 #   record      - the discipline layer (REC-1..5): what was decided, what was seen
 #                 when it was decided, what happened after. Not Edge - its shape is
 #                 not negotiated with anyone outside. Not Core - it decides nothing
@@ -118,6 +124,7 @@ UNCLASSIFIED = (
     "orders",
     "identity",
     "record",
+    "experiment",
     "gig_platform",
     "events",
     "payroll",

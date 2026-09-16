@@ -5,7 +5,7 @@ use 'Design Partner' / 'Customer Warehouse' as placeholders.
 """
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import DateTime, Float, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -72,6 +72,16 @@ class Client(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # provisional hub and ops assigns the real one at approval, using this.
     # Structured routing of signups to hubs is deferred until there is more
     # than one hub to route between.
+    # EXP-1's gate. A date rather than a boolean on purpose: turning the
+    # control arm on requires stating when this customer agreed to it, which is
+    # a thing you either have or do not. Null means they are not in the
+    # experiment, which is every client until somebody enrols them.
+    control_arm_contracted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # 0.05-0.10, the band the roadmap specifies. Null alongside a null date.
+    control_arm_fraction: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     service_area: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # The applicant's phone. Lives here rather than on ClientUser because it is
     # how ops calls the *company* back to qualify them, which is a fact about
