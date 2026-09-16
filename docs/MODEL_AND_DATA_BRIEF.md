@@ -218,12 +218,12 @@ At the design partner: ~141 stops/day, ~250 operating days, ~229 receivers → *
 | Model | Needs | One partner | Five partners |
 |---|---|---|---|
 | M1 dwell (pooled prior) | ~30 obs per dock | 5–6 weeks | 1–2 weeks |
-| M2 urgency | 500–1,000 observed consequences | 4–6 months | 5–7 weeks |
+| M2 urgency | 500–1,000 observed consequences | **21–41 months** | ~7 months (five partners at full volume) |
 | M3 batch value | Historical pairs | Available now | — |
 | M4 cost vs value | One order book | Available now | — |
 | M5 modality fit | SKU master + ~200 docks surveyed | 6–8 weeks | 3 weeks |
 
-**Breadth beats depth.** Five partners at a fifth of the volume each reach a usable M2 roughly four times faster than one partner at full volume, because the scarce thing is *distinct docks and distinct exception events*, not orders.
+**Breadth beats depth — for two different reasons, which should not be conflated.** For `M2` the gain is simply more total deliveries: five partners *at full volume each* see five times the exception events. For `M5` the gain is structural — dock knowledge **saturates** at one customer's dock count, so volume at an existing customer buys none of it. Five partners at a *fifth* of the volume each is the same total volume and buys no `M2` speedup at all. See `docs/DATA_NEED_BRIEF.md` §3–§4, which derives these and supersedes the M2 row above.
 
 ---
 
