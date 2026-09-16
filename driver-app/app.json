@@ -41,7 +41,10 @@
       ]
     },
     "extra": {
-      "apiBaseUrl": "http://localhost:8000"
+      "apiBaseUrl": "http://localhost:8000",
+      "eas": {
+        "projectId": "80b4057d-d8ff-4171-a58b-59ae0e0a1622"
+      }
     },
     "plugins": [
       "expo-font",
@@ -66,6 +69,7 @@
           "isIosBackgroundLocationEnabled": false
         }
       ]
-    ]
+    ],
+    "owner": "sourabhmiglani"
   }
 }
