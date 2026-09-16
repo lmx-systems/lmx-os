@@ -25,7 +25,8 @@
       "infoPlist": {
         "NSFaceIDUsageDescription": "Unlock LMX Driver with Face ID instead of re-entering a verification code every shift.",
         "NSCameraUsageDescription": "LMX Driver uses the camera to scan parcel barcodes and capture proof-of-delivery photos.",
-        "NSLocationWhenInUseUsageDescription": "LMX Driver shares your location with dispatch while you're on duty, so you get offered the deliveries nearest to you. Location is not shared when you're off duty."
+        "NSLocationWhenInUseUsageDescription": "Shows dispatch where you are while you're on duty, so you're offered the deliveries nearest to you. Your location is not shared when you're off duty.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Records when you arrive at and leave each delivery on your route, so your arrival times are accurate without you having to tap anything. Your location is not recorded between stops, and never when you're off duty."
       }
     },
     "android": {
@@ -37,7 +38,8 @@
       "permissions": [
         "CAMERA",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
       ]
     },
     "extra": {
@@ -64,9 +66,10 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "LMX Driver shares your location with dispatch while you're on duty, so you get offered the deliveries nearest to you. Location is not shared when you're off duty.",
-          "isAndroidBackgroundLocationEnabled": false,
-          "isIosBackgroundLocationEnabled": false
+          "locationWhenInUsePermission": "Shows dispatch where you are while you're on duty, so you're offered the deliveries nearest to you. Your location is not shared when you're off duty.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isIosBackgroundLocationEnabled": true,
+          "locationAlwaysAndWhenInUsePermission": "Records when you arrive at and leave each delivery on your route, so your arrival times are accurate without you having to tap anything. Your location is not recorded between stops, and never when you're off duty."
         }
       ]
     ],

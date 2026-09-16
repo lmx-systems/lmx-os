@@ -20,6 +20,8 @@ import { spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
 import { isStopTerminal, primaryActionForStop, primaryActionLabel, stopLabel } from '../utils/stopStatus';
 import { useTodayRoute } from './useTodayRoute';
+import { LocationDisclosureScreen } from './LocationDisclosureScreen';
+import { markAsked, shouldAskForBackgroundLocation } from '../location/backgroundConsent';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'Home'>;
 
@@ -40,8 +42,24 @@ export function TodayRouteScreen({ navigation }: Props) {
   // tapping the toggle and getting a 409 (docs/ROADMAP.md R4). Same computation
   // the gate uses, so the banner and the refusal can never disagree.
   const [compliance, setCompliance] = useState<DriverCompliance | null>(null);
+  // DRV-2. The disclosure is reachable from Profile, but a driver who never
+  // opens Profile never grants and the sensor stays off for everyone by
+  // default. Asked once, when there is actually a route to measure - agreeing
+  // to background location with no work in front of you is a worse consent and
+  // a worse conversion.
+  const [askingConsent, setAskingConsent] = useState(false);
 
   useRouteEvents(route?.route_id ?? null, useCallback((event) => setRouteChangeEvent(event), []));
+
+  useEffect(() => {
+    let cancelled = false;
+    shouldAskForBackgroundLocation(Boolean(route)).then((should) => {
+      if (!cancelled && should) setAskingConsent(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [route]);
 
   // Report position only while on duty (docs/ROADMAP.md F1). Keyed off
   // isOnline rather than the toggle handler below so that relaunching the app
@@ -94,6 +112,21 @@ export function TodayRouteScreen({ navigation }: Props) {
   const primaryOffer = offers.find((o) => o.offer_id === selectedOfferId) ?? offers[0];
   const otherOffers = offers.filter((o) => o.offer_id !== primaryOffer?.offer_id);
 
+  if (askingConsent) {
+    // A full-screen takeover rather than a banner: this is a consent step, and
+    // Play requires the disclosure to be what a driver sees before the runtime
+    // prompt rather than something alongside it. `markAsked` runs on either
+    // answer - declining is a decision, and re-asking every launch would make
+    // "Not now" meaningless.
+    return (
+      <LocationDisclosureScreen
+        onDecided={() => {
+          void markAsked();
+          setAskingConsent(false);
+        }}
+      />
+    );
+  }
   return (
     <ScreenContainer scroll={!route}>
       <View style={styles.headerRow}>
