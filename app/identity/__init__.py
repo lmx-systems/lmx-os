@@ -23,6 +23,13 @@ from app.identity.node_class import (
     infer_node_class,
     set_node_class,
 )
+from app.identity.profile import (
+    profile_for,
+    refresh_dwell_statistics,
+    set_access,
+    set_autonomy_fit,
+    set_receiving_hours,
+)
 from app.identity.resolution import canonical_location, resolve_location
 
 __all__ = [
@@ -34,10 +41,15 @@ __all__ = [
     "infer_node_class",
     "merge_locations",
     "pending_merges",
+    "profile_for",
     "propose_duplicate_locations",
     "propose_merge",
+    "refresh_dwell_statistics",
     "reject_merge",
     "resolve_location",
+    "set_access",
+    "set_autonomy_fit",
     "set_node_class",
+    "set_receiving_hours",
     "revert_merge",
 ]
