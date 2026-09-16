@@ -175,6 +175,19 @@ export const api = {
 
   arriveAtStop: (stopId: string) => request<Route['stops'][number]>(`/driver/stops/${stopId}/arrive`, { method: 'POST' }),
 
+  // DRV-1. A batch because DRV-4's outbox is the caller and a dead zone
+  // flushes several crossings at once; the endpoint is idempotent on
+  // (stop, kind, occurred_at), so a replay is a no-op rather than a second
+  // arrival that would double a dwell sample.
+  recordGeofenceEvents: (
+    stopId: string,
+    events: { kind: 'enter' | 'exit'; occurred_at: string; accuracy_m?: number | null }[],
+  ) =>
+    request<{ accepted: number; duplicates: number; rejected: number }>(
+      `/driver/stops/${stopId}/geofence-events`,
+      { method: 'POST', body: JSON.stringify({ events }) },
+    ),
+
   scanParcels: (stopId: string, scannedCount: number) =>
     request<Route['stops'][number]>(`/driver/stops/${stopId}/scan`, {
       method: 'POST',

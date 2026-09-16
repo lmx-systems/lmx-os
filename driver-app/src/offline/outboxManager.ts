@@ -145,6 +145,13 @@ class OutboxManager {
         return api.completeStop(item.stopId, item.payload as Parameters<typeof api.completeStop>[1]);
       case 'flag':
         return api.flagStop(item.stopId, item.payload as Parameters<typeof api.flagStop>[1]);
+      case 'geofence':
+        // One crossing per item. The endpoint takes a batch and the server
+        // de-duplicates on (stop, kind, occurred_at), so a retry after a
+        // response we never saw is a no-op rather than a second arrival.
+        return api.recordGeofenceEvents(item.stopId, [
+          item.payload as { kind: 'enter' | 'exit'; occurred_at: string },
+        ]);
     }
   }
 

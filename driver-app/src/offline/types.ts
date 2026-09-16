@@ -1,11 +1,12 @@
-export type OutboxActionType = 'arrive' | 'scan' | 'complete' | 'flag';
+export type OutboxActionType = 'arrive' | 'scan' | 'complete' | 'flag' | 'geofence';
 
 export interface OutboxItem {
   id: string;
   type: OutboxActionType;
   stopId: string;
   // arrive: {}; scan: {scannedCount}; complete: CompleteStopBody-shaped;
-  // flag: {reason, note?} - kept loose here since each type's shape is
+  // flag: {reason, note?}; geofence: {kind, occurred_at} - kept loose here
+  // since each type's shape is
   // only ever read by outboxManager.send(), not by UI code.
   payload: Record<string, unknown>;
   attempts: number;

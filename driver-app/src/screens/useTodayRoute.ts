@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { api } from '../api/client';
+import { stopStopGeofencing, syncStopGeofences } from '../location/stopGeofences';
 import { useAuth } from '../auth/AuthContext';
 import { useAppForeground } from '../hooks/useAppForeground';
 import type { JobOffer, Route } from '../api/types';
@@ -55,6 +56,20 @@ export function useTodayRoute() {
     const id = setInterval(refresh, OFFER_POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, [isForeground, isOnline, route, refresh]);
+
+  // Keep the geofence window on the stops that still need measuring (DRV-1).
+  // Runs on every route change rather than once per shift, because the window
+  // has to advance: iOS monitors 20 regions at most and a real route is longer
+  // than that, so stops are registered a rolling batch at a time as earlier
+  // ones complete. A mid-route insertion (the optimizer can add a stop to an
+  // active route) lands here for the same reason.
+  useEffect(() => {
+    if (!route) {
+      void stopStopGeofencing();
+      return;
+    }
+    void syncStopGeofences(route.stops);
+  }, [route]);
 
   return { route, offers, loading, isOnline, refresh, setRoute };
 }
