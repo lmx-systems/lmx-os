@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { DarkTheme, DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import type { Theme as NavigationTheme } from '@react-navigation/native';
 import {
@@ -11,6 +11,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { loadApiBaseUrl } from './src/api/serverUrl';
 import { AuthProvider } from './src/auth/AuthContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { OutboxProvider } from './src/offline/OutboxContext';
@@ -24,14 +25,25 @@ export default function App() {
     Inter_600SemiBold,
     Inter_700Bold,
   });
+  // Which server this install talks to, if somebody has set one. Read before
+  // the first request rather than lazily: AuthContext refreshes a token on
+  // mount, and a request that went to the build-time default first would fail
+  // in a way that looks like bad credentials rather than a wrong address.
+  const [serverResolved, setServerResolved] = useState(false);
 
   useEffect(() => {
-    if (fontsLoaded || fontError) {
+    loadApiBaseUrl().finally(() => setServerResolved(true));
+  }, []);
+
+  const ready = (fontsLoaded || fontError) && serverResolved;
+
+  useEffect(() => {
+    if (ready) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError]);
+  }, [ready]);
 
-  if (!fontsLoaded && !fontError) {
+  if (!ready) {
     return null;
   }
 

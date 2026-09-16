@@ -1,4 +1,4 @@
-import Constants from 'expo-constants';
+import { getApiBaseUrl } from './serverUrl';
 
 import type {
   AuthToken,
@@ -23,11 +23,12 @@ import type {
   UploadUrlResult,
 } from './types';
 
-// app.json's extra.apiBaseUrl is the dev default (local backend). Point
-// this at the real LMX OS deployment for anything beyond a simulator
-// pointed at localhost - see driver-app/README.md.
-export const API_BASE_URL: string =
-  (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ?? 'http://localhost:8000';
+// app.json's extra.apiBaseUrl is the build-time default; a device can point
+// somewhere else at runtime (src/api/serverUrl.ts). Resolved per call rather
+// than captured once, so changing the address takes effect without a relaunch.
+export function apiBaseUrl(): string {
+  return getApiBaseUrl();
+}
 
 let authToken: string | null = null;
 
@@ -59,7 +60,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers.Authorization = `Bearer ${authToken}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  const response = await fetch(`${apiBaseUrl()}${path}`, { ...options, headers });
 
   if (!response.ok) {
     let detail = response.statusText;

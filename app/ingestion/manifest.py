@@ -71,6 +71,16 @@ _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
         "po number",
         "po",
     ),
+    "deadline": (
+        "service level",
+        "priority code",
+        "delivery type",
+        "priority",
+        "urgency",
+        "service",
+        "deadline",
+        "rush",
+    ),
     "drop_contact_name": (
         "delivery contact",
         "contact name",
@@ -84,6 +94,58 @@ _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+# What a counter system writes in its priority column, mapped to the four
+# choices §2.2 principle 4 already defines. RUSH lands on `within_the_hour`
+# rather than `now` to match the Epicor adapter, where PriorityCode RUSH
+# classifies T1 - two intake paths that disagree about what RUSH means would be
+# worse than neither supporting it.
+_DEADLINE_WORDS: dict[str, str] = {
+    "now": "now",
+    "asap": "now",
+    "hot": "now",
+    "hot shot": "now",
+    "hotshot": "now",
+    "immediate": "now",
+    "emergency": "now",
+    "rush": "within_the_hour",
+    "urgent": "within_the_hour",
+    "expedite": "within_the_hour",
+    "expedited": "within_the_hour",
+    "1 hour": "within_the_hour",
+    "within the hour": "within_the_hour",
+    "today": "today",
+    "normal": "today",
+    "standard": "today",
+    "routine": "today",
+    "regular": "today",
+    "same day": "today",
+    "tomorrow": "tomorrow",
+    "next day": "tomorrow",
+    "overnight": "tomorrow",
+}
+
+
+def parse_deadline_word(value: str | None) -> str | None:
+    """A priority cell as a DeadlineChoice, or None when the cell is empty.
+
+    Raises `ValueError` on a word we do not know, which the caller turns into a
+    row error. That is deliberate and it is the asymmetry that decides it:
+    defaulting an unrecognised priority to `today` would quietly downgrade a
+    rush order to a 90-minute hold, and the customer would find out when it
+    arrived late. A rejected row is visible immediately and costs one line of a
+    manifest - the other rows still import, because this file is never
+    all-or-nothing.
+    """
+    if value is None:
+        return None
+    cleaned = " ".join(value.strip().casefold().replace("-", " ").replace("_", " ").split())
+    if not cleaned:
+        return None
+    if cleaned in _DEADLINE_WORDS:
+        return _DEADLINE_WORDS[cleaned]
+    raise ValueError(cleaned)
+
+
 @dataclass(frozen=True)
 class ParsedRow:
     # 1-based and counting the header, so it matches what the dispatcher sees in
@@ -93,6 +155,9 @@ class ParsedRow:
     drop_address: str
     reference: str | None
     drop_contact_name: str | None
+    #: None when the file says nothing, in which case the upload's own deadline
+    #: applies. A row that names its own urgency overrides it.
+    deadline: str | None = None
 
 
 @dataclass(frozen=True)
@@ -185,12 +250,15 @@ def parse_manifest(text: str) -> ParsedManifest:
         )
     reference_column = _match_column(headers, "reference")
     contact_column = _match_column(headers, "drop_contact_name")
+    deadline_column = _match_column(headers, "deadline")
 
     mapping = {"drop_address": address_column}
     if reference_column:
         mapping["reference"] = reference_column
     if contact_column:
         mapping["drop_contact_name"] = contact_column
+    if deadline_column:
+        mapping["deadline"] = deadline_column
 
     rows: list[ParsedRow] = []
     errors: list[RowError] = []
@@ -226,12 +294,27 @@ def parse_manifest(text: str) -> ParsedManifest:
             )
             continue
 
+        try:
+            deadline = parse_deadline_word(_cell(raw, deadline_column, 40))
+        except ValueError as unknown:
+            errors.append(
+                RowError(
+                    line_number=line_number,
+                    message=(
+                        f"We don't recognise the priority '{unknown}'. Use one of: "
+                        "now, rush, today, tomorrow."
+                    ),
+                )
+            )
+            continue
+
         rows.append(
             ParsedRow(
                 line_number=line_number,
                 drop_address=address,
                 reference=_cell(raw, reference_column, 120),
                 drop_contact_name=_cell(raw, contact_column, 120),
+                deadline=deadline,
             )
         )
 

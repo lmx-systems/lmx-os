@@ -35,6 +35,10 @@ export type ProfileStackParamList = {
   // change their mind - and one who granted has to be able to see what they
   // agreed to without digging through system settings.
   LocationDisclosure: undefined;
+  // Which LMX OS this install talks to (src/api/serverUrl.ts). Not hidden
+  // behind a debug flag: pointing a real install at staging is a pilot need,
+  // and the build-time default is useless on a handset.
+  Server: undefined;
   EditVehicle: undefined;
   Documents: undefined;
   PaymentMethod: undefined;

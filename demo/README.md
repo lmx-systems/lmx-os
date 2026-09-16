@@ -13,7 +13,8 @@ driver automatically.
 | `epicor_sample_order.json` | One sample Epicor webhook payload — a rush brake-parts order. Field shape matches `app/ingestion/adapters/epicor.py`. |
 | `seed_demo_data.py` | Creates the one Hub / Client / Shop / Driver this payload needs to actually ingest and dispatch. Safe to re-run. |
 | `send_demo_order.py` | Sends the order, watches it get classified and automatically dispatched, prints each step. |
-| `ids.py` | Shared, fixed IDs so both scripts agree on which Hub/Client/Shop/Driver they mean. |
+| `ids.py` | Shared, fixed IDs (and the driver's phone) so the scripts agree on which Hub/Client/Shop/Driver they mean. |
+| `run_full_loop.py` | **The whole pipeline in one command** - a CSV manifest lands, the hold queue holds it, the optimizer offers it, and a driver delivers it. |
 
 ## Running it
 
@@ -59,3 +60,39 @@ Still not persisted: which route/stop an order landed on, or route
 sequencing/ETAs for a driver's shift — that's `routes`/`stops` persistence,
 tied to the driver app (component 7), and a separate, larger piece of work
 than this status write-back.
+
+
+## The full loop: CSV in, delivered out
+
+`send_demo_order.py` stops at "dispatched", which is where the interesting half
+begins. `run_full_loop.py` carries on to the end:
+
+```
+python -m demo.seed_demo_data
+python -m scripts.create_ops_user --email demo@lmxit.com --password "demo-password" --name "Demo" --role admin
+python -m scripts.create_client_user --client-id <CLIENT_ID from the seeder> \
+    --email demo-client@example.com --password "demo-password-123" --name "Demo Client" --role admin
+python -m demo.run_full_loop
+```
+
+It drops a CSV manifest the way a distributor would, waits out the hold,
+accepts the offer as the driver, records a geofence crossing at every stop, and
+delivers. Roughly two minutes, most of it the HOT_SHOT hold window.
+
+**Every call is a real HTTP endpoint** - no internal function calls, no
+database writes of its own. If it passes, the same calls work from the driver
+app, because they are the same calls.
+
+**It needs no external service.** Without `GOOGLE_CLOUD_PROJECT_ID` the
+optimizer uses its nearest-neighbour stub; without Twilio the OTP comes back in
+the response. Both are deliberate unconfigured-to-stub paths.
+
+### What it does not show
+
+- **A live routing solve.** The stub does not model time, so sequencing and
+  ETAs are not what Google would return (`DEC-3`/`E1`).
+- **Any SMS.** Shop and recipient notifications go to the Twilio stub.
+- **Real geography.** The addresses are Austin; the design partner is not.
+- **A real phone.** The script plays the driver over HTTP. To use the app
+  itself, set the server address in the app's Profile - the built-in default is
+  `localhost`, which on a handset means the handset.

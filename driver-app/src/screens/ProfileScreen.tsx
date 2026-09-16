@@ -5,6 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { api } from '../api/client';
+import { getApiBaseUrl } from '../api/serverUrl';
 import { useAuth } from '../auth/AuthContext';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -115,6 +116,16 @@ export function ProfileScreen({ navigation }: Props) {
           <View style={styles.rowText}>
             <Text style={styles.rowBody}>Arrival times</Text>
             <Text style={styles.rowSmall}>What the app records at a delivery, and what it doesn&apos;t</Text>
+          </View>
+          <ChevronRight size={20} color={colors.textMuted} />
+        </Card>
+      </Pressable>
+
+      <Pressable onPress={() => navigation.navigate('Server')}>
+        <Card style={styles.row}>
+          <View style={styles.rowText}>
+            <Text style={styles.rowBody}>Server</Text>
+            <Text style={styles.rowSmall}>{getApiBaseUrl()}</Text>
           </View>
           <ChevronRight size={20} color={colors.textMuted} />
         </Card>

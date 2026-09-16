@@ -36,6 +36,7 @@ from app.ingestion.service import (
 )
 from app.client_auth.dependencies import AuthedClient, get_current_client, require_client_admin
 from app.ingestion.manifest import ManifestUnreadable, parse_manifest
+from app.optimizer.event_trigger import dispatch_event_bus
 from app.models.client_api_key import ClientApiKey, mint_api_key
 from app.models.client_webhook import (
     ClientWebhookEndpoint,
@@ -1015,6 +1016,19 @@ async def submit_orders_batch(
         used_remembered_shop=body.pickup_shop_id is not None,
         entry_seconds=body.entry_seconds,
     )
+    # A newly-held order is a "meaningful event" - it may have a cluster-mate
+    # already waiting, or be releasable immediately if there is nothing to
+    # commingle with. `app/ingestion/router.py` publishes this for the webhook
+    # path; without the same publish here, an order that arrived through the
+    # portal - web form, bulk paste, or CSV manifest - sat in the hold queue
+    # until some unrelated event happened to trigger a cycle. Every LMX Link
+    # order was affected, which is the whole intake track.
+    #
+    # Published once per request rather than once per order: a 40-row manifest
+    # firing 40 cycles would be 40 solves of the same queue.
+    if accepted:
+        await dispatch_event_bus.publish(str(client_row.hub_id), "order_held")
+
     return ClientOrderBatchResult(
         accepted=accepted, failed=len(results) - accepted, results=results
     )
@@ -1094,6 +1108,10 @@ async def submit_order(
         used_remembered_shop=body.pickup_shop_id is not None,
         entry_seconds=body.entry_seconds,
     )
+
+    # Same reason as the batch path above: without this, a single order placed
+    # through the portal waits for somebody else's event.
+    await dispatch_event_bus.publish(str(client_row.hub_id), "order_held")
 
     return ClientOrderResult(
         order_id=str(order.id),
@@ -1490,37 +1508,48 @@ async def upload_order_manifest(
     # manifest legitimately runs to 40 rows and beyond (T3), so the answer is several
     # bounded calls rather than one unbounded one, which keeps the paste path's
     # guarantee intact instead of quietly weakening it for everyone.
-    for offset in range(0, len(parsed.rows), MAX_BATCH_ROWS):
-        chunk = parsed.rows[offset : offset + MAX_BATCH_ROWS]
-        batch = await submit_orders_batch(
-            ClientOrderBatchBody(
-                pickup_shop_id=pickup_shop_id,
-                pickup_address=pickup_address,
-                deadline=deadline,
-                rows=[
-                    ClientOrderBatchRow(
-                        drop_address=row.drop_address,
-                        reference=row.reference,
-                        drop_contact_name=row.drop_contact_name,
-                    )
-                    for row in chunk
-                ],
-            ),
-            client=client,
-            session=session,
-        )
-        # Back to line numbers. The batch result is indexed by position within its own
-        # chunk, which is neither the file's numbering nor the dispatcher's.
-        for row_result in batch.results:
-            source_row = chunk[row_result.index]
-            results.append(
-                ManifestRowResult(
-                    line_number=source_row.line_number,
-                    drop_address=row_result.drop_address,
-                    order=row_result.order,
-                    error=row_result.error,
-                )
+    # Grouped by deadline before chunking, because a manifest may state its own
+    # urgency per row (a `Priority` column) while the batch path takes one
+    # deadline for a whole call. Grouping keeps that path untouched - a second
+    # way to classify an order is exactly what §1.1 forbids - and the sort at
+    # the end puts the file back in its own order, so a dispatcher still reads
+    # results against the lines they uploaded.
+    by_deadline: dict[str, list] = {}
+    for row in parsed.rows:
+        by_deadline.setdefault(row.deadline or deadline, []).append(row)
+
+    for group_deadline, group_rows in by_deadline.items():
+        for offset in range(0, len(group_rows), MAX_BATCH_ROWS):
+            chunk = group_rows[offset : offset + MAX_BATCH_ROWS]
+            batch = await submit_orders_batch(
+                ClientOrderBatchBody(
+                    pickup_shop_id=pickup_shop_id,
+                    pickup_address=pickup_address,
+                    deadline=group_deadline,
+                    rows=[
+                        ClientOrderBatchRow(
+                            drop_address=row.drop_address,
+                            reference=row.reference,
+                            drop_contact_name=row.drop_contact_name,
+                        )
+                        for row in chunk
+                    ],
+                ),
+                client=client,
+                session=session,
             )
+            # Back to line numbers. The batch result is indexed by position within its own
+            # chunk, which is neither the file's numbering nor the dispatcher's.
+            for row_result in batch.results:
+                source_row = chunk[row_result.index]
+                results.append(
+                    ManifestRowResult(
+                        line_number=source_row.line_number,
+                        drop_address=row_result.drop_address,
+                        order=row_result.order,
+                        error=row_result.error,
+                    )
+                )
 
     results.sort(key=lambda r: r.line_number)
     accepted = sum(1 for r in results if r.order is not None)

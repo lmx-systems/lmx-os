@@ -16,6 +16,7 @@ import { ProfileScreen } from '../screens/ProfileScreen';
 import { SignInScreen } from '../screens/SignInScreen';
 import { StopDetailScreen } from '../screens/StopDetailScreen';
 import { TodayRouteScreen } from '../screens/TodayRouteScreen';
+import { ServerScreen } from '../screens/ServerScreen';
 import { SupportScreen } from '../screens/SupportScreen';
 import { ScorecardScreen } from '../screens/ScorecardScreen';
 import { TripHistoryScreen } from '../screens/TripHistoryScreen';
@@ -80,6 +81,7 @@ function ProfileNavigator() {
       <ProfileStack.Screen name="Documents" component={DocumentsScreen} options={{ title: 'Documents' }} />
       <ProfileStack.Screen name="PaymentMethod" component={PaymentMethodScreen} options={{ title: 'Payment method' }} />
       <ProfileStack.Screen name="Support" component={SupportScreen} options={{ title: 'Contact support' }} />
+      <ProfileStack.Screen name="Server" component={ServerScreen} options={{ title: 'Server' }} />
       <ProfileStack.Screen
         name="LocationDisclosure"
         component={LocationDisclosureRoute}
