@@ -413,3 +413,71 @@ async def test_a_utf8_bom_does_not_become_part_of_the_first_header(
     )
 
     assert result.accepted == 1
+
+
+class TestPerRowUrgency:
+    """A manifest can say how urgent each row is (the `Priority` column).
+
+    Without it every row takes the upload's single deadline, so a file
+    containing one genuinely rush order and thirty routine ones either holds
+    the rush order for ninety minutes or treats the whole file as urgent.
+    Neither is what the dispatcher meant.
+    """
+
+    def test_a_priority_column_is_recognised_by_several_names(self):
+        for header in ("Priority", "Urgency", "Service Level", "Priority Code"):
+            parsed = parse_manifest(f"Delivery Address,{header}\n1 Main St,RUSH\n")
+            assert parsed.column_mapping.get("deadline") == header, header
+            assert parsed.rows[0].deadline == "within_the_hour"
+
+    @pytest.mark.parametrize(
+        "word,expected",
+        [
+            ("RUSH", "within_the_hour"),
+            ("rush", "within_the_hour"),
+            ("Urgent", "within_the_hour"),
+            ("HOT SHOT", "now"),
+            ("hot-shot", "now"),
+            ("ASAP", "now"),
+            ("NORMAL", "today"),
+            ("Standard", "today"),
+            ("Same Day", "today"),
+            ("Tomorrow", "tomorrow"),
+            ("next day", "tomorrow"),
+        ],
+    )
+    def test_the_words_a_counter_system_actually_writes(self, word, expected):
+        parsed = parse_manifest(f"Delivery Address,Priority\n1 Main St,{word}\n")
+        assert parsed.rows[0].deadline == expected
+
+    def test_rush_means_the_same_here_as_it_does_to_the_webhook(self):
+        """The Epicor adapter classifies PriorityCode RUSH as T1.
+
+        Two intake paths disagreeing about what RUSH means would be worse than
+        one of them not supporting it - the same word would produce a
+        different promise depending on how the order arrived.
+        """
+        parsed = parse_manifest("Delivery Address,Priority\n1 Main St,RUSH\n")
+        assert parsed.rows[0].deadline == "within_the_hour"
+
+    def test_an_empty_cell_defers_to_the_upload(self):
+        parsed = parse_manifest("Delivery Address,Priority\n1 Main St,\n")
+        assert parsed.rows[0].deadline is None
+
+    def test_a_word_we_do_not_know_rejects_that_row_and_only_that_row(self):
+        """Defaulting an unrecognised priority to `today` would quietly
+        downgrade a rush order to a ninety-minute hold, and the customer would
+        find out when it arrived late. A rejected row is visible immediately."""
+        parsed = parse_manifest(
+            "Delivery Address,Priority\n1 Main St,SUPERFAST\n2 Main St,RUSH\n"
+        )
+        assert len(parsed.rows) == 1
+        assert parsed.rows[0].drop_address == "2 Main St"
+        assert len(parsed.errors) == 1
+        assert parsed.errors[0].line_number == 2
+        assert "superfast" in parsed.errors[0].message.lower()
+
+    def test_a_file_with_no_priority_column_is_unchanged(self):
+        parsed = parse_manifest("Delivery Address\n1 Main St\n")
+        assert "deadline" not in parsed.column_mapping
+        assert parsed.rows[0].deadline is None

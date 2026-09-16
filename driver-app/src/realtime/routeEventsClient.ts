@@ -1,6 +1,6 @@
 import EventSource from 'react-native-sse';
 
-import { API_BASE_URL, getAuthToken } from '../api/client';
+import { apiBaseUrl, getAuthToken } from '../api/client';
 
 export interface RouteChangeEvent {
   type: 'route_updated';
@@ -21,7 +21,7 @@ export interface RouteChangeEvent {
 // convention instead of needing a token-in-query-string workaround.
 export function connectRouteEvents(onEvent: (event: RouteChangeEvent) => void): () => void {
   const token = getAuthToken();
-  const es = new EventSource<'route_updated'>(`${API_BASE_URL}/driver/me/route-events`, {
+  const es = new EventSource<'route_updated'>(`${apiBaseUrl()}/driver/me/route-events`, {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
 

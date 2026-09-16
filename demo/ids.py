@@ -16,6 +16,11 @@ CLIENT_ID = uuid.uuid5(_NAMESPACE, "lmx-demo-client")
 SHOP_ID = uuid.uuid5(_NAMESPACE, "lmx-demo-shop")
 DRIVER_ID = uuid.uuid5(_NAMESPACE, "lmx-demo-driver")
 
+# The seeded driver's number. Here rather than duplicated in each script for
+# the same reason the UUIDs are: run_full_loop.py signs in as this driver, and
+# a second copy of the number is a second thing to get wrong.
+DRIVER_PHONE = "+14045550100"
+
 # Matches "ShipToNum" in demo/epicor_sample_order.json - this is how a real
 # Epicor payload gets matched back to a shop_profiles row (see
 # app/ingestion/service.py's shop lookup by external_ref).
