@@ -182,10 +182,10 @@ The app exists and is good. Its location layer is pointed at the wrong job: `src
 
 | ID | Feature | Status | Done when |
 |---|---|---|---|
-| **IDN-1** | `Location` table in `app/identity/`, one row per physical dock; `Shop.location_id` FK, backfilled (§2.2b) | `NEW` | Every historical stop resolves to exactly one dock |
-| **IDN-2** | Alias map + merge review queue. **Human-confirms the founding ~230, auto-merge after, every merge audited and reversible** (§2.2c) | `NEW` | The five duplicate body-shop records collapse to one dock, and the merge is in the audit log |
-| **IDN-3** | Node-class labelling (shop / parts store / dealer / body shop / warehouse / transfer / municipal) | `NEW` | All ~230 accounts classified; unlabelled below 2% |
-| **IDN-4** | Receiver profile store | `NEW` | Dwell, hours, access and autonomy flags queryable per dock |
+| **IDN-1** | `Location` table in `app/identity/`, one row per physical dock; `Shop.location_id` FK, backfilled (§2.2b) | `BUILT` | `app/identity/resolution.py`, merged. Placeholder addresses (`N/A`) are refused rather than normalised into one fictional dock |
+| **IDN-2** | Alias map + merge review queue. **Human-confirms the founding ~230, auto-merge after, every merge audited and reversible** (§2.2c) | `BUILT` | `app/identity/merge.py`, merged. Built on UDID root/branch rather than coordinates, which the export does not carry; requiring two independent signals cut 192 candidates to 78 |
+| **IDN-3** | Node-class labelling (shop / parts store / dealer / body shop / warehouse / transfer / municipal) | `BUILT, DONE-WHEN UNMET` | `app/identity/node_class.py`, merged. **36.2% of the 229 receivers are still `unknown` against a target of under 2%**, and account names alone will not close it — the export carries no industry code. Needs a decision: a person labels the tail, or the target moves |
+| **IDN-4** | Receiver profile store | `BUILT` | `app/identity/profile.py`, merged. Geofence evidence is preferred over driver taps per dock |
 
 > Start here — it is days of work. The design partner's export has **230 customer IDs → 224 names → an unknown smaller number of physical docks**: five records for one body shop across two ID roots, one shop twice with its city spelled with zeros for O's, one record with city/state/zip literally `N/A`. Until identity holds still every per-dock number is wrong, and it has already put a withdrawn figure in investor materials.
 
@@ -202,10 +202,10 @@ The app exists and is good. Its location layer is pointed at the wrong job: `src
 
 | ID | Feature | Status | Done when |
 |---|---|---|---|
-| **REC-1** | Immutable decision log — feature snapshot at decision time | `RESHAPE` | `shadow_decision` is the seed. A decision replays to reproduce its inputs exactly; **no field may reference data created after the decision** |
+| **REC-1** | Immutable decision log — feature snapshot at decision time | `BUILT` | `app/record/decisions.py`, merged (#48). Append-only at the database; a replay that recomputes a different input hash raises rather than returning a plausible answer |
 | **REC-2** | Execution trace — geofence, warehouse, exceptions, actual cost | `RESHAPE` | `driver_location_ping` and `driver_shift_event` exist; stop-level arrive/depart does not |
-| **REC-3** | Outcome ledger | `NEW` | Outcomes attach by key without touching the decision row |
-| **REC-4** | Linkage flag engine — open return on the same part, duplicate order across branches, repeat visit today | `NEW` | The open-return-and-reorder case fires on historical data |
+| **REC-3** | Outcome ledger | `BUILT` | `app/record/outcomes.py`, merged (#48). Values are copied, not referenced, so a later edit cannot move a replay. Supersede requires a reason |
+| **REC-4** | Linkage flag engine — open return on the same part, duplicate order across branches, repeat visit today | `BUILT` | `app/record/linkage.py`, merged (#48). All three detectors |
 | **REC-5** | **Data dictionary** — dwell, stop, order, route defined in writing | `NEW` | One page, signed by all three founders. Three sources currently report three different stop counts for the same window |
 
 ---
@@ -216,7 +216,7 @@ The app exists and is good. Its location layer is pointed at the wrong job: `src
 
 | ID | Feature | Status | Done when |
 |---|---|---|---|
-| **DEC-0** | Shadow-mode runner | `RESHAPE` | `app/shadow/recorder.py` records; it does not run a full parallel plan. A full day produces a plan and a recorded delta with zero operational change |
+| **DEC-0** | Shadow-mode runner | `RESHAPE` | `app/shadow/divergence.py` computes the delta and `scripts/shadow_day.py` runs a cycle and reports a window. **Still open: nothing runs the cycle on a schedule**, and cadence is a real choice — the dispatch lead is bounded below by how often it runs. Cost-per-drop and on-time deltas are refused here by design: the shadow plan was never driven, so `EXP-1` is the measurement |
 | **EXP-0** | Historical baseline from the customer's own prior exports | `BUILT` | `app/baseline/` + `scripts/analyze_baseline.py`, merged. Reduces a driver-activity and a stop-invoice export to drops per driver-hour, miles per drop, on-time rate, batch rate, cost per billed stop and a two-file reconciliation. **Strictly weaker than `EXP-1` and superseded by it** — a historical comparison is confounded by season, mix and volume, so this sizes a prospect and seeds `STL-2`; it is not the counterfactual a savings statement rests on |
 | **EXP-1** | Control-arm randomiser — 5–10% dispatched as the customer would have | `NEW` | Arm assigned at intake, immutable, **in the contract before the code** |
 | **EXP-2** | Exploration policy and per-receiver caps | `NEW` | No single dock absorbs more than its share; fragile accounts excludable |
