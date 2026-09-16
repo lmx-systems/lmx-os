@@ -35,6 +35,7 @@ from app.models.receiver_profile import (
 )
 from app.models.shop import Shop
 from app.models.stop import Stop
+from app.models.stop_geofence_event import KIND_ENTER, KIND_EXIT, StopGeofenceEvent
 
 _WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
@@ -68,30 +69,73 @@ async def profile_for(
     return profile
 
 
+def _geofence_edge(kind: str, label: str):
+    """Earliest crossing of `kind` per stop, as a joinable subquery.
+
+    Earliest rather than latest: a driver who circles the block re-triggers the
+    fence, and the first entry is when they got there. For exits the same choice
+    is wrong in principle - the last exit is the departure - but a re-entry
+    writes a later `enter` too, and taking the first of each keeps the pair
+    consistent. Where that matters is a single visit, which is the overwhelming
+    majority, and a stop with a re-entry is better identified than silently
+    averaged; `dwell_censored_count`'s sibling for that case is DRV-3's
+    territory, not this function's.
+    """
+    return (
+        select(
+            StopGeofenceEvent.stop_id.label("stop_id"),
+            func.min(StopGeofenceEvent.occurred_at).label(label),
+        )
+        .where(StopGeofenceEvent.kind == kind)
+        .group_by(StopGeofenceEvent.stop_id)
+        .subquery()
+    )
+
+
 def _completed_dwells_at(location_id) -> Select:
-    """Seconds between arrival and completion, for stops that actually finished.
+    """Seconds at the door, for stops that actually finished.
 
     Joined through `Shop.location_id` because that is how a stop reaches a dock,
     and restricted to `status == 'completed'`: a failed or flagged stop never
     produced a true dwell, only a lower bound on one (M1b). Counting those as
     observations would bias the worst docks downward, which is the one direction
     that breaks an SLA promise rather than merely being wrong.
+
+    **The geofence wins where it exists** (DRV-1). `arrived_at`/`completed_at`
+    are tap times stamped by the server when the request landed; the crossings
+    are the phone's own record of reaching and leaving the boundary. The whole
+    argument for Phase 1 is that the second is a measurement and the first is
+    an approximation of one - 65.5% of the design partner's stops compute to
+    zero dwell from tap-grade data, and the second-precision file shows they
+    really took 3-50 seconds.
+
+    Taps remain the fallback rather than being discarded: a stop with no
+    crossings is a stop where the driver denied the permission, or the app was
+    killed, and a tap-derived dwell is worth more than no dwell. Which source a
+    row came from is not recorded here - the two columns still exist on their
+    own rows, so the comparison is always available to anyone who wants it.
     """
+    enters = _geofence_edge(KIND_ENTER, "entered_at")
+    exits = _geofence_edge(KIND_EXIT, "exited_at")
+
+    arrived = func.coalesce(enters.c.entered_at, Stop.arrived_at)
+    departed = func.coalesce(exits.c.exited_at, Stop.completed_at)
+
     return (
-        select(
-            func.extract("epoch", Stop.completed_at - Stop.arrived_at).label("dwell")
-        )
+        select(func.extract("epoch", departed - arrived).label("dwell"))
         .join(Shop, Stop.shop_id == Shop.id)
+        .outerjoin(enters, enters.c.stop_id == Stop.id)
+        .outerjoin(exits, exits.c.stop_id == Stop.id)
         .where(
             Shop.location_id == location_id,
             Stop.status == "completed",
-            Stop.arrived_at.is_not(None),
-            Stop.completed_at.is_not(None),
-            # A completion recorded before the arrival is a clock or a tap
-            # problem, not a zero-second stop. Excluded rather than clamped:
-            # clamping to zero would drag the median of a fast dock down and
-            # look exactly like the minute-rounding defect we are replacing.
-            Stop.completed_at >= Stop.arrived_at,
+            arrived.is_not(None),
+            departed.is_not(None),
+            # A departure before its arrival is a clock or a tap problem, not a
+            # zero-second stop. Excluded rather than clamped: clamping to zero
+            # would drag the median of a fast dock down and look exactly like
+            # the minute-rounding defect we are replacing.
+            departed >= arrived,
         )
     )
 

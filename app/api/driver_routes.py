@@ -18,6 +18,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -59,6 +60,7 @@ from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
+from app.models.stop_geofence_event import StopGeofenceEvent
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.messaging.cod_notifications import ESCALATION_SENT, notify_shop_of_cod_dispute
 from app.messaging.tracking_notifications import notify_recipient_picked_up
@@ -66,6 +68,8 @@ from app.orders.status_service import advance_orders
 from app.returns.service import return_views
 from app.schemas.returns import CollectReturnBody, ReturnItemView
 from app.schemas.driver_app import (
+    StopGeofenceEventsBody,
+    StopGeofenceEventsResult,
     CallView,
     CodDisputeBody,
     CodObligationView,
@@ -1576,6 +1580,85 @@ async def arrive_at_stop(
     await refresh_route_etas(session, stop.route_id)
     await session.commit()
     return await _stop_view_after_reload(session, stop)
+
+
+# How far ahead of our own clock a device crossing may claim to be. Phones drift
+# by seconds, not minutes; anything past this is a broken clock rather than skew,
+# and storing it would put a fabricated arrival into the one dataset Phase 1 is
+# being built to trust.
+_MAX_DEVICE_CLOCK_LEAD = timedelta(minutes=5)
+
+
+@router.post("/stops/{stop_id}/geofence-events", response_model=StopGeofenceEventsResult)
+async def record_geofence_events(
+    stop_id: str,
+    body: StopGeofenceEventsBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> StopGeofenceEventsResult:
+    """Record boundary crossings at a stop (docs/ROADMAP_1.5.md DRV-1).
+
+    Deliberately NOT an arrival. This writes the sensor's observation and leaves
+    `stops.arrived_at` - the driver's tap - exactly as it was. Both are kept,
+    because the comparison between them is what shows whether the sensor
+    recovered the time a rounded clock and a forgotten tap threw away, and you
+    cannot make that comparison from a column that has been overwritten.
+
+    No terminal-status guard. A crossing is a fact about the physical world, and
+    a completed stop that reports a late exit is reporting something that
+    happened - refusing it would discard evidence to protect a state machine.
+    """
+    stop = await _get_owned_stop(session, stop_id, driver)
+
+    now = datetime.now(timezone.utc)
+    horizon = now + _MAX_DEVICE_CLOCK_LEAD
+    rows, rejected = [], 0
+    for event in body.events:
+        occurred_at = event.occurred_at
+        if occurred_at.tzinfo is None:
+            # A naive timestamp from the client is read as UTC rather than
+            # refused: every client we ship sends UTC, and dropping the event
+            # would cost a real crossing over a formatting detail.
+            occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+        if occurred_at > horizon:
+            rejected += 1
+            continue
+        rows.append(
+            {
+                "id": uuid.uuid4(),
+                "stop_id": stop.id,
+                "kind": event.kind,
+                "occurred_at": occurred_at,
+                "recorded_at": now,
+                "accuracy_m": event.accuracy_m,
+            }
+        )
+
+    accepted = 0
+    if rows:
+        # ON CONFLICT DO NOTHING against the (stop_id, kind, occurred_at) unique
+        # constraint. The outbox retries, so a replay has to be a no-op rather
+        # than a second arrival that doubles a dwell sample - and doing it in one
+        # statement means a batch cannot half-apply.
+        statement = (
+            pg_insert(StopGeofenceEvent)
+            .values(rows)
+            .on_conflict_do_nothing(constraint="uq_stop_geofence_event_crossing")
+            .returning(StopGeofenceEvent.id)
+        )
+        accepted = len((await session.execute(statement)).all())
+
+    await session.commit()
+    logger.info(
+        "stop_geofence_events_recorded",
+        stop_id=str(stop.id),
+        accepted=accepted,
+        duplicates=len(rows) - accepted,
+        rejected=rejected,
+    )
+    return StopGeofenceEventsResult(
+        accepted=accepted, duplicates=len(rows) - accepted, rejected=rejected
+    )
 
 
 @router.post("/stops/{stop_id}/scan", response_model=StopView)
