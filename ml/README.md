@@ -29,6 +29,54 @@ python scripts/run_m2_harness.py --leak-demo               # the release gates
 | `ml/m2/calibration.py` | Isotonic (PAVA), Brier, reliability, ECE and its noise floor |
 | `ml/m2/gates.py` | The five rules as checks that can fail, plus label sizing |
 
+## The real export — PRD-1, PRD-2, M1
+
+```bash
+python scripts/analyze_real_export.py --rate 45   # loaded driver cost per hour, no default
+```
+
+Reads `lmx-dwell/out/*.csv`, which are gitignored — this repository is public and
+those files are the design partner's book. Nothing here embeds them, the loaders
+have no field that could hold an account name, and the tests run on invented
+fixtures with invented towns.
+
+| Module | What it is |
+|---|---|
+| `ml/real/export.py` | Loaders, coverage, and a per-model verdict on what this export can support |
+| `ml/prd/batch_value.py` | PRD-1 — the hold-window curve by node class, three readings |
+| `ml/prd/trip_cost.py` | PRD-2 — loaded driver time against invoice value |
+| `ml/m1/features.py` | Dwell features, expanding-window, plus the time and cold-start splits |
+| `ml/m1/baseline.py` | PRD-3 — the shrunk quantile baseline, promoted |
+| `ml/m1/conformal.py` | Rule (4) — a distribution-free coverage guarantee |
+| `ml/m1/evaluate.py` | PRD-4 — warm and cold scored separately, promoted |
+
+### What the export says
+
+**PRD-1 cannot be closed against this data.** Its done-when is reproducing
++3–7% at shops and +195–271% at warehouse and transfer. Classified by account
+name, the 229 receivers hold **one** warehouse and **no** transfer nodes, and
+the file's own `Transfer` flag is false on all 6,715 rows. The shop end measures
++22% to +40% depending on which of three readings of "buys +X%" you take — not
++3–7% under any of them. Among classes with five or more docks the spread is
+1.5×, not the 40× the finding implies.
+
+**PRD-2 works.** 920 billed stops; at $45/hr, 12.3% lose money and 43 fall in
+the cheap-part-on-a-long-trip class the roadmap names. Time only — there is no
+distance column anywhere in the export — so every figure is a lower bound.
+
+**M1 is one driver's pace.** 1,385 second-precision stops, 142 receivers, one
+driver: no driver effect can be separated and there is no held-out-driver split.
+The shrunk baseline beats a global quantile on both warm and cold populations,
+so PRD-3's claim reproduces. Conformal calibration *tightens* the warm p90 from
+14.3 to 12.3 minutes and it holds at 89.8%. Calibrated correctly for cold start
+— on held-out receivers — the promise widens to **23.2 minutes for a stop whose
+median is two**. Kept 100% of the time and not sellable, which is what "not
+enough cold-start data" looks like once the arithmetic is done honestly.
+
+**The two files disagree about what a route is** — 3.7 stops per route against
+27, a factor of seven, because one counts manifests and the other driver-days.
+Every per-route figure inherits it. That is REC-5.
+
 ### The corpus is not evidence
 
 Every coefficient in `population.py` is a guess with a reason attached. A model
