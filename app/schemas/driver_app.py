@@ -259,6 +259,50 @@ class ScanParcelBody(BaseModel):
     barcode: str = Field(min_length=1, max_length=128)
 
 
+class StopGeofenceEventBody(BaseModel):
+    """One boundary crossing at a stop, as the phone saw it (DRV-1).
+
+    `occurred_at` is the device's own clock, same convention as
+    `DriverLocationPingBody` and for a stronger reason: DRV-4's outbox holds
+    these through a dead zone, so a server-stamped time would collapse a whole
+    offline stretch onto the reconnect instant - destroying the second-accurate
+    arrival this sensor exists to capture.
+    """
+
+    kind: Literal["enter", "exit"]
+    occurred_at: datetime
+    accuracy_m: float | None = Field(default=None, ge=0)
+
+
+class StopGeofenceEventsBody(BaseModel):
+    """A flush from the outbox: one crossing or a shift's worth.
+
+    Batched because that is how they arrive. A driver who loses signal at the
+    first stop and regains it at the twelfth delivers twenty-two crossings in
+    one request, and twenty-two round trips over a marginal connection is how
+    you lose some of them.
+    """
+
+    events: list[StopGeofenceEventBody] = Field(min_length=1, max_length=200)
+
+
+class StopGeofenceEventsResult(BaseModel):
+    """What the outbox needs back to know it can drop its copy.
+
+    `accepted` and `duplicates` are reported separately so a replay is visibly
+    a no-op rather than looking like a write. `rejected` counts crossings whose
+    device clock put them implausibly in the future.
+
+    All three mean "stop resending". That matters most for `rejected`: a phone
+    with a broken clock that kept retrying would be a poison pill, jamming its
+    own outbox behind an event that can never be accepted.
+    """
+
+    accepted: int
+    duplicates: int
+    rejected: int
+
+
 class ParcelView(BaseModel):
     barcode: str
     scanned: bool

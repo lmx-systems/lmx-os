@@ -32,6 +32,7 @@ from app.models.route_offer import RouteOffer
 from app.models.rules import ActiveRule, ProposedRule
 from app.models.shadow_decision import ShadowDecision, ShadowOrderDecision
 from app.models.shop import Shop
+from app.models.stop_geofence_event import StopGeofenceEvent
 from app.models.stop import Stop, StopFlag, StopOrder
 
 __all__ = [
@@ -72,6 +73,7 @@ __all__ = [
     "ShadowDecision",
     "ShadowOrderDecision",
     "Shop",
+    "StopGeofenceEvent",
     "Stop",
     "StopFlag",
     "StopOrder",
