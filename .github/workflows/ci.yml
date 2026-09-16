@@ -111,3 +111,29 @@ jobs:
 
       - name: Build
         run: npx vite build
+
+  # driver-app is a separate job rather than a third entry in the matrix above:
+  # it is React Native, so there is no `vite build` step, and its lint config
+  # has not been migrated to eslint 9 yet. Type checking is the part that
+  # matters and the part that was missing - the app's `tsc` was red on main for
+  # a while without anything noticing, because nothing in CI ever ran it.
+  driver-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: driver-app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: driver-app/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
