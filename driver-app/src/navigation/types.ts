@@ -29,6 +29,12 @@ export type HomeStackParamList = {
 // not part of the delivery loop, so it lives here rather than Home).
 export type ProfileStackParamList = {
   ProfileHome: undefined;
+  // The background-location disclosure (DRV-1/DRV-2,
+  // docs/BACKGROUND_LOCATION_CONSENT.md §4.4). Reachable from Profile rather
+  // than only shown once, because a driver who declined has to be able to
+  // change their mind - and one who granted has to be able to see what they
+  // agreed to without digging through system settings.
+  LocationDisclosure: undefined;
   EditVehicle: undefined;
   Documents: undefined;
   PaymentMethod: undefined;

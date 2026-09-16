@@ -109,6 +109,17 @@ export function ProfileScreen({ navigation }: Props) {
         </Card>
       </Pressable>
 
+      <Text style={styles.sectionLabel}>Privacy</Text>
+      <Pressable onPress={() => navigation.navigate('LocationDisclosure')}>
+        <Card style={styles.row}>
+          <View style={styles.rowText}>
+            <Text style={styles.rowBody}>Arrival times</Text>
+            <Text style={styles.rowSmall}>What the app records at a delivery, and what it doesn&apos;t</Text>
+          </View>
+          <ChevronRight size={20} color={colors.textMuted} />
+        </Card>
+      </Pressable>
+
       <Text style={styles.sectionLabel}>Help</Text>
       <Pressable onPress={() => navigation.navigate('Support')}>
         <Card style={styles.row}>

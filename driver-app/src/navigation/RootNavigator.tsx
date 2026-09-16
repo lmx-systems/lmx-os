@@ -9,6 +9,7 @@ import { DocumentsScreen } from '../screens/DocumentsScreen';
 import { EarningsScreen } from '../screens/EarningsScreen';
 import { EditVehicleScreen } from '../screens/EditVehicleScreen';
 import { FlagIssueScreen } from '../screens/FlagIssueScreen';
+import { LocationDisclosureScreen } from '../screens/LocationDisclosureScreen';
 import { MessageCustomerScreen } from '../screens/MessageCustomerScreen';
 import { PaymentMethodScreen } from '../screens/PaymentMethodScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -64,6 +65,13 @@ function HomeNavigator() {
 // Screen 1r, "Profile", its edit sub-screens (vehicle, documents, payment
 // method - Phase 2), plus 1q's "Contact support" (Phase 3) - account/help
 // territory, not part of the delivery loop.
+// The disclosure screen reports a decision rather than navigating itself, so
+// the same component can back a one-time prompt later without being coupled
+// to this stack.
+function LocationDisclosureRoute({ navigation }: { navigation: { goBack: () => void } }) {
+  return <LocationDisclosureScreen onDecided={() => navigation.goBack()} />;
+}
+
 function ProfileNavigator() {
   return (
     <ProfileStack.Navigator screenOptions={{ headerShown: true }}>
@@ -72,6 +80,11 @@ function ProfileNavigator() {
       <ProfileStack.Screen name="Documents" component={DocumentsScreen} options={{ title: 'Documents' }} />
       <ProfileStack.Screen name="PaymentMethod" component={PaymentMethodScreen} options={{ title: 'Payment method' }} />
       <ProfileStack.Screen name="Support" component={SupportScreen} options={{ title: 'Contact support' }} />
+      <ProfileStack.Screen
+        name="LocationDisclosure"
+        component={LocationDisclosureRoute}
+        options={{ title: 'Arrival times' }}
+      />
     </ProfileStack.Navigator>
   );
 }
