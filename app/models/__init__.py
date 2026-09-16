@@ -15,6 +15,7 @@ from app.models.driver_location_ping import DriverLocationPing
 from app.models.driver_shift_event import DriverShiftEvent
 from app.models.geocoded_address import GeocodedAddress
 from app.models.location import Location
+from app.models.linkage_flag import LinkageFlag
 from app.models.location_merge import LocationMerge
 from app.models.receiver_profile import ReceiverProfile
 from app.models.gig_job import GigJob
@@ -48,6 +49,7 @@ __all__ = [
     "DriverLocationPing",
     "GeocodedAddress",
     "Location",
+    "LinkageFlag",
     "LocationMerge",
     "ReceiverProfile",
     "GigJob",

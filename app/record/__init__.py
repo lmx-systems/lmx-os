@@ -14,10 +14,24 @@ from app.record.decisions import (
     record_decision,
     replay_inputs,
 )
+from app.record.linkage import (
+    flag_duplicates_across_branches,
+    flag_open_returns_on_visits,
+    flag_repeat_visits,
+    open_flags,
+    resolve_flag,
+    run_linkage_detectors,
+)
 
 __all__ = [
     "canonical_inputs_hash",
+    "flag_duplicates_across_branches",
+    "flag_open_returns_on_visits",
+    "flag_repeat_visits",
     "freeze_plan_inputs",
+    "open_flags",
     "record_decision",
     "replay_inputs",
+    "resolve_flag",
+    "run_linkage_detectors",
 ]
