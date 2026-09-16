@@ -14,6 +14,13 @@ from app.record.decisions import (
     record_decision,
     replay_inputs,
 )
+from app.record.outcomes import (
+    current_outcome,
+    outcomes_for,
+    record_delivery_outcome,
+    record_outcome,
+    supersede_outcome,
+)
 from app.record.linkage import (
     flag_duplicates_across_branches,
     flag_open_returns_on_visits,
@@ -25,13 +32,18 @@ from app.record.linkage import (
 
 __all__ = [
     "canonical_inputs_hash",
+    "current_outcome",
     "flag_duplicates_across_branches",
     "flag_open_returns_on_visits",
     "flag_repeat_visits",
     "freeze_plan_inputs",
     "open_flags",
+    "outcomes_for",
     "record_decision",
+    "record_delivery_outcome",
+    "record_outcome",
     "replay_inputs",
     "resolve_flag",
+    "supersede_outcome",
     "run_linkage_detectors",
 ]

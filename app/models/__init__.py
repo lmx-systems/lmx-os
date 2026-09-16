@@ -27,6 +27,7 @@ from app.models.invoice_credit import InvoiceCredit
 from app.models.message import Message
 from app.models.ops_user import OpsUser
 from app.models.order import Order
+from app.models.outcome_entry import OutcomeEntry
 from app.models.parcel import Parcel
 from app.models.return_item import ReturnItem
 from app.models.route import Route
@@ -59,6 +60,7 @@ __all__ = [
     "Invoice",
     "Message",
     "Order",
+    "OutcomeEntry",
     "Parcel",
     "ReturnItem",
     "Route",
