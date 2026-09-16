@@ -14,6 +14,15 @@ from app.record.decisions import (
     record_decision,
     replay_inputs,
 )
+from app.record.consequences import (
+    CONSEQUENCES,
+    close_consequence_windows,
+    consequence_label,
+    label_counts,
+    late_orders_awaiting_judgement,
+    record_consequence,
+    record_silence,
+)
 from app.record.outcomes import (
     current_outcome,
     outcomes_for,
@@ -31,6 +40,13 @@ from app.record.linkage import (
 )
 
 __all__ = [
+    "record_silence",
+    "record_consequence",
+    "late_orders_awaiting_judgement",
+    "label_counts",
+    "consequence_label",
+    "close_consequence_windows",
+    "CONSEQUENCES",
     "canonical_inputs_hash",
     "current_outcome",
     "flag_duplicates_across_branches",
