@@ -3,6 +3,14 @@ import * as TaskManager from 'expo-task-manager';
 
 import { outboxManager } from '../offline/outboxManager';
 import type { Stop } from '../api/types';
+import {
+  GEOFENCE_RADIUS_M,
+  MAX_MONITORED_REGIONS,
+  regionsForRoute,
+} from './geofenceWindow';
+
+// Re-exported so callers and tests have one import site for the sensor.
+export { GEOFENCE_RADIUS_M, MAX_MONITORED_REGIONS, regionsForRoute };
 
 /**
  * Arrive/depart per stop, from a geofence rather than a tap (DRV-1).
@@ -34,27 +42,6 @@ export const STOP_GEOFENCE_TASK = 'lmx-stop-geofence';
  * say - would otherwise silently evict a stop. Silently is the problem; iOS
  * does not tell you which region it dropped.
  */
-export const MAX_MONITORED_REGIONS = 18;
-
-/**
- * Metres. The number that decides how good the measurement is, and it is a
- * genuine trade-off rather than a tuned value:
- *
- *   too small - GPS noise means the fence never fires, and a missed crossing
- *               is a stop with no arrival at all
- *   too large - the fence fires while the van is still down the street, and
- *               "arrival" is stamped early
- *
- * Both platforms are unreliable below roughly 100m, which is why that is the
- * usual advice. 75m is a deliberate compromise and **is not yet calibrated
- * against anything** - no field data exists. The dwell bias partly cancels,
- * since enter and exit are both early by roughly the same walk, but the
- * arrival timestamp itself is not self-correcting. Revisit once DRV-1 has run
- * a real route: compare fence crossings against driver taps and see how far
- * apart they actually land.
- */
-export const GEOFENCE_RADIUS_M = 75;
-
 type Crossing = 'enter' | 'exit';
 
 /**
@@ -106,33 +93,6 @@ TaskManager.defineTask(STOP_GEOFENCE_TASK, async ({ data, error }) => {
     await queueCrossing(region.identifier, 'exit', at);
   }
 });
-
-/** Stops that still need measuring, nearest in the route order first. */
-function pendingStops(stops: Stop[]): Stop[] {
-  return stops
-    .filter((stop) => stop.status !== 'completed' && stop.status !== 'failed')
-    .sort((a, b) => a.sequence - b.sequence);
-}
-
-/**
- * The regions to monitor right now: the next `MAX_MONITORED_REGIONS` stops.
- *
- * Exported for testing. The window is what makes a 25-stop route work against
- * a 20-region cap, and it is worth being able to assert on directly rather
- * than through a native module that cannot run in a test.
- */
-export function regionsForRoute(stops: Stop[]): Location.LocationRegion[] {
-  return pendingStops(stops)
-    .slice(0, MAX_MONITORED_REGIONS)
-    .map((stop) => ({
-      identifier: stop.stop_id,
-      latitude: stop.lat,
-      longitude: stop.lng,
-      radius: GEOFENCE_RADIUS_M,
-      notifyOnEnter: true,
-      notifyOnExit: true,
-    }));
-}
 
 /**
  * Re-register the rolling window for the current route.
