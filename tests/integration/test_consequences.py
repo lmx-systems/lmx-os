@@ -226,9 +226,12 @@ class TestCorrections:
 
 
 class TestReadiness:
-    async def test_the_count_reports_against_626_and_nothing_else(self, db_session):
-        """456 is the normal-approximation figure and the brief says it is
-        wrong at this rate and must not be quoted."""
+    async def test_the_count_reports_against_the_band_the_brief_states(self, db_session):
+        """500-1,000, from `DATA_NEED_BRIEF.md` §4.2 - and deliberately not 626,
+        which is §4.3's Wilson sizing for M5's modality false-positive rate.
+        This function reported against 626 once. Both are a few hundred labels
+        from the same document and 626 sits inside the band, so the error was
+        invisible; the assertion is here to keep it that way."""
         hub, client = await _hub_and_client(db_session)
         for _ in range(3):
             order = await _delivered(db_session, hub, client, late=True)
@@ -243,9 +246,12 @@ class TestReadiness:
         assert counts["observed_consequences"] == 3
         assert counts["silences"] == 1
         assert counts["labelled_total"] == 4
-        assert counts["required_for_m2"] == 626
-        assert counts["ready_for_m2"] is False
-        assert counts["shortfall"] == 623
+        assert counts["required_range_for_m2"] == (500, 1000)
+        assert counts["at_band_minimum"] is False
+        assert counts["at_band_target"] is False
+        assert counts["shortfall_to_minimum"] == 497
+        assert counts["shortfall_to_target"] == 997
+        assert "required_for_m2" not in counts, "626 must not come back"
         assert counts["by_type"][CONSEQUENCE_ESCALATION] == 3
 
     async def test_pending_orders_are_listed_so_somebody_can_chase_them(self, db_session):

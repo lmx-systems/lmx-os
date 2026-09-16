@@ -9,10 +9,11 @@ model: an urgency signal that only ever fires positive cannot price anything.
 **Why this is worth building before there is volume to use it.** A consequence
 not captured when it happens is gone. Nobody can reconstruct, months later,
 whether a customer rang up angry about a particular delivery, or quietly bought
-the part elsewhere. The brief puts `M2` at ~78,000 drops and about 27 months at
-the design partner's rate - and that clock does not start when the deliveries
-start, it starts when the *labels* start. Until then the drops accumulate and
-the labels do not.
+the part elsewhere. `DATA_NEED_BRIEF.md` §4.2 puts `M2` at 500-1,000 observed
+consequences - 62,500 to 125,000 deliveries at the rate it assumes, 21 to 41
+months at the design partner alone - and that clock does not start when the
+deliveries start, it starts when the *labels* start. Until then the drops
+accumulate and the labels do not.
 
 Two of the six had no representation anywhere in this codebase before this
 module: competitor-sourced and reorder gap. Credits existed in billing,
@@ -55,6 +56,12 @@ CONSEQUENCE_CANCELLED = "order_cancelled"
 CONSEQUENCE_COMPETITOR = "competitor_sourced"
 CONSEQUENCE_REORDER_GAP = "reorder_gap"
 SILENCE = "silence"
+
+# `DATA_NEED_BRIEF.md` §4.2. A band, quoted as a band. Not 626 - that is §4.3's
+# Wilson sizing for M5's modality false-positive rate and belongs to a different
+# model entirely.
+M2_BAND_MINIMUM = 500
+M2_BAND_TARGET = 1000
 
 CONSEQUENCES = (
     CONSEQUENCE_ESCALATION,
@@ -257,10 +264,18 @@ async def close_consequence_windows(
 async def label_counts(session: AsyncSession, *, hub_id) -> dict:
     """How close the label set is to being usable, in the brief's own terms.
 
-    §M2 puts the requirement at **626 observed consequences** - a Wilson
-    interval sizing a ~5% false-alarm rate to ±2 points. The
-    normal-approximation figure of 456 is wrong at that rate and the brief says
-    not to quote it, so this reports against 626 and nothing else.
+    `DATA_NEED_BRIEF.md` §4.2 puts the requirement at **500-1,000 observed
+    consequences**. That is a stated band, not a derived figure, so this reports
+    against both ends rather than picking a point target between them and
+    lending it a precision the source does not have.
+
+    **It is specifically not 626.** That number is §4.3's: a Wilson interval
+    sizing `M5`'s modality false-positive rate to ±2 points, per modality. It
+    has nothing to do with how many labels train a classifier. An earlier
+    version of this function reported against it, and the mistake is easy to
+    make - both are "a few hundred labels", both come from the same document,
+    and 626 sits inside 500-1,000 so nothing looked wrong. That is why the
+    citation is in the code rather than in somebody's memory.
     """
     entries = list(
         await session.scalars(
@@ -283,7 +298,12 @@ async def label_counts(session: AsyncSession, *, hub_id) -> dict:
         "silences": silent,
         "labelled_total": observed + silent,
         "by_type": by_type,
-        "required_for_m2": 626,
-        "ready_for_m2": observed >= 626,
-        "shortfall": max(626 - observed, 0),
+        "required_range_for_m2": (M2_BAND_MINIMUM, M2_BAND_TARGET),
+        # No key called "ready": the brief states a band and declines to say
+        # where inside it the model becomes trainable, so this reports the two
+        # ends and leaves the judgement to whoever has to defend it.
+        "at_band_minimum": observed >= M2_BAND_MINIMUM,
+        "at_band_target": observed >= M2_BAND_TARGET,
+        "shortfall_to_minimum": max(M2_BAND_MINIMUM - observed, 0),
+        "shortfall_to_target": max(M2_BAND_TARGET - observed, 0),
     }
