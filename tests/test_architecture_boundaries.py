@@ -98,6 +98,13 @@ EDGE = (
 #   hub_calendar - infrastructure and internal operations, not order-shaped.
 #   events      - the in-process hub event bus. Foundation: core publishes to it, edge
 #                 subscribes, and it knows nothing about either.
+#   record      - the discipline layer (REC-1..5): what was decided, what was seen
+#                 when it was decided, what happened after. Not Edge - its shape is
+#                 not negotiated with anyone outside. Not Core - it decides nothing
+#                 and dispatch does not depend on it. The dependency runs one way:
+#                 the optimizer hands it a plan, and nothing here ever hands the
+#                 optimizer anything back. A record the deciding code could read
+#                 back and act on would stop being a record.
 #   identity    - canonical reference data about physical places: which dock an
 #                 address is, and eventually that dock's profile. Neither list fits.
 #                 Not Edge: its shape is not negotiated with anyone outside, and
@@ -110,6 +117,7 @@ EDGE = (
 UNCLASSIFIED = (
     "orders",
     "identity",
+    "record",
     "gig_platform",
     "events",
     "payroll",
