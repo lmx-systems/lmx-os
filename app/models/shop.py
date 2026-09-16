@@ -20,3 +20,11 @@ class Shop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # External POS/DMS identifier for this shop, used to match inbound
     # webhooks/flat files back to a shop_profiles row.
     external_ref: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+
+    # The physical dock this account delivers to (IDN-1, ROADMAP_1.5 §2.2b).
+    # Many shops may share one location: a Shop is a customer account, a Location
+    # is a place. Nullable and staying that way - a shop whose address does not
+    # normalize to anything usable has no dock, and forcing one would invent it.
+    location_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("locations.id"), nullable=True, index=True
+    )

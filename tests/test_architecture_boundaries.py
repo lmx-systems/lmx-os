@@ -98,8 +98,18 @@ EDGE = (
 #   hub_calendar - infrastructure and internal operations, not order-shaped.
 #   events      - the in-process hub event bus. Foundation: core publishes to it, edge
 #                 subscribes, and it knows nothing about either.
+#   identity    - canonical reference data about physical places: which dock an
+#                 address is, and eventually that dock's profile. Neither list fits.
+#                 Not Edge: its shape is not negotiated with anyone outside, and
+#                 filing it there would forbid the dependency the roadmap already
+#                 plans for - IDN-4's receiver profile (dwell, hours, access) is
+#                 what PRD-5 predicts from and the SLA engine promises against, so
+#                 the core will read this by design. Not Core either: it is not
+#                 dispatch, and a change here does not move an order. Foundation,
+#                 like `orders` - imported from both sides, owning neither.
 UNCLASSIFIED = (
     "orders",
+    "identity",
     "gig_platform",
     "events",
     "payroll",
