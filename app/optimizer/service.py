@@ -26,6 +26,8 @@ from app.batch_queue.store import HoldQueueStore
 from app.hub_calendar import is_hub_closed_at
 from app.config import settings
 from app.db import session_scope
+from app.record import record_decision
+from app.record.decisions import MODE_LIVE
 from app.fleet_state.manager import FleetStateManager
 from app.messaging.job_offer_notifications import notify_driver_of_new_offer
 from app.models.order import Order, OrderStatus
@@ -175,6 +177,19 @@ class DispatchOptimizerService:
         cycle_start = time.perf_counter()
 
         plan = await self.plan_cycle(hub_id)
+
+        # REC-1: freeze what this cycle saw, before acting on any of it. In its
+        # own session and committed immediately, so the record survives a
+        # failure in the commit half below - a decision that was made and then
+        # failed to execute is exactly the kind a dispute turns on, and losing
+        # it with the transaction would lose the interesting ones first.
+        #
+        # A closed hub is recorded too, with `hub_closed` set. W9's
+        # data-completeness metric needs a quiet Sunday to be distinguishable
+        # from a cycle that had a chance and took it, and it can only be if
+        # both leave a row.
+        async with session_scope() as record_session:
+            await record_decision(record_session, plan, mode=MODE_LIVE)
 
         if plan.hub_closed:
             return OptimizationResult(

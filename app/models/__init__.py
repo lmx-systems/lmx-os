@@ -1,5 +1,6 @@
 from app.models.call import Call
 from app.models.client import Client
+from app.models.decision_snapshot import DecisionSnapshot
 from app.models.cod_collection import CodCollection
 from app.models.client_rate import ClientRate
 from app.models.client_sla_term import ClientSlaTerm
@@ -38,6 +39,7 @@ from app.models.stop import Stop, StopFlag, StopOrder
 __all__ = [
     "Call",
     "Client",
+    "DecisionSnapshot",
     "ClientRate",
     "ClientUser",
     "DeliveryRating",
