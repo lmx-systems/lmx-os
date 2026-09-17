@@ -160,13 +160,21 @@ class ExclusionImpact:
         the number first, then what it means for the claim.
         """
         if not self.live_exclusions:
-            return "No docks were excluded from the measurement."
+            return "No delivery points were left out of the measurement."
+        count = self.live_exclusions
+        # Written out rather than "1 dock(s)". This sentence goes in front of a
+        # customer, and a statement that reads like a database dump invites the
+        # phone call STL-1 exists to avoid.
+        subject = (
+            "One delivery point was" if count == 1
+            else f"{count} delivery points were"
+        )
         return (
-            f"{self.live_exclusions} dock(s), carrying {self.share_of_orders:.1%} of "
-            f"orders in this window, were excluded from the control arm at request. "
-            "The comparison therefore does not cover them, and because docks are "
-            "usually excluded for being delivery-sensitive, the excluded traffic is "
-            "likely to be where lateness costs the most."
+            f"{subject} left out of the comparison at request, carrying "
+            f"{self.share_of_orders:.1%} of orders in this period. The figures "
+            "above do not cover them - and because a delivery point is usually "
+            "left out for being the one that can least afford a slower service, "
+            "it is probably not a representative slice to have removed."
         )
 
 
