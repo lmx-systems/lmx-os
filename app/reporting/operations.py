@@ -49,6 +49,10 @@ from app.models.driver_shift_event import DriverShiftEvent
 from app.models.order import Order, OrderStatus
 from app.models.route_offer import RouteOffer
 from app.models.stop import Stop, StopFlag
+from app.reporting.insertion import (
+    in_flight_share,
+    order_to_door_measurements,
+)
 from app.reporting.measurement import (
     Measurement,
     Rate,
@@ -526,11 +530,18 @@ async def build_operations_scorecard(
     measurements = [
         await _deliveries_per_hour(session, since),
         await _eta_accuracy(session, since),
+        # DEC-4, against the ceiling Phase 3 names: half the design partner's
+        # orders are inserted by hand after planning, and those reach customers
+        # faster. Surfaced here rather than behind its own endpoint because it
+        # is the same question the rest of this scorecard asks, and a
+        # measurement nothing calls is a measurement nobody reads.
+        *await order_to_door_measurements(session, since),
     ]
     rates = [
         *await _sla_hit_rates(session, since),
         await _hold_window_flag_rate(session, since),
         *await _offer_outcomes(session, since),
+        await in_flight_share(session, since),
     ]
 
     scorecard = OperationsScorecard(
