@@ -30,7 +30,11 @@ from app.identity.profile import (
     set_autonomy_fit,
     set_receiving_hours,
 )
-from app.identity.resolution import canonical_location, resolve_location
+from app.identity.resolution import (
+    canonical_location,
+    receiver_key_for,
+    resolve_location,
+)
 
 __all__ = [
     "NODE_CLASSES",
@@ -46,6 +50,7 @@ __all__ = [
     "propose_merge",
     "refresh_dwell_statistics",
     "reject_merge",
+    "receiver_key_for",
     "resolve_location",
     "set_access",
     "set_autonomy_fit",

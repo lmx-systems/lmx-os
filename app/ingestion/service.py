@@ -23,7 +23,16 @@ from app.batch_queue.store import HoldQueueStore
 from app.geocoding import BaseGeocoder, get_geocoder, normalize_address, resolve_address
 from app.ingestion.registry import get_adapter
 from app.billing.rates import distance_between, price_drop
+from app.experiment import (
+    ARM_CONTROL,
+    ReceiverExcluded,
+    assign_arm,
+    control_arm_is_live,
+)
+from app.identity import receiver_key_for
+from app.models.client import Client
 from app.models.client_rate import ClientRate
+from app.record.abstention import record_arm_abstention
 from app.models.order import Order, OrderStatus
 from app.models.parcel import Parcel
 from app.models.return_item import ReturnItem
@@ -122,6 +131,42 @@ def _expected_return_manifest(payload: dict) -> str | None:
     if payload.get("core_return"):
         return "core exchange"
     return None
+
+
+async def _assign_control_arm(
+    session: AsyncSession, order: Order, lmx, now: datetime
+) -> str | None:
+    """Put this order in an arm, if its client has contracted one.
+
+    None is the ordinary answer and will be for every order until a customer
+    signs the clause - `EXP-1` ships off and the gate is a recorded date rather
+    than a flag. A dock excluded under `EXP-2` also lands here: the customer
+    asked for it to stay out of the experiment, which is not an error.
+
+    Failures are swallowed on purpose. An experiment must never be the reason an
+    order fails to be ingested - the measurement is worth less than the
+    delivery, and a customer whose orders bounced because of our control arm
+    would be entirely right to be angry about it.
+    """
+    if not lmx.client_id:
+        return None
+    client = await session.get(Client, uuid.UUID(lmx.client_id))
+    if client is None or not control_arm_is_live(client):
+        return None
+    try:
+        assignment = await assign_arm(
+            session,
+            order,
+            client,
+            receiver_key=receiver_key_for(order.delivery_address),
+            now=now,
+        )
+    except ReceiverExcluded:
+        return None
+    except Exception:
+        logger.exception("control_arm_assignment_failed", order_id=str(order.id))
+        return None
+    return assignment.arm
 
 
 async def _resolve_shop(session: AsyncSession, client_id: str, shop_external_ref: str) -> Shop:
@@ -534,6 +579,30 @@ async def ingest_lmx_order(
     else:
         order.fee_cents, order.fee_breakdown, order.rate_version_id = None, None, None
     order.status = OrderStatus.held
+
+    # EXP-1's arm, assigned here because "at intake" is a clause of its
+    # done-when: an arm chosen any later can be chosen knowing something about
+    # the order. Returns None for every client until somebody records the date
+    # their contract clause was agreed, so this is inert today.
+    arm = await _assign_control_arm(session, order, lmx, now)
+    if arm == ARM_CONTROL:
+        # The abstention. A control order is dispatched as the customer would
+        # have dispatched it, which means our batching hold does not apply - so
+        # the deadline collapses to now and the queue releases it on the next
+        # cycle. The hold we classified and then declined to take is written
+        # down, because afterwards an order we left alone and one we quietly
+        # held are indistinguishable. See app/record/abstention.py.
+        await record_arm_abstention(
+            session,
+            hub_id=uuid.UUID(lmx.hub_id),
+            order_id=order.id,
+            arm=arm,
+            occurred_at=now,
+            would_have_held_until=hold_deadline,
+        )
+        hold_deadline = now
+        order.hold_deadline = now
+
     await session.commit()
     metrics.ORDERS_INGESTED.labels(hub_id=lmx.hub_id, source_system=lmx.source_system).inc()
 

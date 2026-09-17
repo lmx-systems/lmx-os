@@ -41,18 +41,23 @@ reason, and the least likely to be noticed without one.
 different contract dates. Pooling them into a single comparison silently mixes
 two experiments, and the statement would describe neither.
 
-## What it cannot check, which is the contamination that matters most
+**The abstention.** Intake now writes down that it declined to hold a control
+order (`app/record/abstention.py`), which closes the gap this monitor originally
+had to report as unfixable: an order genuinely left alone and one we quietly
+held used to look identical afterwards. A control assignment with no abstention
+against it is now a control order we cannot prove we honoured.
 
-Nothing in the data records that dispatch *declined to act* on a control order.
-The arm means "dispatched as the customer would have" and the only evidence we
-hold is the label saying so. A control order that was quietly held and batched
-like any other looks identical to one that was not.
+## What it still cannot check
 
-Detecting that needs the dispatch path to write down its abstention - a `REC-1`
-extension, not something this monitor can infer - so it is reported as a
-standing limitation on every run rather than left for somebody to discover after
-quoting a number. A monitor that listed six checks and stayed silent about the
-seventh would be worse than no monitor, because it would read as a clean bill.
+The abstention covers the **hold**, which is what the arm is mostly about and
+was the cheapest part to close. It does not prove that nothing downstream picked
+the order up and batched it anyway. The optimizer never sees an arm label - by
+design, so that a measurement apparatus can never become a dispatch dependency -
+so it cannot record an abstention of its own without being told about the
+experiment first.
+
+That residue is reported on every run, pass or fail. A monitor that closed six
+gaps and stayed quiet about the seventh would read as a clean bill.
 """
 from __future__ import annotations
 
@@ -71,6 +76,7 @@ from app.models.experiment_assignment import (
     ExperimentAssignment,
 )
 from app.models.outcome_entry import KIND_COST, OutcomeEntry
+from app.record.abstention import orders_with_an_abstention
 
 SEVERITY_BLOCKS = "blocks"
 SEVERITY_WARNS = "warns"
@@ -172,13 +178,14 @@ async def check_arm_integrity(
     # stayed quiet about the one it cannot make would read as a clean bill.
     report.findings.append(
         Finding(
-            check="dispatch-abstention-is-unverifiable",
+            check="downstream-batching-is-unverifiable",
             severity=SEVERITY_NOTES,
             detail=(
-                "nothing records that dispatch declined to act on a control order, "
-                "so an order that was quietly held and batched looks identical to "
-                "one dispatched the customer's old way. This monitor cannot detect "
-                "that; recording the abstention is a REC-1 extension"
+                "intake's abstention is now recorded and checked, so a control "
+                "order we declined to hold can be proved. Nothing yet proves the "
+                "optimizer did not pick it up and batch it afterwards - it never "
+                "sees an arm label, by design, so it cannot record an abstention "
+                "of its own without being told about the experiment"
             ),
         )
     )
@@ -198,6 +205,7 @@ async def check_arm_integrity(
     _check_position_collisions(report, assignments)
     _check_terms_drift(report, assignments)
     await _check_differential_coverage(session, report, assignments)
+    await _check_abstentions_recorded(session, report, assignments)
     return report
 
 
@@ -395,6 +403,38 @@ async def _check_differential_coverage(
                     "treatment_coverage": treatment_coverage,
                     "gap": gap,
                 },
+            )
+        )
+
+
+async def _check_abstentions_recorded(
+    session: AsyncSession, report: IntegrityReport, assignments: list
+) -> None:
+    """Every control order should carry proof we declined to hold it.
+
+    The arm means "dispatched as the customer would have". Without an abstention
+    against a control order, the only evidence that we honoured it is the label
+    saying we did - which is the thing being audited. Blocking rather than
+    warning: a savings figure computed over control orders we cannot prove were
+    left alone is a figure about nothing in particular.
+    """
+    controls = [a for a in assignments if a.arm == ARM_CONTROL]
+    if not controls:
+        return
+    recorded = await orders_with_an_abstention(session, [a.order_id for a in controls])
+    missing = [a for a in controls if a.order_id not in recorded]
+    if missing:
+        report.findings.append(
+            Finding(
+                check="abstentions-recorded",
+                severity=SEVERITY_BLOCKS,
+                detail=(
+                    f"{len(missing)} of {len(controls)} control orders carry no "
+                    "record that we declined to hold them, so there is nothing to "
+                    "show they were dispatched the customer's old way rather than "
+                    "held like any other order"
+                ),
+                numbers={"missing": len(missing), "control_orders": len(controls)},
             )
         )
 

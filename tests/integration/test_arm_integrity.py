@@ -32,6 +32,7 @@ from app.models.experiment_assignment import (
 )
 from app.models.hub import Hub
 from app.models.outcome_entry import KIND_COST, SUBJECT_ORDER
+from app.record.abstention import record_arm_abstention
 from app.record.outcomes import record_outcome
 
 pytestmark = pytest.mark.integration
@@ -58,7 +59,9 @@ async def _client(db_session, hub, fraction=0.10) -> Client:
     return client
 
 
-async def _clean_book(db_session, hub, client, *, docks=15, cost_control=True):
+async def _clean_book(
+    db_session, hub, client, *, docks=15, cost_control=True, abstain=True
+):
     """What `assign_arm` produces: one block per dock, one control slot in each."""
     salt = f"{EXPERIMENT_CONTROL_ARM}:{client.id}"
     size = block_size(client.control_arm_fraction)
@@ -82,6 +85,13 @@ async def _clean_book(db_session, hub, client, *, docks=15, cost_control=True):
             made.append((order_id, arm))
     await db_session.flush()
     for order_id, arm in made:
+        if arm == ARM_CONTROL and abstain:
+            # A control order without this is a control order we cannot prove we
+            # left alone, which EXP-3 now blocks on. Intake writes it for real.
+            await record_arm_abstention(
+                db_session, hub_id=hub.id, order_id=order_id, arm=arm,
+                occurred_at=MID, would_have_held_until=MID,
+            )
         if arm == ARM_CONTROL and not cost_control:
             continue
         await record_outcome(
@@ -268,28 +278,59 @@ class TestWhatItOnlyWarnsAbout:
         assert report.blocks_a_statement is False
 
 
-class TestWhatItCannotCheck:
-    async def test_it_says_so_on_every_run(self, db_session):
-        """A monitor that listed six checks and stayed silent about the seventh
-        would read as a clean bill. Nothing records that dispatch declined to
-        act on a control order, so a contaminated one is indistinguishable."""
+class TestTheAbstention:
+    async def test_a_control_order_with_no_abstention_blocks(self, db_session):
+        """Without it, the only evidence we honoured the arm is the label saying
+        we did - which is the thing being audited."""
+        hub = await _hub(db_session)
+        client = await _client(db_session, hub)
+        await _clean_book(db_session, hub, client, abstain=False)
+        report = await _check(db_session, client)
+        finding = next(
+            (f for f in report.blocking if f.check == "abstentions-recorded"), None
+        )
+        assert finding is not None
+        assert finding.numbers["missing"] == finding.numbers["control_orders"]
+
+    async def test_a_book_with_abstentions_passes(self, db_session):
+        hub = await _hub(db_session)
+        client = await _client(db_session, hub)
+        await _clean_book(db_session, hub, client)
+        report = await _check(db_session, client)
+        assert "abstentions-recorded" not in {f.check for f in report.blocking}
+
+    async def test_one_missing_among_many_still_blocks(self, db_session):
+        hub = await _hub(db_session)
+        client = await _client(db_session, hub)
+        await _clean_book(db_session, hub, client, docks=15)
+        # One extra control order, arriving with no abstention behind it.
+        await _inject(db_session, hub, client, arm=ARM_CONTROL, receiver_key="dock-77")
+        report = await _check(db_session, client)
+        finding = next(f for f in report.blocking if f.check == "abstentions-recorded")
+        assert finding.numbers["missing"] == 1
+
+
+class TestWhatItStillCannotCheck:
+    async def test_downstream_batching_is_reported_on_every_run(self, db_session):
+        """The abstention covers the hold. It does not prove the optimizer left
+        the order alone afterwards - it never sees an arm label, by design."""
         hub = await _hub(db_session)
         client = await _client(db_session, hub)
         await _clean_book(db_session, hub, client)
         report = await _check(db_session, client)
         note = next(
             f for f in report.findings
-            if f.check == "dispatch-abstention-is-unverifiable"
+            if f.check == "downstream-batching-is-unverifiable"
         )
         assert note.severity == SEVERITY_NOTES
-        assert "REC-1" in note.detail
+        assert "optimizer" in note.detail
 
     async def test_it_is_present_even_with_no_assignments(self, db_session):
         hub = await _hub(db_session)
         client = await _client(db_session, hub)
         report = await _check(db_session, client)
         assert any(
-            f.check == "dispatch-abstention-is-unverifiable" for f in report.findings
+            f.check == "downstream-batching-is-unverifiable" for f in report.findings
         )
 
 

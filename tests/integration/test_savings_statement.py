@@ -23,6 +23,7 @@ from app.models.experiment_assignment import (
 from app.models.hub import Hub
 from app.models.outcome_entry import KIND_COST, SUBJECT_ORDER, OutcomeEntry
 from app.record.cost import RATE_FROM_DRIVER, RATE_PLACEHOLDER
+from app.record.abstention import record_arm_abstention
 from app.record.outcomes import record_outcome
 from app.experiment.arms import _draw, block_size
 from app.settle.statement import (
@@ -96,6 +97,14 @@ async def _book(
                 )
             )
             (control_ids if is_control else treatment_ids).append(order_id)
+    await db_session.flush()
+    for order_id in control_ids:
+        # EXP-3 blocks a statement built on control orders with no record that we
+        # declined to hold them. Intake writes these for real.
+        await record_arm_abstention(
+            db_session, hub_id=hub.id, order_id=order_id, arm=ARM_CONTROL,
+            occurred_at=MID, would_have_held_until=MID,
+        )
 
     for ids, cents_for in (
         (control_ids, control_cents), (treatment_ids, treatment_cents)

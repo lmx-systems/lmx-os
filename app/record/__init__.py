@@ -8,6 +8,11 @@ Classified UNCLASSIFIED in `tests/test_architecture_boundaries.py`: it is not
 an adapter and it is not dispatch. The dispatch engine hands it a plan; nothing
 here ever hands the dispatch engine anything back.
 """
+from app.record.abstention import (
+    DECLINED_TO_HOLD,
+    orders_with_an_abstention,
+    record_arm_abstention,
+)
 from app.record.cost import (
     DriverDayCost,
     OrderCost,
@@ -53,6 +58,7 @@ __all__ = [
     "consequence_label",
     "close_consequence_windows",
     "CONSEQUENCES",
+    "DECLINED_TO_HOLD",
     "DriverDayCost",
     "OrderCost",
     "canonical_inputs_hash",
@@ -65,6 +71,8 @@ __all__ = [
     "outcomes_for",
     "record_decision",
     "record_delivery_outcome",
+    "orders_with_an_abstention",
+    "record_arm_abstention",
     "record_outcome",
     "driver_day_cost",
     "record_driver_day_cost",

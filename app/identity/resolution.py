@@ -61,6 +61,26 @@ def _carries_a_place(key: str) -> bool:
     return not all(segment in _PLACEHOLDER_KEYS or not segment for segment in segments)
 
 
+def receiver_key_for(address: str | None) -> str | None:
+    """A stable dock key for an address, or None when it names no place.
+
+    The same normalisation `resolve_location` keys on, without the row. Callers
+    that need to *stratify* by dock - `EXP-2`'s blocks, `EXP-3`'s per-dock check
+    - need a key and have no business creating `Location` rows as a side effect
+    of an experiment.
+
+    Returns None rather than raising for a placeholder, because the caller's
+    correct response is "this order has no dock key", not "this order failed".
+    `N/A` and its friends must never collapse into one shared fictional dock -
+    the failure `_PLACEHOLDER_KEYS` exists to prevent - so they get no key at
+    all, which is the honest answer.
+    """
+    if not address:
+        return None
+    key = normalize_address(address)
+    return key if _carries_a_place(key) else None
+
+
 async def resolve_location(
     session: AsyncSession,
     *,
