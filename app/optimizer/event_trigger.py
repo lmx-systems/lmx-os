@@ -7,11 +7,12 @@ producers (app/api/routes.py, app/ingestion/router.py) import
 `dispatch_event_bus` from here and call `.publish(hub_id, event_type)`
 right after the state change that makes a new cycle worth running.
 
-"Stop completed" - the design doc's third trigger - has no producer yet:
-component 7 (driver app / OS Shell) isn't built. `Stop.status` already has
-a `completed` state (app/models/stop.py) reserved for when it lands; that
-future endpoint is the spot to add a matching `.publish(hub_id,
-"stop_completed")` call.
+All three of the design doc's triggers now have producers. "Stop completed"
+was the last one outstanding - this docstring said component 7 (the driver
+app) was not built, which stopped being true when `DRV-1` shipped, and
+`app/api/driver_routes.py`'s complete-stop endpoint publishes it. Whether
+the cycle it triggers actually beats the dispatcher is `DEC-4`, measured in
+`app/reporting/insertion.py`.
 """
 from __future__ import annotations
 
