@@ -229,6 +229,65 @@ The app exists and is good. Its location layer is pointed at the wrong job: `src
 | **STL-2** | Baseline definition and change control | `NEW` | Baseline changes need sign-off from both sides and are versioned |
 | **STL-3** | Metering and invoice export on the fee unit | `RESHAPE` | `app/billing/` exists. Billable events reconcile to ingested orders, to the unit |
 
+### What actually stands between here and the gate
+
+*Audited against the code on 17 September 2026, not against the rows above.*
+
+Seventeen of the nineteen Phase 2 items read BUILT. The phase still cannot
+close, and the reasons are three different kinds of thing that the status column
+cannot tell apart. Producing **one statement with a figure on it** requires all
+of the following to be true at once:
+
+| # | Required | State |
+|---|---|---|
+| 1 | A customer's contract records the date they agreed to a control arm | **People.** Nobody has signed one |
+| 2 | That client is enrolled — `control_arm_contracted_at` and a fraction written | **Missing.** Nothing in `app/` or `scripts/` sets either column |
+| 3 | Orders reach intake and get an arm | ✅ `app/ingestion/service.py` |
+| 4 | Drivers have `hourly_rate_cents` | **Missing.** Nothing sets it; every cost would use payroll's placeholder wage |
+| 5 | Drivers clock on, so shift events exist | ✅ the endpoint exists, gated by `R4` compliance |
+| 6 | Something computes cost per driver-day | **Missing.** `record_driver_day_cost` has no caller |
+| 7 | Something generates the statement | **Missing.** `build_statement` has no caller |
+| 8 | 30+ costed drops in each arm | **Data.** Follows from 1–7 plus time |
+
+**The measurement layer is complete and has no switches.** That is the finding.
+Every piece is built, tested and off, and for four of them there is no supported
+way to turn them on — the day a clause is signed, somebody would be writing SQL
+against production to enrol the client. `exclude_receiver` has no caller either,
+so a customer can be promised their fragile dock stays out of the arm and there
+is no way to record it.
+
+This is the same defect as `record_shadow_cycle` having no caller, which `DEC-0`
+found and fixed. Three more were introduced after it and nothing caught them,
+because a module with tests and no entry point looks finished from every angle
+except this one.
+
+**Blocked on people, not engineering:**
+
+- **0.4** — Sourabh approved the background-location consent approach on 16 Sep.
+  0.4 as written is Matan negotiating it into *pilot terms*, which is a different
+  act and is still open.
+- **0.5 / §2.3** — licence versus savings share. Blocks `STL-3`'s second billing
+  event type. Killed twice, reopened 13 Sep.
+- **0.7** — outcome liability. Blocks `DEC-1`'s credit percentages.
+- **0.8** — the background-location "always" tier.
+- **The shadow cadence.** `DEC-0` runs but is off; the cadence bounds what the
+  dispatch lead can show and is an operating cost, so it is not ours to pick.
+- **`REC-5`** — three founder signatures. The evidence for why is now concrete:
+  the two exports disagree about what a route is by a factor of seven.
+
+**Blocked on data nobody holds yet:**
+
+- **`PRD-1`** — one warehouse receiver and no transfer nodes in the export, so
+  the finding the item is defined by cannot be tested. Needs a customer with
+  that volume, or a traced source for the stated figures.
+- **`M2`** — 500–1,000 observed consequences, 21–41 months at one partner.
+- **Cold-start dwell** — calibrated honestly, the p90 promise is 23.2 minutes
+  for a stop whose median is two. More docks, not more code.
+
+**So the shortest path to the gate is four switches and a signature**, in that
+order — and the four switches are days of work, not weeks.
+
+
 ---
 
 ## Phase 3 — Live authority (weeks 12–26)
