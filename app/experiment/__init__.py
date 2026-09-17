@@ -25,6 +25,12 @@ from app.experiment.arms import (
     control_arm_is_live,
     verify_assignment,
 )
+from app.experiment.integrity import (
+    Finding,
+    IntegrityReport,
+    check_arm_integrity,
+    wilson_interval,
+)
 from app.experiment.exclusions import (
     ExclusionImpact,
     ReceiverExcluded,
@@ -42,10 +48,13 @@ __all__ = [
     "STRATUM_UNKNOWN_RECEIVER",
     "ArmNotContractedError",
     "ExclusionImpact",
+    "Finding",
+    "IntegrityReport",
     "ReceiverExcluded",
     "arm_for_order",
     "assign_arm",
     "assignment_for",
+    "check_arm_integrity",
     "block_size",
     "control_arm_is_live",
     "exclude_receiver",
@@ -53,4 +62,5 @@ __all__ = [
     "is_excluded",
     "revoke_exclusion",
     "verify_assignment",
+    "wilson_interval",
 ]

@@ -57,6 +57,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.experiment.exclusions import ExclusionImpact, exclusion_impact
+from app.experiment.integrity import IntegrityReport, check_arm_integrity
 from app.models.experiment_assignment import (
     ARM_CONTROL,
     ARM_TREATMENT,
@@ -134,6 +135,9 @@ class SavingsStatement:
     comparison_unavailable: str | None
     exclusions: ExclusionImpact | None = None
     caveats: list[str] = field(default_factory=list)
+    # `EXP-3`'s verdict on the window. Kept whole so an operator can read what
+    # actually failed; the customer-facing text says only that something did.
+    integrity: IntegrityReport | None = None
 
     @property
     def headline(self) -> str:
@@ -286,7 +290,23 @@ async def build_statement(
             "until the rate is recorded."
         )
 
-    if not assignments:
+    # EXP-3 runs before anything is computed, because its done-when is "a skewed
+    # or contaminated arm alerts BEFORE a statement is generated". A monitor that
+    # ran afterwards would be a dashboard, and the failure it catches is one
+    # nothing downstream can see: an arm that stopped being fair produces a
+    # confident number, not an obviously broken one.
+    statement.integrity = await check_arm_integrity(
+        session, client_id=client_id, since=period_start, until=period_end
+    )
+
+    if statement.integrity.blocks_a_statement:
+        statement.comparison_unavailable = (
+            "We found a problem with how this period's comparison was sampled, so "
+            "we are not putting a figure to it. That is our fault rather than "
+            "yours and we would rather say so than show you a number we do not "
+            "trust. Your account team has the detail."
+        )
+    elif not assignments:
         statement.comparison_unavailable = (
             "No orders were in the measured comparison during this period. The "
             "comparison works by dispatching a small share of orders the way they "
