@@ -24,6 +24,7 @@ from app.models.hub import Hub
 from app.models.outcome_entry import KIND_COST, SUBJECT_ORDER, OutcomeEntry
 from app.record.cost import RATE_FROM_DRIVER, RATE_PLACEHOLDER
 from app.record.outcomes import record_outcome
+from app.experiment.arms import _draw, block_size
 from app.settle.statement import (
     MINIMUM_ARM_DROPS,
     SavingsStatement,
@@ -56,23 +57,56 @@ async def _client(db_session, hub) -> Client:
     return client
 
 
-async def _drop(db_session, hub, client, *, arm, cents, rate_source=RATE_FROM_DRIVER):
-    """One assigned order with a recorded cost, which is all a statement needs."""
-    order_id = uuid.uuid4()
-    db_session.add(
-        ExperimentAssignment(
-            hub_id=hub.id, client_id=client.id, order_id=order_id,
-            experiment=EXPERIMENT_CONTROL_ARM, arm=arm, assigned_at=MID,
-            salt="s", control_fraction=0.10, draw=0.5, contracted_at=START,
-            receiver_key="dock", block_size=10, block_index=0, position_in_block=0,
-        )
-    )
-    await record_outcome(
-        db_session, hub_id=hub.id, subject_type=SUBJECT_ORDER, subject_id=order_id,
-        kind=KIND_COST, occurred_at=MID,
-        values={"loaded_cents": cents, "rate_source": rate_source},
-    )
-    return order_id
+async def _book(
+    db_session, hub, client, *, docks, control_cents, treatment_cents,
+    rate_source=RATE_FROM_DRIVER,
+):
+    """A book of assignments that `EXP-3` will accept as genuine.
+
+    The first version of this fabricated rows - an arbitrary salt, every order at
+    one dock, a 50/50 split against a 10% arm - and EXP-3 blocked every statement
+    built on it, correctly. Three of its checks fired at once and they were all
+    right: the rows did not recompute, the share was nowhere near contracted, and
+    one dock had taken every control order there was.
+
+    So this builds what `assign_arm` would have: one block per dock, the control
+    slot chosen by the same hash the real path uses, exactly one control order per
+    block. Fast enough to keep in a test, and valid enough that a monitor
+    designed to catch fabricated data does not catch it.
+    """
+    salt = f"{EXPERIMENT_CONTROL_ARM}:{client.id}"
+    size = block_size(client.control_arm_fraction)
+    control_ids, treatment_ids = [], []
+    for dock in range(docks):
+        stratum = f"dock-{dock}"
+        draw = _draw(salt, f"{stratum}:0")
+        chosen = min(int(draw * size), size - 1)
+        for position in range(size):
+            order_id = uuid.uuid4()
+            is_control = position == chosen
+            db_session.add(
+                ExperimentAssignment(
+                    hub_id=hub.id, client_id=client.id, order_id=order_id,
+                    experiment=EXPERIMENT_CONTROL_ARM,
+                    arm=ARM_CONTROL if is_control else ARM_TREATMENT,
+                    assigned_at=MID, salt=salt,
+                    control_fraction=client.control_arm_fraction, draw=draw,
+                    contracted_at=START, receiver_key=stratum, block_size=size,
+                    block_index=0, position_in_block=position,
+                )
+            )
+            (control_ids if is_control else treatment_ids).append(order_id)
+
+    for ids, cents_for in (
+        (control_ids, control_cents), (treatment_ids, treatment_cents)
+    ):
+        for index, order_id in enumerate(ids):
+            await record_outcome(
+                db_session, hub_id=hub.id, subject_type=SUBJECT_ORDER,
+                subject_id=order_id, kind=KIND_COST, occurred_at=MID,
+                values={"loaded_cents": cents_for(index), "rate_source": rate_source},
+            )
+    return control_ids, treatment_ids
 
 
 async def _statement(db_session, hub, client, **kwargs) -> SavingsStatement:
@@ -86,9 +120,10 @@ class TestTheIntervalIsTheHeadline:
     async def test_a_clear_saving_is_stated_as_a_range(self, db_session):
         hub = await _hub(db_session)
         client = await _client(db_session, hub)
-        for i in range(60):
-            await _drop(db_session, hub, client, arm=ARM_CONTROL, cents=1000 + i)
-            await _drop(db_session, hub, client, arm=ARM_TREATMENT, cents=700 + i)
+        await _book(
+            db_session, hub, client, docks=35,
+            control_cents=lambda i: 1000 + i, treatment_cents=lambda i: 700 + i,
+        )
 
         statement = await _statement(db_session, hub, client)
         assert statement.comparison is not None
@@ -103,9 +138,11 @@ class TestTheIntervalIsTheHeadline:
         indefensible the first time somebody checks it."""
         hub = await _hub(db_session)
         client = await _client(db_session, hub)
-        for i in range(60):
-            await _drop(db_session, hub, client, arm=ARM_CONTROL, cents=900 + (i * 37) % 600)
-            await _drop(db_session, hub, client, arm=ARM_TREATMENT, cents=880 + (i * 53) % 600)
+        await _book(
+            db_session, hub, client, docks=35,
+            control_cents=lambda i: 900 + (i * 37) % 600,
+            treatment_cents=lambda i: 880 + (i * 53) % 600,
+        )
 
         statement = await _statement(db_session, hub, client)
         assert statement.comparison is not None
@@ -124,9 +161,10 @@ class TestTheIntervalIsTheHeadline:
     async def test_a_worse_result_is_reported_not_hidden(self, db_session):
         hub = await _hub(db_session)
         client = await _client(db_session, hub)
-        for i in range(60):
-            await _drop(db_session, hub, client, arm=ARM_CONTROL, cents=700 + i)
-            await _drop(db_session, hub, client, arm=ARM_TREATMENT, cents=1000 + i)
+        await _book(
+            db_session, hub, client, docks=35,
+            control_cents=lambda i: 700 + i, treatment_cents=lambda i: 1000 + i,
+        )
 
         statement = await _statement(db_session, hub, client)
         assert statement.comparison.difference_cents < 0
@@ -139,9 +177,10 @@ class TestWhenItRefusesToCompare:
         is a better statement than a wide number that reads as a small one."""
         hub = await _hub(db_session)
         client = await _client(db_session, hub)
-        for i in range(MINIMUM_ARM_DROPS - 1):
-            await _drop(db_session, hub, client, arm=ARM_CONTROL, cents=1000)
-            await _drop(db_session, hub, client, arm=ARM_TREATMENT, cents=700)
+        await _book(
+            db_session, hub, client, docks=MINIMUM_ARM_DROPS - 1,
+            control_cents=lambda i: 1000, treatment_cents=lambda i: 700,
+        )
 
         statement = await _statement(db_session, hub, client)
         assert statement.comparison is None
@@ -195,9 +234,11 @@ class TestItCarriesItsBasis:
         silently."""
         hub = await _hub(db_session)
         client = await _client(db_session, hub)
-        for _ in range(3):
-            await _drop(db_session, hub, client, arm=ARM_TREATMENT, cents=900,
-                        rate_source=RATE_PLACEHOLDER)
+        await _book(
+            db_session, hub, client, docks=2,
+            control_cents=lambda i: 900, treatment_cents=lambda i: 900,
+            rate_source=RATE_PLACEHOLDER,
+        )
 
         statement = await _statement(db_session, hub, client)
         assert any("placeholder wage" in c for c in statement.caveats)
@@ -240,7 +281,11 @@ class TestItCarriesItsBasis:
         counted."""
         hub = await _hub(db_session)
         client = await _client(db_session, hub)
-        order_id = await _drop(db_session, hub, client, arm=ARM_TREATMENT, cents=5000)
+        _, treatment_ids = await _book(
+            db_session, hub, client, docks=1,
+            control_cents=lambda i: 5000, treatment_cents=lambda i: 5000,
+        )
+        order_id = treatment_ids[0]
         original = (
             await db_session.scalars(
                 select(OutcomeEntry).where(OutcomeEntry.subject_id == order_id)
@@ -253,12 +298,17 @@ class TestItCarriesItsBasis:
             supersedes=original.id,
         )
         statement = await _statement(db_session, hub, client)
-        assert statement.cost_per_drop_cents == pytest.approx(1000)
+        # Nine drops at 5000 and the corrected one at 1000, so the mean moves by
+        # exactly the correction rather than counting the order twice.
+        assert statement.cost_per_drop_cents == pytest.approx((9 * 5000 + 1000) / 10)
 
     async def test_the_period_is_honoured(self, db_session):
         hub = await _hub(db_session)
         client = await _client(db_session, hub)
-        await _drop(db_session, hub, client, arm=ARM_TREATMENT, cents=900)
+        await _book(
+            db_session, hub, client, docks=1,
+            control_cents=lambda i: 900, treatment_cents=lambda i: 900,
+        )
         statement = await build_statement(
             db_session, hub_id=hub.id, client_id=client.id,
             period_start=END, period_end=END + timedelta(days=30),
@@ -281,9 +331,10 @@ class TestItReadsWithoutACall:
     async def test_it_uses_no_internal_vocabulary(self, db_session):
         hub = await _hub(db_session)
         client = await _client(db_session, hub)
-        for i in range(40):
-            await _drop(db_session, hub, client, arm=ARM_CONTROL, cents=1000 + i)
-            await _drop(db_session, hub, client, arm=ARM_TREATMENT, cents=700 + i)
+        await _book(
+            db_session, hub, client, docks=35,
+            control_cents=lambda i: 1000 + i, treatment_cents=lambda i: 700 + i,
+        )
         text = render_statement(await _statement(db_session, hub, client))
         for jargon in (
             "EXP-1", "REC-2", "STL-1", "control arm", "treatment", "Welch",
