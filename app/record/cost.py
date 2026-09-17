@@ -70,13 +70,13 @@ Nobody should be able to quote one of these without meeting the word
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.driver import Driver
-from app.models.outcome_entry import KIND_COST, SUBJECT_ORDER
+from app.models.outcome_entry import KIND_COST, SUBJECT_ORDER, OutcomeEntry
 from app.models.route import Route
 from app.models.stop import Stop, StopOrder
 from app.models.stop_geofence_event import KIND_ENTER, KIND_EXIT, StopGeofenceEvent
@@ -366,6 +366,120 @@ async def driver_day_cost(
             )
         )
     return cost
+
+
+async def record_costs_for_period(
+    session: AsyncSession,
+    *,
+    hub_id,
+    since: datetime,
+    until: datetime,
+    recompute: bool = False,
+) -> dict:
+    """Cost every driver-day in a window, writing each drop's share to the ledger.
+
+    The switch `record_driver_day_cost` was missing. It had no caller anywhere,
+    so nothing in this system ever computed what a drop cost - the function
+    existed, was tested, and was never run.
+
+    **Idempotent by default.** The ledger is append-only, so a second run would
+    write a second live cost for the same order and nothing downstream could
+    choose between them. Orders already costed are skipped.
+
+    `recompute` supersedes instead, which is the ledger's own answer to a
+    corrected figure: both entries stay, the correction is visible, and
+    `app/settle/statement.py` reads the one that supersedes. Use it when an
+    input changed - a driver's rate was finally recorded, a geofence event
+    arrived late - not to paper over a double run.
+    """
+    days = _days_in(since, until)
+    drivers = list(
+        await session.scalars(select(Driver.id).where(Driver.hub_id == hub_id))
+    )
+    summary = {
+        "driver_days": 0,
+        "costed": 0,
+        "skipped_already_costed": 0,
+        "superseded": 0,
+        "placeholder_rate_days": 0,
+    }
+    for driver_id in drivers:
+        for day_start, day_end in days:
+            cost = await driver_day_cost(
+                session, driver_id=driver_id, since=day_start, until=day_end
+            )
+            if not cost.orders:
+                continue
+            summary["driver_days"] += 1
+            if cost.rate_source == RATE_PLACEHOLDER:
+                summary["placeholder_rate_days"] += 1
+
+            existing = await _live_costs_for(
+                session, [o.order_id for o in cost.orders]
+            )
+            for order in cost.orders:
+                previous = existing.get(order.order_id)
+                if previous is not None and not recompute:
+                    summary["skipped_already_costed"] += 1
+                    continue
+                await record_outcome(
+                    session,
+                    hub_id=hub_id,
+                    subject_type=SUBJECT_ORDER,
+                    subject_id=order.order_id,
+                    kind=KIND_COST,
+                    occurred_at=day_end,
+                    supersedes=previous.id if previous is not None else None,
+                    values={
+                        "loaded_cents": order.loaded_cents,
+                        "own_cents": order.own_cents,
+                        "stop_seconds": round(order.stop_seconds, 1),
+                        "travel_seconds": round(order.travel_seconds, 1),
+                        "overhead_seconds": round(order.overhead_seconds, 1),
+                        "rate_cents_per_hour": order.rate_cents_per_hour,
+                        "rate_source": order.rate_source,
+                        "shared_with": order.shared_with,
+                        "timing_source": cost.timing_source,
+                        "driver_id": str(cost.driver_id),
+                        "window": [day_start.isoformat(), day_end.isoformat()],
+                        "notes": cost.notes,
+                    },
+                )
+                if previous is not None:
+                    summary["superseded"] += 1
+                else:
+                    summary["costed"] += 1
+    return summary
+
+
+async def _live_costs_for(session: AsyncSession, order_ids: list) -> dict:
+    """The current cost entry per order, corrections followed."""
+    if not order_ids:
+        return {}
+    entries = list(
+        await session.scalars(
+            select(OutcomeEntry).where(
+                OutcomeEntry.subject_id.in_(order_ids),
+                OutcomeEntry.kind == KIND_COST,
+            )
+        )
+    )
+    superseded = {e.supersedes for e in entries if e.supersedes is not None}
+    return {e.subject_id: e for e in entries if e.id not in superseded}
+
+
+def _days_in(since: datetime, until: datetime) -> list:
+    """Whole days, so a driver-day is the unit the wage is paid in.
+
+    Windowing on anything else would split one paid day across two costings and
+    attribute each half its own overhead.
+    """
+    out = []
+    cursor = since.replace(hour=0, minute=0, second=0, microsecond=0)
+    while cursor < until:
+        out.append((cursor, cursor + timedelta(days=1)))
+        cursor += timedelta(days=1)
+    return out
 
 
 async def record_driver_day_cost(

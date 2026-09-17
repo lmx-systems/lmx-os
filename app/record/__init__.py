@@ -17,6 +17,7 @@ from app.record.cost import (
     DriverDayCost,
     OrderCost,
     driver_day_cost,
+    record_costs_for_period,
     record_driver_day_cost,
 )
 from app.record.decisions import (
@@ -73,6 +74,7 @@ __all__ = [
     "record_delivery_outcome",
     "orders_with_an_abstention",
     "record_arm_abstention",
+    "record_costs_for_period",
     "record_outcome",
     "driver_day_cost",
     "record_driver_day_cost",

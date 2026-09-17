@@ -241,25 +241,28 @@ of the following to be true at once:
 | # | Required | State |
 |---|---|---|
 | 1 | A customer's contract records the date they agreed to a control arm | **People.** Nobody has signed one |
-| 2 | That client is enrolled — `control_arm_contracted_at` and a fraction written | **Missing.** Nothing in `app/` or `scripts/` sets either column |
+| 2 | That client is enrolled — `control_arm_contracted_at` and a fraction written | ✅ `scripts/control_arm.py enrol` |
 | 3 | Orders reach intake and get an arm | ✅ `app/ingestion/service.py` |
-| 4 | Drivers have `hourly_rate_cents` | **Missing.** Nothing sets it; every cost would use payroll's placeholder wage |
+| 4 | Drivers have `hourly_rate_cents` | ✅ `scripts/set_driver_rate.py` |
 | 5 | Drivers clock on, so shift events exist | ✅ the endpoint exists, gated by `R4` compliance |
-| 6 | Something computes cost per driver-day | **Missing.** `record_driver_day_cost` has no caller |
-| 7 | Something generates the statement | **Missing.** `build_statement` has no caller |
+| 6 | Something computes cost per driver-day | ✅ `record_costs_for_period`, via `scripts/settle_month.py` |
+| 7 | Something generates the statement | ✅ `scripts/settle_month.py` |
 | 8 | 30+ costed drops in each arm | **Data.** Follows from 1–7 plus time |
 
-**The measurement layer is complete and has no switches.** That is the finding.
-Every piece is built, tested and off, and for four of them there is no supported
-way to turn them on — the day a clause is signed, somebody would be writing SQL
-against production to enrol the client. `exclude_receiver` has no caller either,
-so a customer can be promised their fragile dock stays out of the arm and there
-is no way to record it.
+**The switches existed nowhere and now exist as commands.** The audit found the
+measurement layer complete, tested and unreachable: nothing set a contract date,
+nothing recorded an exclusion, nothing computed a cost, nothing produced a
+statement. The day a clause was signed, somebody would have been writing SQL
+against production.
 
-This is the same defect as `record_shadow_cycle` having no caller, which `DEC-0`
-found and fixed. Three more were introduced after it and nothing caught them,
-because a module with tests and no entry point looks finished from every angle
-except this one.
+This was the same defect as `record_shadow_cycle` having no caller, which
+`DEC-0` found and fixed — three more were introduced after it and nothing
+caught them, because a module with tests and no entry point looks finished from
+every angle except that one. `tests/integration/test_the_switches.py` now runs
+the whole chain (enrol → ingest → cost → settle) so the next one fails a test
+rather than an audit.
+
+**Only item 1 is left**, and it is not ours.
 
 **Blocked on people, not engineering:**
 
