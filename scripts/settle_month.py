@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.db import AsyncSessionLocal  # noqa: E402
 from app.experiment.integrity import render as render_integrity  # noqa: E402
 from app.record.cost import record_costs_for_period  # noqa: E402
+from app.settle.basis import issue, live_basis, reproduce  # noqa: E402
 from app.settle.pdf import render_statement_pdf  # noqa: E402
 from app.settle.statement import build_statement, render_statement  # noqa: E402
 
@@ -49,7 +50,10 @@ def _month_bounds(month: str) -> tuple[datetime, datetime]:
     return start, following
 
 
-async def _run(hub: str, client: str, month: str, pdf: Path | None, recompute: bool) -> int:
+async def _run(
+    hub: str, client: str, month: str, pdf: Path | None, recompute: bool,
+    issue_basis: bool,
+) -> int:
     since, until = _month_bounds(month)
     async with AsyncSessionLocal() as session:
         print(f"Costing {since:%B %Y} for hub {hub}")
@@ -80,6 +84,29 @@ async def _run(hub: str, client: str, month: str, pdf: Path | None, recompute: b
             print("\nWhy no figure was printed:\n")
             print(render_integrity(statement.integrity))
 
+        # STL-2. Checked before issuing, because the interesting case is a
+        # period that already has a basis and no longer reproduces under it -
+        # which is exactly what `--recompute` above can cause.
+        existing = await live_basis(
+            session, client_id=uuid.UUID(client),
+            period_start=since, period_end=until,
+        )
+        if existing is not None:
+            result = reproduce(existing, statement)
+            print(f"\n{result.explain()}")
+            if not result.reproduces and result.recosted_orders:
+                for order in result.recosted_orders[:20]:
+                    print(f"    {order}")
+                if len(result.recosted_orders) > 20:
+                    print(f"    ... and {len(result.recosted_orders) - 20} more")
+
+        if issue_basis:
+            basis = await issue(session, statement)
+            await session.commit()
+            state = "agreed" if basis.is_agreed else "not yet signed by either side"
+            print(f"\nissued under basis v{basis.version} ({state})")
+            print("  scripts/sign_basis.py records a signature")
+
         if pdf:
             pdf.write_bytes(render_statement_pdf(statement))
             print(f"\nwrote {pdf}")
@@ -96,9 +123,16 @@ def main() -> int:
         "--recompute", action="store_true",
         help="supersede existing costs rather than skipping them",
     )
+    parser.add_argument(
+        "--issue", action="store_true",
+        help="record what this statement was calculated under (STL-2)",
+    )
     args = parser.parse_args()
     return asyncio.run(
-        _run(args.hub, args.client, args.month, args.pdf, args.recompute)
+        _run(
+            args.hub, args.client, args.month, args.pdf, args.recompute,
+            args.issue,
+        )
     )
 
 
