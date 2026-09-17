@@ -30,7 +30,7 @@ longer match.
 """
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, String
+from sqlalchemy import DateTime, Float, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -85,3 +85,18 @@ class ExperimentAssignment(Base, UUIDPrimaryKeyMixin):
     # assignment rather than only living on the client, because the client row
     # can change and this is the fact the assignment was made under.
     contracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    # EXP-2's stratification. The dock this order went to, normalised by the
+    # caller, and where the order sat in that dock's sequence. Within each block
+    # of `block_size` orders to one dock, exactly one position is control - which
+    # is how "no single dock absorbs more than its share" is enforced rather than
+    # hoped for.
+    #
+    # Nullable because rows written before EXP-2 have no block, and
+    # `verify_assignment` checks those the way they were made. Not backfilled: an
+    # assignment records how it was actually decided, and inventing a block for
+    # one that was drawn independently would make the record say something untrue.
+    receiver_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    block_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    block_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    position_in_block: Mapped[int | None] = mapped_column(Integer, nullable=True)

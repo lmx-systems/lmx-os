@@ -11,13 +11,36 @@ third clause made mechanical: *"in the contract before the code."* It is
 deliberately not a config flag somebody can flip in a hurry - turning it on
 requires stating the date the customer agreed, which is a thing you either have
 or do not.
+
+**Stratified by dock, not drawn independently (`EXP-2`).** The first version
+hashed each order on its own, which gives the right fraction across the book and
+says nothing about any single dock. Over twenty-five orders at an 8% arm, one
+dock landing in control four times is an ordinary run of luck - and four
+deliberately slower deliveries to one customer, possibly in the same fortnight,
+is a phone call rather than a statistic. EXP-2's done-when is *"no single dock
+absorbs more than its share"*, so the draw is now a permuted block: within each
+run of `round(1/fraction)` orders to a dock, exactly one is control, and which
+one is chosen by hash.
+
+*The cap that was rejected.* The obvious alternative - draw independently, then
+force treatment when a dock is over quota - biases the arm. The orders it moves
+are not a random subset: they are the ones that came after a dock had already
+been unlucky, so the control group systematically under-represents the busiest
+docks and the treatment group quietly absorbs the difference. Block
+randomisation costs a count and gives the guarantee without the bias.
+
+*A partial block is still fair.* A dock with five orders in a twelve-order block
+never completes it, and each of those five has a 1/12 chance of being the chosen
+position - so its marginal rate is the contracted fraction exactly, the same as
+everyone else. Small docks are not quietly excluded by the stratification.
 """
 import hashlib
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.experiment.exclusions import ReceiverExcluded, is_excluded
 from app.models.client import Client
 from app.models.experiment_assignment import (
     ARM_CONTROL,
@@ -33,6 +56,24 @@ from app.models.order import Order
 # orders than the measurement needs. Both ends are a promise to somebody.
 MIN_CONTROL_FRACTION = 0.05
 MAX_CONTROL_FRACTION = 0.10
+
+# When an order carries no usable dock key - an address that names no place, a
+# source that does not send one - it is stratified against the client as a
+# whole. That keeps the overall fraction right and gives up the per-dock
+# guarantee for those orders, which is the honest trade: the alternative is
+# excluding them from the experiment for a data-quality reason that has nothing
+# to do with the customer.
+STRATUM_UNKNOWN_RECEIVER = "__no_receiver__"
+
+
+def block_size(fraction: float) -> int:
+    """Orders per block, so that exactly one of them is control.
+
+    At the contracted band this is 10 to 20. Rounded rather than truncated so a
+    fraction of 0.08 gives 12 (a 8.3% rate) rather than 12.5 silently becoming
+    12 or 13 depending on the direction somebody happened to round.
+    """
+    return max(2, round(1 / fraction))
 
 
 class ArmNotContractedError(RuntimeError):
@@ -79,13 +120,22 @@ async def assign_arm(
     order: Order,
     client: Client,
     *,
+    receiver_key: str | None = None,
     now: datetime | None = None,
 ) -> ExperimentAssignment:
     """Put this order in an arm, at intake, once.
 
     Raises `ArmNotContractedError` when the client has no contracted arm -
     which is every client until somebody records the date their clause was
-    agreed.
+    agreed - and `ReceiverExcluded` when the dock is one they asked us to leave
+    out. Two types rather than one, because "never agreed to an experiment" and
+    "agreed, and named this dock as out of scope" read very differently in a log.
+
+    `receiver_key` is the dock, already normalised, supplied by the caller.
+    This package does not learn how an order maps to a dock: that mapping lives
+    in `app/identity/`, the dispatch engine reads arm labels, and importing an
+    edge package here would put the core one hop from it -
+    `tests/test_architecture_boundaries.py` exists to catch exactly that.
 
     Idempotent: an order already assigned returns its existing assignment
     rather than drawing again. Intake can be retried, and a retry that re-rolled
@@ -104,12 +154,46 @@ async def assign_arm(
     if existing is not None:
         return existing
 
-    salt = f"{EXPERIMENT_CONTROL_ARM}:{client.id}"
-    # Keyed on the order's own id rather than the customer's reference: a
-    # reference can be reused or edited, and an arm that moved when somebody
-    # corrected a typo would not be immutable in the sense that matters.
-    draw = _draw(salt, str(order.id))
-    arm = ARM_CONTROL if draw < client.control_arm_fraction else ARM_TREATMENT
+    stratum = receiver_key or STRATUM_UNKNOWN_RECEIVER
+    if receiver_key and await is_excluded(
+        session, client_id=client.id, receiver_key=receiver_key
+    ):
+        raise ReceiverExcluded(
+            f"receiver {receiver_key!r} is excluded from {EXPERIMENT_CONTROL_ARM} "
+            f"for client {client.id}. The order is dispatched normally and takes "
+            "no part in the measurement."
+        )
+
+    size = block_size(client.control_arm_fraction)
+    # Serialise the count for this dock. Two intakes racing would both read the
+    # same position and could both land on the chosen one, putting two control
+    # orders in a block that guarantees one - which is the single promise EXP-2
+    # makes. A transaction-scoped advisory lock is the cheapest way to mean it;
+    # it is released on commit or rollback without a finally block.
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"{client.id}:{stratum}"},
+    )
+    index = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(ExperimentAssignment)
+            .where(
+                ExperimentAssignment.client_id == client.id,
+                ExperimentAssignment.receiver_key == stratum,
+                ExperimentAssignment.experiment == EXPERIMENT_CONTROL_ARM,
+            )
+        )
+        or 0
+    )
+    block_index = index // size
+    position = index % size
+
+    # One draw per block, not per order: the block is the unit that has exactly
+    # one control slot, so the hash has to name a slot rather than a verdict.
+    draw = _draw(f"{EXPERIMENT_CONTROL_ARM}:{client.id}", f"{stratum}:{block_index}")
+    chosen = min(int(draw * size), size - 1)
+    arm = ARM_CONTROL if position == chosen else ARM_TREATMENT
 
     assignment = ExperimentAssignment(
         hub_id=order.hub_id,
@@ -118,10 +202,14 @@ async def assign_arm(
         experiment=EXPERIMENT_CONTROL_ARM,
         arm=arm,
         assigned_at=now or datetime.now(timezone.utc),
-        salt=salt,
+        salt=f"{EXPERIMENT_CONTROL_ARM}:{client.id}",
         control_fraction=client.control_arm_fraction,
         draw=draw,
         contracted_at=client.control_arm_contracted_at,
+        receiver_key=stratum,
+        block_size=size,
+        block_index=block_index,
+        position_in_block=position,
     )
     session.add(assignment)
     await session.flush()
@@ -151,9 +239,33 @@ def verify_assignment(assignment: ExperimentAssignment) -> bool:
     `EXP-3`'s integrity monitor will want this over a whole window. Here so
     that the property - an arm is checkable, not merely asserted - has one
     definition rather than being re-derived by whoever writes that monitor.
+
+    Block stratification keeps this checkable, but changes what is being
+    checked. The old form was a pure function of the order id; this one depends
+    on the order's position in its dock's sequence, which is history. So the
+    position and block are stored on the row and recomputed against - a re-roll
+    still stops matching, and so does a row whose position was edited to move it
+    out of the control slot.
     """
-    recomputed = _draw(assignment.salt, str(assignment.order_id))
+    if assignment.block_size is None or assignment.position_in_block is None:
+        # Written before EXP-2. Verified the way it was made.
+        recomputed = _draw(assignment.salt, str(assignment.order_id))
+        if abs(recomputed - assignment.draw) > 1e-12:
+            return False
+        expected = (
+            ARM_CONTROL
+            if recomputed < assignment.control_fraction
+            else ARM_TREATMENT
+        )
+        return expected == assignment.arm
+
+    recomputed = _draw(
+        assignment.salt, f"{assignment.receiver_key}:{assignment.block_index}"
+    )
     if abs(recomputed - assignment.draw) > 1e-12:
         return False
-    expected = ARM_CONTROL if recomputed < assignment.control_fraction else ARM_TREATMENT
+    chosen = min(int(recomputed * assignment.block_size), assignment.block_size - 1)
+    expected = (
+        ARM_CONTROL if assignment.position_in_block == chosen else ARM_TREATMENT
+    )
     return expected == assignment.arm

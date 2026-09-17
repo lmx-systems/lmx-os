@@ -16,11 +16,22 @@ from app.experiment.arms import (
     ARM_TREATMENT,
     MAX_CONTROL_FRACTION,
     MIN_CONTROL_FRACTION,
+    STRATUM_UNKNOWN_RECEIVER,
     ArmNotContractedError,
     arm_for_order,
     assign_arm,
     assignment_for,
+    block_size,
     control_arm_is_live,
+    verify_assignment,
+)
+from app.experiment.exclusions import (
+    ExclusionImpact,
+    ReceiverExcluded,
+    exclude_receiver,
+    exclusion_impact,
+    is_excluded,
+    revoke_exclusion,
 )
 
 __all__ = [
@@ -28,9 +39,18 @@ __all__ = [
     "ARM_TREATMENT",
     "MAX_CONTROL_FRACTION",
     "MIN_CONTROL_FRACTION",
+    "STRATUM_UNKNOWN_RECEIVER",
     "ArmNotContractedError",
+    "ExclusionImpact",
+    "ReceiverExcluded",
     "arm_for_order",
     "assign_arm",
     "assignment_for",
+    "block_size",
     "control_arm_is_live",
+    "exclude_receiver",
+    "exclusion_impact",
+    "is_excluded",
+    "revoke_exclusion",
+    "verify_assignment",
 ]

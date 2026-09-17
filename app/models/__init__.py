@@ -21,6 +21,7 @@ from app.models.receiver_profile import ReceiverProfile
 from app.models.gig_job import GigJob
 from app.models.gig_payout import GigPayout
 from app.models.experiment_assignment import ExperimentAssignment
+from app.models.experiment_exclusion import ExperimentExclusion
 from app.models.hub import Hub
 from app.models.hub_closure import HubClosure
 from app.models.invoice import Invoice
@@ -57,6 +58,7 @@ __all__ = [
     "GigJob",
     "GigPayout",
     "ExperimentAssignment",
+    "ExperimentExclusion",
     "Hub",
     "HubClosure",
     "Invoice",
