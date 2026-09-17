@@ -23,13 +23,16 @@ It performs no writes - no hold-queue removals, no status updates, no offers, no
 notifications - and `tests/test_shadow_recorder.py` asserts a shadow run leaves
 the queue and every order status exactly as it found them.
 
-**Still to decide, and not decided here:** whether this runs as a background
-task in the app - the shape `app/learning_loop/scheduler.py` already uses, an
-asyncio loop with a Redis lock started at startup - and at what cadence, and for
-which hubs. Cadence is the load-bearing one: the shadow cycle's dispatch lead is
-bounded below by how often it runs, so a cycle every thirty minutes cannot
-demonstrate beating a dispatcher who inserts an order the moment it lands. That
-is an operational choice with a cost, so it belongs to whoever runs the pilot.
+**In production this is a background task, not this script.**
+`app/shadow/scheduler.py` runs the cycle per hub on a cadence, started from the
+app's lifespan and **off until `shadow_scheduler_enabled` is set** - every cycle
+is a solver call, and against a live Google project that is billed. This script
+stays because a one-off cycle and an ad-hoc report are worth having without
+enabling a loop, and because `report` is the only way to read a window.
+
+Cadence is the setting that matters: the dispatch lead is bounded below by how
+often the cycle fires, so the report measures the interval actually achieved and
+states how much of the lead the cadence alone explains.
 """
 from __future__ import annotations
 

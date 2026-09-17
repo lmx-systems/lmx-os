@@ -32,6 +32,7 @@ from app.db import engine
 from app.driver_auth.tokens import assert_driver_jwt_secret_configured
 from app.ingestion.router import router as ingestion_router
 from app.learning_loop.scheduler import learning_loop_scheduler
+from app.shadow.scheduler import shadow_scheduler
 from app.logging_config import configure_logging, get_logger
 from app.ops_auth.middleware import OpsUserAuthMiddleware
 from app.ops_auth.tokens import assert_ops_jwt_secret_configured
@@ -70,6 +71,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # app/learning_loop/scheduler.py (docs/ROADMAP.md E7).
     learning_loop_scheduler.start()
 
+    # Shadow mode's cycle runner (app/shadow/scheduler.py, DEC-0). Declines to
+    # start unless `shadow_scheduler_enabled` is set - see app/config.py for why
+    # it is off by default.
+    shadow_scheduler.start()
+
     logger.info("lmx_os_ready")
     yield
 
@@ -77,6 +83,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # connection pools it depends on go away (app/optimizer/event_trigger.py).
     await dispatch_event_bus.wait_idle()
     await learning_loop_scheduler.stop()
+    await shadow_scheduler.stop()
     await engine.dispose()
     await close_pool()
     logger.info("lmx_os_shutdown")

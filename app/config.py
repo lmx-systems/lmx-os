@@ -259,6 +259,33 @@ class Settings(BaseSettings):
     # the alert that matters.
     stuck_order_after_seconds: int = 1800
 
+    # Shadow mode (app/shadow/, docs/ROADMAP_1.5.md DEC-0). LMX OS plans the
+    # same orders in parallel and writes down what it would have done, changing
+    # nothing.
+    #
+    # Off by default, and the reason is money rather than risk. Shadow mode
+    # writes no operational state - no hold-queue removals, no status updates,
+    # no offers - but every cycle calls the optimizer, and once DEC-3 points
+    # that at a live Google project each call is billed. An unattended loop
+    # making one every few minutes, per hub, around the clock, is a cost that
+    # would arrive as an invoice instead of as a decision.
+    shadow_scheduler_enabled: bool = False
+    #
+    # The cadence, and it is load-bearing rather than a tuning knob: the
+    # dispatch lead DEC-0 measures is bounded below by how often the cycle
+    # fires. At 300s the report cannot show LMX OS beating a dispatcher on a
+    # HOT_SHOT order, whose whole hold window is 120s - it can only show it
+    # beating them on the tiers where minutes are available to win. Raising
+    # this buys solver calls back and costs resolution; the divergence report
+    # measures the interval actually achieved rather than trusting this value.
+    shadow_cycle_cadence_seconds: int = 300
+    #
+    # Operating hours in each hub's own local time. A cycle at three in the
+    # morning plans an empty queue and records that it decided nothing, which
+    # dilutes every rate in the report with rows that never had work to do.
+    shadow_cycle_start_local_hour: int = 6
+    shadow_cycle_end_local_hour: int = 20
+
     # Payroll (app/payroll/): W2 hours submission today, with 1099/gig pay
     # rails expected to join behind the same PayrollProvider interface as
     # the driver-classification phases roll out (docs/NEXT_STEPS.md). No
