@@ -119,6 +119,77 @@ def _draw(salt: str, order_key: str) -> float:
     return int.from_bytes(digest[:8], "big") / float(1 << 64)
 
 
+class AlreadyEnrolled(RuntimeError):
+    """Raised when enrolling a client that already has a contracted arm.
+
+    Its own type because the caller's right response is a conversation, not a
+    retry: changing a live arm's terms mid-period is what `EXP-3`'s terms-drift
+    check blocks a statement on, and doing it by accident would invalidate a
+    window nobody had finished measuring.
+    """
+
+
+async def enrol_control_arm(
+    session: AsyncSession,
+    client: Client,
+    *,
+    fraction: float,
+    contracted_at: datetime,
+    replacing: bool = False,
+) -> Client:
+    """Turn the arm on for one client, which nothing else in this codebase does.
+
+    The gate `EXP-1` describes - a recorded contract date rather than a flag -
+    had no way to be set. The columns are nullable with no default and nothing
+    in `app/` or `scripts/` wrote them, so the only way to enrol a customer was
+    SQL against production. This is the switch.
+
+    Deliberately not an endpoint. Enrolling a customer in an experiment that
+    gives a slice of their orders worse service is a rare, deliberate act tied
+    to a signed clause, and the date has to come off that clause. A button
+    invites somebody to press it; a command requires them to have the date in
+    their hand.
+
+    `replacing` is required to change a live arm. Pooling assignments made under
+    two different fractions is two experiments described as one - `EXP-3` blocks
+    a statement over any window that spans the change, which is correct and
+    which somebody should choose rather than discover.
+    """
+    if not MIN_CONTROL_FRACTION <= fraction <= MAX_CONTROL_FRACTION:
+        raise ValueError(
+            f"control fraction must be between {MIN_CONTROL_FRACTION} and "
+            f"{MAX_CONTROL_FRACTION}; {fraction} is outside the band the roadmap "
+            "sets. Below it the arm says nothing within a quarter, above it we "
+            "are giving a paying customer a worse service on more orders than "
+            "the measurement needs."
+        )
+    if client.control_arm_contracted_at is not None and not replacing:
+        raise AlreadyEnrolled(
+            f"client {client.id} already has a contracted arm from "
+            f"{client.control_arm_contracted_at:%Y-%m-%d} at "
+            f"{client.control_arm_fraction:.0%}. Pass replacing=True to change "
+            "it, and expect EXP-3 to block any statement whose window spans the "
+            "change - two fractions pooled is two experiments described as one."
+        )
+    client.control_arm_fraction = fraction
+    client.control_arm_contracted_at = contracted_at
+    await session.flush()
+    return client
+
+
+async def withdraw_control_arm(session: AsyncSession, client: Client) -> Client:
+    """Take a client back out of the experiment.
+
+    Clears the gate. Assignments already made are untouched - they are
+    append-only evidence of what happened, and a customer leaving the experiment
+    does not unmake the orders that were in it.
+    """
+    client.control_arm_fraction = None
+    client.control_arm_contracted_at = None
+    await session.flush()
+    return client
+
+
 async def assign_arm(
     session: AsyncSession,
     order: Order,
