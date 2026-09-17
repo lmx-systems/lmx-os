@@ -30,6 +30,25 @@ inventory doc, and GTM slide deck were in July 2026.
   accent green rather than leaving them in the old color — a plain
   find/replace on the XML won't touch baked-in icon pixels.
 
+## PDFs (generated server-side)
+
+Two exist: `app/billing/invoice_pdf.py` and `app/settle/pdf.py`. Palette and
+mark come from `app/brand.py`.
+
+- **Colour:** the same brand green `#0A6644`. **The invoice currently renders
+  in navy `#1F3A5F`** and predates this note — so the two documents a customer
+  receives do not match each other, and one does not match the brand. Recolouring
+  a live billing artifact is a brand call rather than a refactor; flagged here
+  and in `app/brand.py` so whoever makes it can find both ends.
+- **Logo:** `app/billing/assets/lmx-stamp.png`, which is **committed**. The
+  creative sources in `docs/LMX branding /` are gitignored, so a renderer
+  depending on them fails in CI and for anybody without the shared drive. A
+  missing mark must degrade to a text header rather than fail the document.
+- **Look at the rendered page before shipping it.** Rendering the savings
+  statement is what caught a bold point estimate sitting directly above the
+  sentence retracting it — no assertion would have found that, and a reader
+  skimming the table would have stopped at the bold number.
+
 ## Source of truth
 
 Creative source files live in `docs/LMX branding /` (kept out of git,

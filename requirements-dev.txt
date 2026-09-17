@@ -9,3 +9,8 @@ pytest-cov>=5.0.0
 ruff==0.15.22
 mypy>=1.10.0
 fakeredis>=2.23.2
+# Reading back the PDFs app/settle/pdf.py writes, so a test can assert what a
+# customer would actually see on the page rather than that some bytes were
+# produced. It was already present in the venv as a transitive dependency and
+# undeclared, which is the shape of a suite that is green locally and red in CI.
+pypdf>=5.0.0
