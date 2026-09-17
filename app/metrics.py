@@ -51,6 +51,17 @@ HOLD_QUEUE_DEPTH = Gauge(
     labelnames=("hub_id",),
 )
 
+# DEC-5: a plan that came from the fallback planner because the primary solver
+# failed. Any non-zero rate here is a degraded plan reaching a real driver -
+# worse routes, real deliveries - so it is worth alerting on rather than only
+# graphing. Labelled by failure class because a persistent `invalid_request` is
+# our own bug and everything else is weather.
+OPTIMIZER_FALLBACKS = Counter(
+    "lmx_optimizer_fallbacks_total",
+    "Dispatch cycles planned by the fallback router after the primary solver failed",
+    labelnames=("reason",),
+)
+
 ORDERS_INGESTED = Counter(
     "lmx_orders_ingested_total",
     "Orders accepted by the ingestion layer",

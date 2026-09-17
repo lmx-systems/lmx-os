@@ -536,8 +536,24 @@ def get_route_optimization_client() -> RouteOptimizationClient:
         return _client
 
     if settings.google_cloud_project_id:
-        logger.info("optimizer_client_selected", engine="google_route_optimization")
-        _client = GoogleRouteOptimizationClient(project_id=settings.google_cloud_project_id)
+        # DEC-5: wrapped, never bare. The client is built once and cached for the
+        # process, so without this a Route Optimization outage stops dispatch
+        # until somebody redeploys with the project id removed. The fallback
+        # tries Google first and drops to the nearest-neighbour planner when it
+        # cannot, recording which one actually ran.
+        from app.optimizer.fallback import FallbackRouteOptimizationClient
+
+        logger.info(
+            "optimizer_client_selected",
+            engine="google_route_optimization",
+            fallback="stub_nearest_neighbor",
+        )
+        _client = FallbackRouteOptimizationClient(
+            primary=GoogleRouteOptimizationClient(
+                project_id=settings.google_cloud_project_id
+            ),
+            fallback=StubRouteOptimizationClient(),
+        )
     else:
         logger.warning(
             "optimizer_client_selected",
