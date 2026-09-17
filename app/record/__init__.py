@@ -8,6 +8,12 @@ Classified UNCLASSIFIED in `tests/test_architecture_boundaries.py`: it is not
 an adapter and it is not dispatch. The dispatch engine hands it a plan; nothing
 here ever hands the dispatch engine anything back.
 """
+from app.record.cost import (
+    DriverDayCost,
+    OrderCost,
+    driver_day_cost,
+    record_driver_day_cost,
+)
 from app.record.decisions import (
     canonical_inputs_hash,
     freeze_plan_inputs,
@@ -47,6 +53,8 @@ __all__ = [
     "consequence_label",
     "close_consequence_windows",
     "CONSEQUENCES",
+    "DriverDayCost",
+    "OrderCost",
     "canonical_inputs_hash",
     "current_outcome",
     "flag_duplicates_across_branches",
@@ -58,6 +66,8 @@ __all__ = [
     "record_decision",
     "record_delivery_outcome",
     "record_outcome",
+    "driver_day_cost",
+    "record_driver_day_cost",
     "replay_inputs",
     "resolve_flag",
     "supersede_outcome",
