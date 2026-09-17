@@ -336,6 +336,15 @@ async def compute_divergence(
     return report
 
 
+def _intervals(cycles: list[ShadowDecision]) -> list[float]:
+    """Gaps between consecutive cycles, in seconds."""
+    times = sorted(c.planned_at for c in cycles)
+    return [
+        (later - earlier).total_seconds()
+        for earlier, later in zip(times, times[1:])
+    ]
+
+
 def _median(values: list[float]) -> float | None:
     if not values:
         return None
@@ -380,6 +389,23 @@ def _plan_shape(
         if o.dispatch_lead_seconds is not None
     ]
     metrics: list[Measurement | Rate] = []
+
+    # The interval the cycle actually achieved, measured rather than read from
+    # `shadow_cycle_cadence_seconds`. A restart, a held lock or a closed hour
+    # produces gaps the configuration does not know about, and the whole point
+    # of this row is to bound a claim - so it has to be the real number.
+    gaps = _intervals(cycles)
+    if gaps:
+        metrics.append(
+            Measurement(
+                name="interval between shadow cycles",
+                target="bounds the dispatch lead below - see the note",
+                median=_median(gaps),
+                p90=_percentile(gaps, 0.9),
+                sample_size=len(gaps),
+                unit="seconds",
+            )
+        )
 
     if leads:
         metrics.append(
@@ -491,6 +517,25 @@ def render(report: DivergenceReport) -> str:
         )
 
     lines.append("\n  decision comparisons")
+    gaps = [
+        m
+        for m in report.metrics
+        if m.name == "interval between shadow cycles" and not m.not_measured
+    ]
+    if gaps and any(
+        m.name == "dispatch lead over the operation" and not m.not_measured
+        for m in report.metrics
+    ):
+        # Against us, which is why it is worth printing. The cycle only looks
+        # every so often, so an order becoming releasable between two cycles
+        # waits on average half an interval before shadow sees it - and the
+        # measured lead is that much smaller than a continuously-running system
+        # would have produced.
+        lines.append(
+            f"    NOTE: the lead below understates LMX OS by roughly "
+            f"{gaps[0].median / 2:.0f}s - half the cycle interval - because the "
+            "cycle only looks that often. It cannot show a win smaller than that."
+        )
     for metric in report.metrics:
         if isinstance(metric, Rate):
             if metric.not_measured:
