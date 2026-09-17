@@ -340,14 +340,16 @@ class TestTheExclusionIsDisclosed:
         assert impact.orders_excluded == 300
         assert impact.share_of_orders == pytest.approx(0.3)
         assert "30.0%" in impact.disclosure()
-        assert "does not cover" in impact.disclosure()
+        assert "do not cover them" in impact.disclosure()
 
     async def test_it_says_so_plainly_when_nothing_is_excluded(self, db_session):
         hub = await _hub(db_session)
         client = await _client(db_session, hub)
         impact = await exclusion_impact(db_session, client_id=client.id)
         assert impact.live_exclusions == 0
-        assert impact.disclosure() == "No docks were excluded from the measurement."
+        assert impact.disclosure() == (
+            "No delivery points were left out of the measurement."
+        )
 
     async def test_a_revoked_exclusion_still_counts_in_the_history(self, db_session):
         hub = await _hub(db_session)

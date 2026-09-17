@@ -57,6 +57,13 @@ EDGE = (
     "webhooks",
     "billing",
     "reporting",
+    # Settlement (STL-1..2): the savings statement a customer reads. Edge by the
+    # definition that matters here - its shape is negotiated with somebody
+    # outside, and that somebody is arguing about their own account. The
+    # dispatch engine must never reach it: a router that could see what a
+    # statement said about last month would be optimising the claim rather than
+    # the route.
+    "settle",
     "legal",
     "geocoding",
     "tracking",
