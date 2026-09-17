@@ -9,6 +9,7 @@ Classified EDGE in `tests/test_architecture_boundaries.py`. Its shape is
 negotiated with someone outside - the customer reading it - which is exactly
 what Edge means here.
 """
+from app.settle.pdf import render_statement_pdf
 from app.settle.statement import (
     MINIMUM_ARM_DROPS,
     ArmComparison,
@@ -22,5 +23,6 @@ __all__ = [
     "ArmComparison",
     "SavingsStatement",
     "build_statement",
+    "render_statement_pdf",
     "render_statement",
 ]
