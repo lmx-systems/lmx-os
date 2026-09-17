@@ -6,8 +6,18 @@ service does not need it installed: the ML dependencies live in
 never carries a gradient boosting library for a model that trains offline.
 
 ```bash
-pip install -r requirements-ml.txt   # only for the boosted models; the harness runs on stdlib
+uv venv .venv-ml
+uv pip install --python .venv-ml/bin/python -r requirements-ml.txt
 ```
+
+A separate interpreter, not the application venv: the harness, baseline and
+conformal bound are all standard library so they keep running where no ML stack
+is installed, and the service image has no business carrying a boosting library.
+
+**macOS arm64 needs `libomp` and pip will not tell you.** LightGBM and XGBoost
+install cleanly and then fail at `import` — their wheels link against
+`@rpath/libomp.dylib`, which is not in the wheel. `brew install libomp`, or
+conda-forge's `llvm-openmp`. scikit-learn, numpy and pandas are unaffected.
 
 ## M2 — true urgency
 

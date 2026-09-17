@@ -3,6 +3,10 @@ __pycache__/
 .venv/
 venv/
 .venv-test/
+# The ML interpreter (requirements-ml.txt). Separate from .venv on purpose -
+# the harness is standard library so it runs without one, and the service image
+# has no business carrying a boosting library.
+.venv-ml/
 .env
 .pytest_cache/
 .mypy_cache/

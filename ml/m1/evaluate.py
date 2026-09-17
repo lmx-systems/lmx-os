@@ -75,6 +75,36 @@ class Evaluation:
     promises: list[Promise] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
+    def challenger_verdict(self) -> tuple[bool, list[str]]:
+        """`PRD-5`: beats the baseline on both populations, or ships the baseline.
+
+        Both, and at every quantile. Not on average, and not on the headline
+        split - `MODEL_AND_DATA_BRIEF.md` rule (3) exists because the p90 model
+        covered 66.5% of cold-start cases after promising 90%, and an average
+        across warm and cold would have hidden exactly that.
+
+        Returns (ships, populations it lost on). An empty loss list with no
+        challenger scored is not a pass: nothing was tested.
+        """
+        challenger_scores = [
+            s for s in self.scores if s.model.startswith("sklearn-")
+        ]
+        if not challenger_scores:
+            return False, ["no challenger was scored"]
+        lost = []
+        for score in challenger_scores:
+            baseline = next(
+                (
+                    s for s in self.scores
+                    if s.population == score.population
+                    and s.model == "shrunk-quantile"
+                ),
+                None,
+            )
+            if baseline is None or score.pinball >= baseline.pinball:
+                lost.append(score.population)
+        return not lost, sorted(lost)
+
     def baseline_wins(self) -> list[str]:
         """Populations where the shrunk baseline did not beat the constant."""
         losses = []
@@ -143,7 +173,14 @@ def _promise(
     )
 
 
-def run(rows: list[DwellRow]) -> Evaluation:
+def run(rows: list[DwellRow], *, with_challenger: bool = False) -> Evaluation:
+    """Score the baseline, and optionally the `PRD-5` challenger, on both
+    populations.
+
+    `with_challenger` is off by default so the harness keeps running where no ML
+    stack is installed - which is CI, and which is the whole reason the rest of
+    `ml/m1/` is standard library.
+    """
     train_all, test, cut = time_split(rows)
     train, warm, cold = coldstart_split(train_all, test)
 
@@ -152,13 +189,30 @@ def run(rows: list[DwellRow]) -> Evaluation:
         evaluation.notes.append("not enough history to split chronologically")
         return evaluation
 
+    challenger_available = False
+    if with_challenger:
+        from ml.m1.challenger import is_available
+
+        challenger_available = is_available()
+        if not challenger_available:
+            from ml.m1.challenger import BLOCKED_REASON
+
+            evaluation.notes.append(
+                f"no challenger was scored: {BLOCKED_REASON}"
+            )
+
     for q, label in ((PLANNING_QUANTILE, "p50"), (PROMISE_QUANTILE, "p90")):
         shrunk = ShrunkQuantileBaseline(q=q).fit(train)
         flat = GlobalQuantile(q=q).fit(train)
+        models = [shrunk, flat]
+        if challenger_available:
+            from ml.m1.challenger import GradientBoostedQuantile
+
+            models.append(GradientBoostedQuantile(q=q).fit(train))
         for population, subset in (("warm", warm), ("cold", cold)):
             if not subset:
                 continue
-            for model in (shrunk, flat):
+            for model in models:
                 score = _score(model, subset, q, f"{population}/{label}")
                 evaluation.scores.append(score)
 
@@ -205,6 +259,17 @@ def run(rows: list[DwellRow]) -> Evaluation:
                 "not sellable - which is what not having enough cold-start data "
                 "looks like once the arithmetic is done honestly"
             )
+
+    if with_challenger and challenger_available:
+        ships, lost_on = evaluation.challenger_verdict()
+        evaluation.notes.append(
+            "PRD-5: the challenger beats the baseline on every population - it "
+            "may ship"
+            if ships
+            else "PRD-5: the challenger lost on "
+            + ", ".join(lost_on)
+            + " - ship the baseline"
+        )
 
     losses = evaluation.baseline_wins()
     if losses:

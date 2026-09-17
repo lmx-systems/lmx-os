@@ -6,7 +6,22 @@
 # small - and it means a training script cannot quietly become a runtime
 # dependency, because the runtime would not have the import.
 #
-# Install separately:  pip install -r requirements-ml.txt
+# Install separately, and into a SEPARATE interpreter:
+#     uv venv .venv-ml && uv pip install --python .venv-ml/bin/python -r requirements-ml.txt
+#
+# **macOS arm64 needs libomp, and pip will not tell you.** lightgbm and xgboost
+# both install cleanly from PyPI and both then fail at import: their wheels link
+# against @rpath/libomp.dylib and the OpenMP runtime is not part of the wheel.
+# The error arrives at `import lightgbm`, not at install time, which is why this
+# went unnoticed through four separate mentions of this file.
+#
+#     brew install libomp        # or conda install -c conda-forge llvm-openmp
+#
+# scikit-learn, numpy and pandas have no such dependency and work as installed -
+# which is why `ml/m1/challenger.py` runs the PRD-5 release gate on sklearn's
+# quantile GBM rather than on the LightGBM the brief specifies. See its
+# docstring: the substitute is handicapped on exactly the feature LightGBM was
+# chosen for, so a loss there is weaker evidence than a LightGBM loss would be.
 -r requirements-dev.txt
 
 # MODEL_AND_DATA_BRIEF.md §M2: gradient-boosted binary classifier plus isotonic
