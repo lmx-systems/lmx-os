@@ -49,8 +49,13 @@ KIND_DWELL = "dwell"
 # The customer disagreed with something we recorded. Not a delivery outcome -
 # an outcome about an outcome, which is why it is a kind rather than a column.
 KIND_DISPUTED = "disputed"
+# What the drop actually cost us (REC-2, app/record/cost.py). An outcome rather
+# than a field on the order: the wage bill is a thing that happened after the
+# decision, and a cost the dispatch engine could read back would stop being a
+# record of it.
+KIND_COST = "cost"
 
-KINDS = (KIND_DELIVERED, KIND_FAILED, KIND_DWELL, KIND_DISPUTED)
+KINDS = (KIND_DELIVERED, KIND_FAILED, KIND_DWELL, KIND_DISPUTED, KIND_COST)
 
 
 class OutcomeEntry(Base, UUIDPrimaryKeyMixin):

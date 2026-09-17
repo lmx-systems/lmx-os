@@ -117,6 +117,7 @@ def run(base_url: str, poll_seconds: float) -> int:
         step(2, "The SLA engine held them; the optimizer offers the work")
         detail("held rather than dispatched instantly - that hold is the product")
         driver_token = _sign_in_driver(http)
+        clocked_on = _clock_on(http, driver_token)
         offers = _wait_for_offer(http, driver_token, _ops_token(http), poll_seconds)
         detail(f"{len(offers)} offer(s) reached the driver with no button pressed")
 
@@ -133,7 +134,9 @@ def run(base_url: str, poll_seconds: float) -> int:
         _drive_route(http, driver_token)
 
         step(5, "Where it ended up")
-        _report(http, driver_token)
+        if clocked_on:
+            _clock_off(http, driver_token)
+        _report(http, driver_token, clocked_on)
     return 0
 
 
@@ -252,15 +255,61 @@ def _drive_route(http: httpx.Client, token: str) -> None:
         detail(f"{kind} {stop_id[:8]}: crossed, arrived, completed")
 
 
-def _report(http: httpx.Client, token: str) -> None:
+def _clock_on(http: httpx.Client, token: str) -> bool:
+    """Put the driver on the clock through the endpoint that logs it.
+
+    `seed_demo_data` sets the Redis fleet state directly, which is enough for
+    the optimizer to offer work and leaves no `driver_shift_event` behind. That
+    gap was invisible until `REC-2` went looking for a wage to attribute and
+    found a day of drops with no shift under it.
+
+    **A 409 here is the demo working, not failing.** `R4`'s compliance gate
+    refuses to put a driver on shift until every document is on file, reviewed
+    by an ops user and unexpired - and the seeded demo driver has none. So the
+    run continues and says what the refusal costs: with no shift log, the day
+    has no wage to attribute and `app/record/cost.py` will report that rather
+    than invent one.
+    """
+    response = http.post(
+        "/driver/me/state",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "available"},
+    )
+    if response.status_code == 409:
+        detail(f"R4 refused to clock the driver on: {response.json().get('detail')}")
+        detail("so this run records no shift, and REC-2 will have no wage to cost")
+        return False
+    response.raise_for_status()
+    detail("driver clocked on - the shift log is what REC-2 costs the day against")
+    return True
+
+
+def _clock_off(http: httpx.Client, token: str) -> None:
+    http.post(
+        "/driver/me/state",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "off_shift"},
+    ).raise_for_status()
+
+
+def _report(http: httpx.Client, token: str, clocked_on: bool = False) -> None:
     route = http.get("/driver/me/route", headers={"Authorization": f"Bearer {token}"})
     if route.status_code == 200 and route.json():
         detail("the driver still has an active route - some stop did not complete")
     else:
         detail("the driver's route is finished")
+    costing = (
+        "and a shift log to cost the day against (app/record/cost.py)"
+        if clocked_on
+        else (
+            "but no shift log, so REC-2 has no wage to attribute - seed reviewed\n"
+            "driver documents and R4 will let the clock start"
+        )
+    )
     print(
-        "\nThe orders are delivered, the route is completed, and every stop has a\n"
-        "machine-recorded arrival beside the driver's tap. Dashboard:\n"
+        "\nThe orders are delivered, the route is completed, every stop has a\n"
+        f"machine-recorded arrival beside the driver's tap, {costing}.\n"
+        "Dashboard:\n"
         "  http://localhost:5173    (ops)\n"
         "  http://localhost:5174    (client portal)"
     )
