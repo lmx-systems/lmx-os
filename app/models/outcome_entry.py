@@ -54,8 +54,22 @@ KIND_DISPUTED = "disputed"
 # decision, and a cost the dispatch engine could read back would stop being a
 # record of it.
 KIND_COST = "cost"
+# We chose not to act on this order, because it is in the control arm
+# (EXP-1/EXP-3, app/record/abstention.py). The one kind here that records an
+# absence: every other entry says something happened, this one says we
+# deliberately let it happen without us. Without it, an order dispatched the
+# customer's old way and one we quietly held look identical afterwards, and the
+# arm cannot be audited at all.
+KIND_ARM_ABSTENTION = "arm_abstention"
 
-KINDS = (KIND_DELIVERED, KIND_FAILED, KIND_DWELL, KIND_DISPUTED, KIND_COST)
+KINDS = (
+    KIND_DELIVERED,
+    KIND_FAILED,
+    KIND_DWELL,
+    KIND_DISPUTED,
+    KIND_COST,
+    KIND_ARM_ABSTENTION,
+)
 
 
 class OutcomeEntry(Base, UUIDPrimaryKeyMixin):

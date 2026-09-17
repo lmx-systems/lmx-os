@@ -40,7 +40,11 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.experiment.exclusions import ReceiverExcluded, is_excluded
+from app.experiment.exclusions import (
+    ReceiverExcluded,
+    excluded_receiver_count,
+    is_excluded,
+)
 from app.models.client import Client
 from app.models.experiment_assignment import (
     ARM_CONTROL,
@@ -155,13 +159,26 @@ async def assign_arm(
         return existing
 
     stratum = receiver_key or STRATUM_UNKNOWN_RECEIVER
-    if receiver_key and await is_excluded(
-        session, client_id=client.id, receiver_key=receiver_key
-    ):
+    if receiver_key:
+        if await is_excluded(session, client_id=client.id, receiver_key=receiver_key):
+            raise ReceiverExcluded(
+                f"receiver {receiver_key!r} is excluded from "
+                f"{EXPERIMENT_CONTROL_ARM} for client {client.id}. The order is "
+                "dispatched normally and takes no part in the measurement."
+            )
+    elif await excluded_receiver_count(session, client_id=client.id):
+        # No dock key, and this customer has asked us to leave at least one dock
+        # out. We cannot show this order is not going to that dock, and the
+        # promise was specific - so it does not go in the arm.
+        #
+        # The alternative is enrolling it and being wrong some of the time,
+        # which breaks an undertaking made before the customer signed. The cost
+        # is a slightly smaller experiment at accounts that use exclusions, and
+        # that is the right way for this trade to fall.
         raise ReceiverExcluded(
-            f"receiver {receiver_key!r} is excluded from {EXPERIMENT_CONTROL_ARM} "
-            f"for client {client.id}. The order is dispatched normally and takes "
-            "no part in the measurement."
+            f"client {client.id} has excluded at least one receiver and this "
+            "order carries no resolvable dock, so it cannot be shown to be "
+            "outside the exclusion. It takes no part in the measurement."
         )
 
     size = block_size(client.control_arm_fraction)
