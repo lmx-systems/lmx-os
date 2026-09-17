@@ -304,7 +304,7 @@ order — and the four switches are days of work, not weeks.
 | **DEC-2** | Batch-hold queue live | `BUILT` | `app/batch_queue/` — queue, clustering, store, 350 LOC. Measured stops-per-route improvement vs the control arm |
 | **DEC-3** | Optimiser against a live Google project | `RESHAPE` | `app/optimizer/google_routes_client.py` exists and has never been called against a live project (`docs/ROADMAP.md` E1). p95 solve under 5s |
 | **DEC-4** | In-flight insertion | `RESHAPE` | `app/optimizer/event_trigger.py` is the hook. Matches or beats the human dispatcher's 34-minute median |
-| **DEC-5** | Fallback router | `NEW` | A solver outage produces a usable plan, not an outage |
+| **DEC-5** | Fallback router | `BUILT` | `app/optimizer/fallback.py`. The routing client is built once and cached for the process, so before this a Route Optimization outage stopped dispatch until somebody redeployed without the project id. Tries Google, drops to the existing nearest-neighbour planner, and **records the degradation**: a plan from the fallback reports `stub_nearest_neighbor_fallback`, which a deployment configured without Google never does — one is a choice, the other an incident, and `REC-1` keeps the row for months. A breaker opens after three consecutive failures because the primary retries with backoff, and paying that budget every cycle would blow `DEC-3`'s p95-under-5s for the whole outage |
 | **DEC-6** | Fleet state manager | `BUILT` | `app/fleet_state/` — verify it never assigns to an off-shift or full driver |
 | **CON-1** | Dispatcher live board | `RESHAPE` | `dashboard/` exists. A working dispatcher can run a day on it |
 | **CON-2** | Override with mandatory reason code | `NEW` | No override completes without a reason |
