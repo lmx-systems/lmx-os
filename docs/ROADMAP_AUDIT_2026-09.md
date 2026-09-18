@@ -33,11 +33,12 @@ The three things meant to be measured *against* it do not exist in production:
 | Item | Status claimed | What is actually true |
 |---|---|---|
 | `REC-2` consequences | `BUILT, ONE GAP` | `record_consequence` has no caller. No consequence is ever recorded, and `close_consequence_windows` has no scheduler |
-| `REC-3` outcome ledger | `BUILT` | `record_delivery_outcome` has no caller. `app/api/driver_routes.py` completes a delivery, advances the order, pays the driver, adjusts the vehicle load — and records no outcome. **The ledger is empty in production** |
+| `REC-3` outcome ledger | `BUILT` | ~~`record_delivery_outcome` has no caller — the ledger was empty in production.~~ **Fixed in the same pass:** `record_delivery_outcomes` now runs inside `complete_stop`'s transaction on every dropoff, and `snapshot_that_assigned` fills the `REC-1` link that was null on every row |
 | `REC-4` linkage flags | `BUILT` | All three detectors work and are reachable only through `run_linkage_detectors`, which nothing calls. **No linkage flag has ever been raised** |
 
 The chain the central claim depends on is *decision → outcome → consequence*.
-The first link is live. The second and third are inert.
+The first link is live. The second and third were inert; **`REC-3` is now wired**
+(see below), and `REC-2` and `REC-4` remain.
 
 The one production writer of `outcome_ledger` is `record_arm_abstention`, called
 from intake for control-arm orders — and no client has contracted an arm, so
@@ -112,8 +113,8 @@ remain a reading problem.
 
 ## Suggested order
 
-1. **`REC-3`** — one call at delivery completion. It is the smallest change here
-   and it starts the ledger the measurement needs.
+1. ~~**`REC-3`**~~ — **done.** One call at delivery completion, plus
+   `snapshot_that_assigned` so `REC-1` and `REC-3` are actually joinable.
 2. **`REC-2`'s consequences** — needs a scheduler, which is the same shape as
    `close_consequence_windows` already expects.
 3. **`IDN-4`'s `refresh_dwell_statistics`** — `M1` cannot train on statistics

@@ -65,6 +65,7 @@ from app.optimizer.event_trigger import dispatch_event_bus
 from app.messaging.cod_notifications import ESCALATION_SENT, notify_shop_of_cod_dispute
 from app.messaging.tracking_notifications import notify_recipient_picked_up
 from app.orders.status_service import advance_orders
+from app.record.outcomes import record_delivery_outcomes
 from app.returns.service import return_views
 from app.schemas.returns import CollectReturnBody, ReturnItemView
 from app.schemas.driver_app import (
@@ -2153,7 +2154,7 @@ async def complete_stop(
     # to tell whether their parts had been collected. That is the gap the
     # stop-level states close.
     if order_ids:
-        await advance_orders(
+        moved = await advance_orders(
             session,
             order_ids,
             OrderStatus.delivered if stop.stop_type == "dropoff" else OrderStatus.picked_up,
@@ -2161,6 +2162,23 @@ async def complete_stop(
             # which for a dropoff is also delivered_at's ground truth (I1).
             occurred_at=now,
         )
+
+        # REC-3's ledger, written here because nothing wrote it before. A
+        # delivery advanced the order, paid the driver and adjusted the vehicle
+        # load, and recorded no outcome - so the table the whole measurement
+        # reads was empty in production (docs/ROADMAP_AUDIT_2026-09.md).
+        #
+        # `moved` rather than `order_ids`: `advance_orders` skips anything
+        # already delivered, so a replayed offline action cannot write a second
+        # outcome for one delivery - which an append-only ledger could not take
+        # back afterwards.
+        #
+        # Inside the transaction, unlike the payout and the notifications below.
+        # Those are outside because a failed SMS must never roll back a
+        # completed delivery; this is our own record of that delivery, and a
+        # delivered order with no outcome is the state it exists to prevent.
+        if stop.stop_type == "dropoff" and moved:
+            await record_delivery_outcomes(session, moved)
 
     remaining_result = await session.execute(
         select(func.count())

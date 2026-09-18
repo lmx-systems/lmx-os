@@ -55,13 +55,11 @@ APP = ROOT / "app"
 # stratification. Resolution, merging, node class and the profile store are not
 # called from anywhere an order passes through.
 KNOWN_ORPHANS: dict[str, str] = {
-    # REC-3 - the outcome ledger. Nothing writes it, so in production it is
-    # empty. `app/api/driver_routes.py` completes a delivery, advances the order
-    # to `delivered`, pays a gig driver and adjusts the vehicle load, and does
-    # not record an outcome.
-    "record_delivery_outcome": "REC-3: nothing calls it at delivery; the ledger is empty in production",
-    "current_outcome": "REC-3: reader for a ledger nothing writes",
-    "supersede_outcome": "REC-3: correction path for a ledger nothing writes",
+    # REC-3 - the ledger is written now, by `record_delivery_outcomes` from
+    # `app/api/driver_routes.py` on every completed dropoff. What remains
+    # unwired is the reading and correcting of it.
+    "current_outcome": "REC-3: nothing reads the ledger back yet",
+    "supersede_outcome": "REC-3: correction path with no operator surface",
     # REC-2's consequence half. Same shape: the detectors exist, nothing runs.
     "record_consequence": "REC-2: no caller; no consequence is ever recorded",
     "close_consequence_windows": "REC-2: no scheduler runs it",

@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.decision_snapshot import MODE_LIVE, MODE_SHADOW, DecisionSnapshot
+from app.models.order import Order
 from app.schemas.optimizer import CyclePlan
 
 __all__ = [
@@ -177,3 +178,39 @@ async def replay_inputs(session: AsyncSession, snapshot_id) -> dict:
             "The row has been altered since it was written."
         )
     return snapshot.inputs
+
+
+async def snapshot_that_assigned(session: AsyncSession, order: Order):
+    """The decision snapshot whose plan put this order on a route, if any.
+
+    `REC-1` records what each cycle decided and `REC-3` records what happened.
+    They are joinable only if something writes the link, and until this existed
+    `outcome_ledger.decision_snapshot_id` was null on every row - two tables
+    built to be compared, with nothing connecting them.
+
+    Bounded to cycles from the order's arrival onwards, the same window
+    `explain_order` uses and for the same reason: a cycle that ran before the
+    order existed cannot have assigned it, and proving that by reading the whole
+    log would make a delivery completion a table scan.
+
+    Returns None when no recorded cycle assigned it - a live-route insertion, a
+    hand-built route, or a cycle from before the column existed. Null is the
+    honest answer there; picking the nearest snapshot would manufacture a
+    provenance link that reads exactly like a real one.
+    """
+    key = str(order.id)
+    snapshots = await session.scalars(
+        select(DecisionSnapshot)
+        .where(
+            DecisionSnapshot.hub_id == order.hub_id,
+            DecisionSnapshot.decided_at >= order.requested_at,
+        )
+        .order_by(DecisionSnapshot.decided_at.desc())
+        .limit(50)
+    )
+    for snapshot in snapshots:
+        for assignment in snapshot.assignments or []:
+            for visit in assignment.get("visits") or []:
+                if visit.get("order_id") == key:
+                    return snapshot.id
+    return None

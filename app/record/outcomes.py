@@ -18,6 +18,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.order import Order
+from app.record.decisions import snapshot_that_assigned
+from app.sla.commitment import delivery_commitment, terms_for_client
 from app.models.outcome_entry import (
     KIND_DELIVERED,
     KIND_DISPUTED,
@@ -202,3 +204,56 @@ async def supersede_outcome(
 
 # Re-exported so callers have one import site for the vocabulary.
 __all__ += ["KIND_DELIVERED", "KIND_DISPUTED", "KIND_DWELL", "KIND_FAILED"]
+
+
+async def record_delivery_outcomes(
+    session: AsyncSession, orders: list[Order]
+) -> list[OutcomeEntry]:
+    """Record what happened for every order that just became delivered (`REC-3`).
+
+    Called from `app/api/driver_routes.py` when a driver completes a dropoff.
+    Until this existed the ledger had no writer at all: a delivery advanced the
+    order, paid the driver and adjusted the vehicle load, and recorded nothing -
+    so `REC-3` read `BUILT` with an empty table, and every measurement built on
+    it had no rows to read (`docs/ROADMAP_AUDIT_2026-09.md`).
+
+    **Pass only the orders that actually moved.** `advance_orders` returns
+    exactly those, skipping any already delivered, which is what stops a
+    replayed offline action writing a second outcome for one delivery. An
+    append-only ledger cannot take that back afterwards.
+
+    **The commitment is resolved here, now, against the client's current terms** -
+    which is right at this moment and would not be later. `record_delivery_outcome`
+    takes it as an argument for that reason: terms change, and an outcome
+    recomputed afterwards would judge this delivery against a promise made after
+    it happened, in whichever direction favoured whoever changed them.
+
+    **In the caller's transaction, deliberately.** The file's pattern for payouts
+    and notifications is "commit the delivery first, act after", because a failed
+    SMS must never roll back a completed delivery. The ledger is not that: it is
+    our own record of the delivery, and a delivered order with no outcome row is
+    precisely the state this function exists to make impossible.
+    """
+    if not orders:
+        return []
+
+    # One query per distinct client rather than per order - a route can carry a
+    # dozen drops for the same customer.
+    terms_by_client: dict = {}
+    entries: list[OutcomeEntry] = []
+    for order in orders:
+        if order.client_id is not None and order.client_id not in terms_by_client:
+            terms_by_client[order.client_id] = await terms_for_client(
+                session, order.client_id
+            )
+        terms = terms_by_client.get(order.client_id, {})
+        commitment = delivery_commitment(order, terms.get(order.sla_tier))
+        entries.append(
+            await record_delivery_outcome(
+                session,
+                order,
+                commitment,
+                decision_snapshot_id=await snapshot_that_assigned(session, order),
+            )
+        )
+    return entries
