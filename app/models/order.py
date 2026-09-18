@@ -20,6 +20,18 @@ class SLATier(str, enum.Enum):
     T3 = "T3"  # flexible / long hold window
 
 
+# How an order entered the system (`ING-3`, migration `0061`).
+#
+# `live` is work we are operating. `backfill` is history re-ingested - real
+# orders that already happened, imported so the models and the baselines have
+# something to learn from. The distinction has to be on the row because five of
+# the six things intake does are wrong for the second kind, and three of them
+# cannot be undone afterwards.
+INTAKE_LIVE = "live"
+INTAKE_BACKFILL = "backfill"
+INTAKE_MODES = (INTAKE_LIVE, INTAKE_BACKFILL)
+
+
 class OrderStatus(str, enum.Enum):
     received = "received"
     classified = "classified"
@@ -287,4 +299,21 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # already included in an earlier one (docs/ROADMAP.md C3).
     invoice_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("invoices.id"), nullable=True, index=True
+    )
+
+    # Live work, or history re-ingested (`ING-3`, migration `0061`).
+    #
+    # *"History re-ingests without double-counting or mutating decisions."* An
+    # order that already happened must not be priced into an invoice, must not
+    # be assigned a control arm, and must not land in the live hold queue - the
+    # first bills a customer twice, the second contaminates `EXP-1`'s
+    # measurement permanently (`experiment_assignments` is append-only), and the
+    # third sends a driver to collect a delivery from three weeks ago.
+    #
+    # Deliberately not expressed as a null `fee_cents`: null already means "no
+    # rate was configured at intake", and overloading it would make an unpriced
+    # live order and a historical one indistinguishable at precisely the moment
+    # somebody is working out why a customer was not billed.
+    intake_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=INTAKE_LIVE, server_default=INTAKE_LIVE
     )
