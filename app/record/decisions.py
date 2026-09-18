@@ -135,6 +135,7 @@ async def record_decision(
         mode=mode,
         engine=plan.engine,
         inputs=inputs,
+        hold_decisions=[decision.model_dump() for decision in plan.hold_decisions],
         inputs_hash=canonical_inputs_hash(inputs),
         assignments=[assignment.model_dump(mode="json") for assignment in plan.assignments],
         unassigned_stop_ids=sorted(plan.unassigned_stop_ids),

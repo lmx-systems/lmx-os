@@ -325,3 +325,26 @@ export interface ExceptionQueue {
   worst_wait_minutes: number
   items: ExceptionItem[]
 }
+
+/** One thing the decision log says, and the row it says it in (AGT-4). */
+export interface DecisionFact {
+  at: string
+  statement: string
+  snapshot_id: string
+  engine: string
+}
+
+/**
+ * Why an order is where it is (docs/ROADMAP_1.5.md AGT-4).
+ *
+ * `is_explained: false` is an answer, not an error. The record being silent
+ * about an order is a different thing from the order having no reason, and the
+ * console must show the difference rather than filling the gap with something
+ * that sounds right.
+ */
+export interface OrderExplanation {
+  order_id: string
+  is_explained: boolean
+  facts: DecisionFact[]
+  unexplained: string | null
+}
