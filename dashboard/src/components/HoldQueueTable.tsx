@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Card } from './ui/Card'
 import { Chip } from './ui/Chip'
 import { TierBadge } from './ui/Badge'
 import { AT_RISK_MINUTES, formatCountdown, minutesUntil, truncateId } from '../lib/format'
-import type { HeldOrderView } from '../lib/types'
+import { api } from '../lib/api'
+import type { HeldOrderView, OrderExplanation } from '../lib/types'
 
 interface HoldQueueTableProps {
   data: HeldOrderView[] | null
@@ -22,6 +23,9 @@ export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
   const [tier, setTier] = useState<(typeof TIERS)[number]>('all')
   const [sortKey, setSortKey] = useState<SortKey>('hold_deadline')
   const [sortDir, setSortDir] = useState<1 | -1>(1)
+  // One at a time. Several open explanations is a wall of text on the
+  // screen somebody is using to decide what to do in the next minute.
+  const [explaining, setExplaining] = useState<string | null>(null)
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) {
@@ -100,12 +104,13 @@ export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
                     <SortableHeader label="SLA" sortKey="sla_tier" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                     <SortableHeader label="Held" sortKey="held_since" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
                     <SortableHeader label="Deadline in" sortKey="hold_deadline" activeKey={sortKey} dir={sortDir} onClick={toggleSort} />
+                    <th className="py-0 pb-2 font-semibold" />
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="py-6 text-center text-[var(--text-muted)]">
+                      <td colSpan={5} className="py-6 text-center text-[var(--text-muted)]">
                         No held orders match this filter.
                       </td>
                     </tr>
@@ -113,8 +118,10 @@ export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
                   {rows.map((order) => {
                     const minsLeft = minutesUntil(order.hold_deadline)
                     const risk = minsLeft <= AT_RISK_MINUTES
+                    const open = explaining === order.order_id
                     return (
-                      <tr key={order.order_id} className={`border-t border-[var(--border)] ${risk ? 'shadow-[inset_3px_0_0_var(--red)]' : ''}`}>
+                      <Fragment key={order.order_id}>
+                      <tr className={`border-t border-[var(--border)] ${risk ? 'shadow-[inset_3px_0_0_var(--red)]' : ''}`}>
                         <td className="py-2 pr-3">
                           <div className="font-medium text-[var(--text-primary)]">
                             {order.shop_name || <span className="text-[var(--text-muted)]">Unknown shop</span>}
@@ -144,7 +151,18 @@ export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
                         >
                           {formatCountdown(order.hold_deadline)}
                         </td>
+                        <td className="py-2 text-right">
+                          <button
+                            onClick={() => setExplaining(open ? null : order.order_id)}
+                            className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+                            aria-expanded={open}
+                          >
+                            {open ? 'Hide' : 'Why?'}
+                          </button>
+                        </td>
                       </tr>
+                      {open && <ExplanationRow orderId={order.order_id} />}
+                      </Fragment>
                     )
                   })}
                 </tbody>
@@ -176,5 +194,68 @@ function SortableHeader({
       {label}
       {active && <span className="ml-1 text-[9px] opacity-70">{dir === 1 ? '▾' : '▴'}</span>}
     </th>
+  )
+}
+
+/**
+ * What the decision log says about one held order (docs/ROADMAP_1.5.md AGT-4).
+ *
+ * *"Every explanation cites `REC-1`'s decision log rather than narrating. No
+ * explanation the record cannot support."* So this renders the snapshot id
+ * beside every line, and when the record is silent it says so in the same
+ * weight as an answer rather than hiding an empty panel. A dispatcher who
+ * cannot tell "we held it because no driver was on shift" from "we have no idea
+ * why we held it" will stop believing both.
+ */
+function ExplanationRow({ orderId }: { orderId: string }) {
+  const [data, setData] = useState<OrderExplanation | null>(null)
+  const [error, setError] = useState<Error | null>(null)
+
+  useEffect(() => {
+    let live = true
+    setData(null)
+    setError(null)
+    api
+      .orderExplanation(orderId)
+      .then((d) => live && setData(d))
+      .catch((e) => live && setError(e as Error))
+    return () => {
+      live = false
+    }
+  }, [orderId])
+
+  return (
+    <tr className="bg-[var(--surface-2)]">
+      <td colSpan={5} className="px-3 py-2.5">
+        {error && <p className="text-[12px] text-[var(--red)]">Couldn't load: {error.message}</p>}
+        {!error && !data && <p className="text-[12px] text-[var(--text-muted)]">Reading the decision log…</p>}
+
+        {data && !data.is_explained && (
+          <p className="text-[12px] text-[var(--text-secondary)]">
+            <span className="font-medium text-[var(--amber)]">Not recorded. </span>
+            {data.unexplained}
+          </p>
+        )}
+
+        {data && data.is_explained && (
+          <ol className="space-y-1.5">
+            {data.facts.map((fact, i) => (
+              <li key={`${fact.snapshot_id}-${i}`} className="text-[12px] leading-snug">
+                <span className="mr-2 tabular-nums text-[var(--text-muted)]">
+                  {new Date(fact.at).toLocaleTimeString()}
+                </span>
+                <span className="text-[var(--text-primary)]">{fact.statement}</span>
+                <span
+                  className="ml-2 font-mono text-[10.5px] text-[var(--text-muted)]"
+                  title={`Decision snapshot ${fact.snapshot_id}, engine ${fact.engine}`}
+                >
+                  decision {fact.snapshot_id.slice(0, 8)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </td>
+    </tr>
   )
 }

@@ -34,17 +34,20 @@ from app.optimizer.service import DispatchOptimizerService
 from app.reporting.lmx_link import build_scorecard
 from app.reporting.credit_exposure import DEFAULT_WINDOW_DAYS as CREDIT_WINDOW_DAYS
 from app.reporting.credit_exposure import build_credit_exposure
+from app.record.explain import explain_order
 from app.reporting.exceptions import build_exception_queue
 from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_operations_scorecard
 from app.schemas.batch_queue import HeldOrderView
 from app.schemas.reporting import (
     ClientExposureView,
     CreditExposureView,
+    DecisionFactView,
     ExceptionItemView,
     ExceptionQueueView,
     LinkScorecardView,
     MeasurementView,
     OperationsScorecardView,
+    OrderExplanationView,
     RateView,
     TierExposureView,
 )
@@ -156,6 +159,47 @@ async def operations_scorecard(
             )
             for r in scorecard.rates
         ],
+    )
+
+
+@router.get("/orders/{order_id}/explanation", response_model=OrderExplanationView)
+async def order_explanation(
+    order_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> OrderExplanationView:
+    """Why is this order waiting? (`docs/ROADMAP_1.5.md` AGT-4.)
+
+    *"Every explanation cites `REC-1`'s decision log rather than narrating. No
+    explanation the record cannot support."*
+
+    The pair to `/operations/exceptions`: that says which orders need attention,
+    this says why each one is where it is. Every line carries the
+    `decision_snapshots` row it came from, because an explanation assembled from
+    current state would be a plausible story about the past and a dispatcher
+    cannot tell a plausible story from a true one.
+
+    **It refuses rather than infers.** An order held past its deadline looks
+    like it should have been released, and saying so would be narration - the
+    queue may not have run, the hub may have closed, a driver may have gone off
+    shift. When no cycle recorded a decision about the order, that is the answer.
+
+    Any ops session, like the exception queue it sits beside.
+    """
+    explanation = await explain_order(session, order_id=order_id)
+    return OrderExplanationView(
+        order_id=order_id,
+        is_explained=explanation.is_explained,
+        facts=[
+            DecisionFactView(
+                at=fact.at,
+                statement=fact.statement,
+                snapshot_id=fact.snapshot_id,
+                engine=fact.engine,
+            )
+            for fact in explanation.facts
+        ],
+        unexplained=explanation.unexplained,
     )
 
 

@@ -1,6 +1,8 @@
 # LMX 1.5 — Build Roadmap
 
-**v1.1 · 13 September 2026 · Sourabh**
+**v1.2 · 18 September 2026 · Sourabh**
+
+*v1.2 adds the `agents/` module to Phase 1 and amends §2.1, in response to the external review of 17 September. The decision path is unchanged; the edges of the system are not. See `MODEL_AND_DATA_BRIEF.md` §14.*
 
 Source of truth for strategy: *LMX 1.0 vs 1.5* (13 Sep 2026).
 Source of truth for build status: **this repository, inspected 13 Sep 2026** — 174 commits, 94 test files, 291 test functions, last commit 31 Aug.
@@ -91,6 +93,14 @@ Richard asked for this on the record and both co-founders agreed. **There are tw
 - `PRD-8` changes job. It was cross-*tenant* transfer evaluation; it is now **the evidence for the compounding claim**, and must measure transfer both across customers and across verticals, reporting either way.
 
 **The honest reading, which should be said the same way externally.** "It compounds across verticals" is a claim about the schema and the collection method, not about model transfer. An investor will hear the second. Say which one we mean, and let `PRD-8` be the thing that settles it rather than an assertion.
+
+**Amendment, 18 September 2026 — the agent challenge.** External review argued that model-selection-then-training is a traditional shape for this problem, and that headless agents reading across all available datasets would get to an answer faster. **The decision above stands for the decision path**, and is now scoped explicitly rather than by omission:
+
+- **Agents belong at the edges** — order-feed ingestion, identity resolution, cold-start priors, and explaining a decision to an operator. Unstructured and variable input, no calibration requirement, errors visible and correctable.
+- **Trained predictors belong in the middle** — wherever the output is traded against money in the solver and has to be reproducible when a customer disputes a savings figure.
+- **Arithmetic stays arithmetic.** `M3` and `M4` are computed; an exact answer is available and neither an agent nor a model improves on it.
+
+`MODEL_AND_DATA_BRIEF.md` §14 carries the test and the layer-by-layer split. The strongest form of the challenge is commercial rather than technical: the Y1 book is 25 Micro sites at $149 per month, where a per-customer integration never amortises, so **`AGT-2` is a precondition for the Micro segment existing rather than an optimisation of it.** `AGT-1` decides the question by measurement rather than by architecture argument.
 
 **Why this rather than one model.** At the volumes in play — tens of thousands of rows per customer — small tabular models train in seconds and are beaten by a per-receiver lookup table often enough that the baseline has to be a release gate (see `PRD-3`). A single cross-vertical model would be harder to evaluate, harder to explain to a customer disputing a savings statement, and would make the compounding claim untestable rather than true.
 
@@ -197,6 +207,29 @@ The app exists and is good. Its location layer is pointed at the wrong job: `src
 | **ING-2** | Idempotent intake, **billing key pluggable** pending 0.5 (§2.2d) | `RESHAPE` | A replayed order produces one record and one billable event, under either fee unit |
 | **ING-3** | Replay and backfill | `NEW` | History re-ingests without double-counting or mutating decisions |
 | **ING-4** | Historical export loaders | `BUILT` | `lmx-dwell/` already parses both dispatch exports — promote it into `app/ingestion/adapters/` |
+
+### agents/ — new module
+
+Scoped by §2.1's amendment. **Nothing in this module touches the decision path** — `M1`, `M2` and the solver are unchanged.
+
+| ID | Feature | Status | Done when |
+|---|---|---|---|
+| **AGT-1** | **The resolution bake-off.** Hand-label the true physical dock count behind the 230 account IDs once, then run the existing deterministic resolver and an agent resolver on identical input | `NEW` | Precision and recall on merge decisions reported for both, plus the cases each gets right that the other does not. One engineer, a few days. **This is the gate for AGT-2 and AGT-3** |
+| **AGT-2** | Agentic order-feed mapping — an arbitrary customer export to our schema, with a human review gate before first live order | `NEW, GATED ON AGT-1` | A new Micro customer is onboarded in under a day with no engineer writing an adapter. `[ASSUMPTION]` the hand-built path is 2–4 engineering weeks per customer |
+| **AGT-3** | Cold-start prior from unstructured evidence — dock survey, address, customer notes | `NEW, GATED ON AGT-1` | Outputs a distribution rather than a point, is superseded by observation once the dock has history, and beats the node-class prior on unseen docks — or is not shipped (§4 rule 3 in the brief applies unchanged) |
+| **AGT-4** | Decision explanation for the operator console — why this order was held | `BUILT` | Every explanation cites `REC-1`'s decision log rather than narrating. No explanation the record cannot support |
+
+**AGT-4 found that there was nothing to explain.** `run_hold_cycle` has always
+returned a reason for every order it looks at — hot shot, deadline reached, no
+cluster mate, no driver available, conflict with a more urgent order — and
+`run_cycle` kept only the set of ids it released. So a product whose central
+claim is that **the hold is the product** held orders and recorded no reason for
+any of it, and the only honest explanation of a hold was "we do not know".
+`decision_snapshots.hold_decisions` now carries them (migration `0059`).
+Snapshots written before it read as *reasons were never captured*, which is true
+and is deliberately not backfilled.
+
+**Also in scope, unresolved:** benchmark tabular and time-series foundation models — TabPFN, Chronos, TimesFM — against the shrunk baseline for `M1`. Small-sample tabular at ~15 observations per dock is the shape they are built for. This is the defensible form of "do not train from scratch"; training time itself is not a cost we pay.
 
 ### record/ — the discipline layer
 
