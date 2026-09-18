@@ -40,7 +40,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.decision_snapshot import DecisionSnapshot
+from app.models.dispatcher_override import REASON_LABELS, DispatcherOverride
 from app.models.order import Order
+
+# How far back a single order's history is read. A cycle runs every few
+# minutes, so this is days of them - and an unbounded scan would make an
+# on-demand explanation a table scan of the whole decision log.
+_DECISION_SCAN_LIMIT = 50
 
 # What the batch-hold queue's reasons mean, in a sentence a dispatcher can act
 # on. Keyed by the exact strings `app/batch_queue/queue.py` emits, so a reason
@@ -110,8 +116,62 @@ def _describe(entry: dict) -> str:
     return text
 
 
+@dataclass(frozen=True)
+class SystemDecision:
+    """The last thing a dispatch cycle recorded about one order.
+
+    `CON-3`'s half of a labelled override. Carried as values, because the label
+    must not change when the snapshot does - and `known=False` is a real answer
+    rather than a missing one, which is the distinction the whole of `AGT-4`
+    turns on.
+    """
+
+    known: bool
+    action: str | None = None
+    reason: str | None = None
+    snapshot_id: object = None
+    at: datetime | None = None
+
+
+async def latest_system_decision(session: AsyncSession, *, order_id) -> SystemDecision:
+    """What the queue last decided about this order, if anything.
+
+    Shares `explain_order`'s scan rather than re-deriving it, so "what the system
+    decided" has one definition. A second implementation would drift, and the
+    two places it is read - the explanation a dispatcher sees and the label an
+    override is recorded against - are precisely the two that must agree.
+    """
+    order = await session.get(Order, order_id)
+    if order is None:
+        return SystemDecision(known=False)
+
+    key = str(order_id)
+    snapshots = list(
+        await session.scalars(
+            select(DecisionSnapshot)
+            .where(
+                DecisionSnapshot.hub_id == order.hub_id,
+                DecisionSnapshot.decided_at >= order.requested_at,
+            )
+            .order_by(DecisionSnapshot.decided_at.desc())
+            .limit(_DECISION_SCAN_LIMIT)
+        )
+    )
+    for snapshot in snapshots:
+        for entry in snapshot.hold_decisions or []:
+            if entry.get("order_id") == key:
+                return SystemDecision(
+                    known=True,
+                    action=entry.get("action"),
+                    reason=entry.get("reason"),
+                    snapshot_id=snapshot.id,
+                    at=snapshot.decided_at,
+                )
+    return SystemDecision(known=False)
+
+
 async def explain_order(
-    session: AsyncSession, *, order_id, limit: int = 50
+    session: AsyncSession, *, order_id, limit: int = _DECISION_SCAN_LIMIT
 ) -> Explanation:
     """Assemble what the decision log says about one order, oldest first.
 
@@ -140,12 +200,12 @@ async def explain_order(
             .limit(limit)
         )
     )
-    if not snapshots:
-        explanation.unexplained = (
-            "No dispatch cycle has run for this hub since the order arrived, so "
-            "nothing has decided anything about it yet."
-        )
-        return explanation
+    # No early return when there are no snapshots. A human override is a decision
+    # about this order whether or not a cycle ever ran, and returning "nothing
+    # has decided anything about it" while an override sits in the record would
+    # be a refusal the record contradicts - the mirror image of the narration
+    # this module exists to avoid.
+    no_cycle_has_run = not snapshots
 
     key = str(order_id)
     for snapshot in snapshots:
@@ -201,17 +261,52 @@ async def explain_order(
         # Silence in one cycle out of forty is noise; silence in all of them is
         # the `unexplained` case below, which is the one worth saying.
 
-    if not explanation.facts:
-        recorded = sum(1 for s in snapshots if s.hold_decisions)
-        explanation.unexplained = (
-            f"{len(snapshots)} cycle(s) ran since this order arrived and none "
-            "recorded a decision about it."
-            + (
-                ""
-                if recorded
-                else " None of them recorded hold reasons at all - they predate "
-                "the column that holds them, so the reasons were never captured "
-                "rather than lost."
+    # The human decisions, from CON-2's record. Shown beside the system's rather
+    # than in a panel of their own: "the queue held it, then someone released it
+    # because the customer called" is one story, and split across two lists it
+    # reads as two unrelated things that happened to the same order.
+    for override in await session.scalars(
+        select(DispatcherOverride)
+        .where(DispatcherOverride.order_id == order_id)
+        .order_by(DispatcherOverride.overridden_at)
+    ):
+        reason = REASON_LABELS.get(override.reason_code, override.reason_code)
+        statement = (
+            f"{override.action}d by {override.ops_user_email} - {reason.lower()}"
+        )
+        if override.note:
+            statement += f' ("{override.note}")'
+        explanation.facts.append(
+            Fact(
+                at=override.overridden_at,
+                statement=statement,
+                # An override cites itself. It is a record in its own right, not
+                # a reading of one, and pointing at the snapshot it disagreed
+                # with would credit the decision to the cycle that lost.
+                snapshot_id=override.id,
+                engine="dispatcher override",
             )
         )
+
+    explanation.facts.sort(key=lambda fact: fact.at)
+
+    if not explanation.facts:
+        if no_cycle_has_run:
+            explanation.unexplained = (
+                "No dispatch cycle has run for this hub since the order arrived, "
+                "so nothing has decided anything about it yet."
+            )
+        else:
+            recorded = sum(1 for s in snapshots if s.hold_decisions)
+            explanation.unexplained = (
+                f"{len(snapshots)} cycle(s) ran since this order arrived and none "
+                "recorded a decision about it."
+                + (
+                    ""
+                    if recorded
+                    else " None of them recorded hold reasons at all - they predate "
+                    "the column that holds them, so the reasons were never captured "
+                    "rather than lost."
+                )
+            )
     return explanation

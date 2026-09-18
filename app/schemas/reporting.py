@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class MeasurementView(BaseModel):
@@ -159,3 +159,62 @@ class OrderExplanationView(BaseModel):
     is_explained: bool
     facts: list[DecisionFactView]
     unexplained: str | None
+
+
+class OverrideRequest(BaseModel):
+    """A dispatcher overruling the queue on one order (`CON-2`).
+
+    `reason_code` has no default and is not optional. That is the first of the
+    three places CON-2's *"no override completes without a reason"* is enforced -
+    the other two are a NOT NULL CHECK in migration `0060`, and the rule in
+    `app/record/overrides.py` that `other` must carry a note. Three, because they
+    stop three different things: a malformed request, a script that bypasses the
+    API, and a reason that is technically present and says nothing.
+    """
+
+    action: str = Field(description="release or hold")
+    reason_code: str = Field(description="One of app/models/dispatcher_override.py's codes")
+    note: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Required when reason_code is 'other'. Free text for a person to read.",
+    )
+
+
+class OverrideView(BaseModel):
+    """One recorded override, and whether it was a disagreement.
+
+    `contradicted_the_system` is not `action != system_action` computed by the
+    caller: an override of a decision nobody recorded contradicts nothing, and a
+    caller doing the subtraction itself would read the missing side as a mismatch
+    and count it as a correction.
+    """
+
+    id: uuid.UUID
+    order_id: uuid.UUID
+    overridden_at: datetime
+    action: str
+    reason_code: str
+    reason_label: str
+    note: str | None
+    by: str
+    system_action: str | None
+    system_reason: str | None
+    system_decision_known: bool
+    contradicted_the_system: bool
+    order_status_before: str
+    order_status_after: str
+
+
+class OverrideReasonOption(BaseModel):
+    """One choice in the reason list the console offers.
+
+    Served rather than hardcoded in the dashboard, so the vocabulary the UI
+    offers cannot drift from the one the database accepts - a drift whose
+    symptom is a dispatcher picking a reason that is rejected at the moment they
+    are least able to absorb it.
+    """
+
+    code: str
+    label: str
+    note_required: bool

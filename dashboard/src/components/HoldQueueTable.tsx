@@ -4,7 +4,7 @@ import { Chip } from './ui/Chip'
 import { TierBadge } from './ui/Badge'
 import { AT_RISK_MINUTES, formatCountdown, minutesUntil, truncateId } from '../lib/format'
 import { api } from '../lib/api'
-import type { HeldOrderView, OrderExplanation } from '../lib/types'
+import type { HeldOrderView, OrderExplanation, OverrideReasonOption } from '../lib/types'
 
 interface HoldQueueTableProps {
   data: HeldOrderView[] | null
@@ -157,7 +157,7 @@ export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
                             className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
                             aria-expanded={open}
                           >
-                            {open ? 'Hide' : 'Why?'}
+                            {open ? 'Hide' : 'Why? / Release'}
                           </button>
                         </td>
                       </tr>
@@ -255,7 +255,111 @@ function ExplanationRow({ orderId }: { orderId: string }) {
             ))}
           </ol>
         )}
+
+        <OverrideForm orderId={orderId} />
       </td>
     </tr>
+  )
+}
+
+/**
+ * Overrule the queue on one order, with a reason (docs/ROADMAP_1.5.md CON-2).
+ *
+ * *"No override completes without a reason."* The submit button stays disabled
+ * until a code is chosen, and `other` will not submit without a note — but that
+ * is a courtesy, not the guarantee. The server refuses both, and the database
+ * refuses a row without a reason underneath that, because a UI rule is only ever
+ * a rule about this UI.
+ *
+ * Sits under the explanation deliberately. A dispatcher reads what the queue
+ * decided and then disagrees with it in the same place, which is what makes the
+ * override a considered act rather than a button next to a countdown.
+ */
+function OverrideForm({ orderId }: { orderId: string }) {
+  const [reasons, setReasons] = useState<OverrideReasonOption[] | null>(null)
+  const [code, setCode] = useState('')
+  const [note, setNote] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [done, setDone] = useState<string | null>(null)
+  const [refused, setRefused] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    api
+      .overrideReasons()
+      .then((r) => live && setReasons(r))
+      .catch(() => live && setReasons([]))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const chosen = reasons?.find((r) => r.code === code)
+  const noteMissing = !!chosen?.note_required && note.trim() === ''
+  const canSubmit = code !== '' && !noteMissing && !submitting
+
+  async function submit() {
+    setSubmitting(true)
+    setRefused(null)
+    try {
+      const result = await api.overrideOrder(orderId, {
+        action: 'release',
+        reason_code: code,
+        note: note.trim() || undefined,
+      })
+      setDone(
+        result.contradicted_the_system
+          ? `Released. The queue had decided to ${result.system_action} — recorded as a disagreement.`
+          : result.system_decision_known
+            ? 'Released. The queue had reached the same conclusion.'
+            : 'Released. No cycle had recorded a decision, so this is not recorded as a disagreement.',
+      )
+    } catch (e) {
+      setRefused((e as Error).message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (done) {
+    return <p className="mt-2.5 border-t border-[var(--border)] pt-2.5 text-[12px] text-[var(--accent)]">{done}</p>
+  }
+
+  return (
+    <div className="mt-2.5 border-t border-[var(--border)] pt-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+          Release early
+        </span>
+        <select
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[12px] text-[var(--text-primary)]"
+        >
+          <option value="">Choose a reason…</option>
+          {(reasons ?? []).map((r) => (
+            <option key={r.code} value={r.code}>
+              {r.label}
+            </option>
+          ))}
+        </select>
+        {chosen?.note_required && (
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Say what the reason was"
+            className="min-w-[14rem] flex-1 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+          />
+        )}
+        <button
+          onClick={submit}
+          disabled={!canSubmit}
+          className="rounded-[var(--radius)] bg-[var(--accent)] px-2.5 py-1 text-[12px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {submitting ? 'Releasing…' : 'Release'}
+        </button>
+      </div>
+      {refused && <p className="mt-1.5 text-[12px] text-[var(--red)]">{refused}</p>}
+    </div>
   )
 }
