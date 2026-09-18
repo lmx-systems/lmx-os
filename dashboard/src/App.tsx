@@ -3,6 +3,7 @@ import { TopBar } from './components/TopBar'
 import { KpiStrip } from './components/KpiStrip'
 import { OrderPipeline } from './components/OrderPipeline'
 import { HoldQueueTable } from './components/HoldQueueTable'
+import { ExceptionsPanel } from './components/ExceptionsPanel'
 import { FleetMap } from './components/FleetMap'
 import { FleetRoster } from './components/FleetRoster'
 import { MeasurementPanel } from './components/MeasurementPanel'
@@ -82,6 +83,17 @@ function App() {
   // Server-side snapshot (see app/optimizer/last_cycle_store.py) - reflects
   // automatic event-triggered cycles too, not just ones this tab fired.
   const lastCycle = usePolling(() => api.lastCycle(hubId), POLL_INTERVAL_MS, [hubId], enabled)
+  // CON-4. Polled on the same tick as everything else so the exception count
+  // and the tables below it cannot disagree - two independent polls of related
+  // endpoints land a tick apart and briefly contradict each other, which is
+  // worse here than anywhere: the whole panel is a claim that nothing else on
+  // the board needs attention.
+  const exceptions = usePolling(
+    () => api.operationsExceptions(hubId),
+    POLL_INTERVAL_MS,
+    [hubId],
+    enabled,
+  )
 
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null)
   useEffect(() => {
@@ -134,6 +146,17 @@ function App() {
             <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr]">
               <div className="flex flex-col gap-4">
                 <OrderPipeline summary={summary.data} error={summary.error} loading={summary.loading} />
+                {/* Above the hold queue on purpose: the hold queue is work
+                    going to plan and this is work that is not, so a dispatcher
+                    scanning top-down should meet the exceptions first.
+                    Deliberately outside the admin block - it is a read, and a
+                    dispatcher on a viewer account who cannot see their own
+                    exceptions cannot run a day (CON-1). */}
+                <ExceptionsPanel
+                  data={exceptions.data}
+                  error={exceptions.error}
+                  loading={exceptions.loading}
+                />
                 <HoldQueueTable key={hubId} data={held.data} error={held.error} loading={held.loading} />
               </div>
               <div className="flex flex-col gap-4">

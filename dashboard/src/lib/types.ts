@@ -299,3 +299,29 @@ export interface CreditExposure {
   unassessable_orders: number
   unpriced_orders: number
 }
+
+/** One thing worth a dispatcher's attention (docs/ROADMAP_1.5.md CON-4). */
+export interface ExceptionItem {
+  kind: 'flagged_by_driver' | 'delivery_failed' | 'past_promise' | 'released_but_unplaced'
+  order_id: string
+  client_id: string | null
+  external_ref: string
+  sla_tier: string | null
+  /**
+   * Minutes, not a score. The model that would rank these properly is `M2` -
+   * P(a consequence | this order is late) - and it needs hundreds of observed
+   * consequences that do not exist yet, so the UI must not dress this up as a
+   * prediction it is standing in for.
+   */
+  minutes_waiting: number
+  promised_at: string | null
+  detail: string
+  next_action: string
+}
+
+export interface ExceptionQueue {
+  generated_at: string
+  counts: Record<string, number>
+  worst_wait_minutes: number
+  items: ExceptionItem[]
+}
