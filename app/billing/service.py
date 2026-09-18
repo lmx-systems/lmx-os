@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.billing.credits import assess_credits
 from app.models.invoice import Invoice
 from app.models.invoice_credit import InvoiceCredit
-from app.models.order import Order, OrderStatus
+from app.models.order import INTAKE_LIVE, Order, OrderStatus
 from app.models.shop import Shop
 from app.schemas.billing import (
     InvoiceCreditLine,
@@ -60,6 +60,13 @@ async def generate_invoice(
             Order.invoice_id.is_(None),
             Order.delivered_at >= period_start_dt,
             Order.delivered_at < period_end_dt,
+            # Backfilled history is never billed (`ING-3`, migration `0061`).
+            # An imported historical delivery matches every other clause here
+            # exactly - delivered, in period, no invoice - so without this an
+            # import bills a customer a second time for work already invoiced.
+            # Backfills are also left unpriced at intake, which makes this the
+            # second of two independent guards rather than the only one.
+            Order.intake_mode == INTAKE_LIVE,
         )
     )
     candidates = list(candidates_result.scalars().all())

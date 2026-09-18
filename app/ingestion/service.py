@@ -33,7 +33,7 @@ from app.identity import receiver_key_for
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.record.abstention import record_arm_abstention
-from app.models.order import Order, OrderStatus
+from app.models.order import INTAKE_BACKFILL, INTAKE_LIVE, INTAKE_MODES, Order, OrderStatus
 from app.models.parcel import Parcel
 from app.models.return_item import ReturnItem
 from app.models.rules import ActiveRule
@@ -441,6 +441,32 @@ def _lmx_from_normalized(normalized: NormalizedOrder, payload: dict) -> LMXOrder
     )
 
 
+async def find_existing_order(session: AsyncSession, lmx: LMXOrder) -> Order | None:
+    """The order this one would duplicate, if there is one (`ING-3`).
+
+    Scoped by client as well as source, matching `uq_orders_source_ref` as
+    migration `0035` reshaped it: two customers' ERPs both number their orders
+    from 1, and a global uniqueness rule makes one of them unable to send us
+    their second order.
+
+    Every order has a reference to key on: `LMXOrder.source_order_ref` is
+    required with `min_length=1`, so a source that cannot identify its own
+    orders cannot reach this function at all. That is what makes replay a
+    property of the contract rather than a best effort - and it is why there is
+    no "we could not tell" branch here to get it wrong.
+    """
+    query = select(Order).where(
+        Order.source_system == lmx.source_system,
+        Order.source_order_ref == lmx.source_order_ref,
+    )
+    query = (
+        query.where(Order.client_id == uuid.UUID(lmx.client_id))
+        if lmx.client_id
+        else query.where(Order.client_id.is_(None))
+    )
+    return (await session.scalars(query.limit(1))).first()
+
+
 async def ingest_lmx_order(
     session: AsyncSession,
     hold_queue: HoldQueueStore,
@@ -448,6 +474,7 @@ async def ingest_lmx_order(
     *,
     geocoder: BaseGeocoder,
     payload: dict | None = None,
+    mode: str = INTAKE_LIVE,
 ) -> Order:
     """The one ingestion path (docs/LMX_LINK_PLAN.md §1.1).
 
@@ -456,10 +483,29 @@ async def ingest_lmx_order(
     branches on where the order came from; `source_system` is the only record of
     it.
 
+    **Replaying is safe** (`ING-3`). An order whose (client, source system,
+    source ref) is already present returns the existing row *untouched* rather
+    than creating a second one or raising. Untouched is the load-bearing word:
+    re-ingesting must not refresh `requested_at`, re-price, or move a status,
+    because by then a cycle may have decided something about this order and a
+    statement may have been settled on it. "Without mutating decisions" is the
+    half of ING-3's done-when that a unique constraint alone does not give you -
+    the constraint stops the second row and says nothing about the first.
+
+    **`mode=INTAKE_BACKFILL` is for history**, and suppresses everything intake
+    does that only makes sense for work not yet done: pricing, the control arm,
+    the abstention, and the hold queue. See `app/ingestion/backfill.py`.
+
     Raises ShopNotFoundError for an unknown registered shop, or
     OriginUnresolvableError when a typed address cannot be geocoded.
     """
+    if mode not in INTAKE_MODES:
+        raise ValueError(f"mode must be one of {INTAKE_MODES}, got {mode!r}")
     payload = payload if payload is not None else lmx.raw_payload
+
+    existing = await find_existing_order(session, lmx)
+    if existing is not None:
+        return existing
 
     shop = await _resolve_or_create_shop(session, lmx, geocoder=geocoder)
 
@@ -517,6 +563,7 @@ async def ingest_lmx_order(
         delivery_contact_name=lmx.drop_contact_name,
         delivery_contact_phone=lmx.drop_contact_phone,
         delivery_notes=lmx.access_notes,
+        intake_mode=mode,
     )
     session.add(order)
     await session.flush()  # assigns order.id without committing
@@ -567,7 +614,12 @@ async def ingest_lmx_order(
     # No client relationship means nothing to bill against. Skipped rather than
     # logged as a missing rate, which would be misleading - there is no rate to
     # be missing.
-    if lmx.client_id:
+    # Backfilled history is never priced. `generate_invoice` selects delivered
+    # orders with a non-null `fee_cents` and no invoice, so a priced historical
+    # delivery is billed a second time for work already invoiced - the
+    # "double-counting" in ING-3's done-when, arrived at by an import rather
+    # than by anything anyone did wrong on the day.
+    if lmx.client_id and mode != INTAKE_BACKFILL:
         order.fee_cents, order.fee_breakdown, order.rate_version_id = await _price_order(
             session,
             client_id=lmx.client_id,
@@ -584,7 +636,12 @@ async def ingest_lmx_order(
     # done-when: an arm chosen any later can be chosen knowing something about
     # the order. Returns None for every client until somebody records the date
     # their contract clause was agreed, so this is inert today.
-    arm = await _assign_control_arm(session, order, lmx, now)
+    # Never for history. `assign_arm` writes to `experiment_assignments`, which
+    # is append-only and immutable by trigger (0054), so an arm given to an
+    # order delivered three weeks ago is experiment data about an experiment
+    # that order was never in - and it cannot be removed afterwards. An import
+    # would contaminate EXP-1's measurement permanently.
+    arm = None if mode == INTAKE_BACKFILL else await _assign_control_arm(session, order, lmx, now)
     if arm == ARM_CONTROL:
         # The abstention. A control order is dispatched as the customer would
         # have dispatched it, which means our batching hold does not apply - so
@@ -605,6 +662,18 @@ async def ingest_lmx_order(
 
     await session.commit()
     metrics.ORDERS_INGESTED.labels(hub_id=lmx.hub_id, source_system=lmx.source_system).inc()
+
+    # A backfilled order in the live queue dispatches a driver to collect a
+    # delivery that already happened. It is also the only one of these
+    # suppressions whose absence would be noticed within the hour.
+    if mode == INTAKE_BACKFILL:
+        logger.info(
+            "order_backfilled",
+            order_id=str(order.id),
+            hub_id=lmx.hub_id,
+            source_system=lmx.source_system,
+        )
+        return order
 
     await hold_queue.add(
         lmx.hub_id,
