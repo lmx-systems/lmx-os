@@ -4,6 +4,7 @@ import { KpiStrip } from './components/KpiStrip'
 import { OrderPipeline } from './components/OrderPipeline'
 import { HoldQueueTable } from './components/HoldQueueTable'
 import { ExceptionsPanel } from './components/ExceptionsPanel'
+import { MergeReviewPanel } from './components/MergeReviewPanel'
 import { RecordHealthPanel } from './components/RecordHealthPanel'
 import { RecordLayerPanel } from './components/RecordLayerPanel'
 import { FleetMap } from './components/FleetMap'
@@ -170,6 +171,11 @@ function App() {
                     layer was wired recently and one that silently stops looks
                     exactly like a quiet week (REC-1..REC-4). */}
                 <RecordHealthPanel key={`health-${hubId}`} hubId={hubId} />
+                {/* Not hub-scoped, so no key on hubId: the same physical dock
+                    can be reached from two hubs and that pair is the most
+                    valuable merge to catch (IDN-2). Renders nothing when the
+                    queue is empty, which is most days. */}
+                <MergeReviewPanel isAdmin={opsProfile.role === 'admin'} />
               </div>
               <div className="flex flex-col gap-4">
                 {/* Map above the roster: "where is my fleet" is the glance a

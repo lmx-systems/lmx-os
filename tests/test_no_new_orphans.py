@@ -68,14 +68,12 @@ KNOWN_ORPHANS: dict[str, str] = {
     # REC-1's replay. The log itself is written live by the optimizer; this is
     # the verification half, and nothing in the product verifies.
     "replay_inputs": "REC-1: verification tool with no production caller",
-    # IDN-2 - the merge review queue has no producer. Nothing proposes a merge,
-    # so the queue a human reviews is permanently empty.
-    "propose_merge": "IDN-2: nothing proposes a merge; the review queue is empty",
-    "confirm_merge": "IDN-2: review queue with no producer",
-    "reject_merge": "IDN-2: review queue with no producer",
-    "revert_merge": "IDN-2: review queue with no producer",
-    "pending_merges": "IDN-2: review queue with no producer",
-    "merge_locations": "IDN-2: review queue with no producer",
+    # IDN-2 is wired: `propose_duplicate_locations` fills the queue once a night
+    # and `GET /operations/merge-proposals` is where it is worked. Two paths
+    # into the same table are still unused, and both are deliberate holds
+    # rather than oversights.
+    "propose_merge": "IDN-2: queue one pair by hand - no surface, and the detector covers the case",
+    "merge_locations": "IDN-2: the auto-merge path §2.2(c) allows only after the founding set is confirmed",
     # IDN-3 / IDN-4. `refresh_dwell_statistics` is wired now - the nightly tick
     # calls it through `refresh_hub_dwell_statistics`, and shops reach the
     # identity layer at all because `link_shop_to_dock` runs at creation. The

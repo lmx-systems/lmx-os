@@ -58,7 +58,7 @@ from any path an order passes through.
 
 | Item | Status claimed | What is actually true |
 |---|---|---|
-| `IDN-2` merge review queue | `BUILT` | Nothing calls `propose_merge`. The queue a human reviews is permanently empty, so "human-confirms the founding ~230" cannot happen |
+| `IDN-2` merge review queue | `BUILT` | ~~Nothing calls `propose_merge`; the queue is permanently empty.~~ **Fixed** — filled nightly, worked through `GET /operations/merge-proposals`. Needed `IDN-1` first: no links, no near-duplicates to find |
 | `IDN-3` node-class labelling | `BUILT, DONE-WHEN UNMET` | `set_node_class` is not called from any live path. The 36.2% unlabelled figure the row already carries is a floor, not a snapshot |
 | `IDN-4` receiver profile store | `BUILT` | ~~`refresh_dwell_statistics` has no caller.~~ **Fixed** — nightly, per hub. Fixing it first required `IDN-1`: nothing had ever set `Shop.location_id` outside a one-off script, so a refresh would have covered a frozen subset of docks and looked from every angle like it worked |
 
@@ -142,8 +142,13 @@ remain a reading problem.
    deeper one: `Shop.location_id` was set by nothing but a one-off script, so
    shops created by ordinary intake had no dock at all. Both are wired now.
 4. ~~**`REC-4`**~~ — **done**, runner and reader together.
-5. **`IDN-2`** — the review queue needs a producer before the ~230 can be
-   confirmed. **The last one still open.**
+5. ~~**`IDN-2`**~~ — **done.** Producer and reviewer together.
+
+**Every finding in this audit is now closed.** What remains on
+`tests/test_no_new_orphans.py`'s allowlist is four deliberate holds, each with
+its reason: two paths into the merge table that §2.2(c) gates behind the
+founding set, a per-order consequence label nothing reads back yet, and a
+superseded cost function.
 
 `ING-4` is separate and already reopened: it is blocked on `REC-5`'s definition
 of a stop.
