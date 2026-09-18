@@ -82,10 +82,12 @@ KNOWN_ORPHANS: dict[str, str] = {
     "revert_merge": "IDN-2: review queue with no producer",
     "pending_merges": "IDN-2: review queue with no producer",
     "merge_locations": "IDN-2: review queue with no producer",
-    # IDN-3 / IDN-4 - the labelling and profile writes are not on any path an
-    # order takes. `refresh_dwell_statistics` is the one M1 will need.
+    # IDN-3 / IDN-4. `refresh_dwell_statistics` is wired now - the nightly tick
+    # calls it through `refresh_hub_dwell_statistics`, and shops reach the
+    # identity layer at all because `link_shop_to_dock` runs at creation. The
+    # profile's *stated* fields still have no live writer: they are what a
+    # person tells us, and nothing asks.
     "set_node_class": "IDN-3: not called from any path an order passes through",
-    "refresh_dwell_statistics": "IDN-4: dwell statistics are never refreshed; M1 reads them",
     "set_access": "IDN-4: profile field with no live writer",
     "set_autonomy_fit": "IDN-4: profile field with no live writer",
     "set_receiving_hours": "IDN-4: profile field with no live writer",

@@ -25,6 +25,7 @@ from app.batch_queue.store import HoldQueueStore
 from app.billing.service import NoBillableOrdersError, generate_invoice, invoice_detail_view
 from app.client_auth.passwords import hash_password
 from app.db import get_db
+from app.identity import link_shop_to_dock
 from app.delivery.resolution import RESOLUTION_ACTIONS, OrderNotFailedError, resolve_failed_order
 from app.driver_auth.dependencies import revoked_devices_key
 from app.models.client import Client
@@ -159,6 +160,10 @@ async def onboard_client(
         )
         session.add(shop)
         await session.flush()
+        # IDN-1, the same link the ad-hoc path makes. An onboarded shop with no
+        # dock contributes nothing to any per-dock statistic and looks exactly
+        # like a place we have never visited.
+        await link_shop_to_dock(session, shop)
         shop_ids.append(shop.id)
 
     for rate_input in body.rates:

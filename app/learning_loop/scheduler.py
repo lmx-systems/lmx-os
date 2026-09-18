@@ -26,6 +26,7 @@ from sqlalchemy import select
 
 from app.db import session_scope
 from app.hub_calendar import is_hub_closed_on
+from app.identity import refresh_hub_dwell_statistics
 from app.learning_loop.service import run_nightly_job
 from app.models.hub import Hub
 from app.redis_client import get_client
@@ -125,9 +126,35 @@ class LearningLoopScheduler:
                     created = []
                 else:
                     created = await run_nightly_job(session, hub_id=hub_id)
+
+                # IDN-4's dwell statistics, refreshed on the same nightly tick.
+                # `refresh_dwell_statistics` existed and nothing called it, so
+                # every profile's figures were whatever a one-off script last
+                # left there - and MODEL_AND_DATA_BRIEF specifies M1 to read
+                # them (docs/ROADMAP_AUDIT_2026-09.md).
+                #
+                # Outside the closed-day branch above deliberately: a hub that
+                # was shut today still has yesterday's stops to compute from,
+                # and the pattern detector's reason for skipping - no activity
+                # to learn from - does not apply to recomputing a percentile
+                # over history.
+                #
+                # Its own try, because a dwell refresh must not cost the hub its
+                # rule proposals, and the rule proposals must not cost it the
+                # refresh.
+                try:
+                    docks = await refresh_hub_dwell_statistics(session, hub_id=hub_id)
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    logger.exception("dwell_refresh_failed", hub_id=hub_id)
+                    docks = 0
             await redis.set(_last_run_date_key(hub_id), today)
             logger.info(
-                "learning_loop_scheduled_run_completed", hub_id=hub_id, proposed_rules_created=len(created)
+                "learning_loop_scheduled_run_completed",
+                hub_id=hub_id,
+                proposed_rules_created=len(created),
+                docks_refreshed=docks,
             )
         except Exception:
             logger.exception("learning_loop_scheduled_run_failed", hub_id=hub_id)

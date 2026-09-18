@@ -29,7 +29,7 @@ from app.experiment import (
     assign_arm,
     control_arm_is_live,
 )
-from app.identity import receiver_key_for
+from app.identity import link_shop_to_dock, receiver_key_for
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.record.abstention import record_arm_abstention
@@ -292,6 +292,11 @@ async def _resolve_or_create_shop(
     )
     session.add(shop)
     await session.flush()
+    # IDN-1: attach it to the physical dock its address names. Until this call
+    # existed the only caller of `resolve_location` was a one-off backfill
+    # script, so every shop the ad-hoc path created was invisible to the
+    # identity layer - and therefore to the dwell statistics M1 reads.
+    await link_shop_to_dock(session, shop)
     logger.info(
         "adhoc_shop_created",
         shop_id=str(shop.id),
