@@ -218,3 +218,63 @@ class OverrideReasonOption(BaseModel):
     code: str
     label: str
     note_required: bool
+
+
+class LateOrderView(BaseModel):
+    """A late delivery nobody has judged yet (`REC-2`).
+
+    The worklist that makes the consequence label possible. Without it the only
+    way to record what happened after a late delivery is to already know which
+    ones were late, which nobody does fourteen days later.
+    """
+
+    order_id: uuid.UUID
+    external_ref: str
+    client_id: uuid.UUID | None
+    delivered_at: datetime | None
+    minutes_late: int | None
+    sla_tier: str | None
+
+
+class ConsequenceRequest(BaseModel):
+    """What actually happened after a late delivery (`REC-2`).
+
+    `kind` is one of the six the brief names. There is no free-text-only path:
+    a consequence nobody can count is not a label, and counting is the entire
+    purpose - `DATA_NEED_BRIEF.md` §4.2 puts the requirement at 500-1,000
+    observed consequences.
+    """
+
+    kind: str = Field(description="One of app/record/consequences.py's CONSEQUENCES")
+    occurred_at: datetime | None = Field(
+        default=None,
+        description="When it happened. Defaults to now; set it when recording something from a few days ago.",
+    )
+    detail: str | None = Field(default=None, max_length=500)
+    amount_cents: int | None = Field(
+        default=None, description="For credit_issued - what it cost us."
+    )
+
+
+class ConsequenceOptionView(BaseModel):
+    code: str
+    label: str
+
+
+class LinkageFlagView(BaseModel):
+    """One question the linkage detectors raised (`REC-4`).
+
+    A flag is a question, not a finding. The wording matters: a dispatcher who
+    reads these as accusations stops reading them.
+    """
+
+    id: uuid.UUID
+    kind: str
+    # The ids this flag is about, shaped by kind - an order and a return, two
+    # orders, or a dock and several orders. A dict rather than mostly-null
+    # columns, matching the model for the reason its docstring gives.
+    subjects: dict
+    detail: str
+    detected_at: datetime
+    resolved_at: datetime | None
+    resolution_note: str | None

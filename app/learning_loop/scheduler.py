@@ -27,6 +27,8 @@ from sqlalchemy import select
 from app.db import session_scope
 from app.hub_calendar import is_hub_closed_on
 from app.identity import refresh_hub_dwell_statistics
+from app.record.consequences import close_consequence_windows
+from app.record.linkage import run_linkage_detectors
 from app.learning_loop.service import run_nightly_job
 from app.models.hub import Hub
 from app.redis_client import get_client
@@ -149,12 +151,46 @@ class LearningLoopScheduler:
                     await session.rollback()
                     logger.exception("dwell_refresh_failed", hub_id=hub_id)
                     docks = 0
+
+                # REC-2's silence half. `close_consequence_windows` records
+                # "nothing happened" for every late order nobody judged inside
+                # the window - which is the half of the label set that nobody
+                # volunteers, because somebody always reports the angry phone
+                # call and nobody reports the twelve deliveries that were late
+                # and fine.
+                #
+                # **Only safe because the judging surface now exists.** With no
+                # way to record a real consequence, this would label every late
+                # delivery as silence: false labels, in an append-only ledger,
+                # indistinguishable from true ones by the time anyone trained on
+                # them. See POST /orders/{id}/consequence.
+                try:
+                    silences = await close_consequence_windows(session, hub_id=hub_id)
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    logger.exception("consequence_close_failed", hub_id=hub_id)
+                    silences = 0
+
+                # REC-4's three detectors. They raise questions for a dispatcher
+                # rather than findings, and `GET /operations/linkage-flags` is
+                # what reads them - running them without that would fill a table
+                # nobody opens, which is not better than not running them.
+                try:
+                    flags = await run_linkage_detectors(session, hub_id=hub_id)
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    logger.exception("linkage_detectors_failed", hub_id=hub_id)
+                    flags = {}
             await redis.set(_last_run_date_key(hub_id), today)
             logger.info(
                 "learning_loop_scheduled_run_completed",
                 hub_id=hub_id,
                 proposed_rules_created=len(created),
                 docks_refreshed=docks,
+                silences_recorded=silences,
+                linkage_flags_raised=sum(flags.values()),
             )
         except Exception:
             logger.exception("learning_loop_scheduled_run_failed", hub_id=hub_id)

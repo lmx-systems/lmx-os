@@ -72,6 +72,19 @@ CONSEQUENCES = (
     CONSEQUENCE_REORDER_GAP,
 )
 
+# What each one means to the person recording it. The wording is the label's
+# definition as far as a dispatcher is concerned - `competitor_sourced` and
+# `order_cancelled` both end with no delivery, and which one somebody picks
+# depends entirely on how the choice is worded on the screen.
+CONSEQUENCE_LABELS: dict[str, str] = {
+    CONSEQUENCE_ESCALATION: "The customer called to chase it",
+    CONSEQUENCE_CREDIT: "We issued a credit",
+    CONSEQUENCE_RETURNED: "The part came back",
+    CONSEQUENCE_CANCELLED: "The order was cancelled",
+    CONSEQUENCE_COMPETITOR: "They sourced it somewhere else",
+    CONSEQUENCE_REORDER_GAP: "They stopped ordering",
+}
+
 # How long after a late delivery we keep watching before calling it silence.
 #
 # **The brief does not state this, and it should.** It is not a tuning knob -

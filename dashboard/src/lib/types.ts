@@ -379,3 +379,36 @@ export interface OverrideResult {
   order_status_before: string
   order_status_after: string
 }
+
+/** A late delivery nobody has judged yet (docs/ROADMAP_1.5.md REC-2). */
+export interface LateOrder {
+  order_id: string
+  external_ref: string
+  client_id: string | null
+  delivered_at: string | null
+  minutes_late: number | null
+  sla_tier: string | null
+}
+
+/** One of the six consequences the brief names. */
+export interface ConsequenceOption {
+  code: string
+  label: string
+}
+
+/**
+ * A question the linkage detectors raised (REC-4).
+ *
+ * A flag is a question, not a finding — "a return has been waiting at this dock
+ * since Tuesday", not an accusation. A dispatcher who reads them as accusations
+ * stops reading them, which is why `detail` is rendered rather than `kind`.
+ */
+export interface LinkageFlag {
+  id: string
+  kind: string
+  subjects: Record<string, unknown>
+  detail: string
+  detected_at: string
+  resolved_at: string | null
+  resolution_note: string | null
+}
