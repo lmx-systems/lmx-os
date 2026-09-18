@@ -454,3 +454,22 @@ export interface RecordHealth {
     shortfall_to_target: number
   }
 }
+
+/**
+ * A pair of docks somebody is being asked to judge (docs/ROADMAP_1.5.md IDN-2).
+ *
+ * Both addresses are carried, not just ids. The reviewer's question is "are
+ * these the same place", and two UUIDs cannot be answered.
+ */
+export interface MergeProposal {
+  id: string
+  status: string
+  reason: string
+  source_location_id: string
+  source_address: string
+  target_location_id: string
+  target_address: string
+  proposed_at: string
+  decided_at: string | null
+  decision_source: string | null
+}

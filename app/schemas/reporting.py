@@ -319,3 +319,22 @@ class RecordHealthView(BaseModel):
     # because the band is a range the brief declines to collapse and a view that
     # picked a point target would lend it a precision the source does not have.
     labels: dict
+
+
+class MergeProposalView(BaseModel):
+    """One pair of docks a person is being asked to judge (`IDN-2`).
+
+    Both sides are described rather than named by id. The reviewer's question is
+    *"are these the same place"*, and two UUIDs cannot be answered.
+    """
+
+    id: uuid.UUID
+    status: str
+    reason: str
+    source_location_id: uuid.UUID
+    source_address: str
+    target_location_id: uuid.UUID
+    target_address: str
+    proposed_at: datetime
+    decided_at: datetime | None
+    decision_source: str | None

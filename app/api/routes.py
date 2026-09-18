@@ -37,6 +37,9 @@ from app.reporting.credit_exposure import DEFAULT_WINDOW_DAYS as CREDIT_WINDOW_D
 from app.reporting.credit_exposure import build_credit_exposure
 from app.models.dispatcher_override import REASON_CODES, REASON_CODES_REQUIRING_NOTE, REASON_LABELS
 from app.models.linkage_flag import LinkageFlag
+from app.models.location import Location
+from app.models.location_merge import LocationMerge
+from app.identity.merge import confirm_merge, pending_merges, reject_merge, revert_merge
 from app.record.consequences import (
     CONSEQUENCE_LABELS,
     CONSEQUENCES,
@@ -64,6 +67,7 @@ from app.schemas.reporting import (
     LateOrderView,
     LinkageFlagView,
     OrderExplanationView,
+    MergeProposalView,
     RecordHealthView,
     WriterHealthView,
     OverrideReasonOption,
@@ -181,6 +185,121 @@ async def operations_scorecard(
             for r in scorecard.rates
         ],
     )
+
+
+@router.get("/operations/merge-proposals", response_model=list[MergeProposalView])
+async def merge_proposals(
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> list[MergeProposalView]:
+    """Dock pairs waiting for somebody to say whether they are one place (`IDN-2`).
+
+    *"Human-confirms the founding ~230, auto-merge after, every merge audited
+    and reversible."* The queue had no producer and no reader, so it was
+    permanently empty and the founding set could not be confirmed
+    (`docs/ROADMAP_AUDIT_2026-09.md`). `propose_duplicate_locations` now fills it
+    once a night; this is where it is worked.
+
+    Not hub-scoped, because the queue is not: the same physical dock can be
+    reached from two hubs, and that pair is the most valuable merge to catch.
+    """
+    proposals = await pending_merges(session)
+    return [await _merge_view(session, proposal) for proposal in proposals]
+
+
+async def _merge_view(session: AsyncSession, proposal) -> MergeProposalView:
+    """Both addresses, resolved. "Are these the same place" cannot be answered
+    from two UUIDs, and a reviewer who has to look each one up will not."""
+    source = await session.get(Location, proposal.source_location_id)
+    target = await session.get(Location, proposal.target_location_id)
+    return MergeProposalView(
+        id=proposal.id,
+        status=proposal.status,
+        reason=proposal.reason,
+        source_location_id=proposal.source_location_id,
+        source_address=source.address if source else "(dock no longer exists)",
+        target_location_id=proposal.target_location_id,
+        target_address=target.address if target else "(dock no longer exists)",
+        proposed_at=proposal.created_at,
+        decided_at=proposal.decided_at,
+        decision_source=proposal.decision_source,
+    )
+
+
+@router.post("/operations/merge-proposals/{proposal_id}/confirm", response_model=MergeProposalView)
+async def confirm_merge_proposal(
+    proposal_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    admin: AuthedOpsUser = Depends(require_admin),
+) -> MergeProposalView:
+    """These two docks are one place. Applies the merge (`IDN-2`).
+
+    **Admin, unlike the queue itself.** Confirming rewrites which dock a shop
+    points at, and every per-dock statistic - dwell, node class, the receiver
+    profile - moves with it. That is the shape `require_admin`'s docstring
+    describes: a mutating action a viewer should not reach. Reading the queue is
+    open to anyone, because a dispatcher spotting a duplicate is how good
+    proposals get noticed.
+
+    Reversible, and the audit row records who decided and on what evidence.
+    """
+    proposal = await session.get(LocationMerge, proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="No such merge proposal")
+    try:
+        await confirm_merge(session, proposal, ops_user_id=uuid.UUID(admin.ops_user_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    await session.commit()
+    return await _merge_view(session, proposal)
+
+
+@router.post("/operations/merge-proposals/{proposal_id}/reject", response_model=MergeProposalView)
+async def reject_merge_proposal(
+    proposal_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    admin: AuthedOpsUser = Depends(require_admin),
+) -> MergeProposalView:
+    """These are different places. Recorded, not deleted (`IDN-2`).
+
+    The rejection is the useful artefact: it stops the pair being re-proposed
+    every time the detector runs, and it is the evidence that somebody looked.
+    A queue that re-asks a question already answered becomes noise that gets
+    cleared without being read.
+    """
+    proposal = await session.get(LocationMerge, proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="No such merge proposal")
+    try:
+        await reject_merge(session, proposal, ops_user_id=uuid.UUID(admin.ops_user_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    await session.commit()
+    return await _merge_view(session, proposal)
+
+
+@router.post("/operations/merges/{merge_id}/revert", response_model=MergeProposalView)
+async def revert_applied_merge(
+    merge_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    admin: AuthedOpsUser = Depends(require_admin),
+) -> MergeProposalView:
+    """Undo an applied merge (`IDN-2`).
+
+    *"Every merge audited and reversible"* is a clause of the done-when, and it
+    was reversible in code with nothing able to call it. Puts back exactly the
+    shops the merge moved - shops that already pointed at the target were never
+    moved and are not touched.
+    """
+    merge = await session.get(LocationMerge, merge_id)
+    if merge is None:
+        raise HTTPException(status_code=404, detail="No such merge")
+    try:
+        await revert_merge(session, merge, ops_user_id=uuid.UUID(admin.ops_user_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    await session.commit()
+    return await _merge_view(session, merge)
 
 
 @router.get("/operations/record-health", response_model=RecordHealthView)

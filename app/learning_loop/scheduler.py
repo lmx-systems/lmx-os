@@ -26,7 +26,7 @@ from sqlalchemy import select
 
 from app.db import session_scope
 from app.hub_calendar import is_hub_closed_on
-from app.identity import refresh_hub_dwell_statistics
+from app.identity import propose_duplicate_locations, refresh_hub_dwell_statistics
 from app.record.consequences import close_consequence_windows
 from app.record.linkage import run_linkage_detectors
 from app.learning_loop.service import run_nightly_job
@@ -56,6 +56,20 @@ def _last_run_date_key(hub_id: str) -> str:
 
 def _lock_key(hub_id: str) -> str:
     return f"learning_loop:scheduler_running:{hub_id}"
+
+
+def _global_job_key(name: str, day: str) -> str:
+    """A once-a-day claim for work that is not per hub.
+
+    `propose_duplicate_locations` compares every dock against every other and
+    is deliberately not hub-scoped: the same physical dock can be reached from
+    two hubs, and scoping the comparison would make exactly that pair - the
+    most valuable merge to catch - invisible.
+
+    So it must run once a night, not once per hub. `set nx` on a day key is the
+    claim: whichever hub's tick fires first does the work and the rest skip it.
+    """
+    return f"learning_loop:global:{name}:{day}"
 
 
 class LearningLoopScheduler:
@@ -183,6 +197,27 @@ class LearningLoopScheduler:
                     await session.rollback()
                     logger.exception("linkage_detectors_failed", hub_id=hub_id)
                     flags = {}
+
+                # IDN-2's producer. Until now the merge review queue had nothing
+                # feeding it, so "human-confirms the founding ~230" could not
+                # happen - the queue was permanently empty
+                # (docs/ROADMAP_AUDIT_2026-09.md).
+                #
+                # Claimed once a day across all hubs rather than run per hub:
+                # the comparison is global on purpose, because the same physical
+                # dock can be reached from two hubs and that is the most valuable
+                # pair to catch. Running it per hub would do the same global work
+                # once per hub and still miss nothing extra.
+                merges = 0
+                if await redis.set(
+                    _global_job_key("propose_merges", today), "1", nx=True, ex=86400
+                ):
+                    try:
+                        merges = len(await propose_duplicate_locations(session))
+                        await session.commit()
+                    except Exception:
+                        await session.rollback()
+                        logger.exception("merge_proposal_failed")
             await redis.set(_last_run_date_key(hub_id), today)
             logger.info(
                 "learning_loop_scheduled_run_completed",
@@ -191,6 +226,7 @@ class LearningLoopScheduler:
                 docks_refreshed=docks,
                 silences_recorded=silences,
                 linkage_flags_raised=sum(flags.values()),
+                merges_proposed=merges,
             )
         except Exception:
             logger.exception("learning_loop_scheduled_run_failed", hub_id=hub_id)

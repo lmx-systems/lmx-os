@@ -16,6 +16,7 @@ import type {
   LateOrder,
   LinkageFlag,
   OrderExplanation,
+  MergeProposal,
   RecordHealth,
   OverrideReasonOption,
   OverrideResult,
@@ -187,6 +188,19 @@ export const api = {
   // looks exactly like a quiet week.
   recordHealth: (hubId: string, windowDays = 30) =>
     request<RecordHealth>(`/operations/record-health?hub_id=${hubId}&window_days=${windowDays}`),
+
+  // Dock pairs waiting to be judged (docs/ROADMAP_1.5.md IDN-2). Not hub-scoped,
+  // because the queue is not: the same physical dock can be reached from two
+  // hubs, and that pair is the most valuable merge to catch.
+  mergeProposals: () => request<MergeProposal[]>('/operations/merge-proposals'),
+
+  // Admin only. Confirming rewrites which dock a shop points at, and every
+  // per-dock statistic moves with it.
+  confirmMerge: (id: string) =>
+    request<MergeProposal>(`/operations/merge-proposals/${id}/confirm`, { method: 'POST' }),
+
+  rejectMerge: (id: string) =>
+    request<MergeProposal>(`/operations/merge-proposals/${id}/reject`, { method: 'POST' }),
 
   // What the SLA credits are costing (docs/ROADMAP.md W3, E11).
   creditExposure: (windowDays = 30) =>
