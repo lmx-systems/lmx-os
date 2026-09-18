@@ -138,6 +138,11 @@ class SavingsStatement:
     # `EXP-3`'s verdict on the window. Kept whole so an operator can read what
     # actually failed; the customer-facing text says only that something did.
     integrity: IntegrityReport | None = None
+    # What this statement read, order by order, in cents. Carried so `STL-2` can
+    # fingerprint it: the ledger is append-only but a cost can be superseded, so
+    # the only way to tell "the number changed" from "these orders were recosted"
+    # is to have recorded which costs the figure rested on.
+    costed_orders: dict = field(default_factory=dict)
 
     @property
     def headline(self) -> str:
@@ -274,6 +279,7 @@ async def build_statement(
             continue
         loaded, rate_source = found
         by_arm.setdefault(assignment.arm, []).append(float(loaded))
+        statement.costed_orders[str(assignment.order_id)] = int(loaded)
         if rate_source == RATE_PLACEHOLDER:
             placeholder_rates += 1
 
