@@ -14,6 +14,13 @@ from app.record.abstention import (
     record_arm_abstention,
 )
 from app.record.explain import Explanation, Fact, explain_order
+from app.record.overrides import (
+    OverrideOutcome,
+    OverrideRefused,
+    apply_override,
+    labelled_overrides,
+    overrides_for_order,
+)
 from app.record.cost import (
     DriverDayCost,
     OrderCost,
@@ -64,10 +71,15 @@ __all__ = [
     "DriverDayCost",
     "Explanation",
     "Fact",
+    "OverrideOutcome",
+    "OverrideRefused",
     "OrderCost",
     "canonical_inputs_hash",
     "current_outcome",
+    "apply_override",
     "explain_order",
+    "labelled_overrides",
+    "overrides_for_order",
     "flag_duplicates_across_branches",
     "flag_open_returns_on_visits",
     "flag_repeat_visits",

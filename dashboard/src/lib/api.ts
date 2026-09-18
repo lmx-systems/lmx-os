@@ -13,6 +13,8 @@ import type {
   NightlyJobResult,
   OperationsScorecard,
   OrderExplanation,
+  OverrideReasonOption,
+  OverrideResult,
   OpsAuthToken,
   OpsProfileView,
   OptimizationResult,
@@ -134,6 +136,20 @@ export const api = {
   // every tick for every held order.
   orderExplanation: (orderId: string) =>
     request<OrderExplanation>(`/orders/${orderId}/explanation`),
+
+  // The reason vocabulary (docs/ROADMAP_1.5.md CON-2). Fetched rather than
+  // hardcoded so the list offered here cannot drift from the CHECK constraint
+  // that accepts it.
+  overrideReasons: () => request<OverrideReasonOption[]>('/operations/override-reasons'),
+
+  // Overrule the queue on one order, with a reason (CON-2, CON-3). A 409 here
+  // is a sentence for the dispatcher, not an error to swallow - usually that
+  // the order moved since the screen was loaded.
+  overrideOrder: (orderId: string, body: { action: string; reason_code: string; note?: string }) =>
+    request<OverrideResult>(`/orders/${orderId}/override`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   // What the SLA credits are costing (docs/ROADMAP.md W3, E11).
   creditExposure: (windowDays = 30) =>

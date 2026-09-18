@@ -9,7 +9,7 @@ import uuid
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,7 +34,9 @@ from app.optimizer.service import DispatchOptimizerService
 from app.reporting.lmx_link import build_scorecard
 from app.reporting.credit_exposure import DEFAULT_WINDOW_DAYS as CREDIT_WINDOW_DAYS
 from app.reporting.credit_exposure import build_credit_exposure
+from app.models.dispatcher_override import REASON_CODES, REASON_CODES_REQUIRING_NOTE, REASON_LABELS
 from app.record.explain import explain_order
+from app.record.overrides import OverrideRefused, apply_override
 from app.reporting.exceptions import build_exception_queue
 from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_operations_scorecard
 from app.schemas.batch_queue import HeldOrderView
@@ -48,6 +50,9 @@ from app.schemas.reporting import (
     MeasurementView,
     OperationsScorecardView,
     OrderExplanationView,
+    OverrideReasonOption,
+    OverrideRequest,
+    OverrideView,
     RateView,
     TierExposureView,
 )
@@ -159,6 +164,83 @@ async def operations_scorecard(
             )
             for r in scorecard.rates
         ],
+    )
+
+
+@router.get("/operations/override-reasons", response_model=list[OverrideReasonOption])
+async def override_reasons(
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> list[OverrideReasonOption]:
+    """The reason codes an override may carry (`docs/ROADMAP_1.5.md` CON-2).
+
+    Served rather than duplicated in the dashboard. A hardcoded copy drifts from
+    the CHECK constraint in migration `0060`, and the symptom of that drift is a
+    dispatcher choosing a reason the database rejects - at the moment they are
+    least able to absorb it.
+    """
+    return [
+        OverrideReasonOption(
+            code=code,
+            label=REASON_LABELS[code],
+            note_required=code in REASON_CODES_REQUIRING_NOTE,
+        )
+        for code in REASON_CODES
+    ]
+
+
+@router.post("/orders/{order_id}/override", response_model=OverrideView)
+async def override_order(
+    order_id: uuid.UUID,
+    body: OverrideRequest,
+    session: AsyncSession = Depends(get_db),
+    ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> OverrideView:
+    """Overrule the queue on one order, with a reason (`CON-2`, `CON-3`).
+
+    *"No override completes without a reason."* *"Every override lands in the
+    decision log as a labelled example."*
+
+    **Any ops session, not admin-only** - and that is a deliberate reading of
+    `require_admin`, whose docstring scopes it to *"the specific mutating
+    endpoints a viewer shouldn't reach"* and names running a cycle, onboarding a
+    client, revoking a device. An override is none of those: it is the ordinary
+    work of the person answering the phone, and a dispatcher who cannot release
+    an order when the customer calls cannot run a day. What makes that safe is
+    not the role but the record - every override is attributed to an email and
+    append-only, so this is accountable rather than unguarded.
+
+    Refusals come back as 409 with a sentence a dispatcher can act on, not a 500.
+    The common one is that the order moved since the screen was loaded.
+    """
+    try:
+        outcome = await apply_override(
+            session,
+            order_id=order_id,
+            action=body.action,
+            reason_code=body.reason_code,
+            note=body.note,
+            ops_user_id=ops.ops_user_id,
+            ops_user_email=ops.email,
+        )
+    except OverrideRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    override = outcome.override
+    return OverrideView(
+        id=override.id,
+        order_id=override.order_id,
+        overridden_at=override.overridden_at,
+        action=override.action,
+        reason_code=override.reason_code,
+        reason_label=REASON_LABELS.get(override.reason_code, override.reason_code),
+        note=override.note,
+        by=override.ops_user_email,
+        system_action=override.system_action,
+        system_reason=override.system_reason,
+        system_decision_known=override.system_decision_known,
+        contradicted_the_system=outcome.contradicted_the_system,
+        order_status_before=outcome.previous_status.value,
+        order_status_after=outcome.new_status.value,
     )
 
 

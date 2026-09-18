@@ -75,7 +75,12 @@ _FORWARD: dict[OrderStatus, tuple[OrderStatus, ...]] = {
     # An EXTERNAL order is never classified (§1.3), so it reaches held directly.
     OrderStatus.classified: (OrderStatus.held, OrderStatus.queued),
     OrderStatus.held: (OrderStatus.queued, OrderStatus.assigned),
-    OrderStatus.queued: (OrderStatus.assigned,),
+    # `held` is a reversal, and a legal one: an order that has been released
+    # but not placed has had nothing irreversible happen to it, and pulling it
+    # back is what `CON-2`'s hold override means. Not reachable from
+    # `assigned` - by then a driver has an offer, and retracting that is a
+    # driver-facing operation rather than a queue decision.
+    OrderStatus.queued: (OrderStatus.assigned, OrderStatus.held),
     OrderStatus.accepted: (OrderStatus.held, OrderStatus.queued, OrderStatus.assigned),
     OrderStatus.assigned: (OrderStatus.en_route_pickup, OrderStatus.picked_up),
     # picked_up is reachable directly: a driver arriving and collecting in one

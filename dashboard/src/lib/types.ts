@@ -348,3 +348,34 @@ export interface OrderExplanation {
   facts: DecisionFact[]
   unexplained: string | null
 }
+
+/** One reason an override may carry (docs/ROADMAP_1.5.md CON-2). */
+export interface OverrideReasonOption {
+  code: string
+  label: string
+  note_required: boolean
+}
+
+/**
+ * A recorded override (CON-2, CON-3).
+ *
+ * `contradicted_the_system` comes from the server rather than being computed
+ * here: an override of a decision nobody recorded contradicts nothing, and a
+ * client doing the subtraction itself would read the missing side as a mismatch.
+ */
+export interface OverrideResult {
+  id: string
+  order_id: string
+  overridden_at: string
+  action: string
+  reason_code: string
+  reason_label: string
+  note: string | null
+  by: string
+  system_action: string | null
+  system_reason: string | null
+  system_decision_known: boolean
+  contradicted_the_system: boolean
+  order_status_before: string
+  order_status_after: string
+}
