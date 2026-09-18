@@ -278,3 +278,44 @@ class LinkageFlagView(BaseModel):
     detected_at: datetime
     resolved_at: datetime | None
     resolution_note: str | None
+
+
+class WriterHealthView(BaseModel):
+    """Whether one of the record's writers is producing anything (`REC-1`..`REC-4`).
+
+    `last_written_at` rather than a boolean: "nothing this week" and "nothing
+    since March" are both zero rows and mean entirely different things.
+    """
+
+    name: str
+    rows_in_window: int
+    last_written_at: datetime | None
+    note: str
+
+
+class RecordHealthView(BaseModel):
+    """The record layer, reported on itself.
+
+    Not a KPI and not the savings statement - those are claims about the
+    business. This answers "is the record being written, and how far is the
+    label set from being usable", which are questions about us.
+    """
+
+    window_days: int
+    on_time_percentage: float | None
+    on_time_numerator: int
+    on_time_denominator: int
+    on_time_interval: tuple[float, float] | None
+    on_time_not_measured: str | None
+    on_time_is_thin: bool
+    decisions_recorded: int
+    outcomes_recorded: int
+    outcomes_linked_to_a_decision: int
+    decision_link_percentage: float | None
+    open_flags: int
+    writers: list[WriterHealthView]
+    # From `label_counts`: observed_consequences, silences, labelled_total,
+    # by_type, and the band's two ends. Passed through rather than flattened,
+    # because the band is a range the brief declines to collapse and a view that
+    # picked a point target would lend it a precision the source does not have.
+    labels: dict

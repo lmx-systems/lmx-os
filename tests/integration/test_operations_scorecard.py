@@ -352,8 +352,16 @@ async def test_a_stop_with_no_planned_eta_is_skipped(db_session):
 
 
 async def _delivered_order(db_session, hub_id, client_id, shop_id, *, tier, late_by_minutes):
-    """An order delivered `late_by_minutes` after its tier commitment (negative = early)."""
-    requested = NOW - timedelta(days=1)
+    """An order delivered `late_by_minutes` after its tier commitment (negative = early).
+
+    Anchored to the real clock, not the file's pinned `NOW`. The readers this
+    feeds - `my_performance`, the operations scorecard - select on a rolling
+    30-day window from *now*, so a fixture pinned to a fixed date drifts out of
+    that window as the calendar moves and the test starts failing on a Tuesday
+    for no reason anybody changed. It did: `NOW` is 20 August, and this order
+    aged out of the window on 18 September.
+    """
+    requested = datetime.now(timezone.utc) - timedelta(days=1)
     order = Order(
         hub_id=hub_id,
         client_id=client_id,

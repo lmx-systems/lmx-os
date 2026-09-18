@@ -16,6 +16,7 @@ import type {
   LateOrder,
   LinkageFlag,
   OrderExplanation,
+  RecordHealth,
   OverrideReasonOption,
   OverrideResult,
   OpsAuthToken,
@@ -180,6 +181,12 @@ export const api = {
       `/operations/linkage-flags/${flagId}/resolve${note ? `?note=${encodeURIComponent(note)}` : ''}`,
       { method: 'POST' },
     ),
+
+  // Is the record being written? (docs/ROADMAP_1.5.md REC-1..REC-4.) Every
+  // writer in the record layer was wired recently, and one that silently stops
+  // looks exactly like a quiet week.
+  recordHealth: (hubId: string, windowDays = 30) =>
+    request<RecordHealth>(`/operations/record-health?hub_id=${hubId}&window_days=${windowDays}`),
 
   // What the SLA credits are costing (docs/ROADMAP.md W3, E11).
   creditExposure: (windowDays = 30) =>

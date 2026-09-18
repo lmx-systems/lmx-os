@@ -47,6 +47,7 @@ from app.record.explain import explain_order
 from app.record.linkage import open_flags, resolve_flag
 from app.record.overrides import OverrideRefused, apply_override
 from app.reporting.exceptions import build_exception_queue
+from app.reporting.record_health import build_record_health
 from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_operations_scorecard
 from app.schemas.batch_queue import HeldOrderView
 from app.schemas.reporting import (
@@ -63,6 +64,8 @@ from app.schemas.reporting import (
     LateOrderView,
     LinkageFlagView,
     OrderExplanationView,
+    RecordHealthView,
+    WriterHealthView,
     OverrideReasonOption,
     OverrideRequest,
     OverrideView,
@@ -177,6 +180,52 @@ async def operations_scorecard(
             )
             for r in scorecard.rates
         ],
+    )
+
+
+@router.get("/operations/record-health", response_model=RecordHealthView)
+async def record_health(
+    hub_id: uuid.UUID,
+    window_days: int = Query(default=30, ge=1, le=365),
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> RecordHealthView:
+    """Is the record being written, and how far is the label set from usable?
+
+    `REC-1`..`REC-4` all have writers now, and every one of them was wired in
+    the last few changes. **A writer that silently stops looks exactly like a
+    quiet week** - this is the thing that would notice, which is why it reports
+    each writer's last-written timestamp rather than a health boolean.
+
+    Computed from the ledger, never recomputed from `orders`. A reader that fell
+    back to recomputing would keep showing a healthy number after the ledger
+    stopped being written, which is the one failure it exists to catch.
+    """
+    health = await build_record_health(session, hub_id=hub_id, window_days=window_days)
+    link = health.decision_link_rate
+    return RecordHealthView(
+        window_days=health.window_days,
+        on_time_percentage=health.on_time.percentage,
+        on_time_numerator=health.on_time.numerator,
+        on_time_denominator=health.on_time.denominator,
+        on_time_interval=health.on_time_interval,
+        on_time_not_measured=health.on_time.not_measured,
+        on_time_is_thin=health.on_time.is_thin,
+        decisions_recorded=health.decisions_recorded,
+        outcomes_recorded=health.outcomes_recorded,
+        outcomes_linked_to_a_decision=health.outcomes_linked_to_a_decision,
+        decision_link_percentage=link.percentage,
+        open_flags=health.open_flags,
+        writers=[
+            WriterHealthView(
+                name=w.name,
+                rows_in_window=w.rows_in_window,
+                last_written_at=w.last_written_at,
+                note=w.note,
+            )
+            for w in health.writers
+        ],
+        labels=health.labels,
     )
 
 

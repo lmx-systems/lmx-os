@@ -64,7 +64,6 @@ KNOWN_ORPHANS: dict[str, str] = {
     # `POST /orders/{id}/consequence`, and the nightly tick closes the windows
     # nobody judged. What is left is the reading back.
     "consequence_label": "REC-2: nothing reads a single order's label back",
-    "label_counts": "REC-2: the progress-against-the-band figure has no reader",
     "record_driver_day_cost": "REC-2: superseded by record_costs_for_period; named only in a docstring",
     # REC-1's replay. The log itself is written live by the optimizer; this is
     # the verification half, and nothing in the product verifies.
