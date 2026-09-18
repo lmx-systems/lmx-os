@@ -104,6 +104,23 @@ class OptimizationResult(BaseModel):
     over_budget: bool
 
 
+class HoldDecisionRecord(BaseModel):
+    """Why one held order was released this cycle, or was not.
+
+    `run_hold_cycle` has always returned this and `run_cycle` has always thrown
+    it away, keeping only the set of ids it released. So the system held orders
+    and recorded no reason for any of it - in a product whose central claim is
+    that the hold is the product. `AGT-4` is what surfaced it: "no explanation
+    the record cannot support" meant the only honest explanation was that we did
+    not know.
+    """
+
+    order_id: str
+    action: str
+    reason: str
+    cluster_mate_ids: list[str] = []
+
+
 class CyclePlan(BaseModel):
     """What a dispatch cycle *decided*, before anything was done about it (W9).
 
@@ -133,6 +150,10 @@ class CyclePlan(BaseModel):
 
     held_order_count: int
     released_order_ids: list[str]
+
+    # One per order the queue looked at, whichever way it went. Carried so
+    # `REC-1` can persist it - see `HoldDecisionRecord`.
+    hold_decisions: list[HoldDecisionRecord] = []
 
     # Carried rather than re-read by the caller. `run_cycle` used to hold these in
     # locals; re-fetching them after planning would be a second round-trip against

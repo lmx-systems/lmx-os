@@ -78,6 +78,17 @@ class DecisionSnapshot(Base, UUIDPrimaryKeyMixin):
     assignments: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     unassigned_stop_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
 
+    # Why each held order was released this cycle, or was not. `run_hold_cycle`
+    # has always produced this and `run_cycle` always discarded it, so the
+    # system held orders and recorded no reason for any of it - in a product
+    # whose central claim is that the hold IS the product. `AGT-4` cannot
+    # explain a hold the record does not contain, which is what surfaced it.
+    #
+    # An output, so it sits beside `assignments` rather than inside `inputs`:
+    # putting a decision into the frozen inputs would make the replay hash
+    # depend on what the cycle concluded rather than on what it saw.
+    hold_decisions: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
     # SHA-256 over the canonical form of `inputs`. Two jobs: it detects a row
     # that has been altered despite the trigger (a restore, a migration, a
     # superuser), and it lets two cycles be compared for "did the optimizer see

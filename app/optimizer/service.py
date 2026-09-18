@@ -41,6 +41,7 @@ from app.schemas.fleet import DriverState
 from app.schemas.optimizer import (
     CyclePlan,
     DriverCandidate,
+    HoldDecisionRecord,
     LastCycleSnapshot,
     OptimizationResult,
     StopCandidate,
@@ -163,6 +164,15 @@ class DispatchOptimizerService:
             hub_closed=False,
             held_order_count=len(held_orders),
             released_order_ids=[o.order_id for o in released_orders],
+            hold_decisions=[
+                HoldDecisionRecord(
+                    order_id=d.order_id,
+                    action=d.action,
+                    reason=d.reason,
+                    cluster_mate_ids=list(d.cluster_mate_ids),
+                )
+                for d in decisions
+            ],
             shop_name_by_order_id={o.order_id: o.shop_name for o in released_orders},
             fleet_snapshot=fleet_snapshot,
             stops=stops,

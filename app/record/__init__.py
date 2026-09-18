@@ -13,6 +13,7 @@ from app.record.abstention import (
     orders_with_an_abstention,
     record_arm_abstention,
 )
+from app.record.explain import Explanation, Fact, explain_order
 from app.record.cost import (
     DriverDayCost,
     OrderCost,
@@ -61,9 +62,12 @@ __all__ = [
     "CONSEQUENCES",
     "DECLINED_TO_HOLD",
     "DriverDayCost",
+    "Explanation",
+    "Fact",
     "OrderCost",
     "canonical_inputs_hash",
     "current_outcome",
+    "explain_order",
     "flag_duplicates_across_branches",
     "flag_open_returns_on_visits",
     "flag_repeat_visits",

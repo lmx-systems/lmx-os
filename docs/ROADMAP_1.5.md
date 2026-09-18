@@ -217,7 +217,17 @@ Scoped by §2.1's amendment. **Nothing in this module touches the decision path*
 | **AGT-1** | **The resolution bake-off.** Hand-label the true physical dock count behind the 230 account IDs once, then run the existing deterministic resolver and an agent resolver on identical input | `NEW` | Precision and recall on merge decisions reported for both, plus the cases each gets right that the other does not. One engineer, a few days. **This is the gate for AGT-2 and AGT-3** |
 | **AGT-2** | Agentic order-feed mapping — an arbitrary customer export to our schema, with a human review gate before first live order | `NEW, GATED ON AGT-1` | A new Micro customer is onboarded in under a day with no engineer writing an adapter. `[ASSUMPTION]` the hand-built path is 2–4 engineering weeks per customer |
 | **AGT-3** | Cold-start prior from unstructured evidence — dock survey, address, customer notes | `NEW, GATED ON AGT-1` | Outputs a distribution rather than a point, is superseded by observation once the dock has history, and beats the node-class prior on unseen docks — or is not shipped (§4 rule 3 in the brief applies unchanged) |
-| **AGT-4** | Decision explanation for the operator console — why this order was held | `NEW` | Every explanation cites `REC-1`'s decision log rather than narrating. No explanation the record cannot support |
+| **AGT-4** | Decision explanation for the operator console — why this order was held | `BUILT` | Every explanation cites `REC-1`'s decision log rather than narrating. No explanation the record cannot support |
+
+**AGT-4 found that there was nothing to explain.** `run_hold_cycle` has always
+returned a reason for every order it looks at — hot shot, deadline reached, no
+cluster mate, no driver available, conflict with a more urgent order — and
+`run_cycle` kept only the set of ids it released. So a product whose central
+claim is that **the hold is the product** held orders and recorded no reason for
+any of it, and the only honest explanation of a hold was "we do not know".
+`decision_snapshots.hold_decisions` now carries them (migration `0059`).
+Snapshots written before it read as *reasons were never captured*, which is true
+and is deliberately not backfilled.
 
 **Also in scope, unresolved:** benchmark tabular and time-series foundation models — TabPFN, Chronos, TimesFM — against the shrunk baseline for `M1`. Small-sample tabular at ~15 observations per dock is the shape they are built for. This is the defensible form of "do not train from scratch"; training time itself is not a cost we pay.
 

@@ -12,6 +12,7 @@ import type {
   LinkScorecard,
   NightlyJobResult,
   OperationsScorecard,
+  OrderExplanation,
   OpsAuthToken,
   OpsProfileView,
   OptimizationResult,
@@ -126,6 +127,13 @@ export const api = {
     request<ExceptionQueue>(
       hubId ? `/operations/exceptions?hub_id=${hubId}` : '/operations/exceptions',
     ),
+
+  // Why this order is where it is (docs/ROADMAP_1.5.md AGT-4). Fetched on
+  // demand rather than polled: it is a reading of the decision log, which only
+  // changes when a cycle runs, and one row's history is not worth a request
+  // every tick for every held order.
+  orderExplanation: (orderId: string) =>
+    request<OrderExplanation>(`/orders/${orderId}/explanation`),
 
   // What the SLA credits are costing (docs/ROADMAP.md W3, E11).
   creditExposure: (windowDays = 30) =>

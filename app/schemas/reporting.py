@@ -136,3 +136,26 @@ class ExceptionQueueView(BaseModel):
     counts: dict[str, int]
     worst_wait_minutes: float
     items: list[ExceptionItemView]
+
+
+class DecisionFactView(BaseModel):
+    """One thing the decision log says, and the row it says it in."""
+
+    at: datetime
+    statement: str
+    snapshot_id: uuid.UUID
+    engine: str
+
+
+class OrderExplanationView(BaseModel):
+    """Why an order is where it is (docs/ROADMAP_1.5.md AGT-4).
+
+    Every fact cites a `decision_snapshots` row. `unexplained` is set instead
+    when the record cannot answer - which is a different thing from there being
+    no reason, and only one of them tells somebody what to fix.
+    """
+
+    order_id: uuid.UUID
+    is_explained: bool
+    facts: list[DecisionFactView]
+    unexplained: str | None
