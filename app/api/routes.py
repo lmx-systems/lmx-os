@@ -30,11 +30,14 @@ from app.optimizer.service import DispatchOptimizerService
 from app.reporting.lmx_link import build_scorecard
 from app.reporting.credit_exposure import DEFAULT_WINDOW_DAYS as CREDIT_WINDOW_DAYS
 from app.reporting.credit_exposure import build_credit_exposure
+from app.reporting.exceptions import build_exception_queue
 from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_operations_scorecard
 from app.schemas.batch_queue import HeldOrderView
 from app.schemas.reporting import (
     ClientExposureView,
     CreditExposureView,
+    ExceptionItemView,
+    ExceptionQueueView,
     LinkScorecardView,
     MeasurementView,
     OperationsScorecardView,
@@ -148,6 +151,59 @@ async def operations_scorecard(
                 not_measured=r.not_measured,
             )
             for r in scorecard.rates
+        ],
+    )
+
+
+@router.get("/operations/exceptions", response_model=ExceptionQueueView)
+async def operations_exceptions(
+    hub_id: Annotated[uuid.UUID | None, Query()] = None,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> ExceptionQueueView:
+    """What to look at before the phone rings (`docs/ROADMAP_1.5.md` CON-4).
+
+    Not the health check. `app/health/checks.py` counts stuck orders for a
+    monitor, answering "is the system healthy". This answers "which of my
+    customers is about to ring and what do I do about it", which needs the
+    order, the customer, how long, and the next action.
+
+    Four kinds, and they are not equally loud. A driver's flag on an open stop
+    is the earliest warning there is - somebody was physically there. A failed
+    delivery they may already know about. Past the promise and still moving is
+    the easy one to miss. Released from the hold queue and never placed is the
+    quietest and the worst, because it looks like an order in transit from every
+    other view in the system.
+
+    **Sorted by the clock, which is a heuristic and not a prediction.** The model
+    that would rank these properly is `M2` - P(a consequence | this order is
+    late) - and it needs hundreds of observed consequences that do not exist
+    yet. So the field is called `minutes_waiting` rather than a score, because a
+    score would look like the model it is standing in for.
+
+    An empty queue is the correct and common answer. The counts make "nothing is
+    outstanding" legible as distinct from "nothing was checked".
+
+    Ops-admin only: cross-client, and it names customers.
+    """
+    queue = await build_exception_queue(session, hub_id=hub_id)
+    return ExceptionQueueView(
+        generated_at=queue.generated_at,
+        counts=queue.by_kind(),
+        worst_wait_minutes=queue.worst_wait_minutes,
+        items=[
+            ExceptionItemView(
+                kind=item.kind,
+                order_id=item.order_id,
+                client_id=item.client_id,
+                external_ref=item.external_ref,
+                sla_tier=item.sla_tier,
+                minutes_waiting=item.minutes_waiting,
+                promised_at=item.promised_at,
+                detail=item.detail,
+                next_action=item.next_action,
+            )
+            for item in queue.items
         ],
     )
 

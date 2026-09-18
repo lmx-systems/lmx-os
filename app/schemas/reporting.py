@@ -1,6 +1,7 @@
 """The LMX Link scorecard as it leaves the API (docs/LMX_LINK_PLAN.md §3.4)."""
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 
 from pydantic import BaseModel
@@ -101,3 +102,37 @@ class CreditExposureView(BaseModel):
     by_client: list[ClientExposureView]
     unassessable_orders: int
     unpriced_orders: int
+
+
+class ExceptionItemView(BaseModel):
+    """One thing worth a dispatcher's attention (docs/ROADMAP_1.5.md CON-4).
+
+    `minutes_waiting` is named for what it is rather than scored. The thing that
+    would rank these properly is `M2` - P(a consequence | this order is late) -
+    and it needs 500-1,000 observed consequences that do not exist yet. An
+    "urgency score" here would look like the model it is standing in for.
+    """
+
+    kind: str
+    order_id: uuid.UUID
+    client_id: uuid.UUID | None
+    external_ref: str
+    sla_tier: str | None
+    minutes_waiting: float
+    promised_at: datetime | None
+    detail: str
+    next_action: str
+
+
+class ExceptionQueueView(BaseModel):
+    """What ops should look at before the phone rings.
+
+    Worst wait first. Empty is the correct and common answer, and it means
+    nothing is outstanding rather than that nothing was checked - the counts
+    make that legible.
+    """
+
+    generated_at: datetime
+    counts: dict[str, int]
+    worst_wait_minutes: float
+    items: list[ExceptionItemView]

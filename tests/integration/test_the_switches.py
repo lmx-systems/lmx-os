@@ -38,10 +38,19 @@ from app.settle.statement import build_statement
 
 pytestmark = pytest.mark.integration
 
+# Fixed instants for the rows this file writes itself.
 DAY = datetime(2026, 9, 17, 9, 0, tzinfo=timezone.utc)
 SINCE = datetime(2026, 9, 17, tzinfo=timezone.utc)
 UNTIL = SINCE + timedelta(days=1)
 CONTRACTED = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+# The chain test cannot use those. `ingest_order` stamps the arm assignment with
+# the real clock, so a window pinned to a calendar date passes on that date and
+# fails the next morning - which is exactly what happened to this file
+# overnight. The window follows the clock instead.
+_REAL_NOW = datetime.now(timezone.utc)
+LIVE_SINCE = _REAL_NOW - timedelta(days=1)
+LIVE_UNTIL = _REAL_NOW + timedelta(days=1)
 
 
 async def _hub(db_session) -> Hub:
@@ -312,7 +321,7 @@ class TestTheWholeChain:
         #    twelve orders is far below the thirty per arm it needs.
         statement = await build_statement(
             db_session, hub_id=hub.id, client_id=client.id,
-            period_start=SINCE, period_end=UNTIL,
+            period_start=LIVE_SINCE, period_end=LIVE_UNTIL,
         )
         assert statement.drops == 12
         assert statement.comparison is None
