@@ -60,17 +60,12 @@ KNOWN_ORPHANS: dict[str, str] = {
     # unwired is the reading and correcting of it.
     "current_outcome": "REC-3: nothing reads the ledger back yet",
     "supersede_outcome": "REC-3: correction path with no operator surface",
-    # REC-2's consequence half. Same shape: the detectors exist, nothing runs.
-    "record_consequence": "REC-2: no caller; no consequence is ever recorded",
-    "close_consequence_windows": "REC-2: no scheduler runs it",
-    "consequence_label": "REC-2: reader for consequences nothing records",
-    "label_counts": "REC-2: reader for consequences nothing records",
+    # REC-2 is wired: a dispatcher records a consequence through
+    # `POST /orders/{id}/consequence`, and the nightly tick closes the windows
+    # nobody judged. What is left is the reading back.
+    "consequence_label": "REC-2: nothing reads a single order's label back",
+    "label_counts": "REC-2: the progress-against-the-band figure has no reader",
     "record_driver_day_cost": "REC-2: superseded by record_costs_for_period; named only in a docstring",
-    # REC-4 - all three detectors exist and are reachable only through a runner
-    # nothing calls, so no linkage flag is ever raised.
-    "run_linkage_detectors": "REC-4: no caller; no flag is ever raised",
-    "open_flags": "REC-4: reader for flags nothing raises",
-    "resolve_flag": "REC-4: resolver for flags nothing raises",
     # REC-1's replay. The log itself is written live by the optimizer; this is
     # the verification half, and nothing in the product verifies.
     "replay_inputs": "REC-1: verification tool with no production caller",

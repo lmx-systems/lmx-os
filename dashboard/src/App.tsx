@@ -4,6 +4,7 @@ import { KpiStrip } from './components/KpiStrip'
 import { OrderPipeline } from './components/OrderPipeline'
 import { HoldQueueTable } from './components/HoldQueueTable'
 import { ExceptionsPanel } from './components/ExceptionsPanel'
+import { RecordLayerPanel } from './components/RecordLayerPanel'
 import { FleetMap } from './components/FleetMap'
 import { FleetRoster } from './components/FleetRoster'
 import { MeasurementPanel } from './components/MeasurementPanel'
@@ -158,6 +159,11 @@ function App() {
                   loading={exceptions.loading}
                 />
                 <HoldQueueTable key={hubId} data={held.data} error={held.error} loading={held.loading} />
+                {/* Below the live work, deliberately. This is what to record
+                    about deliveries that already happened - a fourteen-day-old
+                    question does not belong in front of somebody deciding what
+                    to dispatch in the next minute (REC-2, REC-4). */}
+                <RecordLayerPanel key={`record-${hubId}`} hubId={hubId} />
               </div>
               <div className="flex flex-col gap-4">
                 {/* Map above the roster: "where is my fleet" is the glance a

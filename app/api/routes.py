@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import datetime, timezone
 
 from typing import Annotated
 
@@ -35,7 +36,15 @@ from app.reporting.lmx_link import build_scorecard
 from app.reporting.credit_exposure import DEFAULT_WINDOW_DAYS as CREDIT_WINDOW_DAYS
 from app.reporting.credit_exposure import build_credit_exposure
 from app.models.dispatcher_override import REASON_CODES, REASON_CODES_REQUIRING_NOTE, REASON_LABELS
+from app.models.linkage_flag import LinkageFlag
+from app.record.consequences import (
+    CONSEQUENCE_LABELS,
+    CONSEQUENCES,
+    late_orders_awaiting_judgement,
+    record_consequence,
+)
 from app.record.explain import explain_order
+from app.record.linkage import open_flags, resolve_flag
 from app.record.overrides import OverrideRefused, apply_override
 from app.reporting.exceptions import build_exception_queue
 from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_operations_scorecard
@@ -49,6 +58,10 @@ from app.schemas.reporting import (
     LinkScorecardView,
     MeasurementView,
     OperationsScorecardView,
+    ConsequenceOptionView,
+    ConsequenceRequest,
+    LateOrderView,
+    LinkageFlagView,
     OrderExplanationView,
     OverrideReasonOption,
     OverrideRequest,
@@ -164,6 +177,146 @@ async def operations_scorecard(
             )
             for r in scorecard.rates
         ],
+    )
+
+
+@router.get("/operations/late-orders", response_model=list[LateOrderView])
+async def late_orders(
+    hub_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> list[LateOrderView]:
+    """Late deliveries whose window has closed and that nobody has judged (`REC-2`).
+
+    The worklist the consequence label depends on. Without it the only way to
+    record what happened after a late delivery is to already know which ones
+    were late - which nobody does fourteen days later, which is why the label
+    set was empty.
+
+    "Late" comes from `REC-3`'s delivered outcome rather than being recomputed,
+    so a delivery stays judged by the terms that applied to it even after the
+    client's SLA terms change.
+    """
+    orders = await late_orders_awaiting_judgement(session, hub_id=hub_id)
+    return [
+        LateOrderView(
+            order_id=order.id,
+            external_ref=order.external_order_ref,
+            client_id=order.client_id,
+            delivered_at=order.delivered_at,
+            minutes_late=(
+                int((order.delivered_at - order.promised_at).total_seconds() // 60)
+                if order.delivered_at and order.promised_at
+                else None
+            ),
+            sla_tier=order.sla_tier,
+        )
+        for order in orders
+    ]
+
+
+@router.get("/operations/consequence-kinds", response_model=list[ConsequenceOptionView])
+async def consequence_kinds(
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> list[ConsequenceOptionView]:
+    """The six the brief names, served rather than duplicated in the console."""
+    return [
+        ConsequenceOptionView(code=code, label=CONSEQUENCE_LABELS[code])
+        for code in CONSEQUENCES
+    ]
+
+
+@router.post("/orders/{order_id}/consequence", response_model=dict)
+async def record_order_consequence(
+    order_id: uuid.UUID,
+    body: ConsequenceRequest,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> dict:
+    """Record what actually happened after a late delivery (`REC-2`).
+
+    **This had to exist before the nightly close could run.**
+    `close_consequence_windows` records *silence* for every late order nobody
+    judged inside the window. With no way to judge one, every late delivery
+    would become a "nothing happened" label - false labels, in an append-only
+    ledger, indistinguishable from true ones by the time anyone trained on
+    them. The scheduler was not wired until this was.
+
+    Any ops session, like the exception queue and the override: the person who
+    took the angry phone call is the person who should record it, and a
+    consequence recorded a week later by somebody senior is a worse label.
+    """
+    order = await session.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="No such order")
+    try:
+        entry = await record_consequence(
+            session,
+            order,
+            body.kind,
+            occurred_at=body.occurred_at or datetime.now(timezone.utc),
+            detail=body.detail,
+            amount_cents=body.amount_cents,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    await session.commit()
+    return {"outcome_id": str(entry.id), "consequence": body.kind}
+
+
+@router.get("/operations/linkage-flags", response_model=list[LinkageFlagView])
+async def linkage_flags(
+    hub_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> list[LinkageFlagView]:
+    """The open questions the linkage detectors raised (`REC-4`), oldest first.
+
+    A flag is a question, not a finding - *"a return has been waiting at this
+    dock since Tuesday"*, not an accusation. A dispatcher who reads them as
+    accusations stops reading them.
+
+    The detectors ran nowhere and were read nowhere until this. Wiring the
+    runner without this would have raised flags into a table no one opens,
+    which is the same failure as not running them with more disk use.
+    """
+    flags = await open_flags(session, hub_id=hub_id)
+    return [
+        LinkageFlagView(
+            id=flag.id,
+            kind=flag.kind,
+            subjects=flag.subjects,
+            detail=flag.detail,
+            detected_at=flag.detected_at,
+            resolved_at=flag.resolved_at,
+            resolution_note=flag.resolution_note,
+        )
+        for flag in flags
+    ]
+
+
+@router.post("/operations/linkage-flags/{flag_id}/resolve", response_model=LinkageFlagView)
+async def resolve_linkage_flag(
+    flag_id: uuid.UUID,
+    note: str | None = None,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> LinkageFlagView:
+    """Somebody looked. Recorded rather than deleted (`REC-4`).
+
+    A dismissed flag is evidence that a person considered the case, which is
+    worth as much as the flag was - and deleting it would let the detector raise
+    the same question again tomorrow.
+    """
+    flag = await session.get(LinkageFlag, flag_id)
+    if flag is None:
+        raise HTTPException(status_code=404, detail="No such flag")
+    await resolve_flag(session, flag, note=note)
+    await session.commit()
+    return LinkageFlagView(
+        id=flag.id, kind=flag.kind, subjects=flag.subjects, detail=flag.detail,
+        detected_at=flag.detected_at, resolved_at=flag.resolved_at,
+        resolution_note=flag.resolution_note,
     )
 
 

@@ -12,6 +12,9 @@ import type {
   LinkScorecard,
   NightlyJobResult,
   OperationsScorecard,
+  ConsequenceOption,
+  LateOrder,
+  LinkageFlag,
   OrderExplanation,
   OverrideReasonOption,
   OverrideResult,
@@ -150,6 +153,33 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  // Late deliveries nobody has judged (docs/ROADMAP_1.5.md REC-2). The worklist
+  // the consequence label depends on - without it the only way to record what
+  // happened is to already know which deliveries were late, which nobody does
+  // fourteen days later.
+  lateOrders: (hubId: string) => request<LateOrder[]>(`/operations/late-orders?hub_id=${hubId}`),
+
+  consequenceKinds: () => request<ConsequenceOption[]>('/operations/consequence-kinds'),
+
+  recordConsequence: (orderId: string, body: { kind: string; detail?: string }) =>
+    request<{ outcome_id: string; consequence: string }>(`/orders/${orderId}/consequence`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  // The open questions the detectors raised (REC-4).
+  linkageFlags: (hubId: string) =>
+    request<LinkageFlag[]>(`/operations/linkage-flags?hub_id=${hubId}`),
+
+  // Recorded rather than deleted: a dismissed flag is evidence that a person
+  // considered the case, and deleting it would let the detector raise the same
+  // question again tomorrow.
+  resolveLinkageFlag: (flagId: string, note?: string) =>
+    request<LinkageFlag>(
+      `/operations/linkage-flags/${flagId}/resolve${note ? `?note=${encodeURIComponent(note)}` : ''}`,
+      { method: 'POST' },
+    ),
 
   // What the SLA credits are costing (docs/ROADMAP.md W3, E11).
   creditExposure: (windowDays = 30) =>
