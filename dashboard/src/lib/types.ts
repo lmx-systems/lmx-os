@@ -412,3 +412,45 @@ export interface LinkageFlag {
   resolved_at: string | null
   resolution_note: string | null
 }
+
+/** Whether one of the record's writers is producing anything (REC-1..REC-4). */
+export interface WriterHealth {
+  name: string
+  rows_in_window: number
+  last_written_at: string | null
+  note: string
+}
+
+/**
+ * The record layer reported on itself (docs/ROADMAP_1.5.md REC-1..REC-4).
+ *
+ * Not a KPI and not the savings statement — those are claims about the
+ * business. This answers "is the record being written", which is a question
+ * about us, and a writer that silently stops looks exactly like a quiet week.
+ */
+export interface RecordHealth {
+  window_days: number
+  on_time_percentage: number | null
+  on_time_numerator: number
+  on_time_denominator: number
+  on_time_interval: [number, number] | null
+  on_time_not_measured: string | null
+  on_time_is_thin: boolean
+  decisions_recorded: number
+  outcomes_recorded: number
+  outcomes_linked_to_a_decision: number
+  decision_link_percentage: number | null
+  open_flags: number
+  writers: WriterHealth[]
+  labels: {
+    observed_consequences: number
+    silences: number
+    labelled_total: number
+    by_type: Record<string, number>
+    required_range_for_m2: [number, number]
+    at_band_minimum: boolean
+    at_band_target: boolean
+    shortfall_to_minimum: number
+    shortfall_to_target: number
+  }
+}

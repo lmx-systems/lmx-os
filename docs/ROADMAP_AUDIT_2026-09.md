@@ -97,6 +97,26 @@ and `ING-4`. None becomes `NEW` — the code is real and tested. They become
 
 ---
 
+## Reading it back
+
+Wiring four writers created a new gap: nothing read any of them. A writer that
+silently stops looks exactly like a quiet week, and the only way to tell was to
+query the database by hand.
+
+`app/reporting/record_health.py` and `GET /operations/record-health` report the
+record on itself — each writer's row count **and when it last wrote**, because
+zero rows with no timestamp is a writer that never ran and zero rows with a
+timestamp from March is one that stopped. Plus the on-time rate from `REC-3`'s
+ledger with a Wilson interval, the share of outcomes citing the decision that
+assigned them, and `label_counts`' progress against the brief's 500–1,000 band.
+
+Computed from the ledger and never from `orders` — a reader that fell back to
+recomputing would keep showing a healthy number after the ledger stopped being
+written, which is the one failure it exists to catch. A test asserts the module
+does not import `Order`.
+
+---
+
 ## What this does not say
 
 It does not say the modules are wrong. They are tested, and several were
@@ -123,7 +143,7 @@ remain a reading problem.
    shops created by ordinary intake had no dock at all. Both are wired now.
 4. ~~**`REC-4`**~~ — **done**, runner and reader together.
 5. **`IDN-2`** — the review queue needs a producer before the ~230 can be
-   confirmed.
+   confirmed. **The last one still open.**
 
 `ING-4` is separate and already reopened: it is blocked on `REC-5`'s definition
 of a stop.
