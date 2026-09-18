@@ -1,6 +1,8 @@
 # LMX 1.5 — Model selection and the data need
 
-**v2.2 · 16 September 2026 · Sourabh**
+**v2.3 · 18 September 2026 · Sourabh**
+
+*v2.3: adds §14, which answers the external-review challenge that this should be built with agents rather than trained predictors. The short version: the challenge is right about three layers and wrong about two, the strongest case for it is commercial rather than technical, and `AGT-1` settles it with a measurement instead of an argument. Nothing in §4–§6 changes.*
 
 *v2.2: reconciled against the seed commercial model. The Y1 account book is 25 Micro and 2 Small sites with no Regional or National account, which puts M2 out of reach in Y1 (§5, §6c); the 15% pair-commingle rate is calibrated on the wrong segment for that book (§5, M3); and the model's Y1 savings of 12–19% conflict with the 20% floor in KPI 2.*
 
@@ -79,6 +81,8 @@ Once the mechanism is chosen, the handoff happens and it goes its own way. **We 
                         │ dock × order × outcome │
                         └────────────────────────┘
 ```
+
+This is a three-layer shape — bought inputs, earned parameters, bought solver. Whether the earned middle should be trained predictors or an agent reading everything is a live question, raised in external review on 17 September. It is answered in **§14**, which should be read alongside this section.
 
 **We never build a solver and we never learn a routing policy.** Routing is solved and cheap. What no API can know is how long *this* dock takes, whether *this* urgent flag is real, and which two orders could have ridden together.
 
@@ -392,7 +396,9 @@ The most useful way to think about collection. Labels sort by what they cost us:
 
 **The dock survey.** Ten tapped fields per stop, no typing: place type · where you could stop · walk distance · who took it · wait before handoff · access barriers · carry effort · weight band · size band · goods category. Plus an optional photo. **Collect the autonomy-fit columns in the first migration**, thirty weeks before `SUP-3` needs them — they cost nothing now and are expensive to backfill, because you would have to revisit every dock.
 
-**The control arm (`EXP-1`).** 5–10% of orders dispatched exactly as the customer would have. It produces the counterfactual, the true-urgency labels and the defensible savings number simultaneously. **It goes in the contract before it goes in the code** — an arm discovered rather than disclosed looks like negligence.
+**Onboarding is a collection problem too.** Every figure above assumes the order feed is flowing. Getting there is currently a per-customer integration, and the Y1 book is 27 of them — 25 Micro sites at $149 a month, where weeks of integration engineering never amortises. **The collection plan is only as real as the onboarding path**, which is the argument §14 makes for agentic ingestion.
+
+### The control arm (`EXP-1`) 5–10% of orders dispatched exactly as the customer would have. It produces the counterfactual, the true-urgency labels and the defensible savings number simultaneously. **It goes in the contract before it goes in the code** — an arm discovered rather than disclosed looks like negligence.
 
 ---
 
@@ -429,13 +435,15 @@ Four limits to state before someone else does:
 
 | Phase | What | Unblocks |
 |---|---|---|
-| **1** | `IDN-1..4` identity · `DRV-1..2` sensor · `REC-1..5` record | Everything |
+| **1** | `IDN-1..4` identity · `DRV-1..2` sensor · `REC-1..5` record · **`AGT-1` resolution bake-off** | Everything, and the agent question (§14) |
 | **2** | `EXP-1..3` control arm · M3, M4 · baselines and harness | **KPI 2** — the measured number |
 | **3** | M1 dwell + conformal · M1b censoring · override capture | Live authority |
 | **4** | `PRD-8` transfer evaluation | The compounding claim |
 | **5** | M5 modality · payload dataset · `SUP-5` operator adapter | **KPI 1** — and the supply side |
 
 M2 sits between 2 and 3: the arm starts in 2, the classifier is trainable ~8 weeks later.
+
+`AGT-2` (agentic order-feed mapping) is scheduled by `AGT-1`'s result, not ahead of it — but if it lands, it moves into Phase 1, because §14 argues it is a precondition for the Micro segment rather than an optimisation of it.
 
 **Nothing here needs a GPU, a model server or a feature store.** The artefact is a few-megabyte file loaded in-process. The hard parts are the sensor, the identity layer and the experiment design — none of which is a research problem.
 
@@ -453,3 +461,71 @@ M2 sits between 2 and 3: the arm starts in 2, the classifier is trainable ~8 wee
 ---
 
 *Sources: the 13 and 15 September syncs · `docs/ROADMAP_1.5.md` · `docs/ROADMAP_SEED_RECONCILIATION.md` · the design partner's dispatch export (13 drivers, 229 receivers, 2 Jan – 6 Apr 2026) and the separate second-precision file. Sizing: Wilson score interval for a proportion; split-conformal training-conditional coverage from the exact Beta(n+1−⌊(n+1)α⌋, ⌊(n+1)α⌋) distribution.*
+
+---
+
+## 14. Where agents belong, and where they do not
+
+Raised in external review, 17 September: that model-selection-then-training is a traditional shape for this problem, and that headless agents reading across all available datasets might get to *"the best way to deliver this package"* faster than a set of trained predictors feeding a solver.
+
+Taken seriously, the challenge is **right about three layers of this system and wrong about two**, and the split is not a matter of taste — it follows from what kind of question each layer asks.
+
+### The test
+
+Three properties decide it for any layer:
+
+1. **Is the input unstructured and variable?** If yes, an agent wins — that is the thing language models do that nothing else does.
+2. **Does the output get traded against money?** If yes, it needs calibration, and an agent does not produce calibration.
+3. **Is an exact answer computable?** If yes, neither an agent nor a model belongs there. Compute it.
+
+### The layers
+
+| Layer | The question it asks | Unstructured in? | Traded against money? | Exact answer available? | Verdict |
+|---|---|---|---|---|---|
+| Order-feed ingestion | What does this customer's export mean? | Yes | No | No | **Agent** |
+| Identity resolution (`IDN`) | Are these records the same physical dock? | Yes | No | No | **Agent** |
+| Dock survey capture | What is this dock like? | Yes (photo, free text) | No | No | **Agent-assisted** |
+| Cold-start prior | What to expect at a dock we have never visited? | Yes | Indirectly | No | **Agent, bounded** |
+| `M1` dwell | How long will this stop hold the driver? | No | Yes — it is the SLA promise | No | **Model** |
+| `M2` urgency | Probability of a consequence if late? | No | Yes, directly | No | **Model, calibrated** |
+| `M3` batch value | Is this batch better than solo? | No | Yes | **Yes** | **Compute** |
+| `M4` trip cost | Does this trip earn its keep? | No | Yes | **Yes** | **Compute** |
+| Operator explanation | Why did we hold this order 18 minutes? | — | No | No | **Agent** |
+
+In one line: **agents at the edges, where data enters and decisions are explained; models in the middle, where money is traded; arithmetic wherever arithmetic suffices.**
+
+### The strongest case for agents is commercial, not technical
+
+The Y1 book is 27 sites, 25 of them Micro at $149 per month (§6c). A hand-built order-feed integration is weeks of engineering; twenty-five of them is not a plan, and at $149 a month it never amortises.
+
+So agentic ingestion is **not an efficiency gain on the Micro segment — it is the precondition for that segment existing.** And the Micro cluster is exactly what `M3` commingling depends on (§5 M3, §6c). The agent question and the Year 1 data question turn out to be the same question, which is a stronger form of the challenge than the one that was put to us.
+
+`[ASSUMPTION]` a hand-built integration is 2–4 engineering weeks per customer; agentic mapping with a human review gate brings it under a day. If that holds, it is worth more than any modelling decision in this document.
+
+### Why the decision path stays model-and-solver
+
+Three reasons, in order of how well they hold up:
+
+**Latency.** The batch-hold decision runs on a ~5 second solve budget and evaluates many candidate pairings. Serial agent reasoning over candidates does not fit that envelope.
+
+**Auditability.** The first time a customer argues with a savings figure, we have to show why an order was held. A gradient-boosted model with a calibration curve is inspectable and reproducible. An agent's reasoning trace is not evidence.
+
+**Cost — real, but shrinking, and not the argument to lead with.** At Y1 (~330 drops/day, ~20 candidate evaluations each) a model call per evaluation runs roughly $7,000 a year against ~$75,000 of allocation-fee revenue: about 10%. By Y5 the same arithmetic is nearer 1.5% of revenue. Cost is a Year 1 objection, not a structural one. We should say so rather than overstate it.
+
+### On not training from scratch — the version worth testing
+
+The advice does not transfer directly: LightGBM on our volumes trains in seconds (§7), so training time is not a cost we are paying, and there is no pre-trained dwell model for thousands of docks at ~15 observations each.
+
+There is a real form of the point. **Tabular and time-series foundation models** — TabPFN for small-sample tabular, Chronos and TimesFM for time series — are pre-trained and given context at inference, and small-sample tabular is precisely the shape of per-dock dwell. That is a benchmark to run against the shrunk baseline under §7 rule (3), not a posture to adopt.
+
+### `AGT-1` — how this gets decided
+
+Not by argument. `IDN-1..4` is already built and merged, which means we have both a working implementation and a task with a checkable answer.
+
+**The resolution bake-off.** Hand-label the true physical dock count behind the 230 account IDs, once. Run the existing deterministic resolver and an agent resolver on identical input. Compare precision and recall on merge decisions, and count the cases each gets right that the other does not. One engineer, a few days.
+
+If the agent wins on the messiest real problem we have, the ingestion layer gets rewritten with evidence behind it and `AGT-2` moves into Phase 1. If it loses, we have a measured answer for the next review rather than an opinion.
+
+### What does not change, whatever `AGT-1` says
+
+`M2` still needs 626 observed consequences and the control arm. `M3` still needs neighbouring accounts in one catchment. The Y1 book still cannot reach urgency (§5 M2). **No agent produces a label that was never recorded** — and that is the part of this brief the challenge does not reach.
