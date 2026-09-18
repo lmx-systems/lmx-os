@@ -23,6 +23,7 @@ import type {
   SignupDecisionResult,
   UrgencyRuleBody,
   UrgencyRuleView,
+  ExceptionQueue,
 } from './types'
 
 // Real per-account ops auth (docs/ROADMAP.md S1), replacing the old
@@ -117,6 +118,14 @@ export const api = {
     request<OperationsScorecard>(`/operations/scorecard?window_days=${windowDays}`),
 
   linkScorecard: () => request<LinkScorecard>('/lmx-link/scorecard'),
+
+  // What to look at before the phone rings (docs/ROADMAP_1.5.md CON-4). Any ops
+  // session, not admin-only: a dispatcher on a viewer account who cannot see
+  // their own exceptions cannot run a day.
+  operationsExceptions: (hubId?: string) =>
+    request<ExceptionQueue>(
+      hubId ? `/operations/exceptions?hub_id=${hubId}` : '/operations/exceptions',
+    ),
 
   // What the SLA credits are costing (docs/ROADMAP.md W3, E11).
   creditExposure: (windowDays = 30) =>

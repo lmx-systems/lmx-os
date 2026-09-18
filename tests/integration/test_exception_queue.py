@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.config import settings
+from sqlalchemy import select
+
 from app.models.client import Client
 from app.models.driver import Driver
 from app.models.hub import Hub
@@ -231,3 +233,52 @@ class TestItTellsYouWhatToDo:
         counts = (await _queue(db_session, hub)).by_kind()
         assert counts[KIND_PAST_PROMISE] == 1
         assert counts[KIND_FLAGGED] == 0
+
+
+class TestWhoCanRead:
+    """The endpoint was admin-gated when CON-4 was written, copied from the
+    scorecard beside it. Building the dashboard panel showed that to be wrong.
+    """
+
+    async def test_a_viewer_can_read_the_queue(self, db_session):
+        """`require_admin`'s own docstring says it is "for the specific mutating
+        endpoints a viewer shouldn't reach". This is a read, and a dispatcher on
+        a viewer account who cannot see their own exceptions cannot run a day -
+        which is CON-1's whole bar."""
+        from app.api.routes import operations_exceptions
+        from app.models.ops_user import VIEWER_ROLE
+        from app.ops_auth.dependencies import AuthedOpsUser
+
+        hub = await _hub(db_session)
+        # Relative to the real clock, not this file's fixed NOW. The endpoint
+        # takes no `now` - correctly, it is a live view - so a fixture pinned to
+        # a calendar time is a test that passes at some hours and fails at
+        # others. The same hazard broke TestTheWholeChain overnight.
+        real_now = datetime.now(timezone.utc)
+        await _order(
+            db_session, hub,
+            promised_minutes_ago=0, requested_minutes_ago=0,
+        )
+        order = (await db_session.scalars(select(Order))).all()[-1]
+        order.promised_at = real_now - timedelta(minutes=200)
+        order.requested_at = real_now - timedelta(minutes=260)
+        await db_session.flush()
+
+        viewer = AuthedOpsUser(
+            ops_user_id="u1", email="v@example.com", name="Viewer", role=VIEWER_ROLE
+        )
+        view = await operations_exceptions(
+            hub_id=hub.id, session=db_session, _ops=viewer
+        )
+        assert len(view.items) == 1
+        assert view.items[0].next_action
+
+    async def test_it_still_needs_an_ops_session(self):
+        """Open to any ops user is not open to anyone. It names customers."""
+        import inspect
+
+        from app.api.routes import operations_exceptions
+        from app.ops_auth.dependencies import get_current_ops_user
+
+        dependency = inspect.signature(operations_exceptions).parameters["_ops"].default
+        assert dependency.dependency is get_current_ops_user

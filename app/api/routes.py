@@ -23,7 +23,11 @@ from app.learning_loop.service import run_nightly_job
 from app.models.driver import Driver
 from app.models.hub import Hub
 from app.models.order import Order
-from app.ops_auth.dependencies import AuthedOpsUser, require_admin
+from app.ops_auth.dependencies import (
+    AuthedOpsUser,
+    get_current_ops_user,
+    require_admin,
+)
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.last_cycle_store import LastCycleStore
 from app.optimizer.service import DispatchOptimizerService
@@ -159,7 +163,7 @@ async def operations_scorecard(
 async def operations_exceptions(
     hub_id: Annotated[uuid.UUID | None, Query()] = None,
     session: AsyncSession = Depends(get_db),
-    _admin: AuthedOpsUser = Depends(require_admin),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
 ) -> ExceptionQueueView:
     """What to look at before the phone rings (`docs/ROADMAP_1.5.md` CON-4).
 
@@ -184,7 +188,13 @@ async def operations_exceptions(
     An empty queue is the correct and common answer. The counts make "nothing is
     outstanding" legible as distinct from "nothing was checked".
 
-    Ops-admin only: cross-client, and it names customers.
+    **Any ops session, not admin only.** This was admin-gated when it was
+    written, copied from the scorecard beside it, and building the dashboard
+    panel showed that to be wrong: `require_admin`'s own docstring says it is
+    "for the specific mutating endpoints a viewer shouldn't reach", and this is
+    a read. A dispatcher on a viewer account who cannot see their own exceptions
+    cannot run a day, which is `CON-1`'s whole bar. It names customers, but so
+    do the hold queue and the fleet roster every ops user already reads.
     """
     queue = await build_exception_queue(session, hub_id=hub_id)
     return ExceptionQueueView(
