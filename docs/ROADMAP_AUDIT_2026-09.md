@@ -60,7 +60,7 @@ from any path an order passes through.
 |---|---|---|
 | `IDN-2` merge review queue | `BUILT` | Nothing calls `propose_merge`. The queue a human reviews is permanently empty, so "human-confirms the founding ~230" cannot happen |
 | `IDN-3` node-class labelling | `BUILT, DONE-WHEN UNMET` | `set_node_class` is not called from any live path. The 36.2% unlabelled figure the row already carries is a floor, not a snapshot |
-| `IDN-4` receiver profile store | `BUILT` | `refresh_dwell_statistics` has no caller — **dwell statistics are never refreshed, and `M1` is specified to read them** |
+| `IDN-4` receiver profile store | `BUILT` | ~~`refresh_dwell_statistics` has no caller.~~ **Fixed** — nightly, per hub. Fixing it first required `IDN-1`: nothing had ever set `Shop.location_id` outside a one-off script, so a refresh would have covered a frozen subset of docks and looked from every angle like it worked |
 
 ### Smaller ones
 
@@ -117,8 +117,9 @@ remain a reading problem.
    `snapshot_that_assigned` so `REC-1` and `REC-3` are actually joinable.
 2. **`REC-2`'s consequences** — needs a scheduler, which is the same shape as
    `close_consequence_windows` already expects.
-3. **`IDN-4`'s `refresh_dwell_statistics`** — `M1` cannot train on statistics
-   nothing refreshes.
+3. ~~**`IDN-4`'s `refresh_dwell_statistics`**~~ — **done**, and it turned up a
+   deeper one: `Shop.location_id` was set by nothing but a one-off script, so
+   shops created by ordinary intake had no dock at all. Both are wired now.
 4. **`REC-4`** — a runner for the three detectors.
 5. **`IDN-2`** — the review queue needs a producer before the ~230 can be
    confirmed.

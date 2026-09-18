@@ -10,12 +10,15 @@ Location resolution rather than being replaced" and nothing more. Two spellings
 of one dock that differ by more than whitespace and case will produce two rows;
 collapsing those is IDN-2's job, done by a person for the founding set.
 """
+import structlog
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.geocoding.base import normalize_address
 from app.models.location import Location
+
+logger = structlog.get_logger(__name__)
 
 # Normalized keys that are a placeholder for an address rather than an address.
 #
@@ -184,3 +187,46 @@ async def canonical_location(session: AsyncSession, location: Location) -> Locat
     raise RuntimeError(
         f"alias chain from {location.id} exceeded {_MAX_ALIAS_DEPTH} hops"
     )
+
+
+async def link_shop_to_dock(session: AsyncSession, shop) -> Location | None:
+    """Attach a shop to the physical dock its address names (`IDN-1`).
+
+    The call `resolve_location`'s own docstring describes - *"onboarding writes a
+    Client and a Shop and then asks for the dock"* - and which nothing made. Its
+    only caller was `scripts/load_identity_from_export.py`, a one-off backfill,
+    so **every shop created since that script ran has a null `location_id`**: the
+    ad-hoc pickup path that is LMX Link's whole premise created docks the
+    identity layer never saw (`docs/ROADMAP_AUDIT_2026-09.md`).
+
+    That is not a cosmetic gap. `ReceiverProfile`, dwell statistics and node
+    class are all keyed on `Location`, and everything `M1` is specified to read
+    is computed by joining stops through `Shop.location_id`. A shop with none
+    contributes nothing and disappears from the sample silently, which looks
+    exactly like a dock we have never visited.
+
+    **An unresolvable address leaves `location_id` null and is not an error.**
+    That is the response `resolve_location` asks for, and it is the honest
+    record: a placeholder like `N/A` names no place, and collecting those into
+    one shared fictional dock is the failure the `Location` table exists to
+    prevent. Returns None so the caller can tell the two apart if it cares.
+    """
+    if not shop.address:
+        return None
+    try:
+        location = await resolve_location(
+            session,
+            address=shop.address,
+            lat=float(shop.lat) if shop.lat is not None else None,
+            lng=float(shop.lng) if shop.lng is not None else None,
+        )
+    except ValueError:
+        # Logged rather than raised: an order must never fail to be ingested
+        # because we could not decide which dock its pickup address names.
+        logger.info(
+            "shop_location_unresolved", shop_id=str(shop.id), address=shop.address
+        )
+        return None
+
+    shop.location_id = location.id
+    return location

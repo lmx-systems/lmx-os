@@ -33,6 +33,7 @@ from app.models.receiver_profile import (
     WHO_RECEIVES,
     ReceiverProfile,
 )
+from app.models.route import Route
 from app.models.shop import Shop
 from app.models.stop import Stop
 from app.models.stop_geofence_event import KIND_ENTER, KIND_EXIT, StopGeofenceEvent
@@ -325,3 +326,61 @@ __all__ = [
     "set_autonomy_fit",
     "set_receiving_hours",
 ]
+
+
+async def refresh_hub_dwell_statistics(
+    session: AsyncSession, *, hub_id, limit: int = 500
+) -> int:
+    """Recompute observed dwell for every dock this hub has visited (`IDN-4`).
+
+    Returns how many docks were refreshed.
+
+    `refresh_dwell_statistics` existed and nothing called it, so every
+    `ReceiverProfile`'s dwell figures were whatever a one-off script last left
+    there - and `MODEL_AND_DATA_BRIEF.md` specifies `M1` to read them
+    (`docs/ROADMAP_AUDIT_2026-09.md`). This is the thing that calls it.
+
+    **Nightly rather than per delivery.** Each dock costs an exact
+    `percentile_cont` over its whole stop history, which is the right query to
+    run once a day and the wrong one to run on the path a driver waits on. A
+    dwell p50 that is a few hours stale is a dwell p50; a delivery that takes an
+    extra second to confirm is a driver standing at a door.
+
+    Ordered by the docks whose figures are oldest, and capped, so a hub with
+    thousands of docks makes progress every night instead of timing out and
+    making none.
+    """
+    # Ids first, grouped, then the rows. A `SELECT DISTINCT` cannot order by a
+    # column it does not select, and the column worth ordering by - when this
+    # dock was last observed - lives on the profile rather than the dock.
+    ordered = (
+        await session.execute(
+            select(
+                Location.id,
+                func.min(ReceiverProfile.dwell_observed_at).label("observed"),
+            )
+            .join(Shop, Shop.location_id == Location.id)
+            .join(Stop, Stop.shop_id == Shop.id)
+            # Through the route, because a `Stop` has no hub of its own - it
+            # belongs to a route, and the route belongs to a hub.
+            .join(Route, Stop.route_id == Route.id)
+            .outerjoin(ReceiverProfile, ReceiverProfile.location_id == Location.id)
+            .where(Route.hub_id == hub_id, Stop.status == "completed")
+            .group_by(Location.id)
+            .order_by(func.min(ReceiverProfile.dwell_observed_at).asc().nulls_first())
+            .limit(limit)
+        )
+    ).all()
+    dock_ids = [row.id for row in ordered]
+    if not dock_ids:
+        return 0
+
+    by_id = {
+        dock.id: dock
+        for dock in await session.scalars(select(Location).where(Location.id.in_(dock_ids)))
+    }
+    docks = [by_id[dock_id] for dock_id in dock_ids if dock_id in by_id]
+
+    for dock in docks:
+        await refresh_dwell_statistics(session, dock)
+    return len(docks)

@@ -26,6 +26,7 @@ from app.identity.node_class import (
 from app.identity.profile import (
     profile_for,
     refresh_dwell_statistics,
+    refresh_hub_dwell_statistics,
     set_access,
     set_autonomy_fit,
     set_receiving_hours,
@@ -33,6 +34,7 @@ from app.identity.profile import (
 from app.identity.resolution import (
     canonical_location,
     receiver_key_for,
+    link_shop_to_dock,
     resolve_location,
 )
 
@@ -49,8 +51,10 @@ __all__ = [
     "propose_duplicate_locations",
     "propose_merge",
     "refresh_dwell_statistics",
+    "refresh_hub_dwell_statistics",
     "reject_merge",
     "receiver_key_for",
+    "link_shop_to_dock",
     "resolve_location",
     "set_access",
     "set_autonomy_fit",
