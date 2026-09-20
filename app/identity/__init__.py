@@ -23,6 +23,13 @@ from app.identity.node_class import (
     infer_node_class,
     set_node_class,
 )
+from app.identity.inherited_dwell import (
+    MIN_OWN_SAMPLES,
+    DwellEstimate,
+    ImportReport,
+    dwell_estimate,
+    import_inherited_dwell,
+)
 from app.identity.profile import (
     profile_for,
     refresh_dwell_statistics,
@@ -39,6 +46,11 @@ from app.identity.resolution import (
 )
 
 __all__ = [
+    "DwellEstimate",
+    "ImportReport",
+    "MIN_OWN_SAMPLES",
+    "dwell_estimate",
+    "import_inherited_dwell",
     "NODE_CLASSES",
     "canonical_location",
     "classification_coverage",

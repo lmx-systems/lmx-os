@@ -48,6 +48,10 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 SOURCE_OBSERVED = "observed"
 SOURCE_STATED = "stated"
 SOURCE_SURVEYED = "surveyed"
+# Measured by a previous operator at the same dock. Not `observed`, which
+# means we saw it - the distinction is the whole reason the inherited dwell
+# columns exist rather than being written into the observed ones.
+SOURCE_INHERITED = "inherited"
 
 # --- M5 label vocabularies (MODEL_AND_DATA_BRIEF.md §M5) -------------------
 # Small closed sets, stored as strings rather than Postgres enums for the same
@@ -87,6 +91,32 @@ class ReceiverProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # precisely where an SLA promise would break.
     dwell_censored_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     dwell_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # --- Inherited: dwell measured by somebody else (`IDN-4`, migration 0062) ---
+    # The cold-start prior. A dock we have never delivered to has no dwell of its
+    # own, and the design partner's second-precision export carries real
+    # observations for hundreds of the same physical docks.
+    #
+    # Its own columns, never the ones above. The nightly refresh recomputes those
+    # from our stops and would erase an imported figure by 2am; and they are
+    # different measurements - different drivers, possibly a different process at
+    # the same door. Dwell being mostly a property of the dock is `M1`'s premise,
+    # not a licence to blend the two before anyone has checked it.
+    #
+    # No inherited p90: a tail estimate from somebody else's operation is the
+    # number most likely to be quoted and least likely to survive our own drivers.
+    inherited_dwell_p50_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    inherited_dwell_sample_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    inherited_dwell_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The period the observations cover, not when the import ran. A dwell from
+    # two years ago at a dock that has since rebuilt its bay is worth less, and
+    # an import date cannot tell you that.
+    inherited_dwell_observed_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    inherited_dwell_observed_to: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

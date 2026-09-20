@@ -103,6 +103,28 @@ export function RecordHealthPanel({ hubId }: { hubId: string }) {
             )}
           </section>
 
+          {data.dwell_docks > 0 && (
+            <section className="mb-3">
+              <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                Dwell known per dock
+              </h3>
+              <p className="text-[13px] text-[var(--text-primary)]">
+                <span className="tabular-nums font-medium">{data.dwell_from_our_own}</span> from our
+                own deliveries
+                <span className="text-[var(--text-muted)]">
+                  {' '}
+                  · {data.dwell_inherited} inherited · {data.dwell_unknown} unknown, of{' '}
+                  {data.dwell_docks} docks
+                </span>
+              </p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                Inherited means a previous operator measured it at the same dock. Counted
+                separately and never averaged with ours — they are different measurements, and
+                which one answers is decided per dock rather than blended.
+              </p>
+            </section>
+          )}
+
           <section>
             <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
               Consequence labels
