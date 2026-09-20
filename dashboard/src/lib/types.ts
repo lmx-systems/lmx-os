@@ -448,6 +448,7 @@ export interface RecordHealth {
   dwell_from_our_own: number
   dwell_inherited: number
   dwell_unknown: number
+  dwell_thin: number
   writers: WriterHealth[]
   labels: {
     observed_consequences: number

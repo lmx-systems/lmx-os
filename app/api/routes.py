@@ -339,6 +339,7 @@ async def record_health(
         dwell_from_our_own=health.dwell.from_our_own,
         dwell_inherited=health.dwell.inherited,
         dwell_unknown=health.dwell.unknown,
+        dwell_thin=health.dwell.thin,
         writers=[
             WriterHealthView(
                 name=w.name,

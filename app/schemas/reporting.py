@@ -322,6 +322,7 @@ class RecordHealthView(BaseModel):
     dwell_from_our_own: int
     dwell_inherited: int
     dwell_unknown: int
+    dwell_thin: int
     # From `label_counts`: observed_consequences, silences, labelled_total,
     # by_type, and the band's two ends. Passed through rather than flattened,
     # because the band is a range the brief declines to collapse and a view that

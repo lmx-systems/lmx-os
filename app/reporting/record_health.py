@@ -80,6 +80,10 @@ class DwellCoverage:
     docks: int
     from_our_own: int
     inherited: int
+    # Of the figures we have, how many rest on too few observations to lean
+    # on. Reported because the real import produced a median of four stops
+    # per dock - coverage without this reads as far stronger than it is.
+    thin: int
 
     @property
     def unknown(self) -> int:
@@ -100,7 +104,9 @@ class RecordHealth:
     labels: dict = field(default_factory=dict)
     open_flags: int = 0
     dwell: DwellCoverage = field(
-        default_factory=lambda: DwellCoverage(docks=0, from_our_own=0, inherited=0)
+        default_factory=lambda: DwellCoverage(
+            docks=0, from_our_own=0, inherited=0, thin=0
+        )
     )
 
     @property
@@ -256,6 +262,7 @@ async def build_record_health(
         inherited=sum(
             1 for e in estimates if e.source is not None and not e.is_ours
         ),
+        thin=sum(1 for e in estimates if e.is_thin),
     )
 
     return RecordHealth(

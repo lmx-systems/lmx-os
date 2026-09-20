@@ -54,6 +54,23 @@ from app.models.shop import Shop
 # agenda answers that question, this moves with it.
 MIN_OWN_SAMPLES = 10
 
+# Below this many observations a dwell figure is arithmetic rather than a
+# distribution, and is flagged rather than withheld.
+#
+# **This is not a floor and the asymmetry with `MIN_OWN_SAMPLES` is deliberate.**
+# They answer different questions. `MIN_OWN_SAMPLES` asks "is our own figure good
+# enough to prefer over an inherited one" - below it there is a better answer
+# available, so we take it. This asks "should a reader treat this as solid", and
+# below it there is usually *nothing* else: the alternative to a thin inherited
+# figure at a dock we have never visited is no figure at all.
+#
+# The number comes from the real import rather than from taste. Against the
+# design partner's export, 140 docks received a figure and the median dock had
+# four observations; a floor of 10 would have kept 29% of them and thrown away
+# the cold start this exists to solve. Five keeps about half and is where the
+# distribution stops being one or two stops.
+THIN_SAMPLE_COUNT = 5
+
 
 @dataclass(frozen=True)
 class DwellEstimate:
@@ -72,6 +89,19 @@ class DwellEstimate:
     @property
     def is_ours(self) -> bool:
         return self.source == SOURCE_OBSERVED
+
+    @property
+    def is_thin(self) -> bool:
+        """Whether the figure rests on too few observations to lean on.
+
+        Reported rather than withheld, the same way `Rate.is_thin` is: the
+        alternative at most of these docks is no figure at all, and a reader who
+        can see the count can decide. A caller that ignores this and quotes the
+        number anyway has made a choice; one that never had it could not.
+        """
+        return (
+            self.p50_seconds is not None and 0 < self.sample_count < THIN_SAMPLE_COUNT
+        )
 
 
 def dwell_estimate(profile: ReceiverProfile | None) -> DwellEstimate:
