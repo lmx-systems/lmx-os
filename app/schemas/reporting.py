@@ -314,6 +314,14 @@ class RecordHealthView(BaseModel):
     decision_link_percentage: float | None
     open_flags: int
     writers: list[WriterHealthView]
+    # How many of this hub's docks we can state a dwell for, and whose
+    # observation it is. Three counts rather than a percentage: "80% covered"
+    # hides whose measurement the 80% is, and an inherited figure is a
+    # different kind of answer from one of our own.
+    dwell_docks: int
+    dwell_from_our_own: int
+    dwell_inherited: int
+    dwell_unknown: int
     # From `label_counts`: observed_consequences, silences, labelled_total,
     # by_type, and the band's two ends. Passed through rather than flattened,
     # because the band is a range the brief declines to collapse and a view that

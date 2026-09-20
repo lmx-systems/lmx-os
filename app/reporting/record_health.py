@@ -39,9 +39,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.experiment.integrity import wilson_interval
+from app.identity.inherited_dwell import dwell_estimate
 from app.models.decision_snapshot import DecisionSnapshot
+from app.models.client import Client
 from app.models.linkage_flag import LinkageFlag
 from app.models.outcome_entry import KIND_DELIVERED, OutcomeEntry
+from app.models.receiver_profile import ReceiverProfile
+from app.models.shop import Shop
 from app.record.consequences import label_counts
 from app.reporting.measurement import Rate
 
@@ -63,6 +67,25 @@ class WriterHealth:
     note: str
 
 
+@dataclass(frozen=True)
+class DwellCoverage:
+    """How many of this hub's docks we can say a dwell for, and whose it is.
+
+    The read-back for the inherited import. Three counts rather than a
+    percentage, because "80% covered" hides which 80% and whose measurement it
+    is - and an inherited figure is a different kind of answer from one of our
+    own (`app/identity/inherited_dwell.py`).
+    """
+
+    docks: int
+    from_our_own: int
+    inherited: int
+
+    @property
+    def unknown(self) -> int:
+        return self.docks - self.from_our_own - self.inherited
+
+
 @dataclass
 class RecordHealth:
     """The record layer, reported on itself."""
@@ -76,6 +99,9 @@ class RecordHealth:
     writers: list[WriterHealth] = field(default_factory=list)
     labels: dict = field(default_factory=dict)
     open_flags: int = 0
+    dwell: DwellCoverage = field(
+        default_factory=lambda: DwellCoverage(docks=0, from_our_own=0, inherited=0)
+    )
 
     @property
     def decision_link_rate(self) -> Rate:
@@ -210,7 +236,30 @@ async def build_record_health(
         .where(LinkageFlag.hub_id == hub_id, LinkageFlag.resolved_at.is_(None))
     )
 
+    # Every dock this hub's customers collect from, whether or not we have been
+    # there. Docks we have never visited are the point: they are the ones an
+    # inherited figure exists for, and a coverage count that only looked at
+    # visited docks would report 100% while the new ones had nothing.
+    dock_rows = (
+        await session.execute(
+            select(Shop.location_id, ReceiverProfile)
+            .join(Client, Shop.client_id == Client.id)
+            .outerjoin(ReceiverProfile, ReceiverProfile.location_id == Shop.location_id)
+            .where(Client.hub_id == hub_id, Shop.location_id.is_not(None))
+            .distinct()
+        )
+    ).all()
+    estimates = [dwell_estimate(profile) for _, profile in dock_rows]
+    coverage = DwellCoverage(
+        docks=len(dock_rows),
+        from_our_own=sum(1 for e in estimates if e.is_ours),
+        inherited=sum(
+            1 for e in estimates if e.source is not None and not e.is_ours
+        ),
+    )
+
     return RecordHealth(
+        dwell=coverage,
         window_days=window_days,
         on_time=rate,
         on_time_interval=interval,

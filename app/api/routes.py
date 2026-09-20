@@ -335,6 +335,10 @@ async def record_health(
         outcomes_linked_to_a_decision=health.outcomes_linked_to_a_decision,
         decision_link_percentage=link.percentage,
         open_flags=health.open_flags,
+        dwell_docks=health.dwell.docks,
+        dwell_from_our_own=health.dwell.from_our_own,
+        dwell_inherited=health.dwell.inherited,
+        dwell_unknown=health.dwell.unknown,
         writers=[
             WriterHealthView(
                 name=w.name,

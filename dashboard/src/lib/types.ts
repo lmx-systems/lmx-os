@@ -441,6 +441,13 @@ export interface RecordHealth {
   outcomes_linked_to_a_decision: number
   decision_link_percentage: number | null
   open_flags: number
+  // Whose dwell observation each dock has, if any (IDN-4). Three counts
+  // rather than a percentage: an inherited figure is a different kind of
+  // answer from one of our own and should never be summed with it.
+  dwell_docks: number
+  dwell_from_our_own: number
+  dwell_inherited: number
+  dwell_unknown: number
   writers: WriterHealth[]
   labels: {
     observed_consequences: number
