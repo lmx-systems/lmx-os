@@ -142,3 +142,91 @@ class TestTheDocumentItself:
         drive."""
         assert os.path.exists(LOGO_PATH)
         assert "docs/LMX branding" not in LOGO_PATH
+
+
+class TestADraftSaysSo:
+    """`STL-2`: `require_agreed` existed and was called by nothing.
+
+    So a statement PDF could be written with no basis at all, on one signed by a
+    single side, or on one it no longer reproduced under - and the last of those
+    was already being printed to the terminal and then ignored.
+
+    The refusal lives in `scripts/settle_month.py`, at the only place that
+    produces something a customer sees. This is the other half: when the refusal
+    is overridden, the page must say so, because **an escape hatch that produces
+    an unmarked artifact is not an escape hatch, it is a bypass.**
+    """
+
+    def test_a_draft_is_marked_on_the_page(self):
+        pdf = render_statement_pdf(
+            _statement(_comparison(113.0, 130.0)),
+            draft_reason="Basis v2 is not agreed - the customer has not signed.",
+        )
+        text = _text(pdf)
+
+        assert "DRAFT" in text
+        assert "not final" in text
+
+    def test_the_reason_is_printed_not_just_the_word(self):
+        """"DRAFT" alone tells a reader to distrust the page without telling
+        them what to do about it. The reason names the missing signature."""
+        pdf = render_statement_pdf(
+            _statement(_comparison(113.0, 130.0)),
+            draft_reason="Basis v2 is not agreed - the customer has not signed.",
+        )
+
+        assert "the customer has not signed" in _text(pdf)
+
+    def test_the_mark_comes_before_the_headline(self):
+        """A draft mark a reader meets after the number has done its work is a
+        disclaimer, not a warning. It sits between the period line and the
+        headline, which is where the eye goes second."""
+        text = _text(
+            render_statement_pdf(
+                _statement(_comparison(113.0, 130.0)),
+                draft_reason="Basis v2 is not agreed.",
+            )
+        )
+
+        assert text.index("DRAFT") < text.index("The measurement")
+
+    def test_an_agreed_statement_carries_no_mark(self):
+        """The mark has to mean something. A page that always says DRAFT says
+        nothing."""
+        text = _text(render_statement_pdf(_statement(_comparison(113.0, 130.0))))
+
+        assert "DRAFT" not in text
+
+    def test_the_statement_itself_is_unchanged_by_the_mark(self):
+        """A draft is the same measurement, not a different one. If the numbers
+        moved when the mark appeared, the mark would be hiding something rather
+        than disclosing it."""
+        statement = _statement(_comparison(113.0, 130.0))
+        plain = _text(render_statement_pdf(statement))
+        marked = _text(render_statement_pdf(statement, draft_reason="Not agreed."))
+
+        for line in plain.splitlines():
+            if line.strip():
+                assert line in marked
+
+
+class TestTheScriptRefuses:
+    def test_settle_month_calls_require_agreed_before_writing_a_pdf(self):
+        """Asserted on the source because the refusal lives in a script.
+
+        A test that only covered the PDF renderer would pass with the check
+        removed entirely - which is exactly the state this change found.
+        """
+        import inspect
+        import pathlib
+
+        source = pathlib.Path(
+            inspect.getfile(render_statement_pdf)
+        ).parent.parent.parent / "scripts" / "settle_month.py"
+        text = source.read_text()
+
+        assert "require_agreed(existing)" in text
+        assert "draft_reason=draft_reason" in text
+        # The override must exist and must be explicit. Without it the only way
+        # to produce an internal draft is to sign a basis you have not agreed.
+        assert "--draft" in text

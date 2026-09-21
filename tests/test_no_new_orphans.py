@@ -87,7 +87,6 @@ KNOWN_ORPHANS: dict[str, str] = {
     "arm_for_order": "EXP-1: reader, inert until a client contracts an arm",
     # STL-2 - the signature gate. `scripts/sign_basis.py` signs a basis and does
     # not call this; nothing refuses an unsigned one.
-    "require_agreed": "STL-2: nothing enforces the signature it exists to require",
     # Reachable only from a one-off or analysis script, which this check stopped
     # counting as a caller. All correct as they are: an analysis tool is not a
     # gap, and the alternative - calling a CSV reader from a request path - is

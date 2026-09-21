@@ -39,7 +39,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.db import AsyncSessionLocal  # noqa: E402
 from app.experiment.integrity import render as render_integrity  # noqa: E402
 from app.record.cost import record_costs_for_period  # noqa: E402
-from app.settle.basis import issue, live_basis, reproduce  # noqa: E402
+from app.settle.basis import (  # noqa: E402
+    NotSigned,
+    issue,
+    live_basis,
+    reproduce,
+    require_agreed,
+)
 from app.settle.pdf import render_statement_pdf  # noqa: E402
 from app.settle.statement import build_statement, render_statement  # noqa: E402
 
@@ -52,7 +58,7 @@ def _month_bounds(month: str) -> tuple[datetime, datetime]:
 
 async def _run(
     hub: str, client: str, month: str, pdf: Path | None, recompute: bool,
-    issue_basis: bool,
+    issue_basis: bool, allow_draft: bool,
 ) -> int:
     since, until = _month_bounds(month)
     async with AsyncSessionLocal() as session:
@@ -106,10 +112,41 @@ async def _run(
             state = "agreed" if basis.is_agreed else "not yet signed by either side"
             print(f"\nissued under basis v{basis.version} ({state})")
             print("  scripts/sign_basis.py records a signature")
+            # The PDF check below reads `existing`, which was fetched before
+            # this ran. Without this, issuing and writing a PDF in one command
+            # would refuse with "no basis has been issued" a line after saying
+            # it issued one - true in the sense that matters, and baffling.
+            existing = basis
 
         if pdf:
-            pdf.write_bytes(render_statement_pdf(statement))
-            print(f"\nwrote {pdf}")
+            # STL-2's refusal, at the only place that produces something a
+            # customer sees. `require_agreed` existed and was called by nothing,
+            # so a statement PDF could be written with no basis at all, on one
+            # signed by a single side, or on one it no longer reproduces under -
+            # and the last of those was already being *printed* above and then
+            # ignored.
+            draft_reason = None
+            try:
+                agreed = require_agreed(existing)
+                if not reproduce(agreed, statement).reproduces:
+                    draft_reason = (
+                        f"This statement no longer reproduces under basis "
+                        f"v{agreed.version}, which both sides agreed. The costs "
+                        "have changed since it was signed."
+                    )
+            except NotSigned as exc:
+                draft_reason = str(exc).capitalize() + "."
+
+            if draft_reason and not allow_draft:
+                print(f"\nRefusing to write {pdf}: {draft_reason}")
+                print("  scripts/sign_basis.py records a signature,")
+                print("  or --draft writes it marked as a draft.")
+                return 1
+
+            pdf.write_bytes(
+                render_statement_pdf(statement, draft_reason=draft_reason)
+            )
+            print(f"\nwrote {pdf}" + (" (marked DRAFT)" if draft_reason else ""))
     return 0
 
 
@@ -124,6 +161,10 @@ def main() -> int:
         help="supersede existing costs rather than skipping them",
     )
     parser.add_argument(
+        "--draft", action="store_true",
+        help="write the PDF even without an agreed basis, marked DRAFT on the page",
+    )
+    parser.add_argument(
         "--issue", action="store_true",
         help="record what this statement was calculated under (STL-2)",
     )
@@ -131,7 +172,7 @@ def main() -> int:
     return asyncio.run(
         _run(
             args.hub, args.client, args.month, args.pdf, args.recompute,
-            args.issue,
+            args.issue, args.draft,
         )
     )
 
