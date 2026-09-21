@@ -38,8 +38,11 @@ from app.reporting.credit_exposure import build_credit_exposure
 from app.models.dispatcher_override import REASON_CODES, REASON_CODES_REQUIRING_NOTE, REASON_LABELS
 from app.models.linkage_flag import LinkageFlag
 from app.models.location import Location
+from app.models.receiver_profile import ReceiverProfile
+from app.models.shop import Shop
 from app.models.location_merge import LocationMerge
 from app.identity.merge import confirm_merge, pending_merges, reject_merge, revert_merge
+from app.identity.node_class import classification_coverage, set_node_class
 from app.record.consequences import (
     CONSEQUENCE_LABELS,
     CONSEQUENCES,
@@ -67,7 +70,10 @@ from app.schemas.reporting import (
     LateOrderView,
     LinkageFlagView,
     OrderExplanationView,
+    ClassificationCoverageView,
     MergeProposalView,
+    NodeClassRequest,
+    UnlabelledDockView,
     RecordHealthView,
     WriterHealthView,
     OverrideReasonOption,
@@ -184,6 +190,119 @@ async def operations_scorecard(
             )
             for r in scorecard.rates
         ],
+    )
+
+
+@router.get("/operations/unlabelled-docks", response_model=list[UnlabelledDockView])
+async def unlabelled_docks(
+    limit: int = Query(default=50, ge=1, le=500),
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> list[UnlabelledDockView]:
+    """Docks nobody has classified (`IDN-3`).
+
+    The rules are exhausted. Measured against the design partner's real account
+    book they leave **28.7% unlabelled against a target of under 2%**, and the
+    remainder is family and personal business names carrying no industry word at
+    all - the export has no industry code, so there is nothing else to read. The
+    row has always said the choice is *"a person labels the tail, or the target
+    moves"*; this is the surface that makes the first possible.
+
+    **Ordered by how busy the dock looks**, using the inherited dwell sample
+    count as the only evidence of volume we have before delivering there
+    ourselves. The tail is long and an arbitrary order gets worked from the top
+    until somebody stops, so the order decides which docks get labelled.
+    """
+    rows = (
+        await session.execute(
+            select(Location, ReceiverProfile)
+            .outerjoin(ReceiverProfile, ReceiverProfile.location_id == Location.id)
+            .where(Location.node_class.is_(None), Location.merged_into_id.is_(None))
+            .order_by(ReceiverProfile.inherited_dwell_sample_count.desc().nulls_last())
+            .limit(limit)
+        )
+    ).all()
+
+    views = []
+    for location, profile in rows:
+        names = list(
+            await session.scalars(
+                select(Shop.name).where(Shop.location_id == location.id).limit(5)
+            )
+        )
+        views.append(
+            UnlabelledDockView(
+                location_id=location.id,
+                address=location.address,
+                shop_names=names,
+                inherited_dwell_sample_count=(
+                    profile.inherited_dwell_sample_count if profile else None
+                ),
+                inherited_dwell_p50_seconds=(
+                    profile.inherited_dwell_p50_seconds if profile else None
+                ),
+            )
+        )
+    return views
+
+
+@router.post("/operations/docks/{location_id}/node-class", response_model=UnlabelledDockView)
+async def label_dock(
+    location_id: uuid.UUID,
+    body: NodeClassRequest,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> UnlabelledDockView:
+    """Say what kind of place a dock is (`IDN-3`).
+
+    A human label outranks anything the rules inferred and is never overwritten
+    by them. Any ops session: a dispatcher who has been to the door knows better
+    than a regex over the account name, and making this admin-only would put the
+    knowledge and the permission in different people.
+
+    Not a free-text field. The seven classes are what `PRD-1` groups by, and an
+    eighth appearing would split a group without anyone noticing - which is why
+    `set_node_class` raises rather than storing an unknown one.
+    """
+    location = await session.get(Location, location_id)
+    if location is None:
+        raise HTTPException(status_code=404, detail="No such dock")
+    try:
+        set_node_class(location, body.node_class)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    await session.commit()
+
+    names = list(
+        await session.scalars(
+            select(Shop.name).where(Shop.location_id == location.id).limit(5)
+        )
+    )
+    return UnlabelledDockView(
+        location_id=location.id, address=location.address, shop_names=names,
+        inherited_dwell_sample_count=None, inherited_dwell_p50_seconds=None,
+    )
+
+
+@router.get("/operations/classification-coverage", response_model=ClassificationCoverageView)
+async def classification_coverage_view(
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> ClassificationCoverageView:
+    """How far `IDN-3` is from its done-when, measured rather than asserted.
+
+    The denominator is shops that reach a dock, because the done-when is about
+    accounts. A shop with no dock at all cannot be classified and is counted
+    separately rather than dropped, which would flatter the figure.
+    """
+    coverage = await classification_coverage(session)
+    return ClassificationCoverageView(
+        shops=coverage["shops"],
+        classified=coverage["classified"],
+        without_dock=coverage["without_dock"],
+        unlabelled=coverage["unlabelled"],
+        unlabelled_percent=round(coverage["unlabelled_pct"], 1),
+        meets_target=coverage["meets_target"],
     )
 
 

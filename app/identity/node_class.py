@@ -103,7 +103,17 @@ _RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
         # _RULES.
         (r"\bshop\b", r"\bgarage\b", r"\bservice\s+cent(?:er|re)\b", r"\brepair\b",
          r"\btire\b", r"\btyre\b", r"\bmuffler\b", r"\btransmission\b", r"\blube\b",
-         r"\bauto\b", r"\bservice\b", r"\bmarine\b"),
+         r"\bauto\b", r"\bservice\b", r"\bmarine\b",
+         # Added after measuring the unlabelled tail against the real account
+         # book (see the note below `_RULES`). `automotive` is not caught by
+         # `\bauto\b` - they are different tokens - and a bare "X Automotive"
+         # was falling through entirely; `\bautomotive\s+group\b` in DEALER
+         # still wins because DEALER is ordered first.
+         r"\bautomotive\b",
+         # A fuel brand on a receiver that takes deliveries of parts is a
+         # service station doing repairs, not a filling pump.
+         r"\b(?:exxon|mobil|shell|sunoco|gulf|citgo|bp)\b",
+         r"\bcar\s+(?:care|wash)\b"),
     ),
 )
 

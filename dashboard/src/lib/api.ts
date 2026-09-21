@@ -17,7 +17,9 @@ import type {
   LinkageFlag,
   OrderExplanation,
   MergeProposal,
+  ClassificationCoverage,
   RecordHealth,
+  UnlabelledDock,
   OverrideReasonOption,
   OverrideResult,
   OpsAuthToken,
@@ -201,6 +203,21 @@ export const api = {
 
   rejectMerge: (id: string) =>
     request<MergeProposal>(`/operations/merge-proposals/${id}/reject`, { method: 'POST' }),
+
+  // Docks nobody has classified (docs/ROADMAP_1.5.md IDN-3). Ordered by how busy
+  // the dock looks, because the tail is long and an arbitrary order gets worked
+  // from the top until somebody stops.
+  unlabelledDocks: (limit = 50) =>
+    request<UnlabelledDock[]>(`/operations/unlabelled-docks?limit=${limit}`),
+
+  labelDock: (locationId: string, nodeClass: string) =>
+    request<UnlabelledDock>(`/operations/docks/${locationId}/node-class`, {
+      method: 'POST',
+      body: JSON.stringify({ node_class: nodeClass }),
+    }),
+
+  classificationCoverage: () =>
+    request<ClassificationCoverage>('/operations/classification-coverage'),
 
   // What the SLA credits are costing (docs/ROADMAP.md W3, E11).
   creditExposure: (windowDays = 30) =>

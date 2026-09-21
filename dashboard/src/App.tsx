@@ -4,6 +4,7 @@ import { KpiStrip } from './components/KpiStrip'
 import { OrderPipeline } from './components/OrderPipeline'
 import { HoldQueueTable } from './components/HoldQueueTable'
 import { ExceptionsPanel } from './components/ExceptionsPanel'
+import { DockLabellingPanel } from './components/DockLabellingPanel'
 import { MergeReviewPanel } from './components/MergeReviewPanel'
 import { RecordHealthPanel } from './components/RecordHealthPanel'
 import { RecordLayerPanel } from './components/RecordLayerPanel'
@@ -176,6 +177,11 @@ function App() {
                     valuable merge to catch (IDN-2). Renders nothing when the
                     queue is empty, which is most days. */}
                 <MergeReviewPanel isAdmin={opsProfile.role === 'admin'} />
+                {/* Also not hub-scoped: a dock is a physical place and its class
+                    does not change with which hub serves it (IDN-3). Renders
+                    nothing once the tail is empty, which is the state the
+                    done-when is trying to reach. */}
+                <DockLabellingPanel />
               </div>
               <div className="flex flex-col gap-4">
                 {/* Map above the roster: "where is my fleet" is the glance a
