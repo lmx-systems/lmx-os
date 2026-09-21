@@ -51,6 +51,7 @@ PR that a human reviews. Never assume a commit reached the remote: confirm with
 | `docs/ROADMAP.md` | The 1.0 item store and the archaeology — item detail and the three founder decision logs. Source of truth for item **history**, not for what to build next. Check the reconciliation before acting on anything here |
 | `docs/NEXT_STEPS.md` | Row-by-row punch list, updated in place |
 | `docs/ARCHITECTURE.md` | Technical handoff detail, stubs, and best-effort interpretations |
+| `docs/THE_RECORD_AND_IDENTITY_LAYERS.md` | **What the record and identity layers actually do** — what writes, what reads, what runs at 2am, what a person must do, and the figures measured against the design partner's real export. Read with `ROADMAP_AUDIT_2026-09.md`, which says what was broken |
 | `docs/LMX_LINK_PLAN.md` | The order-intake track: contract, design principles, sequence |
 | `docs/DOCUMENT_STYLE.md` | House style for generated documents |
 | `docs/ORDER_API.md`, `docs/WEBHOOKS.md` | External-facing interfaces |
