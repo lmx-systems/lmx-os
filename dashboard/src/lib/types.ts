@@ -449,6 +449,11 @@ export interface RecordHealth {
   dwell_inherited: number
   dwell_unknown: number
   dwell_thin: number
+  // DRV-1's fence against the driver's own taps. The radius is 75m and 75
+  // was a guess; this is what keeps it from staying one.
+  geofence_coverage: number | null
+  geofence_lead_p50_seconds: number | null
+  geofence_comparable_stops: number
   writers: WriterHealth[]
   labels: {
     observed_consequences: number

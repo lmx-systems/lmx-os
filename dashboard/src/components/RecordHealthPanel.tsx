@@ -134,6 +134,30 @@ export function RecordHealthPanel({ hubId }: { hubId: string }) {
             </section>
           )}
 
+          {data.geofence_coverage !== null && (
+            <section className="mb-3">
+              <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                Geofence
+              </h3>
+              <p className="text-[13px] text-[var(--text-primary)]">
+                <span className="tabular-nums font-medium">
+                  {Math.round(data.geofence_coverage * 100)}%
+                </span>{' '}
+                of completed stops saw a crossing
+                {data.geofence_lead_p50_seconds !== null && (
+                  <span className="text-[var(--text-muted)]">
+                    {' '}
+                    · fence fires {Math.round(data.geofence_lead_p50_seconds)}s before the tap
+                  </span>
+                )}
+              </p>
+              <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                The 75m radius was a guess. This is the measurement that checks it, across{' '}
+                {data.geofence_comparable_stops} stops with both a crossing and a tap.
+              </p>
+            </section>
+          )}
+
           <section>
             <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
               Consequence labels

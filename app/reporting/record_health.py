@@ -47,6 +47,7 @@ from app.models.outcome_entry import KIND_DELIVERED, OutcomeEntry
 from app.models.receiver_profile import ReceiverProfile
 from app.models.shop import Shop
 from app.record.consequences import label_counts
+from app.reporting.geofence_calibration import measure_geofence_calibration
 from app.reporting.measurement import Rate
 
 DEFAULT_WINDOW_DAYS = 30
@@ -108,6 +109,13 @@ class RecordHealth:
             docks=0, from_our_own=0, inherited=0, thin=0
         )
     )
+    # DRV-1's sensor, checked against the driver's own taps. Reported here
+    # because `GEOFENCE_RADIUS_M` is 75 and 75 was a guess - measuring it
+    # once in a dev seed and never again leaves it a guess forever, and
+    # nobody would notice the fence drifting.
+    geofence_coverage: float | None = None
+    geofence_lead_p50_seconds: float | None = None
+    geofence_comparable_stops: int = 0
 
     @property
     def decision_link_rate(self) -> Rate:
@@ -265,7 +273,12 @@ async def build_record_health(
         thin=sum(1 for e in estimates if e.is_thin),
     )
 
+    fence = await measure_geofence_calibration(session, hub_id=hub_id, since=since)
+
     return RecordHealth(
+        geofence_coverage=round(fence.coverage, 3) if fence.completed_stops else None,
+        geofence_lead_p50_seconds=fence.lead_p50_seconds,
+        geofence_comparable_stops=fence.comparable_stops,
         dwell=coverage,
         window_days=window_days,
         on_time=rate,

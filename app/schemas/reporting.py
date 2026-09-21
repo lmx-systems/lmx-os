@@ -323,6 +323,11 @@ class RecordHealthView(BaseModel):
     dwell_inherited: int
     dwell_unknown: int
     dwell_thin: int
+    # DRV-1's fence against the driver's taps. `GEOFENCE_RADIUS_M` is 75 and
+    # 75 was a guess; this is what stops it being one permanently.
+    geofence_coverage: float | None
+    geofence_lead_p50_seconds: float | None
+    geofence_comparable_stops: int
     # From `label_counts`: observed_consequences, silences, labelled_total,
     # by_type, and the band's two ends. Passed through rather than flattened,
     # because the band is a range the brief declines to collapse and a view that

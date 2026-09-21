@@ -281,6 +281,36 @@ class TestTheLabelBandIsReportedAsABand:
         assert 626 not in health.labels["required_range_for_m2"]
 
 
+class TestTheGeofenceReading:
+    """Surfaced by teaching the orphan check that a seed script is not a caller.
+
+    `measure_geofence_calibration` is what turns `GEOFENCE_RADIUS_M = 75` from a
+    guess into a measurement, and it was called by a dev-world seed script and
+    tests and nothing else - so in production the radius stayed a guess and
+    nobody would have noticed the fence drifting.
+    """
+
+    async def test_it_refuses_when_there_are_no_stops(self, db_session):
+        hub = await _hub(db_session)
+
+        health = await build_record_health(db_session, hub_id=hub.id, now=NOW)
+
+        assert health.geofence_coverage is None
+        assert health.geofence_comparable_stops == 0
+
+    async def test_the_endpoint_carries_it(self, db_session):
+        from app.api.routes import record_health
+
+        hub = await _hub(db_session)
+
+        view = await record_health(
+            hub_id=hub.id, window_days=30, session=db_session, _ops=OPS
+        )
+
+        assert view.geofence_coverage is None
+        assert view.geofence_comparable_stops == 0
+
+
 class TestTheEndpoint:
     async def test_it_returns_the_writers_and_the_band(self, db_session):
         from app.api.routes import record_health

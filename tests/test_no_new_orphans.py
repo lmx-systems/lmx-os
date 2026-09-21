@@ -88,6 +88,17 @@ KNOWN_ORPHANS: dict[str, str] = {
     # STL-2 - the signature gate. `scripts/sign_basis.py` signs a basis and does
     # not call this; nothing refuses an unsigned one.
     "require_agreed": "STL-2: nothing enforces the signature it exists to require",
+    # Reachable only from a one-off or analysis script, which this check stopped
+    # counting as a caller. All correct as they are: an analysis tool is not a
+    # gap, and the alternative - calling a CSV reader from a request path - is
+    # the thing the architecture boundary exists to prevent.
+    "parse_customer_timing": "ING-4: reads a historical export; the identity seed is a one-off",
+    "accounts_in": "ING-4: same, the account roll-up the seed uses",
+    "load_activity": "PRD-1: baseline analysis of an export, not a live path",
+    "load_invoices": "PRD-1: baseline analysis of an export, not a live path",
+    "compute": "PRD-1: the baseline metrics themselves, computed offline",
+    "render_text": "PRD-1: renders the baseline report",
+    "render_json": "PRD-1: renders the baseline report",
     # Built this session, and both are honest about what they are waiting for.
     "backfill_orders": "ING-3: blocked on ING-4's export adapter - nothing can feed it",
     "overrides_for_order": "CON-2: the console reads overrides through explain_order instead",
@@ -130,6 +141,71 @@ def _referenced_names(tree: ast.AST) -> collections.Counter:
     return used
 
 
+# Scripts an operator runs to run the business. A function reachable from one of
+# these is wired into the product - somebody uses it to do the job.
+#
+# Everything under `scripts/` that is *not* here is setup, analysis or a one-off,
+# and does not count as a caller. That distinction is the whole reason this list
+# exists: `classify_unlabelled_locations` was called from two seed scripts and
+# nowhere else, so a dock created by ordinary intake never got a node class -
+# and this check said it was fine, because it had callers. **A caller in a seed
+# script is not a caller.** (`docs/THE_RECORD_AND_IDENTITY_LAYERS.md` §6.)
+OPERATIONAL_SCRIPTS: dict[str, str] = {
+    "control_arm.py": "enrol a customer in the control arm, and exclude a receiver",
+    "create_client_user.py": "onboarding a client's first portal login",
+    "create_ops_user.py": "onboarding an ops user",
+    "import_inherited_dwell.py": "import a previous operator's dwell for a new customer",
+    "reconcile_billing.py": "check every ingested order reached an invoice",
+    "set_client_sla_terms.py": "record what a client was promised",
+    "set_driver_rate.py": "record what a driver is paid",
+    "settle_month.py": "produce a period's savings statement",
+    "shadow_day.py": "run a shadow cycle and report the delta",
+    "sign_basis.py": "record that a side agreed to a statement's basis",
+}
+
+# Run once, or to investigate something, or to build a document. Real and useful
+# - and not evidence that anything in the product uses what they call.
+ONE_OFF_SCRIPTS: dict[str, str] = {
+    "__init__.py": "not a script",
+    "analyze_baseline.py": "analysis of an export",
+    "analyze_real_export.py": "analysis of an export",
+    "build_legal_brief_docx.py": "renders a document",
+    "build_review_docx.py": "renders a document",
+    "docx_house_style.py": "a helper for the document renderers",
+    "generate_m2_corpus.py": "generates a synthetic corpus for the M2 harness",
+    "load_identity_from_export.py": "one-off identity seed from a historical export",
+    "run_m2_harness.py": "runs the M2 calibration harness",
+    "seed_austin_world.py": "seeds a development database",
+    "train_m1_dwell.py": "runs M1's release gate offline",
+    "verify_route_optimization.py": "one live call against a real Google project",
+}
+
+
+def test_every_script_is_classified():
+    """A new script must say which kind it is.
+
+    Same discipline as `tests/test_architecture_boundaries.py` requiring every
+    package under `app/` to be classified: an unclassified script would quietly
+    decide whether something counts as wired, which is the question this file
+    exists to answer.
+    """
+    on_disk = {
+        path.name
+        for path in (ROOT / "scripts").glob("*.py")
+        if "__pycache__" not in str(path)
+    }
+    classified = set(OPERATIONAL_SCRIPTS) | set(ONE_OFF_SCRIPTS)
+
+    assert on_disk - classified == set(), (
+        "classify these in OPERATIONAL_SCRIPTS or ONE_OFF_SCRIPTS: "
+        + ", ".join(sorted(on_disk - classified))
+    )
+    assert classified - on_disk == set(), (
+        "these are classified but no longer exist: "
+        + ", ".join(sorted(classified - on_disk))
+    )
+
+
 def _orphans() -> dict[str, str]:
     """Functions nothing calls.
 
@@ -140,8 +216,10 @@ def _orphans() -> dict[str, str]:
     * **The defining module itself.** A public helper used only by its own
       module is not an orphan, and treating it as one produced most of the
       first run's noise.
-    * **A script in `scripts/`.** An operator running `settle_month.py` is using
-      the code; `render_statement` is not dead because no web request reaches it.
+    * **An operational script.** An operator running `settle_month.py` is using
+      the code, and `render_statement` is not dead because no web request
+      reaches it. A *one-off* script is not a caller - see
+      `OPERATIONAL_SCRIPTS`.
 
     A re-export from a package `__init__.py` is not a caller. That is precisely
     what the orphans this file exists for looked like from outside: importable,
@@ -151,7 +229,8 @@ def _orphans() -> dict[str, str]:
 
     used_elsewhere: collections.Counter = collections.Counter()
     own_use: dict[str, collections.Counter] = {}
-    for path in list(APP.rglob("*.py")) + list((ROOT / "scripts").rglob("*.py")):
+    scripts = [ROOT / "scripts" / name for name in OPERATIONAL_SCRIPTS]
+    for path in list(APP.rglob("*.py")) + scripts:
         if "__pycache__" in str(path) or path.name == "__init__.py":
             continue
         rel = str(path.relative_to(ROOT))

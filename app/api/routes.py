@@ -459,6 +459,9 @@ async def record_health(
         dwell_inherited=health.dwell.inherited,
         dwell_unknown=health.dwell.unknown,
         dwell_thin=health.dwell.thin,
+        geofence_coverage=health.geofence_coverage,
+        geofence_lead_p50_seconds=health.geofence_lead_p50_seconds,
+        geofence_comparable_stops=health.geofence_comparable_stops,
         writers=[
             WriterHealthView(
                 name=w.name,
