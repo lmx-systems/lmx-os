@@ -222,12 +222,12 @@ hold rather than an oversight.
 | `IDN-2` | `propose_merge`, `merge_locations` | Auto-merge is gated behind confirming the founding set (§2.2c) |
 | `IDN-4` | `set_access`, `set_autonomy_fit`, `set_receiving_hours` | Stated facts; nothing asks a receiver yet |
 | `EXP-1` | `arm_for_order` | Inert until a client contracts an arm |
-| `STL-2` | `require_agreed` | **Nothing refuses an unsigned basis** |
 | `ING-3` | `backfill_orders` | No order-level history exists to import |
 | `CON-3` | `labelled_overrides` | The training-set export has no reader yet |
 
-`require_agreed` is the one worth a second look: the mechanism to refuse an
-unsigned settlement basis exists and nothing calls it.
+`require_agreed` was on this list and is not any more: `scripts/settle_month.py`
+now refuses to write a statement PDF on a basis that is unsigned or no longer
+reproduces, and `--draft` marks the page instead of bypassing the check.
 
 ---
 

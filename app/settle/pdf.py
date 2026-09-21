@@ -69,6 +69,13 @@ def _styles() -> dict:
             "StatementPeriod", parent=base["Normal"], textColor=_SLATE,
             fontSize=10, leading=14,
         ),
+        # Not styled as a warning triangle, but not quiet either: the one thing
+        # a reader must not do is mistake a draft for the final number.
+        "draft": ParagraphStyle(
+            "StatementDraft", parent=base["Normal"], textColor=colors.HexColor("#8A3A12"),
+            fontSize=10, leading=14, backColor=colors.HexColor("#FDF1E7"),
+            borderPadding=5, spaceBefore=2,
+        ),
         # Deliberately not green and not large. The headline is sometimes the
         # disappointing sentence and must not be styled as a win.
         "headline": ParagraphStyle(
@@ -174,13 +181,24 @@ def _comparison_table(statement: SavingsStatement, styles: dict):
 
 
 def render_statement_pdf(
-    statement: SavingsStatement, *, addressed_to: str | None = None
+    statement: SavingsStatement,
+    *,
+    addressed_to: str | None = None,
+    draft_reason: str | None = None,
 ) -> bytes:
     """One page a customer can read without a call.
 
     `addressed_to` is opt-in. See the module docstring: a statement circulates,
     and one that names nobody says what LMX measured without saying whose
     account it was.
+
+    `draft_reason` marks the page as not final and says why, in the place a
+    reader looks first. `STL-2` is the reason it exists: a statement resting on
+    a basis nobody has signed, or on one it no longer reproduces under, must not
+    be indistinguishable from one that is agreed. An escape hatch that produces
+    an unmarked artifact is not an escape hatch, it is a bypass - which is why
+    the caller supplies the reason rather than a boolean, and why the reason is
+    printed rather than merely recorded.
     """
     styles = _styles()
     buffer = BytesIO()
@@ -214,6 +232,13 @@ def render_statement_pdf(
     if addressed_to:
         period = f"{addressed_to} &nbsp;·&nbsp; {period}"
     elements.append(Paragraph(period, styles["period"]))
+    if draft_reason:
+        # Above the headline, not in a footer. A draft mark a reader meets after
+        # the number has done its work is a disclaimer, not a warning.
+        elements.append(Spacer(1, 0.12 * inch))
+        elements.append(
+            Paragraph(f"DRAFT — not final. {draft_reason}", styles["draft"])
+        )
     elements.append(Spacer(1, 0.22 * inch))
     elements.append(_headline_block(statement, styles))
 
