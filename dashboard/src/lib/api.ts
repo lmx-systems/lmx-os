@@ -16,7 +16,9 @@ import type {
   LateOrder,
   LinkageFlag,
   OrderExplanation,
+  OrderLookupPage,
   MergeProposal,
+  AttentionCounts,
   ClassificationCoverage,
   RecordHealth,
   UnlabelledDock,
@@ -218,6 +220,18 @@ export const api = {
 
   classificationCoverage: () =>
     request<ClassificationCoverage>('/operations/classification-coverage'),
+
+  // Find an order (CON-1). The hold queue's search only ever filtered the held
+  // list, so an order already released or assigned was unfindable - while the
+  // customer phoning about it could search their own orders all along.
+  lookupOrders: (hubId: string, q: string) =>
+    request<OrderLookupPage>(
+      `/operations/orders?hub_id=${hubId}&q=${encodeURIComponent(q)}`,
+    ),
+
+  // How much is waiting for a person, without loading any of it (CON-1).
+  attentionCounts: (hubId: string) =>
+    request<AttentionCounts>(`/operations/attention-counts?hub_id=${hubId}`),
 
   // What the SLA credits are costing (docs/ROADMAP.md W3, E11).
   creditExposure: (windowDays = 30) =>

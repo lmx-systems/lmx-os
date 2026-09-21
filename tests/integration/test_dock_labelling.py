@@ -304,3 +304,98 @@ class TestCoverageIsMeasuredNotAsserted:
         view = await classification_coverage_view(session=db_session, _ops=OPS)
 
         assert view.without_dock >= 1
+
+
+class TestTheBoardKnowsHowMuchIsWaiting:
+    """CON-1: *"a working dispatcher can run a day on it."*
+
+    The board puts what-to-record behind a tab so it is not between a dispatcher
+    and the hold queue. **A tab with no count is a tab nobody opens**, which
+    would trade a cluttered board for work that silently stops getting done - so
+    the count is part of the fix rather than a nicety.
+    """
+
+    async def test_it_counts_each_queue_without_loading_them(self, db_session):
+        from app.api.routes import attention_counts
+
+        hub = await db_session.scalar(select(Hub).limit(1))
+        if hub is None:
+            await _dock(db_session, name="Seed")
+            hub = await db_session.scalar(select(Hub).limit(1))
+        await _dock(db_session, name="Campoli and Sons")
+        await db_session.commit()
+
+        view = await attention_counts(hub_id=hub.id, session=db_session, _ops=OPS)
+
+        assert view.unlabelled_docks >= 1
+        assert view.late_orders >= 0
+        assert view.merge_proposals >= 0
+
+    async def test_a_labelled_dock_stops_being_counted(self, db_session):
+        """The count has to move, or the badge is decoration."""
+        from app.api.routes import attention_counts, label_dock
+
+        dock = await _dock(db_session, name="Campoli and Sons")
+        hub = await db_session.scalar(select(Hub).limit(1))
+        await db_session.commit()
+        before = (
+            await attention_counts(hub_id=hub.id, session=db_session, _ops=OPS)
+        ).unlabelled_docks
+
+        await label_dock(
+            location_id=dock.id,
+            body=NodeClassRequest(node_class="shop"),
+            session=db_session,
+            _ops=OPS,
+        )
+
+        after = (
+            await attention_counts(hub_id=hub.id, session=db_session, _ops=OPS)
+        ).unlabelled_docks
+        assert after == before - 1
+
+    async def test_a_merged_dock_is_not_counted(self, db_session):
+        """It is no longer a place. Counting it would show a dispatcher work
+        that does not exist, and a badge that never reaches zero is one nobody
+        believes."""
+        from app.api.routes import attention_counts
+
+        target = await _dock(db_session, name="Target")
+        merged = await _dock(db_session, name="Merged")
+        hub = await db_session.scalar(select(Hub).limit(1))
+        await db_session.commit()
+        before = (
+            await attention_counts(hub_id=hub.id, session=db_session, _ops=OPS)
+        ).unlabelled_docks
+
+        merged.merged_into_id = target.id
+        await db_session.commit()
+
+        after = (
+            await attention_counts(hub_id=hub.id, session=db_session, _ops=OPS)
+        ).unlabelled_docks
+        assert after == before - 1
+
+    async def test_the_total_is_the_sum_of_the_three(self, db_session):
+        from app.api.routes import attention_counts
+
+        await _dock(db_session, name="Somewhere")
+        hub = await db_session.scalar(select(Hub).limit(1))
+        await db_session.commit()
+
+        view = await attention_counts(hub_id=hub.id, session=db_session, _ops=OPS)
+
+        assert view.total == (
+            view.late_orders + view.merge_proposals + view.unlabelled_docks
+        )
+
+    async def test_any_ops_session_may_read_it(self):
+        """It is a count of work, and the person who has to do the work is not
+        always an admin."""
+        import inspect
+
+        from app.api.routes import attention_counts
+        from app.ops_auth.dependencies import get_current_ops_user
+
+        dependency = inspect.signature(attention_counts).parameters["_ops"].default
+        assert dependency.dependency is get_current_ops_user
