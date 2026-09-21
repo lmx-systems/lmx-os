@@ -347,3 +347,39 @@ class MergeProposalView(BaseModel):
     proposed_at: datetime
     decided_at: datetime | None
     decision_source: str | None
+
+
+class UnlabelledDockView(BaseModel):
+    """A dock nobody has classified, and how much it matters (`IDN-3`).
+
+    Ordered by the evidence we have that it is busy, because the tail is long
+    and a list in arbitrary order gets worked from the top until somebody stops.
+    """
+
+    location_id: uuid.UUID
+    address: str
+    shop_names: list[str]
+    inherited_dwell_sample_count: int | None
+    inherited_dwell_p50_seconds: int | None
+
+
+class NodeClassRequest(BaseModel):
+    """A person saying what kind of place this is.
+
+    Outranks anything inferred and is never overwritten by the rules - see
+    `set_node_class`. There is no free-text option: the seven classes are what
+    `PRD-1` groups by, and an eighth appearing would split a group silently.
+    """
+
+    node_class: str
+
+
+class ClassificationCoverageView(BaseModel):
+    """`IDN-3`'s done-when, measured rather than asserted."""
+
+    shops: int
+    classified: int
+    without_dock: int
+    unlabelled: int
+    unlabelled_percent: float | None
+    meets_target: bool

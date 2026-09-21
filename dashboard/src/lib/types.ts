@@ -481,3 +481,36 @@ export interface MergeProposal {
   decided_at: string | null
   decision_source: string | null
 }
+
+/** A dock nobody has classified yet (docs/ROADMAP_1.5.md IDN-3). */
+export interface UnlabelledDock {
+  location_id: string
+  address: string
+  shop_names: string[]
+  inherited_dwell_sample_count: number | null
+  inherited_dwell_p50_seconds: number | null
+}
+
+/** How far IDN-3 is from its done-when. */
+export interface ClassificationCoverage {
+  shops: number
+  classified: number
+  without_dock: number
+  unlabelled: number
+  unlabelled_percent: number | null
+  meets_target: boolean
+}
+
+/**
+ * The seven classes PRD-1 groups by. Not free text: an eighth appearing would
+ * split a group without anyone noticing.
+ */
+export const NODE_CLASSES = [
+  { code: 'shop', label: 'Repair shop' },
+  { code: 'parts_store', label: 'Parts store' },
+  { code: 'dealer', label: 'Dealership' },
+  { code: 'body_shop', label: 'Body shop' },
+  { code: 'warehouse', label: 'Warehouse' },
+  { code: 'transfer', label: 'Transfer / terminal' },
+  { code: 'municipal', label: 'Municipal fleet' },
+] as const
