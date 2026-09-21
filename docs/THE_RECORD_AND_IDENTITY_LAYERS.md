@@ -187,10 +187,23 @@ It is now on the nightly tick. It only touches docks with no label, so a
 dispatcher's correction survives it.
 
 This is the seventh instance of the same pattern in one month — a mechanism that
-works, is tested, and is called by nothing on the live path. The orphan test
-catches it for functions; it did not catch this, because the function *did* have
-callers, just not ones that run in production. **A caller in a seed script is not
-a caller.**
+works, is tested, and is called by nothing on the live path. The orphan test did
+not catch it, because the function *did* have callers, just not ones that run in
+production. **A caller in a seed script is not a caller.**
+
+**The check now knows the difference.** `scripts/` is partitioned into ten
+operational scripts — things an operator runs to run the business — and twelve
+one-off, analysis and document-rendering tools. Only the first count as callers,
+and a new script must be classified or the suite fails, the same discipline
+`test_architecture_boundaries.py` applies to packages under `app/`.
+
+Tightening it surfaced eight more functions. Seven are the baseline-analysis
+pipeline and the historical export reader, all correctly offline — calling a CSV
+reader from a request path is what the architecture boundary exists to prevent.
+The eighth was real: **`measure_geofence_calibration`**, the thing that turns
+`GEOFENCE_RADIUS_M = 75` from a guess into a measurement, was called by a
+dev-world seed script and nothing else. It is now reported in
+`/operations/record-health`.
 
 ---
 
