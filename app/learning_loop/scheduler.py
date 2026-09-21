@@ -26,7 +26,11 @@ from sqlalchemy import select
 
 from app.db import session_scope
 from app.hub_calendar import is_hub_closed_on
-from app.identity import propose_duplicate_locations, refresh_hub_dwell_statistics
+from app.identity import (
+    classify_unlabelled_locations,
+    propose_duplicate_locations,
+    refresh_hub_dwell_statistics,
+)
 from app.record.consequences import close_consequence_windows
 from app.record.linkage import run_linkage_detectors
 from app.learning_loop.service import run_nightly_job
@@ -208,6 +212,24 @@ class LearningLoopScheduler:
                 # dock can be reached from two hubs and that is the most valuable
                 # pair to catch. Running it per hub would do the same global work
                 # once per hub and still miss nothing extra.
+                # IDN-3's classifier. It ran only from two seed scripts, so a
+                # dock created by ordinary intake never got a node class at all,
+                # and improving the naming rules never reached the docks already
+                # in the table. Both were silent: the coverage figure simply
+                # stayed where the last seed left it.
+                #
+                # Idempotent and safe to run nightly - it only touches docks with
+                # no label, so a dispatcher's correction survives it.
+                try:
+                    classified = (
+                        await classify_unlabelled_locations(session)
+                    )["labelled"]
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    logger.exception("node_classification_failed", hub_id=hub_id)
+                    classified = 0
+
                 merges = 0
                 if await redis.set(
                     _global_job_key("propose_merges", today), "1", nx=True, ex=86400
@@ -227,6 +249,7 @@ class LearningLoopScheduler:
                 silences_recorded=silences,
                 linkage_flags_raised=sum(flags.values()),
                 merges_proposed=merges,
+                docks_classified=classified,
             )
         except Exception:
             logger.exception("learning_loop_scheduled_run_failed", hub_id=hub_id)
