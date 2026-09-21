@@ -121,6 +121,15 @@ export function RecordHealthPanel({ hubId }: { hubId: string }) {
                 Inherited means a previous operator measured it at the same dock. Counted
                 separately and never averaged with ours — they are different measurements, and
                 which one answers is decided per dock rather than blended.
+                {data.dwell_thin > 0 && (
+                  <>
+                    {' '}
+                    <span className="text-[var(--amber)]">
+                      {data.dwell_thin} rest on fewer than five stops
+                    </span>{' '}
+                    — shown anyway, because the alternative at those docks is no figure at all.
+                  </>
+                )}
               </p>
             </section>
           )}

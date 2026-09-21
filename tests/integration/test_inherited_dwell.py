@@ -18,6 +18,7 @@ from sqlalchemy import select, text
 
 from app.identity.inherited_dwell import (
     MIN_OWN_SAMPLES,
+    THIN_SAMPLE_COUNT,
     dwell_estimate,
     import_inherited_dwell,
 )
@@ -312,6 +313,77 @@ class TestWhichFigureAnswers:
 
         assert estimate.p50_seconds is None
         assert estimate.source is None
+
+
+class TestThinnessIsVisible:
+    """Found by running the real import, not by a test.
+
+    Against the design partner's export, 140 docks received a figure and **the
+    median dock had four observations.** A coverage count alone reads as far
+    stronger than that, and the first version of `dwell_estimate` gated our own
+    figures on ten samples while accepting an inherited one from a single stop -
+    which looks backwards until the two thresholds are named as answering
+    different questions.
+    """
+
+    async def test_a_figure_from_one_stop_is_marked_thin(self, db_session):
+        profile = ReceiverProfile(
+            location_id=uuid.uuid4(),
+            inherited_dwell_p50_seconds=115,
+            inherited_dwell_sample_count=1,
+            inherited_dwell_source=SOURCE,
+        )
+
+        estimate = dwell_estimate(profile)
+
+        assert estimate.p50_seconds == 115, "thin is reported, not withheld"
+        assert estimate.is_thin
+
+    async def test_a_well_sampled_figure_is_not(self, db_session):
+        profile = ReceiverProfile(
+            location_id=uuid.uuid4(),
+            inherited_dwell_p50_seconds=115,
+            inherited_dwell_sample_count=THIN_SAMPLE_COUNT,
+            inherited_dwell_source=SOURCE,
+        )
+
+        assert not dwell_estimate(profile).is_thin
+
+    async def test_it_is_reported_rather_than_withheld(self, db_session):
+        """The alternative at most of these docks is no figure at all. Dropping
+        a thin one would throw away the cold start this exists to solve - a floor
+        of ten would have kept 29% of the real import."""
+        profile = ReceiverProfile(
+            location_id=uuid.uuid4(),
+            inherited_dwell_p50_seconds=115,
+            inherited_dwell_sample_count=2,
+            inherited_dwell_source=SOURCE,
+        )
+
+        estimate = dwell_estimate(profile)
+
+        assert estimate.p50_seconds is not None
+        assert estimate.source == SOURCE_INHERITED
+
+    async def test_a_dock_with_nothing_is_not_thin_it_is_absent(self, db_session):
+        """Thin and absent are different states and a count that merged them
+        would report an empty hub as merely under-sampled."""
+        estimate = dwell_estimate(ReceiverProfile(location_id=uuid.uuid4()))
+
+        assert estimate.p50_seconds is None
+        assert not estimate.is_thin
+
+    async def test_the_console_counts_the_thin_ones(self, db_session):
+        from app.reporting.record_health import build_record_health
+
+        hub, _loc = await _dock(db_session, ref="ACCT-12")
+        await import_inherited_dwell(db_session, {"ACCT-12": [100.0]}, source=SOURCE)
+        await db_session.commit()
+
+        health = await build_record_health(db_session, hub_id=hub.id)
+
+        assert health.dwell.inherited == 1
+        assert health.dwell.thin == 1
 
 
 class TestItIsVisibleInTheConsole:
