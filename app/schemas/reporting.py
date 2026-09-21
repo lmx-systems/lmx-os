@@ -388,3 +388,53 @@ class ClassificationCoverageView(BaseModel):
     unlabelled: int
     unlabelled_percent: float | None
     meets_target: bool
+
+
+class AttentionCountsView(BaseModel):
+    """How much work is waiting for a person, in one call (`CON-1`).
+
+    The dispatcher's board separates what to do *now* from what to record about
+    what already happened, and the second is behind a tab. A tab with no count
+    is a tab nobody opens - so the separation that makes the board workable
+    would quietly stop the recording work getting done, trading one failure for
+    another.
+
+    One small query rather than mounting four panels. Before this the board
+    fetched the late-order queue, the merge queue and the labelling queue on
+    every load whether or not anybody looked at them.
+    """
+
+    late_orders: int
+    merge_proposals: int
+    unlabelled_docks: int
+
+    @property
+    def total(self) -> int:
+        return self.late_orders + self.merge_proposals + self.unlabelled_docks
+
+
+class OrderLookupRow(BaseModel):
+    """One order as a dispatcher on the phone needs to see it (`CON-1`).
+
+    Status and the two timestamps that answer *"where is it and is it late"*,
+    plus the shop so a half-remembered name finds it. Enough to answer the call;
+    the explanation endpoint carries the rest.
+    """
+
+    order_id: uuid.UUID
+    external_ref: str
+    shop_name: str | None
+    status: str
+    sla_tier: str | None
+    requested_at: datetime
+    promised_at: datetime | None
+    delivered_at: datetime | None
+    minutes_late: int | None
+
+
+class OrderLookupPage(BaseModel):
+    """A page of matches, with the total so a dispatcher knows to narrow it."""
+
+    items: list[OrderLookupRow]
+    total: int
+    limit: int

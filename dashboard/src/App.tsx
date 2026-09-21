@@ -4,8 +4,10 @@ import { KpiStrip } from './components/KpiStrip'
 import { OrderPipeline } from './components/OrderPipeline'
 import { HoldQueueTable } from './components/HoldQueueTable'
 import { ExceptionsPanel } from './components/ExceptionsPanel'
+import { Tabs } from './components/ui/Tabs'
 import { DockLabellingPanel } from './components/DockLabellingPanel'
 import { MergeReviewPanel } from './components/MergeReviewPanel'
+import { OrderLookupPanel } from './components/OrderLookupPanel'
 import { RecordHealthPanel } from './components/RecordHealthPanel'
 import { RecordLayerPanel } from './components/RecordLayerPanel'
 import { FleetMap } from './components/FleetMap'
@@ -37,6 +39,11 @@ function App() {
   // loggedIn/profile gating exactly.
   const [loggedIn, setLoggedIn] = useState(() => getToken() !== null)
   const [opsProfile, setOpsProfile] = useState<OpsProfileView | null>(null)
+  // Which horizon the left column is showing (CON-1). Not persisted: a
+  // dispatcher opening the board is starting a shift, and the thing they came
+  // for is the live queue - restoring "To record" from last night would put the
+  // wrong half in front of them at the worst moment.
+  const [tab, setTab] = useState('now')
   const [profileError, setProfileError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -92,6 +99,15 @@ function App() {
   // endpoints land a tick apart and briefly contradict each other, which is
   // worse here than anywhere: the whole panel is a claim that nothing else on
   // the board needs attention.
+  // Counts only, so the badge is honest without loading the panels behind it.
+  // Polled on the same tick as everything else: a late order becoming due
+  // during a shift should show up without a reload.
+  const attention = usePolling(
+    () => api.attentionCounts(hubId),
+    POLL_INTERVAL_MS,
+    [hubId],
+    enabled,
+  )
   const exceptions = usePolling(
     () => api.operationsExceptions(hubId),
     POLL_INTERVAL_MS,
@@ -148,40 +164,75 @@ function App() {
             />
 
             <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr]">
+              {/* Two horizons, not one scroll (CON-1: "a working dispatcher can
+                  run a day on it"). Everything under "To record" is real work
+                  and none of it is urgent; interleaved with the hold queue it
+                  put a fortnight-old labelling question between a dispatcher
+                  and the thing they came to the screen for.
+
+                  The badge is what keeps the split honest. A tab with no count
+                  is a tab nobody opens, which would trade a cluttered board for
+                  work that silently stops getting done. */}
               <div className="flex flex-col gap-4">
-                <OrderPipeline summary={summary.data} error={summary.error} loading={summary.loading} />
-                {/* Above the hold queue on purpose: the hold queue is work
-                    going to plan and this is work that is not, so a dispatcher
-                    scanning top-down should meet the exceptions first.
-                    Deliberately outside the admin block - it is a read, and a
-                    dispatcher on a viewer account who cannot see their own
-                    exceptions cannot run a day (CON-1). */}
-                <ExceptionsPanel
-                  data={exceptions.data}
-                  error={exceptions.error}
-                  loading={exceptions.loading}
+                <Tabs
+                  tabs={[
+                    { id: 'now', label: 'Dispatching' },
+                    {
+                      id: 'record',
+                      label: 'To record',
+                      badge: attention.data
+                        ? attention.data.late_orders +
+                          attention.data.merge_proposals +
+                          attention.data.unlabelled_docks
+                        : undefined,
+                    },
+                  ]}
+                  active={tab}
+                  onChange={setTab}
                 />
-                <HoldQueueTable key={hubId} data={held.data} error={held.error} loading={held.loading} />
-                {/* Below the live work, deliberately. This is what to record
-                    about deliveries that already happened - a fourteen-day-old
-                    question does not belong in front of somebody deciding what
-                    to dispatch in the next minute (REC-2, REC-4). */}
-                <RecordLayerPanel key={`record-${hubId}`} hubId={hubId} />
-                {/* Below what a person has to do about it: this is the
-                    read-back, and it exists because every writer in the record
-                    layer was wired recently and one that silently stops looks
-                    exactly like a quiet week (REC-1..REC-4). */}
-                <RecordHealthPanel key={`health-${hubId}`} hubId={hubId} />
-                {/* Not hub-scoped, so no key on hubId: the same physical dock
-                    can be reached from two hubs and that pair is the most
-                    valuable merge to catch (IDN-2). Renders nothing when the
-                    queue is empty, which is most days. */}
-                <MergeReviewPanel isAdmin={opsProfile.role === 'admin'} />
-                {/* Also not hub-scoped: a dock is a physical place and its class
-                    does not change with which hub serves it (IDN-3). Renders
-                    nothing once the tail is empty, which is the state the
-                    done-when is trying to reach. */}
-                <DockLabellingPanel />
+
+                {tab === 'now' && (
+                  <>
+                    {/* First, because it is what somebody reaches for when the
+                        phone rings - and that is not a scheduled moment. Before
+                        this a dispatcher could not look up an order at all once
+                        it left the hold queue (CON-1). */}
+                    <OrderLookupPanel key={`lookup-${hubId}`} hubId={hubId} />
+                    <OrderPipeline summary={summary.data} error={summary.error} loading={summary.loading} />
+                    {/* Above the hold queue on purpose: the hold queue is work
+                        going to plan and this is work that is not, so a
+                        dispatcher scanning top-down should meet the exceptions
+                        first. Deliberately outside the admin block - it is a
+                        read, and a dispatcher on a viewer account who cannot
+                        see their own exceptions cannot run a day (CON-1). */}
+                    <ExceptionsPanel
+                      data={exceptions.data}
+                      error={exceptions.error}
+                      loading={exceptions.loading}
+                    />
+                    <HoldQueueTable key={hubId} data={held.data} error={held.error} loading={held.loading} />
+                  </>
+                )}
+
+                {/* Mounted only when the tab is open, which is what makes the
+                    loading lazy: each of these fetches on mount, and before the
+                    split all four ran on every page view whether anybody looked
+                    or not. */}
+                {tab === 'record' && (
+                  <>
+                    <RecordLayerPanel key={`record-${hubId}`} hubId={hubId} />
+                    {/* Not hub-scoped: the same physical dock can be reached
+                        from two hubs and that pair is the most valuable merge
+                        to catch (IDN-2). */}
+                    <MergeReviewPanel isAdmin={opsProfile.role === 'admin'} />
+                    {/* Also not hub-scoped: a dock is a physical place and its
+                        class does not change with which hub serves it (IDN-3). */}
+                    <DockLabellingPanel />
+                    {/* Last, because it is the read-back rather than the work:
+                        is the record being written at all (REC-1..REC-4). */}
+                    <RecordHealthPanel key={`health-${hubId}`} hubId={hubId} />
+                  </>
+                )}
               </div>
               <div className="flex flex-col gap-4">
                 {/* Map above the roster: "where is my fleet" is the glance a

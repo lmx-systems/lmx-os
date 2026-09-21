@@ -519,3 +519,35 @@ export const NODE_CLASSES = [
   { code: 'transfer', label: 'Transfer / terminal' },
   { code: 'municipal', label: 'Municipal fleet' },
 ] as const
+
+/**
+ * How much work is waiting for a person (docs/ROADMAP_1.5.md CON-1).
+ *
+ * Counts only, in one call. The panels behind the "To record" tab load their
+ * own detail when somebody opens it — before this they all loaded on every page
+ * view whether or not anybody looked.
+ */
+export interface AttentionCounts {
+  late_orders: number
+  merge_proposals: number
+  unlabelled_docks: number
+}
+
+/** One order as a dispatcher on the phone needs to see it (CON-1). */
+export interface OrderLookupRow {
+  order_id: string
+  external_ref: string
+  shop_name: string | null
+  status: string
+  sla_tier: string | null
+  requested_at: string
+  promised_at: string | null
+  delivered_at: string | null
+  minutes_late: number | null
+}
+
+export interface OrderLookupPage {
+  items: OrderLookupRow[]
+  total: number
+  limit: number
+}

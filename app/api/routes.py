@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.batch_queue.clustering import cluster_members
@@ -70,6 +70,9 @@ from app.schemas.reporting import (
     LateOrderView,
     LinkageFlagView,
     OrderExplanationView,
+    OrderLookupPage,
+    OrderLookupRow,
+    AttentionCountsView,
     ClassificationCoverageView,
     MergeProposalView,
     NodeClassRequest,
@@ -190,6 +193,38 @@ async def operations_scorecard(
             )
             for r in scorecard.rates
         ],
+    )
+
+
+@router.get("/operations/attention-counts", response_model=AttentionCountsView)
+async def attention_counts(
+    hub_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> AttentionCountsView:
+    """How much is waiting for a person, without loading any of it (`CON-1`).
+
+    The board puts "what to record about what already happened" behind a tab, so
+    that a dispatcher deciding what to dispatch in the next minute is not
+    scrolling past a fortnight-old labelling queue to reach the hold queue. **A
+    tab with no count is a tab nobody opens**, which would trade a cluttered
+    board for work that silently never gets done.
+
+    Counts only. The panels behind the tab load their own detail when somebody
+    opens it - before this they all loaded on every page view whether or not
+    anybody looked.
+    """
+    late = len(await late_orders_awaiting_judgement(session, hub_id=hub_id))
+    merges = len(await pending_merges(session))
+    unlabelled = await session.scalar(
+        select(func.count())
+        .select_from(Location)
+        .where(Location.node_class.is_(None), Location.merged_into_id.is_(None))
+    )
+    return AttentionCountsView(
+        late_orders=late,
+        merge_proposals=merges,
+        unlabelled_docks=int(unlabelled or 0),
     )
 
 
@@ -690,6 +725,81 @@ async def override_order(
         order_status_before=outcome.previous_status.value,
         order_status_after=outcome.new_status.value,
     )
+
+
+@router.get("/operations/orders", response_model=OrderLookupPage)
+async def lookup_orders(
+    hub_id: uuid.UUID,
+    q: str = Query(min_length=2, max_length=120),
+    limit: int = Query(default=25, ge=1, le=100),
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> OrderLookupPage:
+    """Find an order (`docs/ROADMAP_1.5.md` CON-1).
+
+    **A dispatcher could not do this.** The hold queue's search box filters the
+    held list, so an order that has been released, assigned or delivered was
+    unfindable - while `GET /client/orders?q=` has let the *customer* search
+    their own orders all along. The person phoning could find it; the person
+    answering could not.
+
+    Searches the same fields the client-facing search does, for the same reason:
+    a caller quotes whichever reference they have to hand, and which one that is
+    is not something we get to choose. Scoped by hub rather than by client,
+    because a dispatcher works a hub and does not know which customer an order
+    belongs to until they find it - that being the point.
+
+    Ordered newest first. A reference quoted on the phone is nearly always
+    recent, and a dispatcher scanning for it should not start in March.
+    """
+    pattern = f"%{q.strip()}%"
+    base = (
+        select(Order, Shop.name)
+        .outerjoin(Shop, Order.shop_id == Shop.id)
+        .where(
+            Order.hub_id == hub_id,
+            or_(
+                Order.external_order_ref.ilike(pattern),
+                Order.source_order_ref.ilike(pattern),
+                Order.delivery_contact_name.ilike(pattern),
+                Order.delivery_address.ilike(pattern),
+                Shop.name.ilike(pattern),
+            ),
+        )
+    )
+    total = await session.scalar(
+        select(func.count()).select_from(base.order_by(None).subquery())
+    )
+    rows = (
+        await session.execute(
+            base.order_by(Order.requested_at.desc()).limit(limit)
+        )
+    ).all()
+
+    items = []
+    for order, shop_name in rows:
+        late = None
+        if order.promised_at is not None:
+            # Against the delivery if it landed, against now if it has not -
+            # "40 minutes late and still out" is the sentence a dispatcher needs,
+            # and a null here would read as on time.
+            reference = order.delivered_at or datetime.now(timezone.utc)
+            seconds = (reference - order.promised_at).total_seconds()
+            late = int(seconds // 60) if seconds > 0 else None
+        items.append(
+            OrderLookupRow(
+                order_id=order.id,
+                external_ref=order.external_order_ref,
+                shop_name=shop_name,
+                status=order.status.value,
+                sla_tier=order.sla_tier,
+                requested_at=order.requested_at,
+                promised_at=order.promised_at,
+                delivered_at=order.delivered_at,
+                minutes_late=late,
+            )
+        )
+    return OrderLookupPage(items=items, total=int(total or 0), limit=limit)
 
 
 @router.get("/orders/{order_id}/explanation", response_model=OrderExplanationView)
