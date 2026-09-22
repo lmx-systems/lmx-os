@@ -1,6 +1,8 @@
 import { clearToken, getToken } from './auth'
 import type {
+  AdminClient,
   ClientOnboardingBody,
+  ClientRate,
   ClientOnboardingResult,
   CodDisputeReport,
   DriverDevice,
@@ -376,6 +378,24 @@ export const api = {
   // Repeat COD disputes per account (docs/ROADMAP.md W2).
   codDisputes: (hubId: string, windowDays = 30) =>
     request<CodDisputeReport>(`/admin/hubs/${hubId}/cod-disputes?window_days=${windowDays}`),
+
+  // Clients on a hub. Nothing listed them until this: four endpoints take a
+  // client_id and the only way to get one was to read the database
+  // (docs/ROADMAP_AUDIT_2026-09.md).
+  listClients: (hubId: string) =>
+    request<AdminClient[]>(`/admin/hubs/${hubId}/clients`),
+
+  // Rate cards (docs/ROADMAP.md F5). The GET returns the rate in force now, one
+  // per tier - not the version history, which since migration 0045 every edit
+  // adds to.
+  listClientRates: (clientId: string) =>
+    request<ClientRate[]>(`/admin/clients/${clientId}/rates`),
+
+  upsertClientRate: (clientId: string, body: Omit<ClientRate, 'rate_id'>) =>
+    request<ClientRate>(`/admin/clients/${clientId}/rates`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 
   // The reverse leg (docs/ROADMAP.md W1). `awaiting=true` is the counter-facing
   // cut: everything still waiting on a pickup, oldest first.
