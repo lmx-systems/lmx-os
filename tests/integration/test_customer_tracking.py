@@ -650,3 +650,59 @@ async def test_a_hot_shot_recipient_gets_the_tier_specific_copy(
         await db_session.execute(select(Message).where(Message.channel == "recipient"))
     ).scalar_one()
     assert "Hot Shot" in message.body
+
+
+class TestEveryStatusSaysSomethingTrue:
+    """A recipient is never told a finished delivery is still coming.
+
+    `OrderStatus.returned` is terminal and produced by `app/delivery/resolution.py`,
+    and it had no entry here - so it fell through to *"In progress. Your delivery
+    is being handled"*, permanently, for a parcel that had gone back to the hub.
+    The machine-facing map in `app/orders/state_machine.py` carried
+    `RETURNED_TO_HUB` all along and even annotates it "already terminal": the
+    integration told the truth and the person did not.
+
+    Found by auditing the client-facing layer the way the record layer was
+    audited (`docs/ROADMAP_AUDIT_2026-09.md`).
+    """
+
+    def test_every_status_has_its_own_words(self):
+        from app.models.order import OrderStatus
+        from app.tracking.service import _RECIPIENT_STATUS
+
+        missing = [s.value for s in OrderStatus if s not in _RECIPIENT_STATUS]
+
+        assert missing == [], (
+            "these render as the generic fallback, which claims a delivery is in "
+            f"progress: {missing}"
+        )
+
+    def test_no_terminal_state_reads_as_in_progress(self):
+        """The sharp version. `delivered` and `cancelled` were always covered;
+        `returned` was not, and it is the one where a recipient waits."""
+        from app.orders.state_machine import TERMINAL
+        from app.tracking.service import _FALLBACK_STATUS, _RECIPIENT_STATUS
+
+        for status in TERMINAL:
+            headline, _detail = _RECIPIENT_STATUS.get(status, _FALLBACK_STATUS)
+            assert (headline, _detail) != _FALLBACK_STATUS, (
+                f"{status.value} is terminal and would read as 'In progress'"
+            )
+
+    def test_returned_says_it_went_back(self):
+        from app.models.order import OrderStatus
+        from app.tracking.service import _RECIPIENT_STATUS
+
+        headline, detail = _RECIPIENT_STATUS[OrderStatus.returned]
+
+        assert headline == "Returned"
+        assert "gone back" in detail
+        assert "in progress" not in detail.lower()
+
+    def test_the_fallback_still_exists_for_a_status_nobody_has_written_yet(self):
+        """Kept deliberately. A new status added without a line above would
+        otherwise render an empty page - "in progress" is the safe thing to say
+        when we genuinely do not know, and the wrong thing when we do."""
+        from app.tracking.service import _FALLBACK_STATUS
+
+        assert _FALLBACK_STATUS == ("In progress", "Your delivery is being handled.")

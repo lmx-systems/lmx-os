@@ -95,7 +95,22 @@ _RECIPIENT_STATUS = {
         "Attempted",
         "We couldn't complete this delivery. Our team is in touch with the sender.",
     ),
+    # Terminal, and it was falling through to the fallback - so a recipient whose
+    # parcel had gone back was told "In progress. Your delivery is being handled"
+    # for ever, and waited for something that was never coming. The machine-facing
+    # map in `app/orders/state_machine.py` had `RETURNED_TO_HUB` all along and
+    # even annotates it "already terminal": the integration told the truth and the
+    # person did not.
+    OrderStatus.returned: (
+        "Returned",
+        "We couldn't deliver this, so it has gone back to the sender. "
+        "Our team is in touch with them.",
+    ),
 }
+# Every status a recipient can reach now has its own entry, so this should be
+# unreachable. Kept because a new status added without a line above would
+# otherwise render as an empty page - "in progress" is the safe thing to say
+# when we genuinely do not know, and the wrong thing to say when we do.
 _FALLBACK_STATUS = ("In progress", "Your delivery is being handled.")
 
 
