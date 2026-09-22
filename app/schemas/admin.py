@@ -210,6 +210,29 @@ class ShopDisputeRowView(BaseModel):
     dispute_rate: float
 
 
+class AdminDriverDeviceView(BaseModel):
+    """One device a driver has signed in on, as an admin needs to see it.
+
+    Separate from `DriverDeviceView` because the two answer different questions.
+    The driver's own list answers *"where am I signed in"* and carries
+    `is_current`, which is meaningless to a third party. An admin is answering
+    *"which of these is the phone in the taxi"*, so this carries `registered_at`
+    and `revoked_at` instead — when it appeared, and whether somebody has
+    already dealt with it.
+
+    **Revoked devices are included**, which the driver-facing list excludes.
+    *"No device"* and *"a device revoked on Tuesday"* are different answers to
+    *"why can this driver not sign in"*, and only one of them is somebody's
+    mistake.
+    """
+
+    device_id: str
+    device_name: str | None
+    last_seen_at: datetime
+    registered_at: datetime
+    revoked_at: datetime | None
+
+
 class CodDisputeReportView(BaseModel):
     window_start: datetime
     window_end: datetime

@@ -2,6 +2,11 @@ import { clearToken, getToken } from './auth'
 import type {
   ClientOnboardingBody,
   ClientOnboardingResult,
+  CodDisputeReport,
+  DriverDevice,
+  GigDensityReport,
+  GigJob,
+  HubClosure,
   DriverOnboardingBody,
   DriverOnboardingResult,
   HubSettings,
@@ -341,4 +346,42 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reason: reason ?? null }),
     }),
+
+  // Days the hub is not operating (docs/ROADMAP.md R6). The optimizer skips
+  // dispatch and the nightly job skips the day; all three endpoints existed
+  // with nothing calling them (docs/ROADMAP_AUDIT_2026-09.md).
+  listHubClosures: (hubId: string) =>
+    request<HubClosure[]>(`/admin/hubs/${hubId}/closures`),
+
+  addHubClosure: (hubId: string, body: { closure_date: string; reason: string | null }) =>
+    request<HubClosure>(`/admin/hubs/${hubId}/closures`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  removeHubClosure: (hubId: string, closureDate: string) =>
+    requestVoid(`/admin/hubs/${hubId}/closures/${closureDate}`, { method: 'DELETE' }),
+
+  // A driver's devices, and revoking one on their behalf. The revocation
+  // endpoint existed; nothing could list what to revoke, so the "driver lost
+  // their phone and rings dispatch" path it was written for could not be
+  // walked (docs/ROADMAP_AUDIT_2026-09.md).
+  listDriverDevices: (driverId: string) =>
+    request<DriverDevice[]>(`/admin/drivers/${driverId}/devices`),
+
+  revokeDriverDevice: (driverId: string, deviceId: string) =>
+    requestVoid(`/admin/drivers/${driverId}/devices/${deviceId}`, { method: 'DELETE' }),
+
+  // Repeat COD disputes per account (docs/ROADMAP.md W2).
+  codDisputes: (hubId: string, windowDays = 30) =>
+    request<CodDisputeReport>(`/admin/hubs/${hubId}/cod-disputes?window_days=${windowDays}`),
+
+  // The gig path (docs/ROADMAP.md G3, G12).
+  listGigJobs: (hubId: string, status?: string) =>
+    request<GigJob[]>(
+      `/admin/hubs/${hubId}/gig-jobs${status ? `?status=${encodeURIComponent(status)}` : ''}`,
+    ),
+
+  gigDensity: (hubId: string, days = 14) =>
+    request<GigDensityReport>(`/admin/hubs/${hubId}/gig-density?days=${days}`),
 }

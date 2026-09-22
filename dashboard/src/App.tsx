@@ -21,6 +21,9 @@ import { UrgencyRulesPanel } from './components/UrgencyRulesPanel'
 import { DriverDocumentsPanel } from './components/DriverDocumentsPanel'
 import { PendingSignupsPanel } from './components/PendingSignupsPanel'
 import { ProposedRulesPanel } from './components/ProposedRulesPanel'
+import { CodDisputesPanel } from './components/CodDisputesPanel'
+import { DriverDevicesPanel } from './components/DriverDevicesPanel'
+import { GigPathPanel } from './components/GigPathPanel'
 import { LoginPage } from './components/LoginPage'
 import { Toast } from './components/ui/Toast'
 import { usePolling } from './hooks/usePolling'
@@ -233,6 +236,13 @@ function App() {
                     {/* Last, because it is the read-back rather than the work:
                         is the record being written at all (REC-1..REC-4). */}
                     <RecordHealthPanel key={`health-${hubId}`} hubId={hubId} />
+                    {/* Recording work rather than dispatching work: a repeat
+                        disputer is a conversation to have this month, not this
+                        minute. Deliberately NOT in the tab badge — with no SMS
+                        provider configured every dispute is un-escalated by
+                        definition, so the count would never fall and a badge that
+                        never falls is the "tab nobody opens" failure inverted. */}
+                    <CodDisputesPanel key={`cod-${hubId}`} hubId={hubId} />
                   </>
                 )}
               </div>
@@ -284,8 +294,21 @@ function App() {
                       isAdmin={opsProfile.role === 'admin'}
                       onToast={showToast}
                     />
+                    {/* Beside the driver form, because it is the other half of
+                        the same job. The revocation endpoint had existed for
+                        "the driver lost their phone and rings dispatch" — with
+                        nothing that could list a driver's devices to an admin,
+                        so ops had to already know an id only the driver could
+                        give them (docs/ROADMAP_AUDIT_2026-09.md). */}
+                    <DriverDevicesPanel drivers={fleet.data} onToast={showToast} />
                     <UrgencyRulesPanel key={`urgency-${hubId}`} hubId={hubId} onToast={showToast} />
                     <ProposedRulesPanel key={`proposed-${hubId}`} hubId={hubId} onToast={showToast} />
+                    {/* Jobs and density in one card: the density report is a
+                        summary of exactly those jobs, and split apart a reader
+                        would have to join them by eye to know whether 12%
+                        sequenced is 3 of 25 or 300 of 2500. Hides itself when
+                        the path is empty, which is today. */}
+                    <GigPathPanel key={`gig-${hubId}`} hubId={hubId} />
                     {/* No hub key: these are fleet-wide distributions over durable
                         rows, so they do not change when the hub picker does. Both
                         endpoints had existed with no consumer at all (F7). */}

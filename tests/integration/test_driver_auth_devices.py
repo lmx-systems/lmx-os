@@ -147,3 +147,108 @@ async def test_register_push_token_404s_for_a_device_that_never_signed_in(db_ses
             session=db_session,
         )
     assert exc_info.value.status_code == 404
+
+
+class TestAnAdminCanSeeWhatToRevoke:
+    """The list that made the revocation usable (`docs/ROADMAP_AUDIT_2026-09.md`).
+
+    `DELETE /admin/drivers/{id}/devices/{device_id}` describes itself as the
+    *"driver calls dispatch, ops revokes on their behalf — lost phone, no app
+    access"* path, and it takes a device id. The only list of device ids was
+    `GET /driver/me/devices`, which is driver-authenticated — so ops had to
+    already know an id they could only have got from the driver, who has lost
+    the phone. That is the one case the route exists for.
+    """
+
+    async def _admin(self, db_session):
+        from app.models.ops_user import OpsUser
+        from app.ops_auth.dependencies import AuthedOpsUser
+
+        ops_id = uuid.uuid4()
+        db_session.add(
+            OpsUser(
+                id=ops_id,
+                email=f"ops-{ops_id.hex[:6]}@lmxit.com",
+                password_hash="x",
+                name="Ops Admin",
+                role="admin",
+            )
+        )
+        await db_session.commit()
+        return AuthedOpsUser(
+            ops_user_id=str(ops_id), email="ops@lmxit.com", name="Ops Admin", role="admin"
+        )
+
+    async def test_it_lists_the_devices_a_driver_signed_in_on(
+        self, db_session, real_redis_client
+    ):
+        from app.api.admin_routes import admin_list_driver_devices
+
+        _, driver_id = await _seed_driver(db_session)
+        await _sign_in(db_session, "+15555550300", "device-a")
+        admin = await self._admin(db_session)
+
+        devices = await admin_list_driver_devices(
+            driver_id=str(driver_id), session=db_session, _admin=admin
+        )
+
+        assert [d.device_id for d in devices] == ["device-a"]
+        assert devices[0].device_name == "Test Phone"
+        assert devices[0].revoked_at is None
+
+    async def test_a_revoked_device_stays_listed(self, db_session, real_redis_client):
+        # "No device" and "a device somebody revoked on Tuesday" are different
+        # answers to "why can this driver not sign in", and the driver-facing
+        # list — which filters revoked rows out — cannot tell them apart.
+        from app.api.admin_routes import (
+            admin_list_driver_devices,
+            admin_revoke_driver_device,
+        )
+
+        _, driver_id = await _seed_driver(db_session)
+        await _sign_in(db_session, "+15555550300", "device-a")
+        admin = await self._admin(db_session)
+
+        await admin_revoke_driver_device(
+            driver_id=str(driver_id),
+            device_id="device-a",
+            session=db_session,
+            _admin=admin,
+        )
+        devices = await admin_list_driver_devices(
+            driver_id=str(driver_id), session=db_session, _admin=admin
+        )
+
+        assert len(devices) == 1
+        assert devices[0].revoked_at is not None
+
+    async def test_the_phone_in_somebodys_hand_is_first(
+        self, db_session, real_redis_client
+    ):
+        from app.api.admin_routes import admin_list_driver_devices
+
+        _, driver_id = await _seed_driver(db_session)
+        await _sign_in(db_session, "+15555550300", "old-phone")
+        await _sign_in(db_session, "+15555550300", "new-phone")
+        admin = await self._admin(db_session)
+
+        devices = await admin_list_driver_devices(
+            driver_id=str(driver_id), session=db_session, _admin=admin
+        )
+
+        assert devices[0].device_id == "new-phone"
+
+    async def test_a_driver_who_never_signed_in_has_no_devices(
+        self, db_session, real_redis_client
+    ):
+        from app.api.admin_routes import admin_list_driver_devices
+
+        _, driver_id = await _seed_driver(db_session)
+        admin = await self._admin(db_session)
+
+        assert (
+            await admin_list_driver_devices(
+                driver_id=str(driver_id), session=db_session, _admin=admin
+            )
+            == []
+        )

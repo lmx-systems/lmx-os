@@ -317,6 +317,31 @@ gig density, gig jobs — are weaker than a missing writer, because an admin *ca
 reach them. Recorded rather than fixed; building five surfaces unprompted would
 be inventing work.
 
+**Now built, and one of the five turned out not to be curl-only but unusable.**
+`DELETE /admin/drivers/{id}/devices/{device_id}` describes itself as the *"driver
+calls dispatch, ops revokes on their behalf — lost phone, no app access"* path,
+and it takes a device id. The only list of device ids was
+`GET /driver/me/devices`, which is **driver**-authenticated. So ops had to
+already know an id they could only have got from the driver — who has lost the
+phone. That is the one case the route exists for, and it needed a new endpoint
+(`GET /admin/drivers/{id}/devices`), not a surface.
+
+The other four became four panels rather than five, and none of them a new tab:
+
+| Route | Where | Why there |
+|---|---|---|
+| Hub closures | folded into `HubSettingsPanel` | The same kind of standing hub fact as the state code — set once, rarely revisited, invisible until it matters |
+| Device revocation | `DriverDevicesPanel`, beside driver onboarding | The other half of the same job |
+| COD disputes | `CodDisputesPanel`, on the *To record* tab | Recording work: a repeat disputer is this month's conversation, not this minute's |
+| Gig jobs + gig density | one `GigPathPanel` | Density summarises exactly those jobs; split apart a reader must join them by eye to know whether 12% sequenced is 3 of 25 or 300 of 2500 |
+
+**The COD count is deliberately not in the tab badge**, and the reason is the
+badge rule stated above read backwards. With no SMS provider configured *every*
+dispute is un-escalated by definition, so the count would never fall — and a
+badge that never falls is the *"tab nobody opens"* failure inverted. The panel
+says so in words instead, once, which is what `CodDisputeReportView`'s own
+comment argues: one deployment-wide fact rather than N per-account failures.
+
 ### A bug in the fix, caught by its own test
 
 `include_applied: bool = Query(default=False)` hands a **`Query` object** to a

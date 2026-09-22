@@ -619,3 +619,95 @@ export const US_STATE_CODES = (
   'MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA ' +
   'WV WI WY'
 ).split(' ')
+
+/**
+ * A day the hub is not operating (docs/ROADMAP.md R6).
+ *
+ * A local calendar date in the hub's own timezone, not an instant: a hub closes
+ * for a day, not for 24 hours from midnight UTC.
+ */
+export interface HubClosure {
+  closure_date: string
+  reason: string | null
+  created_at: string
+}
+
+/** One device a driver has signed in on (docs/ROADMAP_AUDIT_2026-09.md).
+ *
+ *  `device_id` is a client-generated per-install id held in the app's
+ *  SecureStore, not an OS advertising id — so it identifies an installation,
+ *  and a reinstall is a new device. */
+export interface DriverDevice {
+  device_id: string
+  device_name: string | null
+  last_seen_at: string
+  registered_at: string
+  revoked_at: string | null
+}
+
+/** One account's COD dispute history over the report window (docs/ROADMAP.md W2). */
+export interface ShopDisputeRow {
+  shop_id: string
+  shop_name: string
+  client_id: string
+  client_name: string
+  disputed_count: number
+  collected_count: number
+  disputed_amount_cents: number
+  dispute_rate: number
+}
+
+/** Repeat COD disputes per account (docs/ROADMAP.md W2). */
+export interface CodDisputeReport {
+  window_start: string
+  window_end: string
+  disputed_count: number
+  collected_count: number
+  disputed_amount_cents: number
+  /** Disputes the distributor was never told about. */
+  unescalated_count: number
+  /** With no SMS provider configured every dispute is un-escalated, and that is
+   *  one deployment-wide fact rather than N per-account failures. */
+  sms_configured: boolean
+  shops: ShopDisputeRow[]
+}
+
+/** One gig-platform job (docs/ROADMAP.md G3). Not an order: the platform set
+ *  the windows and the pay, and we cannot hold one for a cluster-mate. */
+export interface GigJob {
+  gig_job_id: string
+  hub_id: string
+  driver_id: string | null
+  source_platform: string
+  intake_source: string
+  platform_job_ref: string
+  pickup_address: string
+  dropoff_address: string | null
+  pickup_window_open: string
+  pickup_window_close: string
+  pay_cents: number
+  distance_miles: string | null
+  status: string
+}
+
+/** Volume and pairing figures for the gig path (docs/ROADMAP.md G12). */
+export interface GigDensityReport {
+  hub_id: string
+  window_days: number
+  total_offers: number
+  offers_per_day: number
+  accepted_count: number
+  declined_count: number
+  delivered_count: number
+  /** Null rather than 0 when there were no offers: "we accepted none of
+   *  nothing" is not a 0% acceptance rate. */
+  acceptance_rate: number | null
+  active_driver_count: number
+  jobs_per_driver_per_day: number | null
+  pilot_jobs_per_driver_per_day: number
+  /** Denominator and numerator beside the ratio: at these volumes "1 of 3" and
+   *  "33%" are very different things to read. */
+  measurable_delivered_count: number
+  sequenced_delivered_count: number
+  sequenced_share: number | null
+}
