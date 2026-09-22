@@ -117,7 +117,7 @@ documents.
 
 | | |
 |---|---|
-| Accounts in the whole-book export | 230 |
+| Accounts in the whole-book export | 230 distinct `receiver_id` values — **229 of them real.** The 230th is the empty string, and 68 stops carry it. `AGT-1`'s row is named for "the 230 account IDs" and one of them is not an account |
 | Docks after resolution | 217 — **one** account had no usable address; the rest of the drop from 230 is address normalisation collapsing near-identical rows, which is `IDN-2`'s job to confirm |
 | Receivers in the second-precision export | 142 |
 | **Identifier overlap between the two exports** | **142 of 142** — same id space, which is what makes the `Shop.external_ref` join work |
@@ -242,3 +242,59 @@ reproduces, and `--draft` marks the page instead of bypassing the check.
   signatures. Three sources still report three different counts.
 - **`PRD-7`** needs `brew install libomp` on the build machine.
 - **`DEC-3`** needs a live Google project.
+
+---
+
+## 9. What `AGT-1`'s harness found before anybody labelled anything
+
+`ml/agt1/` is the resolution bake-off: the deterministic resolver against an
+agent, scored on hand-labelled truth. **No truth file exists yet** and the agent
+cannot run, so nothing below is a score. These are properties of the incumbent
+that building the harness made visible, and each is checkable with
+`python scripts/agt1_bakeoff.py score`.
+
+### Merges are transitive and nobody was closing them
+
+`propose_duplicate_locations` proposes pairs and a person confirms them one at a
+time. Nothing in that loop ever asks what the *set* of confirmed pairs implies.
+Closed transitively, the incumbent's 97 proposals over the real book produce
+**174 docks from 229 accounts** — and its largest implied dock holds **14**.
+
+That fourteen is a municipal chain. `1960/0-A*` is a **catch-all suffix bucket**
+holding unrelated one-off accounts, so the rule *"same account root and branch,
+differing suffix → HIGH"* — the distributor's own statement that two records are
+one place, and correct nearly everywhere — links a DPW to a county department to
+a business with nothing to do with either. Each link is defensible on its own
+evidence. The closure is a dock with four organisations in it.
+
+**Why nothing downstream would have caught it.** A reviewer sees one pair. The
+pair is fine. Fourteen fine pairs later there is one dock accumulating four
+organisations' dwell, and the seam is exactly what a merge is designed to erase.
+
+### `repair` is missing from `_COMMON_TOKENS`
+
+The second-largest implied dock holds **nine repair shops in seven towns**.
+`_COMMON_TOKENS` lists `auto`, `automotive`, `parts`, `garage`, `motor`, `car`,
+`truck` — and not `repair`, which is the commonest trade word in a body-shop
+book. So `distinctive_tokens("T & J AUTO REPAIR")` is `{"repair"}`: the initials
+are one character and dropped, `auto` is common, and the one surviving token is
+the trade itself. Every *"X & Y AUTO REPAIR"* therefore has **1.00
+distinctive-word overlap** with every other, which is the exact signal the
+function's docstring says it exists to avoid — *"two body shops both called
+'... Auto Parts Inc' overlap heavily on common words and share nothing that
+identifies them. This measures the part that does."*
+
+Twenty-one pairs reach the review queue this way today. It never auto-merges, so
+the cost is a queue two-thirds noise rather than a corrupted dock — which is the
+failure mode `account_signals.py` already names as the reason a queue gets
+cleared rather than read.
+
+### Neither is fixed in `AGT-1`
+
+Changing the contestant because the harness found something, before the harness
+has scored anything, is the anchoring failure `gold.py` refuses in a different
+costume. Both are settled directly by the labelling pass: the label file asks a
+person about all twenty-one repair-shop pairs and the whole municipal chain, and
+their answers are the evidence for whether `repair` belongs on the list and
+whether a catch-all stem should be excluded from the suffix rule.
+

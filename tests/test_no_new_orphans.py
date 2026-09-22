@@ -166,6 +166,7 @@ OPERATIONAL_SCRIPTS: dict[str, str] = {
 # - and not evidence that anything in the product uses what they call.
 ONE_OFF_SCRIPTS: dict[str, str] = {
     "__init__.py": "not a script",
+    "agt1_bakeoff.py": "runs AGT-1's resolution bake-off offline",
     "analyze_baseline.py": "analysis of an export",
     "analyze_real_export.py": "analysis of an export",
     "build_legal_brief_docx.py": "renders a document",
