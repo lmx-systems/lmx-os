@@ -216,6 +216,30 @@ async def pending_merges(session: AsyncSession) -> list[LocationMerge]:
     )
 
 
+async def recently_applied_merges(
+    session: AsyncSession, *, limit: int = 10
+) -> list[LocationMerge]:
+    """Merges that went through, newest first — the undo list.
+
+    *"Every merge audited and reversible"* is a clause of `IDN-2`'s done-when,
+    and `revert_merge` delivered the second half in code while nothing listed an
+    applied merge for anybody to reverse. Reversible-by-curl is a thin reading
+    of it.
+
+    Capped and recent on purpose. Undo is for the merge somebody has just
+    realised was wrong; a complete history of every merge ever made is an audit
+    question, and answering both here would bury the one in the other.
+    """
+    return list(
+        await session.scalars(
+            select(LocationMerge)
+            .where(LocationMerge.status == STATUS_APPLIED)
+            .order_by(LocationMerge.decided_at.desc().nulls_last())
+            .limit(limit)
+        )
+    )
+
+
 async def confirm_merge(
     session: AsyncSession,
     proposal: LocationMerge,

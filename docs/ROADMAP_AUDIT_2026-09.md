@@ -282,3 +282,59 @@ driver accepts the offer. Both are harmless, because each shares its
 customer-facing wording with a reachable neighbour — whoever wrote that map
 anticipated overlapping states. Left alone; noted so the next person does not
 read them as live.
+
+
+---
+
+## Re-audit after twenty-two changes — 21 September
+
+Every `BUILT` row again, now that three invariants (`test_no_new_orphans.py`,
+`test_no_write_only_columns.py`, `test_architecture_boundaries.py`) cover most
+of what the first pass checked by hand. **70 assertions, all green on `main`.**
+So this pass looked for what those tests structurally cannot see — and at my own
+twenty-two changes rather than at the code I inherited.
+
+### The orphan test skips decorated functions
+
+Which means **an endpoint with no caller in the console is invisible to it** —
+the exact `CON-4` shape. Checking the dashboard against `routes.py` and
+`admin_routes.py`:
+
+| | |
+|---|---|
+| Ops routes | 33, of which **1 real orphan** (plus `/metrics`, which is Prometheus) |
+| Admin routes | 27, of which 3 are script-driven and **5 are curl-only** |
+
+**The one real orphan was mine.** `POST /operations/merges/{id}/revert`, added
+last week. *"Every merge audited and reversible"* is a clause of `IDN-2`'s
+done-when, and I built the revert while the console offered only *Same place*
+and *Different* — nothing listed an applied merge for anybody to reverse.
+Reversible-by-curl is a thin reading of it. Fixed: the panel now shows recently
+merged pairs with an Undo.
+
+The five curl-only admin routes — device revocation, hub closures, COD disputes,
+gig density, gig jobs — are weaker than a missing writer, because an admin *can*
+reach them. Recorded rather than fixed; building five surfaces unprompted would
+be inventing work.
+
+### A bug in the fix, caught by its own test
+
+`include_applied: bool = Query(default=False)` hands a **`Query` object** to a
+direct caller, and a `Query` object is truthy — so the default silently
+inverted and applied merges appeared in the queue.
+
+`app/api/client_routes.py` documents this exact trap and prescribes `Annotated`:
+*"Every test in this repo calls endpoint functions directly, and with the older
+form those callers receive `Query` objects instead of values."* I walked into it
+anyway. Four more instances, all added by me in the last week, are converted
+too — latent rather than broken, because every test passed the value
+explicitly.
+
+### What the invariants caught on their own
+
+Across these changes the allowlists moved four times without my noticing first:
+`record_delivery_outcome`, `classify_unlabelled_locations`,
+`vehicle_capacity_units`, and `state_code`/`active`. Each time the companion
+"the list must not outlive the gap" test failed and told me to remove an entry.
+That is the mechanism working as intended — and it is the part of this audit
+that will still be working in six months.

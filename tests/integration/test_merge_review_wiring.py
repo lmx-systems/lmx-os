@@ -309,3 +309,90 @@ class TestWhoMayDecide:
         endpoint = getattr(api.routes, name)
         dependency = inspect.signature(endpoint).parameters["admin"].default
         assert dependency.dependency is require_admin
+
+
+class TestAMergeCanBeUndoneByAPerson:
+    """*"Every merge audited and reversible"* — the second half had no reader.
+
+    `revert_merge` existed, was tested, and was reachable only by curl, because
+    nothing listed an applied merge for anybody to reverse. Found by re-running
+    the endpoint-versus-console check over my own work: the orphan test skips
+    decorated functions, so an endpoint with no caller in the dashboard is
+    invisible to it.
+    """
+
+    async def test_applied_merges_are_listed_when_asked_for(self, db_session):
+        from app.api.routes import confirm_merge_proposal, merge_proposals
+
+        admin = await _admin(db_session)
+        await _two_docks(db_session)
+        await propose_duplicate_locations(db_session)
+        await db_session.flush()
+        proposal = (await merge_proposals(session=db_session, _ops=VIEWER))[0]
+        await confirm_merge_proposal(
+            proposal_id=proposal.id, session=db_session, admin=admin
+        )
+
+        with_applied = await merge_proposals(
+            include_applied=True, session=db_session, _ops=VIEWER
+        )
+
+        assert any(m.status == STATUS_APPLIED for m in with_applied)
+
+    async def test_the_queue_alone_does_not_include_them(self, db_session):
+        """Work to do and work already done are different lists. A reviewer
+        scanning for the next decision should not read past four they already
+        made."""
+        from app.api.routes import confirm_merge_proposal, merge_proposals
+
+        admin = await _admin(db_session)
+        await _two_docks(db_session)
+        await propose_duplicate_locations(db_session)
+        await db_session.flush()
+        proposal = (await merge_proposals(session=db_session, _ops=VIEWER))[0]
+        await confirm_merge_proposal(
+            proposal_id=proposal.id, session=db_session, admin=admin
+        )
+
+        queue = await merge_proposals(session=db_session, _ops=VIEWER)
+
+        assert all(m.status != STATUS_APPLIED for m in queue)
+
+    async def test_an_applied_merge_can_then_be_undone(self, db_session):
+        """End to end: list it, revert it, and it leaves the undo list."""
+        from app.api.routes import (
+            confirm_merge_proposal,
+            merge_proposals,
+            revert_applied_merge,
+        )
+
+        admin = await _admin(db_session)
+        await _two_docks(db_session)
+        await propose_duplicate_locations(db_session)
+        await db_session.flush()
+        proposal = (await merge_proposals(session=db_session, _ops=VIEWER))[0]
+        applied = await confirm_merge_proposal(
+            proposal_id=proposal.id, session=db_session, admin=admin
+        )
+
+        listed = [
+            m
+            for m in await merge_proposals(
+                include_applied=True, session=db_session, _ops=VIEWER
+            )
+            if m.status == STATUS_APPLIED
+        ]
+        assert applied.id in {m.id for m in listed}
+
+        await revert_applied_merge(
+            merge_id=applied.id, session=db_session, admin=admin
+        )
+
+        still_applied = [
+            m
+            for m in await merge_proposals(
+                include_applied=True, session=db_session, _ops=VIEWER
+            )
+            if m.status == STATUS_APPLIED
+        ]
+        assert applied.id not in {m.id for m in still_applied}
