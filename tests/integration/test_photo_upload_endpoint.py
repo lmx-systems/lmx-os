@@ -46,6 +46,11 @@ async def test_returns_a_stub_marker_when_unconfigured(db_session, real_redis_cl
 
     with patch("app.storage.photo_upload_client.settings") as mock_settings:
         mock_settings.photo_upload_bucket = None
+        # And no local directory. Patching the whole settings object makes every
+        # unset attribute a truthy MagicMock, so a backend added to this chooser
+        # captures this test unless it opts out - which is what happened when
+        # LocalPhotoUploadClient landed.
+        mock_settings.photo_storage_dir = None
         result = await create_upload_url(
             str(stop_id), UploadUrlRequestBody(kind="photo", content_type="image/jpeg"),
             driver=authed, session=db_session,

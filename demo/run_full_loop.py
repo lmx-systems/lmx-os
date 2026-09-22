@@ -55,12 +55,34 @@ MANIFEST_CSV = """Ship To Address,Contact Name,Priority
 """
 
 
-def step(number: int, text: str) -> None:
+# Presenter mode. Zero by default, so CI and a rehearsal run at full speed and
+# only a live audience pays for the pauses.
+_PACE = 0.0
+
+
+def step(number: int, text: str, *, look_at: str | None = None) -> None:
+    """One beat of the demo, and where to point while it happens.
+
+    `look_at` exists because the interesting thing is rarely in the terminal.
+    The terminal is the narration; the product is the three screens beside it,
+    and a presenter reading output aloud while the audience watches the wrong
+    window is the failure this avoids.
+    """
     print(f"\n{number}. {text}")
+    if look_at:
+        print(f"   [ on screen: {look_at} ]")
+    _beat()
+
+
+def _beat(multiplier: float = 1.0) -> None:
+    """Let an audience catch up. A no-op unless --pace was asked for."""
+    if _PACE:
+        time.sleep(_PACE * multiplier)
 
 
 def detail(text: str) -> None:
     print(f"   -> {text}")
+    _beat(0.35)
 
 
 class DemoFailed(Exception):
@@ -91,7 +113,8 @@ def run(base_url: str, poll_seconds: float) -> int:
                 f"(`docker compose up -d`). {unreachable}"
             ) from unreachable
 
-        step(1, "A distributor drops a CSV manifest (LMX Link, T3)")
+        step(1, "A distributor drops a CSV manifest (LMX Link, T3)",
+             look_at="client portal :5174 - Orders appear as the file is parsed")
         client_token = _login_client(http)
         upload = http.post(
             "/client/orders/manifest",
@@ -114,14 +137,16 @@ def run(base_url: str, poll_seconds: float) -> int:
         if result["accepted"] == 0:
             raise DemoFailed("Nothing was accepted, so there is nothing to deliver.")
 
-        step(2, "The SLA engine held them; the optimizer offers the work")
+        step(2, "The SLA engine held them; the optimizer offers the work",
+             look_at="ops console :5173 - Hold Queue, then the order leaving it")
         detail("held rather than dispatched instantly - that hold is the product")
         driver_token = _sign_in_driver(http)
         clocked_on = _clock_on(http, driver_token)
         offers = _wait_for_offer(http, driver_token, _ops_token(http), poll_seconds)
         detail(f"{len(offers)} offer(s) reached the driver with no button pressed")
 
-        step(3, "The driver accepts")
+        step(3, "The driver accepts",
+             look_at="the handset - the offer arrives without anybody pressing anything")
         accepted = http.post(
             f"/driver/offers/{offers[0]['offer_id']}/accept",
             headers={"Authorization": f"Bearer {driver_token}"},
@@ -240,10 +265,11 @@ def _drive_route(http: httpx.Client, token: str) -> None:
                 json={"scanned_count": stop.get("parcel_count", 1)},
             ).raise_for_status()
 
+        photo_url = _capture_pod_photo(http, headers, stop_id, kind)
         http.post(
             f"/driver/stops/{stop_id}/complete",
             headers=headers,
-            json={"method": "photo", "photo_url": "https://example.invalid/pod.jpg"},
+            json={"method": "photo", "photo_url": photo_url},
         ).raise_for_status()
 
         left_at = datetime.now(timezone.utc)
@@ -253,6 +279,63 @@ def _drive_route(http: httpx.Client, token: str) -> None:
             json={"events": [{"kind": "exit", "occurred_at": left_at.isoformat()}]},
         ).raise_for_status()
         detail(f"{kind} {stop_id[:8]}: crossed, arrived, completed")
+
+
+def _capture_pod_photo(http: httpx.Client, headers: dict, stop_id: str, kind: str) -> str:
+    """Take a proof-of-delivery photo the way the handset does.
+
+    This used to post `https://example.invalid/pod.jpg` - a placeholder that
+    made the run pass and made "delivered, with proof" undemonstrable, because
+    there was no image anywhere to look at.
+
+    It now walks the real two-step path: ask for an upload URL, PUT the bytes,
+    submit the URL that comes back. Which backend serves it is not this script's
+    business - with `PHOTO_UPLOAD_BUCKET` the PUT goes to S3, with
+    `PHOTO_STORAGE_DIR` it goes to this API's own `/media`, and with neither the
+    stub says `requires_upload=False` and there is nothing to upload. The first
+    two put a real photo on the ops console and the recipient's tracking page.
+    """
+    minted = http.post(
+        f"/driver/stops/{stop_id}/upload-url",
+        headers=headers,
+        json={"kind": "photo", "content_type": "image/jpeg"},
+    )
+    minted.raise_for_status()
+    upload = minted.json()
+
+    if not upload["requires_upload"]:
+        # No storage configured. Say so once rather than letting somebody
+        # discover it in front of an audience by clicking a dead image.
+        detail("no photo storage configured - POD is a marker, not an image")
+        return upload["final_url"]
+
+    http.put(
+        upload["upload_url"],
+        content=_pod_jpeg(stop_id, kind),
+        headers={**headers, "Content-Type": "image/jpeg"},
+    ).raise_for_status()
+    return upload["final_url"]
+
+
+def _pod_jpeg(stop_id: str, kind: str) -> bytes:
+    """A stand-in doorstep photo, labelled so nobody mistakes it for one.
+
+    The script is playing a driver who has no camera. A photo that *looked*
+    real would be the one thing in this demo pretending to be something it is
+    not, so it says what it is on its face. A real handset running the app
+    takes a real photo through this same endpoint.
+    """
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (640, 480), (28, 32, 38))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((16, 16, 624, 464), outline=(90, 170, 130), width=3)
+    draw.text((40, 200), "SIMULATED PROOF OF DELIVERY", fill=(232, 236, 240))
+    draw.text((40, 230), f"{kind} stop {stop_id[:8]}", fill=(150, 160, 170))
+    draw.text((40, 260), "captured by demo/run_full_loop.py", fill=(150, 160, 170))
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=85)
+    return buffer.getvalue()
 
 
 def _clock_on(http: httpx.Client, token: str) -> bool:
@@ -319,7 +402,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--poll-seconds", type=float, default=1.5)
+    parser.add_argument(
+        "--pace",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help=(
+            "pause this long between beats so an audience can follow. 2.5 is "
+            "about right in front of people; the default 0 is for rehearsal "
+            "and CI"
+        ),
+    )
     args = parser.parse_args()
+    global _PACE
+    _PACE = args.pace
     try:
         return run(args.base_url, args.poll_seconds)
     except DemoFailed as failure:

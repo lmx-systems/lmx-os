@@ -77,10 +77,61 @@ class StubPhotoUploadClient(PhotoUploadClient):
         return PresignedUpload(upload_url=marker, final_url=marker, requires_upload=False)
 
 
+class LocalPhotoUploadClient(PhotoUploadClient):
+    """Photos on local disk, served back by this API. **Development only.**
+
+    Exists so a demo can show a *real* proof-of-delivery photo. Without a
+    bucket the stub issues a `local-capture://` marker and nothing is stored -
+    which is fine for a test and useless in front of somebody, because "through
+    to POD" then means a record that a photo existed rather than a photo anybody
+    can look at.
+
+    **Refused outside development, in code.** Local disk loses every photo on
+    redeploy, has no lifecycle policy and no CDN, and a POD photo is evidence in
+    a dispute: the failure mode is discovering months later that the proof is
+    gone. Trusting nobody will point this at production is not a control.
+
+    **The URL is the capability.** `generate_object_key` puts a `uuid4` in every
+    filename, and the GET that serves these is unauthenticated for the same
+    reason S3's `final_url` is: an `<img src>` in the console and on a
+    recipient's tracking page cannot send an Authorization header. An
+    unguessable path is what stands in for one, exactly as it does on the S3
+    path - no worse, and no better, so it should not be mistaken for access
+    control.
+    """
+
+    engine_name = "local"
+
+    def __init__(self, directory: str, base_url: str) -> None:
+        if settings.environment != "development":
+            raise RuntimeError(
+                "PHOTO_STORAGE_DIR is a development-only backend and "
+                f"ENVIRONMENT is {settings.environment!r}. Local disk loses POD "
+                "photos on redeploy and a POD photo is evidence in a dispute - "
+                "configure PHOTO_UPLOAD_BUCKET instead."
+            )
+        self._directory = directory
+        self._base_url = base_url.rstrip("/")
+
+    def create_upload(self, key: str, content_type: str) -> PresignedUpload:
+        # One URL for both. The PUT is authenticated as the driver, which is
+        # stronger than a presigned URL rather than weaker - S3 has no way to
+        # check who is holding the signature.
+        url = f"{self._base_url}/media/{key}"
+        return PresignedUpload(upload_url=url, final_url=url, requires_upload=True)
+
+
 def get_photo_upload_client() -> PhotoUploadClient:
     if settings.photo_upload_bucket:
         logger.info("photo_upload_client_selected", engine="s3")
         return S3PhotoUploadClient(bucket=settings.photo_upload_bucket, region=settings.photo_upload_region)
+    if settings.photo_storage_dir:
+        # Checked after the bucket, so a stack with both configured uses the
+        # real one. A demo backend must never win over durable storage.
+        logger.info("photo_upload_client_selected", engine="local")
+        return LocalPhotoUploadClient(
+            directory=settings.photo_storage_dir, base_url=settings.media_base_url
+        )
     logger.warning(
         "photo_upload_client_selected",
         engine="stub",

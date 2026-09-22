@@ -240,13 +240,54 @@ function RatingPrompt({
   )
 }
 
+/**
+ * The photo the driver took, shown to the person it is proof for.
+ *
+ * **It was captured and shown to nobody.** `Stop.pod_photo_url` has been
+ * written since the app got a camera, and the only thing in the backend that
+ * read it was an idempotency comparison — so proof of delivery existed as a
+ * row and never as something a human could look at.
+ *
+ * Here first, rather than in the ops console, because the recipient is who the
+ * proof is *for*. It discloses nothing the delivery did not: a photo of their
+ * own doorstep, taken because they were sent something, shown to the holder of
+ * a link scoped to that one delivery.
+ *
+ * Renders nothing when there is no photo — a signature, a PIN, and a left-with
+ * note are all valid proof (`CompleteStopBody`), and an empty frame captioned
+ * "no photo" would read as a failure rather than a different method.
+ */
+function ProofOfDelivery({ url }: { url: string | null }) {
+  // A `local-capture://` marker is the stub backend saying nothing was stored.
+  // It is not a URL a browser can load, and rendering it gives a broken image
+  // where the proof should be.
+  if (!url || !/^https?:\/\//i.test(url)) return null
+
+  return (
+    <figure className="mt-4">
+      <img
+        src={url}
+        alt="Photo taken at the delivery"
+        loading="lazy"
+        className="w-full max-w-sm rounded-lg border border-slate-200"
+      />
+      <figcaption className="mt-1.5 text-xs text-slate-500">
+        Taken by the driver at the door.
+      </figcaption>
+    </figure>
+  )
+}
+
 function Arrival({ view }: { view: TrackingView }) {
   if (view.delivered_at) {
     return (
-      <p className="mt-6 text-lg text-slate-900">
-        Delivered at{' '}
-        <span className="font-semibold">{formatTime(view.delivered_at)}</span>
-      </p>
+      <>
+        <p className="mt-6 text-lg text-slate-900">
+          Delivered at{' '}
+          <span className="font-semibold">{formatTime(view.delivered_at)}</span>
+        </p>
+        <ProofOfDelivery url={view.pod_photo_url} />
+      </>
     )
   }
   if (!view.estimated_arrival) return null

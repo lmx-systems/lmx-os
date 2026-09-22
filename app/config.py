@@ -92,6 +92,23 @@ class Settings(BaseSettings):
     photo_upload_bucket: str | None = None
     photo_upload_region: str = "us-east-1"
 
+    # Proof-of-delivery photos on local disk, for a demo or a dev stack with no
+    # AWS account (`app/storage/photo_upload_client.py`).
+    #
+    # **Development only, and refused outside it.** Local disk loses every photo
+    # on redeploy, has no lifecycle policy and no CDN, and a POD photo is
+    # evidence in a dispute - the failure mode is discovering months later that
+    # the proof is gone. It is a demo backend, and the code says no rather than
+    # trusting nobody points it at production.
+    #
+    # Set it and captured photos are written here and served back by
+    # `app/api/media_routes.py`, so a real photo taken on a real handset appears
+    # in the ops console and on the recipient's tracking page.
+    photo_storage_dir: str | None = None
+    # Where this API is reachable from the *handset*, which is not `localhost`:
+    # on a phone that means the phone. Used to build the upload and final URLs.
+    media_base_url: str = "http://localhost:8000"
+
     # Inbound-webhook signature verification (app/api/webhooks.py,
     # app/messaging/twilio_signature.py) needs the exact public URL Twilio
     # was configured to call, scheme+host included - `request.url` as this

@@ -77,6 +77,7 @@ ROUTERS = (
     "public_api_routes",
     "internal_routes",
     "webhooks",
+    "media_routes",
 )
 
 # Routers whose callers are not people with browsers, so a front-end reference
@@ -92,6 +93,13 @@ NOT_CALLED_BY_A_FRONT_END: dict[str, str] = {
     "public_api_routes": (
         "a customer's own integration (docs/ORDER_API.md), which is not in this "
         "repository"
+    ),
+    "media_routes": (
+        "the URL is handed out at runtime by POST /driver/stops/{id}/upload-url, "
+        "not written into any front end - the app PUTs to whatever it was given, "
+        "and a console renders whatever `photo_url` says. A literal /media/ would "
+        "appear in a front end only if somebody had hardcoded what the server is "
+        "supposed to decide"
     ),
 }
 

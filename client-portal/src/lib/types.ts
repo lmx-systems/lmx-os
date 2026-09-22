@@ -258,6 +258,10 @@ export interface TrackingView {
   destination_hint: string | null
   estimated_arrival: string | null
   delivered_at: string | null
+  // The delivery photo, after delivery. Captured since the driver app got a
+  // camera and rendered by nothing until now — `Stop.pod_photo_url` had one
+  // reader in the whole backend, an idempotency comparison.
+  pod_photo_url: string | null
   // Present only while this recipient's drop is the driver's CURRENT stop.
   driver_position: DriverPositionView | null
   // False on a finished delivery, so a forgotten open tab stops polling.

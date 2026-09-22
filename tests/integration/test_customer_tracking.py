@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from app.api.public_routes import track_delivery
 from app.config import settings
@@ -706,3 +707,76 @@ class TestEveryStatusSaysSomethingTrue:
         from app.tracking.service import _FALLBACK_STATUS
 
         assert _FALLBACK_STATUS == ("In progress", "Your delivery is being handled.")
+
+
+# ---------------------------------------------------------------------------
+# Proof of delivery, shown to the person it is proof for
+# ---------------------------------------------------------------------------
+#
+# `Stop.pod_photo_url` has been written since the driver app got a camera, and
+# the only thing in the backend that ever read it was an idempotency comparison
+# in `complete_stop`. So proof of delivery existed as a row and never as
+# something a human could look at - not in the ops console, not in the client
+# portal, and not here, on the page belonging to the person it is proof for.
+
+
+async def _delivered_with_photo(db_session, hub_id, client_id, shop_id, driver_id, photo):
+    order = await _order(db_session, hub_id, client_id, shop_id, status=OrderStatus.delivered)
+    order.delivered_at = datetime.now(timezone.utc)
+    route = await _route_with_stops(
+        db_session,
+        hub_id,
+        driver_id,
+        stops=[(order, "pickup", "completed"), (order, "dropoff", "completed")],
+    )
+    dropoff = (
+        await db_session.execute(
+            select(Stop).where(Stop.route_id == route.id, Stop.stop_type == "dropoff")
+        )
+    ).scalar_one()
+    dropoff.pod_photo_url = photo
+    await db_session.commit()
+    return order
+
+
+async def test_a_delivered_order_shows_the_photo(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id = await _seed(db_session)
+    order = await _delivered_with_photo(
+        db_session, hub_id, client_id, shop_id, driver_id,
+        "http://localhost:8000/media/pod/a/b/photo-c.jpg",
+    )
+
+    view = await resolve_tracking(db_session, order.tracking_token)
+
+    assert view.pod_photo_url == "http://localhost:8000/media/pod/a/b/photo-c.jpg"
+
+
+async def test_an_undelivered_order_shows_no_photo(db_session, real_redis_client):
+    # There cannot be one yet, and a field that is sometimes-null-sometimes-
+    # withheld is one the page has to reason about twice.
+    hub_id, client_id, shop_id, driver_id = await _seed(db_session)
+    order = await _order(db_session, hub_id, client_id, shop_id, status=OrderStatus.en_route_drop)
+    await _route_with_stops(
+        db_session,
+        hub_id,
+        driver_id,
+        stops=[(order, "pickup", "completed"), (order, "dropoff", "pending")],
+    )
+
+    view = await resolve_tracking(db_session, order.tracking_token)
+
+    assert view.pod_photo_url is None
+
+
+async def test_a_delivery_proved_another_way_has_no_photo(db_session, real_redis_client):
+    # A signature, a PIN and a left-with note are all valid proof. The page
+    # renders nothing rather than an empty frame, so this must be None and not
+    # an empty string.
+    hub_id, client_id, shop_id, driver_id = await _seed(db_session)
+    order = await _delivered_with_photo(
+        db_session, hub_id, client_id, shop_id, driver_id, None
+    )
+
+    view = await resolve_tracking(db_session, order.tracking_token)
+
+    assert view.pod_photo_url is None

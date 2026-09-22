@@ -136,3 +136,10 @@ app.include_router(public_api_router)
 # disabled entirely when INTERNAL_API_TOKEN is unset. Exists because a
 # serverless platform suspends the in-process poll loop dispatch relies on.
 app.include_router(internal_router)
+# Proof-of-delivery photos on local disk, mounted only when PHOTO_STORAGE_DIR is
+# set - which `LocalPhotoUploadClient` refuses to accept outside development.
+# With a real bucket the driver app PUTs straight to S3 and this does not exist.
+if settings.photo_storage_dir:
+    from app.api.media_routes import router as media_router
+
+    app.include_router(media_router)
