@@ -237,7 +237,10 @@ export function StopDetailScreen({ route, navigation }: Props) {
         )}
 
         {action.kind === 'confirmDelivery' && stop.stop_type === 'pickup' && (
-          <Button label="Confirm delivery" onPress={handlePickupComplete} />
+          // "Confirm collection", not "Confirm delivery". This is the pickup
+          // branch - the driver is at a shop loading the van, and nothing has
+          // been delivered to anybody yet.
+          <Button label="Confirm collection" onPress={handlePickupComplete} />
         )}
 
         {/* Money before proof, in that order on the screen, because it is the thing

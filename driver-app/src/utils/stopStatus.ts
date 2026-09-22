@@ -21,9 +21,24 @@ export type StopAction =
 // wireframe's "one button reflects the stop's state" stop-detail approach -
 // collapsing what used to be three separate screens (arrive/scan/POD) into
 // one state machine instead of three navigation steps.
+/**
+ * Statuses a stop can be in before the driver has arrived.
+ *
+ * Exported so `applyPendingToStop` can share it rather than restate it. They
+ * had drifted: this module offered "Arrived" from `en_route`, and the
+ * optimistic overlay only applied it from `pending` — so a driver tapping
+ * Arrived at an en-route stop while offline saw nothing happen, and could tap
+ * again.
+ */
+export const PRE_ARRIVAL_STATUSES = ['pending', 'en_route'] as const;
+
+export function isBeforeArrival(stop: Pick<Stop, 'status'>): boolean {
+  return (PRE_ARRIVAL_STATUSES as readonly string[]).includes(stop.status);
+}
+
 export function primaryActionForStop(stop: Stop): StopAction {
   if (isStopTerminal(stop)) return { kind: 'done' };
-  if (stop.status === 'pending' || stop.status === 'en_route') return { kind: 'arrive' };
+  if (isBeforeArrival(stop)) return { kind: 'arrive' };
   // status === 'arrived'
   if (stop.stop_type === 'pickup' && stop.scanned_count < stop.parcel_count) {
     return { kind: 'scan', scanned: stop.scanned_count, total: stop.parcel_count };
