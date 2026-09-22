@@ -551,3 +551,39 @@ export interface OrderLookupPage {
   total: number
   limit: number
 }
+
+/**
+ * Provision a driver (docs/ROADMAP_AUDIT_2026-09.md).
+ *
+ * `vehicle_capacity_units` is required here though the column defaults to 1:
+ * the optimizer's capacity check reads it, so a driver provisioned without
+ * thinking about it gets one order at a time — the safe direction and the wrong
+ * answer. Asking makes it a decision.
+ */
+export interface DriverOnboardingBody {
+  hub_id: string
+  name: string
+  phone: string
+  vehicle_capacity_units: number
+  employment_type: string
+  vehicle_type?: string | null
+  plate_number?: string | null
+  hourly_rate_cents?: number | null
+}
+
+export interface DriverOnboardingResult {
+  driver_id: string
+  name: string
+  phone: string
+  employment_type: string
+  vehicle_capacity_units: number
+  hourly_rate_is_placeholder: boolean
+}
+
+export const EMPLOYMENT_TYPES = [
+  { code: 'w2', label: 'Employee (W2)' },
+  { code: 'contractor_1099', label: 'Contractor (1099)' },
+  { code: 'gig', label: 'Gig' },
+] as const
+
+export const VEHICLE_TYPES = ['car', 'van', 'bike'] as const

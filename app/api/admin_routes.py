@@ -32,7 +32,7 @@ from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.models.client_sla_term import ClientSlaTerm
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
-from app.models.driver import Driver
+from app.models.driver import EMPLOYMENT_TYPES, VEHICLE_TYPES, Driver
 from app.compliance.driver_documents import evaluate_driver_documents
 from app.reporting.cod_disputes import build_cod_dispute_report
 from app.models.driver_device import DriverDevice
@@ -60,6 +60,8 @@ from app.redis_client import get_client as get_redis_client
 from app.schemas.admin import (
     ClientOnboardingBody,
     ClientOnboardingResult,
+    DriverOnboardingBody,
+    DriverOnboardingResult,
     ClientRateBody,
     ClientRateView,
     ClientSlaTermBody,
@@ -179,6 +181,85 @@ async def onboard_client(
 
     await session.commit()
     return ClientOnboardingResult(client_id=str(client.id), shop_ids=[str(sid) for sid in shop_ids])
+
+
+@router.post("/drivers", response_model=DriverOnboardingResult, status_code=201)
+async def onboard_driver(
+    body: DriverOnboardingBody,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> DriverOnboardingResult:
+    """Provision a driver (`docs/ROADMAP_AUDIT_2026-09.md`).
+
+    **Nothing created one before this.** Every `Driver` row was a hand-written
+    insert — while the OTP path's own comment says *"drivers are provisioned by
+    ops, not self-registered"*. The provisioning it refers to did not exist, so
+    the sentence described an intention rather than a route.
+
+    Admin, like client onboarding: it creates the identity a person logs in
+    with, and every capacity, payroll and document decision hangs off it.
+
+    A duplicate phone is a 409 rather than an integrity error, because it is the
+    likeliest mistake here and the consequence is specific: OTP looks a driver
+    up by number with `scalar_one_or_none`, so a second row with the same one
+    locks **both** drivers out. Migration `0063` is what actually guarantees it;
+    this is the readable version of the same refusal.
+    """
+    if body.employment_type not in EMPLOYMENT_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"employment_type must be one of {list(EMPLOYMENT_TYPES)}",
+        )
+    if body.vehicle_type is not None and body.vehicle_type not in VEHICLE_TYPES:
+        raise HTTPException(
+            status_code=422, detail=f"vehicle_type must be one of {list(VEHICLE_TYPES)}"
+        )
+
+    hub = await session.get(Hub, uuid.UUID(body.hub_id))
+    if hub is None:
+        raise HTTPException(status_code=404, detail="No such hub")
+
+    phone = body.phone.strip()
+    existing = await session.scalar(select(Driver.id).where(Driver.phone == phone))
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A driver is already registered with this number. Two drivers "
+                "sharing one would lock both out of the app."
+            ),
+        )
+
+    driver = Driver(
+        hub_id=hub.id,
+        name=body.name.strip(),
+        phone=phone,
+        vehicle_capacity_units=body.vehicle_capacity_units,
+        employment_type=body.employment_type,
+        vehicle_type=body.vehicle_type,
+        plate_number=body.plate_number,
+        hourly_rate_cents=body.hourly_rate_cents,
+    )
+    session.add(driver)
+    await session.commit()
+
+    logger.info(
+        "driver_provisioned",
+        driver_id=str(driver.id),
+        hub_id=body.hub_id,
+        employment_type=driver.employment_type,
+    )
+    return DriverOnboardingResult(
+        driver_id=str(driver.id),
+        name=driver.name,
+        phone=driver.phone,
+        employment_type=driver.employment_type,
+        vehicle_capacity_units=driver.vehicle_capacity_units,
+        # Said out loud rather than left for payroll to discover. A null rate
+        # falls back to a placeholder, and a driver paid from a placeholder is
+        # a number somebody will later have to defend.
+        hourly_rate_is_placeholder=driver.hourly_rate_cents is None,
+    )
 
 
 @router.delete("/drivers/{driver_id}/devices/{device_id}", status_code=204)
