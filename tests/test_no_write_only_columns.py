@@ -34,11 +34,6 @@ MODELS = APP / "models"
 
 # Columns nothing writes, with why. Each is a real gap or a stated hold.
 KNOWN_UNWRITTEN: dict[str, str] = {
-    # The one with teeth. Read by `app/payroll/hours.py` to pick an overtime
-    # rule; set by nothing in app/, scripts/ or tests/. Harmless today only
-    # because `STATE_OVERTIME_RULES` is empty - the trap springs when somebody
-    # registers a state rule and it silently never fires.
-    "state_code": "A9: Hub.state_code selects an overtime rule and nothing sets it",
     "stripe_connect_account_id": "A11: gig payout is stubbed - app/config.py says no driver has a real one",
     # Dead rather than dangerous: read by nothing either, so a flag simply does
     # not record who raised it.
@@ -55,9 +50,6 @@ KNOWN_UNWRITTEN: dict[str, str] = {
     "modality_eligible": "M5: carried now, used later - see the column's own comment",
     # Written by SQLAlchemy's `onupdate`, not by any statement in the tree.
     "updated_at": "TimestampMixin: written by onupdate, invisible to a syntax check",
-    # Filtered on in five places; nothing sets it False because nothing
-    # deactivates a hub or client yet. Read heavily, so not a silent default.
-    "active": "B-series: no deactivation path yet - read in five places and defaults True",
 }
 
 

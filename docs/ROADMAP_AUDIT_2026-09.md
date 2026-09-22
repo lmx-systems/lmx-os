@@ -174,13 +174,34 @@ checks came back empty or near-empty:
 
 ### Two findings with teeth
 
-**`Hub.state_code` is set by nothing** — not `app/`, not `scripts/`, not tests.
-It is read once, by `app/payroll/hours.py`, to select an overtime rule. Harmless
-*today* only because `STATE_OVERTIME_RULES` is empty. The trap springs the day
-somebody writes a California daily-overtime rule, registers it, tests it in
-isolation and ships it — and it never fires, because no hub carries `"CA"`. The
-module docstring anticipates the registry being empty and says nothing about the
-key being unset.
+~~**`Hub.state_code` is set by nothing**~~ — **fixed.** Not `app/`, not
+`scripts/`, not tests. It is read once, by `app/payroll/hours.py`, to select an
+overtime rule. Harmless *today* only because `STATE_OVERTIME_RULES` is
+deliberately empty; the trap springs the day somebody writes a California
+daily-overtime rule, registers it, tests it in isolation and ships it — and it
+never fires, because no hub carries `"CA"`.
+
+**A correction to an earlier draft of this note**, which said the docstring "says
+nothing about the key being unset". `overtime_rules.py`'s docstring does not, but
+the *column's own comment* states it exactly: *"no Hub creation/edit API or UI
+exists yet (hubs are seed/DB-provisioned only)"*. This was a documented gap that
+nothing tracked, not an undiscovered one — a distinction worth keeping, because
+the fix for the two is different.
+
+`POST /admin/hubs`, `PATCH /admin/hubs/{id}` and a console panel now exist, so
+the column can be set at creation or afterwards. A third instance of the same
+shape as the driver finding: **nothing created a `Hub` either.** The state is
+validated against a real list of codes rather than a length check — `"XX"`
+passes a length check, and so does a transposed `"AR"` for `"AZ"`, and the
+consequence of a wrong one is an overtime rule that does not apply or one that
+does.
+
+The panel reports **which rule is in force**, not just the code, because "no
+state set" and "a state with no rule registered" produce identical payroll and
+only one of them is somebody's oversight. Registering a rule is still not
+offered anywhere: that needs a written legal opinion and a business decision
+(`docs/PAYROLL_STATE_OT_RESEARCH.md`), and a dropdown implying otherwise would
+invite somebody to guess at overtime law.
 
 ~~**Nothing creates a `Driver`.**~~ **Fixed.** No endpoint and no script created
 one: a driver row could only be made by a hand-written insert, while

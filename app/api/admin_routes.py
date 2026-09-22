@@ -42,7 +42,8 @@ from app.models.driver_document import (
     REVIEW_VERIFIED,
     DriverDocument,
 )
-from app.models.hub import Hub
+from app.models.hub import US_STATE_CODES, Hub
+from app.payroll.overtime_rules import overtime_rule_for_state
 from app.models.hub_closure import HubClosure
 from app.learning_loop.promotion import (
     PENDING,
@@ -54,7 +55,7 @@ from app.models.order import Order
 from app.models.return_item import ReturnItem
 from app.models.rules import ActiveRule, ProposedRule
 from app.models.shop import Shop
-from app.ops_auth.dependencies import AuthedOpsUser, require_admin
+from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user, require_admin
 from app.payroll import get_payroll_provider
 from app.redis_client import get_client as get_redis_client
 from app.schemas.admin import (
@@ -62,6 +63,9 @@ from app.schemas.admin import (
     ClientOnboardingResult,
     DriverOnboardingBody,
     DriverOnboardingResult,
+    HubCreateBody,
+    HubUpdateBody,
+    HubView,
     ClientRateBody,
     ClientRateView,
     ClientSlaTermBody,
@@ -181,6 +185,128 @@ async def onboard_client(
 
     await session.commit()
     return ClientOnboardingResult(client_id=str(client.id), shop_ids=[str(sid) for sid in shop_ids])
+
+
+def _validated_state(state_code: str | None) -> str | None:
+    """Uppercased, or a refusal naming what is acceptable.
+
+    Checked against a real list rather than a length check: "XX" passes a length
+    check, and so does a transposed "AR" for "AZ" - and the consequence of a
+    wrong one is an overtime rule that does not apply, or one that does.
+    """
+    if state_code is None:
+        return None
+    code = state_code.strip().upper()
+    if code not in US_STATE_CODES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{state_code!r} is not a US state code. Two letters, e.g. 'CA'.",
+        )
+    return code
+
+
+def _hub_view(hub: Hub) -> HubView:
+    """One hub, and which overtime rule its drivers actually get.
+
+    The rule is reported rather than left to be inferred: "no state set" and "a
+    state with no rule registered" produce identical payroll and only one of
+    them is somebody's oversight.
+    """
+    rule = overtime_rule_for_state(hub.state_code)
+    return HubView(
+        id=str(hub.id),
+        name=hub.name,
+        timezone=hub.timezone,
+        lat=hub.lat,
+        lng=hub.lng,
+        state_code=hub.state_code,
+        active=hub.active,
+        overtime_rule=type(rule).__name__,
+    )
+
+
+@router.post("/hubs", response_model=HubView, status_code=201)
+async def create_hub(
+    body: HubCreateBody,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> HubView:
+    """Create a hub (`docs/ROADMAP_AUDIT_2026-09.md`).
+
+    `Hub.state_code`'s own comment said this was missing: *"no Hub creation/edit
+    API or UI exists yet (hubs are seed/DB-provisioned only)"*. So the column
+    that selects a driver's overtime rule could not be set by anybody, and every
+    hub was federal-only regardless of where it is.
+
+    `state_code` is optional, which is the one concession: a hub in a state with
+    no rule registered is genuinely unaffected by leaving it blank, and
+    demanding it would imply we know what to do with it. It is asked at creation
+    because that is the moment somebody knows the answer without looking it up.
+    """
+    state = _validated_state(body.state_code)
+    hub = Hub(
+        name=body.name.strip(),
+        timezone=body.timezone,
+        lat=body.lat,
+        lng=body.lng,
+        state_code=state,
+    )
+    session.add(hub)
+    await session.commit()
+    logger.info("hub_created", hub_id=str(hub.id), state_code=state)
+    return _hub_view(hub)
+
+
+@router.patch("/hubs/{hub_id}", response_model=HubView)
+async def update_hub(
+    hub_id: uuid.UUID,
+    body: HubUpdateBody,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> HubView:
+    """Change a hub - in practice, give an existing one its state.
+
+    Every hub that exists today was provisioned by hand before the column
+    existed, so this is the only way any of them will ever get one.
+
+    Absent and null are different: a field left out keeps its current value, and
+    an explicit null clears it. Without that distinction a hub coded wrongly
+    could never be corrected back to unset.
+    """
+    hub = await session.get(Hub, hub_id)
+    if hub is None:
+        raise HTTPException(status_code=404, detail="No such hub")
+
+    fields = body.model_dump(exclude_unset=True)
+    if "state_code" in fields:
+        hub.state_code = _validated_state(fields["state_code"])
+    if fields.get("name") is not None:
+        hub.name = fields["name"].strip()
+    if fields.get("timezone") is not None:
+        hub.timezone = fields["timezone"]
+    if fields.get("active") is not None:
+        hub.active = fields["active"]
+
+    await session.commit()
+    logger.info("hub_updated", hub_id=str(hub.id), changed=sorted(fields))
+    return _hub_view(hub)
+
+
+@router.get("/hubs/{hub_id}", response_model=HubView)
+async def get_hub(
+    hub_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> HubView:
+    """One hub's settings, including which overtime rule its drivers get.
+
+    Any ops session: it is a read, and somebody wondering why a driver's
+    overtime looks wrong should not need an admin to find out.
+    """
+    hub = await session.get(Hub, hub_id)
+    if hub is None:
+        raise HTTPException(status_code=404, detail="No such hub")
+    return _hub_view(hub)
 
 
 @router.post("/drivers", response_model=DriverOnboardingResult, status_code=201)
