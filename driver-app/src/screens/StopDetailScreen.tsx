@@ -8,6 +8,7 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { ParcelScanPanel } from '../components/ParcelScanPanel';
 import { CodPanel } from '../components/CodPanel';
+import { ReturnsPanel } from '../components/ReturnsPanel';
 import { PodCapture } from '../components/PodCapture';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SyncStatusPill } from '../components/SyncStatusPill';
@@ -234,6 +235,16 @@ export function StopDetailScreen({ route, navigation }: Props) {
 
         {action.kind === 'scan' && (
           <ParcelScanPanel scannedCount={stop.scanned_count} total={stop.parcel_count} onScanNext={handleScanNext} />
+        )}
+
+        {/* Cores before the completion controls, in that order and for the same
+            reason money is: it is the thing that has to happen while the
+            counter person is still standing there. A driver who confirms the
+            stop first has said goodbye, and the core is still on the shelf.
+            W1's endpoints have existed since PRs #13-#16 with no button at all
+            (tests/test_no_unreachable_routes.py). */}
+        {stop.returns && (
+          <ReturnsPanel stop={stop} onDone={() => setLoadToken((t) => t + 1)} />
         )}
 
         {action.kind === 'confirmDelivery' && stop.stop_type === 'pickup' && (

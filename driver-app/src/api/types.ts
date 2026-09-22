@@ -116,6 +116,31 @@ export interface Stop {
   proof: StopProofRequirement | null;
   // Money owed here, if any. Empty for the overwhelming majority of stops.
   cod: CodObligation[];
+  // Cores to collect or drop here, if any (docs/ROADMAP.md W1). Null for the
+  // overwhelming majority. Sent with the stop for the same reason `cod` is: a
+  // driver who learns at the counter that there is a core to collect has
+  // already put the box down and said goodbye.
+  returns: StopReturns | null;
+}
+
+/** One core, as the three W1 endpoints hand it back. */
+export interface ReturnItem {
+  return_id: string;
+  origin_order_ref: string;
+  shop_name: string | null;
+  manifest: string;
+  status: string;
+  created_at: string;
+  age_hours: number;
+  collected_at: string | null;
+  returned_at: string | null;
+}
+
+export interface StopReturns {
+  // Cores this delivery was expected to bring back. Dropoff stops only.
+  expected_manifests: string[];
+  // Cores already collected and bound for THIS shop. Pickup stops only.
+  to_drop_manifests: string[];
 }
 
 export interface StopProofRequirement {

@@ -6,16 +6,23 @@ export type OutboxActionType =
   | 'geofence'
   // The warehouse fence (DRV-3). Carries no stop - `stopId` holds the hub id,
   // which the server ignores in favour of the driver's token.
-  | 'hub_geofence';
+  | 'hub_geofence'
+  // W1's reverse leg. All three are idempotent on the server, which they had to
+  // become before they could be queued: a retried collection used to create a
+  // second core.
+  | 'collect-return'
+  | 'return-not-ready'
+  | 'return-to-shop';
 
 export interface OutboxItem {
   id: string;
   type: OutboxActionType;
   stopId: string;
   // arrive: {}; scan: {scannedCount}; complete: CompleteStopBody-shaped;
-  // flag: {reason, note?}; geofence: {kind, occurred_at} - kept loose here
-  // since each type's shape is
-  // only ever read by outboxManager.send(), not by UI code.
+  // flag: {reason, note?}; geofence: {kind, occurred_at};
+  // hub_geofence: {kind, occurred_at}; collect-return: {manifest?};
+  // return-not-ready: {}; return-to-shop: {} - kept loose here since each
+  // type's shape is only ever read by outboxManager.send(), not by UI code.
   payload: Record<string, unknown>;
   attempts: number;
   lastError: string | null;
