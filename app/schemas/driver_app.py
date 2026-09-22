@@ -28,6 +28,15 @@ class DriverProfileView(BaseModel):
     # no rating-submission system (customers never rate a delivery), so
     # showing a number would be fabricated, not just an estimate.
     trip_count: int = 0
+    # Where the warehouse is, so the app can put a fence round it (`DRV-3`).
+    # On the profile rather than on a route: the fence should be live whenever a
+    # driver is on duty, and a driver back in the yard with no next route
+    # assigned is exactly the turnaround worth measuring.
+    #
+    # Nullable because a hub created before coordinates were required would have
+    # none, and a fence at (0, 0) is in the Gulf of Guinea.
+    hub_lat: float | None = None
+    hub_lng: float | None = None
 
     @property
     def setup_complete(self) -> bool:
@@ -512,3 +521,18 @@ class DriverScorecardView(BaseModel):
     metrics: list[ScorecardMetricView]
     # Set when there are too few colleagues for a team median to be non-identifying.
     comparison_withheld: str | None = None
+
+
+class HubGeofenceEventsBody(BaseModel):
+    """A flush of warehouse crossings (`DRV-3`).
+
+    Same shape as `StopGeofenceEventsBody` and the same reasons: batched
+    because that is how the outbox delivers them, and `occurred_at` is the
+    device's clock because a server-stamped time would collapse an offline
+    stretch onto the reconnect instant.
+
+    No hub id in the body. The driver's hub comes from their token — a phone
+    that could name the hub could name somebody else's.
+    """
+
+    events: list[StopGeofenceEventBody] = Field(min_length=1, max_length=200)

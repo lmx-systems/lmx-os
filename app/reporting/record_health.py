@@ -38,6 +38,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.delivery.turnaround import turnarounds_for_hub
 from app.experiment.integrity import wilson_interval
 from app.identity.inherited_dwell import dwell_estimate
 from app.models.decision_snapshot import DecisionSnapshot
@@ -116,6 +117,12 @@ class RecordHealth:
     geofence_coverage: float | None = None
     geofence_lead_p50_seconds: float | None = None
     geofence_comparable_stops: int = 0
+    # DRV-3's warehouse turnaround. Reported with its pairing rate, never
+    # alone: a hub where half the crossings never pair has a fence problem,
+    # and a median over the half that did pair would look perfectly healthy.
+    turnaround_median_seconds: float | None = None
+    turnaround_pairing_rate: float | None = None
+    turnaround_trips: int = 0
 
     @property
     def decision_link_rate(self) -> Rate:
@@ -274,8 +281,12 @@ async def build_record_health(
     )
 
     fence = await measure_geofence_calibration(session, hub_id=hub_id, since=since)
+    turnaround = await turnarounds_for_hub(session, hub_id=hub_id, since=since)
 
     return RecordHealth(
+        turnaround_median_seconds=turnaround.median_seconds,
+        turnaround_pairing_rate=turnaround.pairing_rate,
+        turnaround_trips=len(turnaround.turnarounds),
         geofence_coverage=round(fence.coverage, 3) if fence.completed_stops else None,
         geofence_lead_p50_seconds=fence.lead_p50_seconds,
         geofence_comparable_stops=fence.comparable_stops,

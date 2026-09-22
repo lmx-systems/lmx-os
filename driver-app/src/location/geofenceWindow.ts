@@ -77,3 +77,28 @@ export function regionsForRoute(stops: Stop[]): StopRegion[] {
       notifyOnExit: true,
     }));
 }
+
+/**
+ * The identifier prefix that marks the warehouse fence (`DRV-3`).
+ *
+ * One region set, not two. iOS caps monitored regions per *app*, and
+ * `startGeofencingAsync` replaces the whole set — so a second task for the hub
+ * would either fight the first for the cap or replace it outright. Instead the
+ * hub rides along as one more region and the task tells them apart by
+ * identifier.
+ *
+ * A stop identifier is a UUID, so this prefix cannot collide with one.
+ */
+export const HUB_REGION_PREFIX = 'hub:'
+
+export function hubRegionIdentifier(hubId: string): string {
+  return `${HUB_REGION_PREFIX}${hubId}`
+}
+
+export function isHubRegion(identifier: string): boolean {
+  return identifier.startsWith(HUB_REGION_PREFIX)
+}
+
+export function hubIdFromRegion(identifier: string): string {
+  return identifier.slice(HUB_REGION_PREFIX.length)
+}

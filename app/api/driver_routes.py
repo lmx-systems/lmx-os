@@ -60,6 +60,8 @@ from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
+from app.models.hub import Hub
+from app.models.hub_geofence_event import HubGeofenceEvent
 from app.models.stop_geofence_event import StopGeofenceEvent
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.messaging.cod_notifications import ESCALATION_SENT, notify_shop_of_cod_dispute
@@ -69,6 +71,7 @@ from app.record.outcomes import record_delivery_outcomes
 from app.returns.service import return_views
 from app.schemas.returns import CollectReturnBody, ReturnItemView
 from app.schemas.driver_app import (
+    HubGeofenceEventsBody,
     StopGeofenceEventsBody,
     StopGeofenceEventsResult,
     CallView,
@@ -552,6 +555,10 @@ async def _count_completed_trips(session: AsyncSession, driver_id: str) -> int:
 
 
 async def _profile_view(session: AsyncSession, row: Driver) -> DriverProfileView:
+    # The hub's position rides along so the app can register DRV-3's warehouse
+    # fence. One extra read on a screen the app already fetches at sign-in,
+    # rather than a second endpoint for two floats.
+    hub = await session.get(Hub, row.hub_id)
     return DriverProfileView(
         driver_id=str(row.id),
         hub_id=str(row.hub_id),
@@ -564,6 +571,8 @@ async def _profile_view(session: AsyncSession, row: Driver) -> DriverProfileView
         delivery_zone=row.delivery_zone,
         payment_bank_last4=row.payment_bank_last4,
         trip_count=await _count_completed_trips(session, str(row.id)),
+        hub_lat=hub.lat if hub else None,
+        hub_lng=hub.lng if hub else None,
     )
 
 
@@ -1588,6 +1597,85 @@ async def arrive_at_stop(
 # and storing it would put a fabricated arrival into the one dataset Phase 1 is
 # being built to trust.
 _MAX_DEVICE_CLOCK_LEAD = timedelta(minutes=5)
+
+
+@router.post("/hub/geofence-events", response_model=StopGeofenceEventsResult)
+async def record_hub_geofence_events(
+    body: HubGeofenceEventsBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> StopGeofenceEventsResult:
+    """Record boundary crossings at the warehouse (`docs/ROADMAP_1.5.md` DRV-3).
+
+    `DRV-1` measures how long a driver spends at a customer's dock; this
+    measures how long they spend at ours. The done-when is *"turnaround measured
+    per return trip"*, and it is a real cost input - `M4` counts the
+    driver-hours a route consumes, and the twenty minutes spent reloading in the
+    yard are as real as the twenty spent driving. Until now only the driving was
+    visible, so every trip cost understated itself by the turnaround.
+
+    **The hub comes from the token, not the body.** A phone that could name its
+    hub could name somebody else's, and the driver's own hub is the only one
+    they can be standing in.
+
+    Writes the crossing and nothing else. Pairing enters with exits is
+    `app/delivery/turnaround.py`'s job, deliberately: a sensor that decided what
+    a crossing *meant* would make the meaning unauditable, and the same reason
+    keeps `DRV-1` from overwriting `Stop.arrived_at`.
+    """
+    driver_row = await _get_driver_row(session, driver)
+
+    now = datetime.now(timezone.utc)
+    horizon = now + _MAX_DEVICE_CLOCK_LEAD
+    rows, rejected = [], 0
+    for event in body.events:
+        occurred_at = event.occurred_at
+        if occurred_at.tzinfo is None:
+            # Read as UTC rather than refused, same as the stop endpoint: every
+            # client we ship sends UTC and dropping a real crossing over a
+            # formatting detail costs more than it protects.
+            occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+        if occurred_at > horizon:
+            rejected += 1
+            continue
+        rows.append(
+            {
+                "id": uuid.uuid4(),
+                "hub_id": driver_row.hub_id,
+                "driver_id": driver_row.id,
+                "kind": event.kind,
+                "occurred_at": occurred_at,
+                "recorded_at": now,
+                "accuracy_m": event.accuracy_m,
+            }
+        )
+
+    accepted = 0
+    if rows:
+        # ON CONFLICT DO NOTHING against (hub_id, driver_id, kind, occurred_at).
+        # The outbox retries, so a replay must be a no-op rather than a second
+        # arrival that invents a turnaround - and one statement means a batch
+        # cannot half-apply.
+        statement = (
+            pg_insert(HubGeofenceEvent)
+            .values(rows)
+            .on_conflict_do_nothing(constraint="uq_hub_geofence_event_crossing")
+            .returning(HubGeofenceEvent.id)
+        )
+        accepted = len((await session.execute(statement)).all())
+
+    await session.commit()
+    logger.info(
+        "hub_geofence_events_recorded",
+        hub_id=str(driver_row.hub_id),
+        driver_id=str(driver_row.id),
+        accepted=accepted,
+        duplicates=len(rows) - accepted,
+        rejected=rejected,
+    )
+    return StopGeofenceEventsResult(
+        accepted=accepted, duplicates=len(rows) - accepted, rejected=rejected
+    )
 
 
 @router.post("/stops/{stop_id}/geofence-events", response_model=StopGeofenceEventsResult)

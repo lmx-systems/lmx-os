@@ -1,4 +1,12 @@
-export type OutboxActionType = 'arrive' | 'scan' | 'complete' | 'flag' | 'geofence';
+export type OutboxActionType =
+  | 'arrive'
+  | 'scan'
+  | 'complete'
+  | 'flag'
+  | 'geofence'
+  // The warehouse fence (DRV-3). Carries no stop - `stopId` holds the hub id,
+  // which the server ignores in favour of the driver's token.
+  | 'hub_geofence';
 
 export interface OutboxItem {
   id: string;

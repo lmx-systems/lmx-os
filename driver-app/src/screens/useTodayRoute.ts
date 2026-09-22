@@ -63,13 +63,22 @@ export function useTodayRoute() {
   // than that, so stops are registered a rolling batch at a time as earlier
   // ones complete. A mid-route insertion (the optimizer can add a stop to an
   // active route) lands here for the same reason.
+  // The warehouse fence is registered whenever the driver is on duty, with or
+  // without a route (DRV-3). A driver back in the yard with nothing assigned is
+  // exactly the turnaround worth measuring, and tearing every region down on
+  // "no route" is precisely when a route-only fence would miss it.
+  const hub =
+    isOnline && profile?.hub_lat != null && profile?.hub_lng != null
+      ? { id: profile.hub_id, lat: profile.hub_lat, lng: profile.hub_lng }
+      : null;
+
   useEffect(() => {
-    if (!route) {
+    if (!route && !hub) {
       void stopStopGeofencing();
       return;
     }
-    void syncStopGeofences(route.stops);
-  }, [route]);
+    void syncStopGeofences(route?.stops ?? [], hub);
+  }, [route, hub?.id, hub?.lat, hub?.lng]);
 
   return { route, offers, loading, isOnline, refresh, setRoute };
 }
