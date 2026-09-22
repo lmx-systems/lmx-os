@@ -9,11 +9,13 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { OfferBanner } from '../components/OfferBanner';
 import { ComplianceBanner } from '../components/ComplianceBanner';
+import { LocationDegradedBanner } from '../components/LocationDegradedBanner';
 import { RouteChangeBanner } from '../components/RouteChangeBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
 import type { DriverCompliance } from '../api/types';
 import type { HomeStackParamList, MainTabParamList } from '../navigation/types';
 import { startReportingLocation, stopReportingLocation } from '../location/reportDriverLocation';
+import { useLocationDegradation } from '../location/useLocationDegradation';
 import type { RouteChangeEvent } from '../realtime/routeEventsClient';
 import { useRouteEvents } from '../realtime/useRouteEvents';
 import { spacing, typography, useThemeColors } from '../theme';
@@ -74,6 +76,13 @@ export function TodayRouteScreen({ navigation }: Props) {
     startReportingLocation().catch(() => {});
     return stopReportingLocation;
   }, [isOnline]);
+
+  // Permission is checked when the watcher starts and when geofences register,
+  // and never again - so a driver who revokes it in Settings mid-shift leaves
+  // the app claiming a sensor it no longer has (DRV-5). Re-checked whenever the
+  // app comes back to the foreground, which is exactly when it can have
+  // changed.
+  const locationState = useLocationDegradation(isOnline);
 
   const loadCompliance = useCallback(async () => {
     try {
@@ -142,6 +151,11 @@ export function TodayRouteScreen({ navigation }: Props) {
         </View>
         <Switch value={isOnline} onValueChange={handleToggle} disabled={togglingOnline} />
       </View>
+
+      {/* Below the compliance banner, which refuses to let a driver work at
+          all. This one says a measurement is off while everything else keeps
+          working, and putting it above would rank it wrongly (DRV-5). */}
+      <LocationDegradedBanner state={locationState} />
 
       {compliance && !compliance.can_go_on_shift && (
         <ComplianceBanner
