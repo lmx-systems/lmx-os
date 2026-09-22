@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from itertools import combinations
 from typing import Protocol
 
-from app.identity.account_signals import why_these_accounts_might_be_one_place
+from app.identity.account_signals import Vocabulary, why_these_accounts_might_be_one_place
 from ml.agt1.book import Account
 from ml.agt1.pool import Pair, pair_key
 
@@ -64,9 +64,19 @@ class DeterministicResolver:
 
     name = "deterministic"
 
+    def __init__(self, *, vocabulary: Vocabulary | None = None):
+        # The corpus reading, built from the same book the resolver is about to
+        # judge. `None` means the static reading, which is what the incumbent
+        # did before `Vocabulary` existed - kept reachable so the bake-off can
+        # still score the older behaviour against the same labels.
+        self.vocabulary = vocabulary
+
     def propose(
         self, accounts: dict[str, Account], pairs: list[Pair]
     ) -> dict[Pair, Proposal]:
+        vocabulary = self.vocabulary or Vocabulary.from_addresses(
+            account.address for account in accounts.values() if account.address
+        )
         verdicts: dict[Pair, Proposal] = {}
         for left, right in pairs:
             a, b = accounts[left], accounts[right]
@@ -77,6 +87,7 @@ class DeterministicResolver:
                 ref_b=b.receiver_id,
                 name_b=b.name,
                 address_b=b.address,
+                vocabulary=vocabulary,
             )
             if found:
                 tier, reason = found

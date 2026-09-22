@@ -609,3 +609,50 @@ class TestPartialTruth:
 
         assert "only when the\nfile is finished" in text or "file is finished" in text
         assert "     ?" in text
+
+
+class TestTheIncumbentsVocabulary:
+    """The resolver reads the book it is judging, and can still be asked not to.
+
+    `IDN-2`'s detector now derives this customer's place words from this
+    customer's addresses, rather than carrying a hardcoded list of towns that
+    would silently stop working for the next one. The bake-off has to be able to
+    score both readings against the same labels — otherwise "the incumbent"
+    means whichever version happened to be checked out.
+    """
+
+    def test_it_derives_the_place_words_from_the_book_it_is_given(self):
+        book = [
+            account("900/0", "Ardenhoe Auto Body", city="Ardenhoe", zip_code="99001"),
+            account("901/0", "Ardenhoe Auto Bodyworks", city="Ardenhoe", zip_code="99001"),
+        ]
+
+        # `ardenhoe` is in both addresses, so it identifies neither business.
+        assert full_space_proposals(book) == {}
+
+    def test_a_name_the_addresses_never_use_still_identifies(self):
+        book = [
+            account("900/0", "Arturo Auto Body", city="Ardenhoe", zip_code="99001"),
+            account("901/0", "Arturo Auto Bodyworks", city="Ardenhoe", zip_code="99001"),
+        ]
+
+        assert pair_key("900/0", "901/0") in full_space_proposals(book)
+
+    def test_the_older_reading_can_still_be_scored(self):
+        # Passing the static vocabulary explicitly runs the incumbent as it was
+        # before the corpus reading existed — the same labels, the other
+        # contestant, which is the only way a change like this is measurable
+        # rather than asserted.
+        from app.identity.account_signals import STATIC_VOCABULARY
+
+        book = [
+            account("900/0", "Ardenhoe Auto Body", city="Ardenhoe", zip_code="99001"),
+            account("901/0", "Ardenhoe Auto Bodyworks", city="Ardenhoe", zip_code="99001"),
+        ]
+        by_id = {a.receiver_id: a for a in book}
+        pair = pair_key("900/0", "901/0")
+
+        older = DeterministicResolver(vocabulary=STATIC_VOCABULARY)
+
+        assert pair in older.propose(by_id, [pair])
+        assert pair not in DeterministicResolver().propose(by_id, [pair])

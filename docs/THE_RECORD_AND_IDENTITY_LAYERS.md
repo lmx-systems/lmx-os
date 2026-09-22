@@ -316,6 +316,61 @@ That last pair of rows is a second-order effect worth naming: the escaping
 proposals *were* the repair-shop pairs. With the trade word out of the way, the
 blocking and the resolver agree about which pairs are worth looking at.
 
+### The words this book uses everywhere
+
+The weakness the fix above deliberately left. Ranking every token in the real
+book puts town names right among the trade words — `englewood` on 14 accounts,
+`bergen` 9, `teaneck` 8 — and two businesses both named after the town they
+stand in have told us where they are, which the postcode signal already weighed.
+Counting it again in the name is double-counting.
+
+**They cannot go on `_COMMON_TOKENS`.** They are *this* customer's towns. A
+hardcoded list would silently stop working for the next customer while
+continuing to look like it worked, which is the worst failure available here.
+
+**Frequency alone cannot find them either**, and this is why the rule is not a
+threshold. `hackensack` is on 6 accounts and `arturo` — a family name — on 5.
+Any cut that suppresses the town suppresses the family, or neither.
+
+So `Vocabulary.from_addresses` reads the book's **addresses**: a token appearing
+in two or more accounts' addresses is a place word. No list, no threshold on
+name frequency, and it works for the next customer's towns without anybody
+editing anything. On the real book, 2 and 3 produce the identical set — the
+separation is not balanced on that number.
+
+| suppressed | kept as distinctive |
+|---|---|
+| englewood(14), bergen(9), teaneck(8), fort(7), lee(7), hackensack(6), new(5), leonia(4), weehawken(3), tenafly(3), bergenfield(3) | hudson(7), valley(5), lorenzo(5), arturo(5), tech(4), exxon(4), cliffs(4) |
+
+| | before | after |
+|---|---|---|
+| Proposals over the whole book | 73 | **65** |
+| of which `WEAK` | 11 | **4** |
+| Implied docks | 182 | **185** |
+| Largest implied dock | 14 accounts | **13** |
+
+The four surviving `WEAK` pairs are all plausible merges rather than noise — two
+spellings of one body shop, a garage and a car-wash under one family name. Down
+from 32 before either fix.
+
+#### Two readings, and why they are not one reading
+
+This is the trap the change would have shipped with. Suppress the town words in
+*"Fort Lee Rd Auto Body"* and **nothing is left**: `rd` is two characters,
+`auto` and `body` are trade words. Under the discounted reading that name shares
+nothing with anything — including with its own second spelling one account id
+away, which is the pair the catch-all-stem rule was written to protect.
+
+So `Vocabulary.discounted` answers *"how much do these two names agree"* and
+`distinctive_tokens` answers *"do they agree at all"*, and the catch-all-stem
+check uses the second. An empty discounted set means *"this name is made of
+words this book uses everywhere"*. That is a fact about the book. It is **not**
+evidence that two records are unrelated.
+
+`STATIC_VOCABULARY` is the reading every caller had before this existed, and it
+is the default — a caller that wants the corpus reading has to say so, and the
+bake-off can still score the older behaviour against the same labels.
+
 ### What the demotion does not fix, and what does
 
 **The 14-account chain survives**, because a tier is advice and an edge is an

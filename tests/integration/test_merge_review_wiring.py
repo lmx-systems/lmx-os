@@ -483,3 +483,82 @@ class TestAReviewerCanSeeWhatAMergeWouldJoin:
 
         assert extending.extends_a_chain is True
         assert extending.accounts_joined == 3
+
+
+class TestTheDetectorReadsItsOwnBook:
+    """The place words come from the shops being compared, not from a list.
+
+    `_COMMON_TOKENS` cannot hold town names — they are this customer's towns,
+    and a hardcoded list would silently stop working for the next customer while
+    continuing to look like it worked. `Vocabulary.from_addresses` derives them
+    from the addresses the run is about to compare.
+    """
+
+    async def _two_shops_one_town(self, db_session, names):
+        hub = Hub(id=uuid.uuid4(), name="Vocab Hub", lat=30.27, lng=-97.74)
+        db_session.add(hub)
+        await db_session.flush()
+        client = Client(
+            id=uuid.uuid4(), hub_id=hub.id, name="Design Partner", pos_system="flat_file"
+        )
+        db_session.add(client)
+        await db_session.flush()
+
+        # Different streets, so the last-resort address-similarity rule stays
+        # out of it and the name signal is the only thing under test. One town,
+        # because the town is the point.
+        # Different streets and a few hundred metres apart, so neither the
+        # address-similarity nor the coordinate fallback fires and the name
+        # signal is the only thing under test. One town, because the town is
+        # the point.
+        streets = ("Quillon Lane", "Marlow Crescent", "Sable Row")
+        for index, name in enumerate(names):
+            address = f"{index + 4} {streets[index]}, Ardenhoe, 99001"
+            dock = Location(
+                normalized_address=f"{index}{streets[index].replace(' ', '').lower()}",
+                address=address,
+                lat=30.26 + index * 0.01,
+                lng=-97.74 - index * 0.01,
+            )
+            db_session.add(dock)
+            await db_session.flush()
+            db_session.add(
+                Shop(
+                    client_id=client.id,
+                    name=name,
+                    address=address,
+                    lat=30.26 + index * 0.01,
+                    lng=-97.74 - index * 0.01,
+                    external_ref=f"90{index}/0",
+                    location_id=dock.id,
+                )
+            )
+        await db_session.flush()
+
+    async def test_two_businesses_named_after_their_town_are_not_proposed(
+        self, db_session
+    ):
+        # The contrast with the test below, one word apart. Under the static
+        # reading these two overlap on `ardenhoe` and reach the queue — but the
+        # only thing they share is the town they stand in, which the postcode
+        # signal already weighed.
+        await self._two_shops_one_town(
+            db_session, ["Ardenhoe Auto Body", "Ardenhoe Auto Bodyworks"]
+        )
+
+        assert await propose_duplicate_locations(db_session) == []
+
+    async def test_a_family_name_shared_in_that_same_town_still_is(
+        self, db_session
+    ):
+        # The same shape of name, and this one is a real candidate. The
+        # separation a frequency threshold could not make: `arturo` never
+        # appears in an address, so no number of accounts carrying it turns it
+        # into a place word.
+        await self._two_shops_one_town(
+            db_session, ["Arturo Auto Body", "Arturo Auto Bodyworks"]
+        )
+
+        proposals = await propose_duplicate_locations(db_session)
+
+        assert len(proposals) == 1

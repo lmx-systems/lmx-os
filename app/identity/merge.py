@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.identity.account_signals import (
     TIER_HIGH,
     TIER_WEAK,
+    Vocabulary,
     why_these_accounts_might_be_one_place,
 )
 from app.identity.resolution import canonical_location
@@ -92,6 +93,16 @@ async def propose_duplicate_locations(
     ).all()
     decided = await _already_considered(session)
 
+    # Built from the book this run is about to compare, not from a list. A token
+    # in two or more of these addresses is a place word, and a business name
+    # made of the town it stands in has told us where it is - which the postcode
+    # signal already weighed. See `Vocabulary`: frequency alone cannot find these
+    # (`hackensack` 6 accounts, `arturo` 5) and a hardcoded list of towns would
+    # silently stop working for the next customer while looking like it worked.
+    vocabulary = Vocabulary.from_addresses(
+        shop.address for shop, _ in rows if shop.address
+    )
+
     proposals: list[LocationMerge] = []
     for index, (shop_a, loc_a) in enumerate(rows):
         for shop_b, loc_b in rows[index + 1 :]:
@@ -105,6 +116,7 @@ async def propose_duplicate_locations(
             verdict = why_these_accounts_might_be_one_place(
                 ref_a=shop_a.external_ref, name_a=shop_a.name, address_a=shop_a.address,
                 ref_b=shop_b.external_ref, name_b=shop_b.name, address_b=shop_b.address,
+                vocabulary=vocabulary,
             )
             if verdict is None:
                 verdict = _why_these_addresses_might_match(source, target)
