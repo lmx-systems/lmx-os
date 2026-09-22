@@ -1,4 +1,5 @@
 import type { Stop } from '../api/types';
+import { isBeforeArrival } from '../utils/stopStatus';
 import type { OutboxItem } from './types';
 
 // Overlays not-yet-flushed queue items onto the last server-fetched Stop,
@@ -9,7 +10,12 @@ export function applyPendingToStop(stop: Stop, pending: OutboxItem[]): Stop {
   let next = stop;
   for (const item of pending) {
     if (item.stopId !== stop.stop_id) continue;
-    if (item.type === 'arrive' && next.status === 'pending') {
+    if (item.type === 'arrive' && isBeforeArrival(next)) {
+      // `isBeforeArrival` rather than `status === 'pending'`. A stop reaches
+      // `en_route` on its own (app/delivery/en_route.py), and
+      // `primaryActionForStop` offers "Arrived" from there - so restating the
+      // condition here let the two drift, and a driver tapping Arrived at an
+      // en-route stop while offline saw the button do nothing.
       next = { ...next, status: 'arrived' };
     } else if (item.type === 'scan') {
       const scannedCount = item.payload.scannedCount as number;
