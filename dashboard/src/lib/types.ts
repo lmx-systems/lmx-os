@@ -717,3 +717,20 @@ export interface GigDensityReport {
   sequenced_delivered_count: number
   sequenced_share: number | null
 }
+
+
+/** One core on the reverse leg (docs/ROADMAP.md W1). */
+export interface ReturnItem {
+  return_id: string
+  /** Empty for a standalone return a shop flagged with no originating order. */
+  origin_order_ref: string
+  shop_name: string | null
+  manifest: string
+  /** expected | ready_for_pickup | collected | returned_to_shop | not_ready | cancelled */
+  status: string
+  created_at: string
+  /** Hours since it first appeared — so nothing sits forgotten. */
+  age_hours: number
+  collected_at: string | null
+  returned_at: string | null
+}

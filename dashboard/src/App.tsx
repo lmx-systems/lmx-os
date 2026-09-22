@@ -24,6 +24,7 @@ import { ProposedRulesPanel } from './components/ProposedRulesPanel'
 import { CodDisputesPanel } from './components/CodDisputesPanel'
 import { DriverDevicesPanel } from './components/DriverDevicesPanel'
 import { GigPathPanel } from './components/GigPathPanel'
+import { ReturnsPanel } from './components/ReturnsPanel'
 import { LoginPage } from './components/LoginPage'
 import { Toast } from './components/ui/Toast'
 import { usePolling } from './hooks/usePolling'
@@ -243,6 +244,15 @@ function App() {
                         definition, so the count would never fall and a badge that
                         never falls is the "tab nobody opens" failure inverted. */}
                     <CodDisputesPanel key={`cod-${hubId}`} hubId={hubId} />
+                    {/* Recording work too, and the half of W1 that shipped
+                        without a front end: a driver could never collect a core
+                        and nobody could close one out. Hides itself when
+                        nothing is outstanding. */}
+                    <ReturnsPanel
+                      key={`returns-${hubId}`}
+                      hubId={hubId}
+                      onToast={showToast}
+                    />
                   </>
                 )}
               </div>
