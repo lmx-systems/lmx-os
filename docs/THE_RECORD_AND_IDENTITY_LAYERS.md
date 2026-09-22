@@ -289,12 +289,46 @@ the cost is a queue two-thirds noise rather than a corrupted dock — which is t
 failure mode `account_signals.py` already names as the reason a queue gets
 cleared rather than read.
 
-### Neither is fixed in `AGT-1`
+### Neither was fixed *in* `AGT-1`, and both are fixed now
 
-Changing the contestant because the harness found something, before the harness
-has scored anything, is the anchoring failure `gold.py` refuses in a different
-costume. Both are settled directly by the labelling pass: the label file asks a
-person about all twenty-one repair-shop pairs and the whole municipal chain, and
-their answers are the evidence for whether `repair` belongs on the list and
-whether a catch-all stem should be excluded from the suffix rule.
+Changing the contestant inside the bake-off, before the harness has scored
+anything, is the anchoring failure `gold.py` refuses in a different costume. So
+the fixes are a separate change, measurable against the incumbent as it shipped.
+
+**What changed.** `repair`, `repairs`, `body`, `collision`, `care`, `dba`,
+`county`, `township`, `boro`, `borough` and `dpw` joined `_COMMON_TOKENS`,
+ranked by how many accounts in the real book carry them — the discipline `IDN-3`
+used to exhaust its rules, rather than a guess. And a pair sharing a stem whose
+two names share **no word at all** is now `REVIEW` with a reason naming the
+possibility, not `HIGH`: demoted rather than refused, because the stem is real
+evidence and a business does get renamed.
+
+| | before | after |
+|---|---|---|
+| Proposals over the whole book | 97 | **73** |
+| of which `WEAK` | 32 | **11** |
+| Implied docks | 174 | **182** |
+| Second-largest implied dock | 9 repair shops in 7 towns | **gone** |
+| Proposals no block would reach | 20 | **0** |
+| Pairs to hand-label | 1,876 | **1,715** |
+
+That last pair of rows is a second-order effect worth naming: the escaping
+proposals *were* the repair-shop pairs. With the trade word out of the way, the
+blocking and the resolver agree about which pairs are worth looking at.
+
+### What the demotion does not fix, and what does
+
+**The 14-account chain survives**, because a tier is advice and an edge is an
+edge: `REVIEW` still proposes the pair, and the transitive closure does not read
+tiers. The closure figure measures *"if every proposal were confirmed"*, and
+nothing here auto-merges — so the real exposure was never the number, it was a
+reviewer confirming a chain pair by pair without being able to see it.
+
+That is fixed where it lives, in the queue. `merge_scale` reports how many shops
+sit behind each side and how many docks each has already absorbed, and
+`GET /operations/merge-proposals` carries it. A proposal where either side is
+already a group is labelled **extends a chain** in the console, with the count
+of records the click would make one place. A merge erases its own seam — that is
+what it is for — so there is exactly one moment the scale can be shown, and it
+is before the click.
 

@@ -485,6 +485,13 @@ export interface MergeProposal {
   proposed_at: string
   decided_at: string | null
   decision_source: string | null
+  /** Shops pointing at each side today. */
+  source_shops: number
+  target_shops: number
+  /** Docks that would share one identity if this were confirmed. */
+  accounts_joined: number
+  /** Either side has already absorbed another dock — this extends a chain. */
+  extends_a_chain: boolean
 }
 
 /** A dock nobody has classified yet (docs/ROADMAP_1.5.md IDN-3). */

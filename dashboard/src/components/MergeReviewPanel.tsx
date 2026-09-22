@@ -24,6 +24,12 @@ import type { MergeProposal } from '../lib/types'
  * Admin only for the decisions — confirming rewrites which dock a shop points
  * at and every per-dock statistic moves with it. Anyone may read the queue,
  * because a dispatcher spotting a duplicate is how good proposals get noticed.
+ *
+ * **A merge that extends a chain says so.** `AGT-1` closed this detector's
+ * proposals transitively and found a dock holding a municipal DPW, two county
+ * departments and an unrelated business — every edge individually defensible,
+ * because each reviewer saw one pair and a merge erases its own seam. There is
+ * exactly one moment that scale can be shown, and it is before the click.
  */
 export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
   const [proposals, setProposals] = useState<MergeProposal[] | null>(null)
@@ -79,6 +85,13 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
             <p className="text-[13px] text-[var(--text-primary)]">{proposal.source_address}</p>
             <p className="text-[13px] text-[var(--text-primary)]">{proposal.target_address}</p>
             <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">{proposal.reason}</p>
+            {proposal.extends_a_chain && (
+              <p className="mt-1 text-[11px] text-[var(--amber)]">
+                This extends a chain — one of these docks has already absorbed another.
+                Confirming makes {proposal.accounts_joined} records one place, and the earlier
+                merges were judged against different pairs.
+              </p>
+            )}
             {isAdmin && (
               <div className="mt-1.5 flex gap-1.5">
                 <button

@@ -45,14 +45,43 @@ _ZIP = re.compile(r"(?<!\d)(\d{5})(?:-\d{4})?\s*$")
 # Words that carry no identifying weight. A shared "auto" or "inc" between two
 # names says nothing; a shared rare token says a great deal, and the difference
 # is what makes name similarity usable rather than noise.
+#
+# **The second block was measured, not guessed.** `AGT-1`'s harness closed this
+# resolver's proposals transitively and found nine repair shops in seven towns
+# welded into one dock. The cause was `repair` - the commonest trade word in a
+# body-shop book - missing from the first block, so
+# `distinctive_tokens("T & J AUTO REPAIR")` is `{"repair"}`: the initials are one
+# character and dropped, `auto` is common, and the one surviving token is the
+# trade itself. Every "X & Y AUTO REPAIR" therefore had 1.00 distinctive-word
+# overlap with every other, which is precisely the signal `rare_token_overlap`
+# exists to avoid.
+#
+# The rest of the block comes from ranking every token in the real book by how
+# many accounts carry it, the same discipline `IDN-3` used to exhaust its rules.
+# `repair` 19 accounts, `body` 12, `county` 12, `dpw` 7, `boro` 6, `dba` 5,
+# `collision` 4, `township` 4, `care` 4 - trade words and municipal category
+# words, none of which identifies anybody.
 _COMMON_TOKENS = frozenset(
     {
         "auto", "automotive", "parts", "supply", "service", "services", "center",
         "centre", "inc", "llc", "ltd", "co", "corp", "company", "the", "and",
         "of", "shop", "garage", "sales", "group", "enterprises", "brothers",
         "bros", "son", "sons", "motor", "motors", "car", "cars", "truck",
+        # Measured against the real book - see above.
+        "repair", "repairs", "body", "collision", "care", "dba",
+        "county", "township", "boro", "borough", "dpw",
     }
 )
+
+# **A known remaining weakness, deliberately not fixed with this list.** The same
+# ranking shows town names used inside business names - `englewood` on 14
+# accounts, `bergen` 9, `teaneck` 8, `hudson` 7, `hackensack` 6. They identify
+# no better than `auto` does, and they are not on this list because they must
+# not be: the towns are this customer's towns, and a hardcoded list of them
+# would silently stop working for the next customer while looking like it
+# worked. The right fix is corpus frequency - which is what `ml/agt1/pool.py`'s
+# `RARE_TOKEN_MAX_ACCOUNTS` already does for blocking - and it needs this
+# function to see the book rather than one pair.
 
 NAME_SIMILARITY_THRESHOLD = 0.75
 RARE_TOKEN_THRESHOLD = 0.40
@@ -144,9 +173,25 @@ def why_these_accounts_might_be_one_place(
     if parsed_a and parsed_b and parsed_a.stem == parsed_b.stem:
         if names_agree:
             return TIER_HIGH, "same account root and branch, names agree"
-        # Differing only by suffix, names differ. Still the same stem, which is
-        # the distributor's own statement that these are one place.
-        return TIER_HIGH, "same account root and branch, differing suffix"
+        if distinctive_tokens(name_a) & distinctive_tokens(name_b):
+            # Differing only by suffix, names differ but overlap. Still the same
+            # stem, which is the distributor's own statement that these are one
+            # place, and a shared word says the two spellings are of it.
+            return TIER_HIGH, "same account root and branch, differing suffix"
+        # Same stem, and the two names share **nothing**. `AGT-1` found why this
+        # matters: one stem in the real book is a catch-all bucket for
+        # miscellaneous accounts, holding a municipal DPW, a county department
+        # and an unrelated business. Calling those HIGH chained four
+        # organisations into one dock by transitive closure, and every edge
+        # looked defensible to the reviewer who saw only that pair.
+        #
+        # Demoted rather than refused. The stem is real evidence and a business
+        # does get renamed, so this belongs in front of a person - just not at
+        # the top of their list, and not without saying what to check.
+        return TIER_REVIEW, (
+            "same account root and branch, but the names share no word - "
+            "may be a catch-all account rather than one place"
+        )
 
     if names_agree and same_zip:
         return TIER_HIGH, "identical name in the same postcode"

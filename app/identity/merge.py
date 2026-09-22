@@ -17,6 +17,7 @@ downstream can see the seam. One afternoon of attention buys a verified starting
 point. That asymmetry - a missed merge is visible and cheap, a wrong merge is
 invisible and permanent - is why this module proposes and never decides.
 """
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from uuid import UUID
@@ -398,3 +399,65 @@ async def _apply(
 
     await session.flush()
     return proposal
+
+
+@dataclass(frozen=True)
+class MergeScale:
+    """How much each side of a proposed merge already holds.
+
+    **The number a reviewer was never shown.** `confirm_merge` applies
+    immediately and the queue described one pair, so a person answering *"are
+    these two the same place"* had no way to see that the dock on the right had
+    already absorbed four others. Confirm twenty defensible pairs in a sitting
+    and the twentieth joins two groups that were never compared - which is
+    exactly what `AGT-1` found when it closed this resolver's proposals
+    transitively: a dock holding a municipal DPW, two county departments and an
+    unrelated business, every edge in the chain individually fine.
+
+    A merge is the one operation here that cannot be seen after the fact, since
+    erasing the seam is what it is for. So the seam has to be shown before.
+    """
+
+    source_shops: int
+    target_shops: int
+    source_absorbed: int
+    target_absorbed: int
+
+    @property
+    def accounts_joined(self) -> int:
+        """Docks that would share one identity if this were confirmed."""
+        return self.source_absorbed + self.target_absorbed + 2
+
+    @property
+    def is_a_chain(self) -> bool:
+        """Whether either side is already a group rather than a dock.
+
+        Two virgin docks merging is the ordinary case and needs no warning.
+        The moment one side has absorbed something, confirming extends a chain
+        the reviewer did not build and cannot see.
+        """
+        return bool(self.source_absorbed or self.target_absorbed)
+
+
+async def merge_scale(session: AsyncSession, proposal: LocationMerge) -> MergeScale:
+    """What confirming this proposal would actually join together."""
+    applied = select(LocationMerge).where(LocationMerge.status == STATUS_APPLIED)
+
+    async def absorbed(location_id: UUID) -> int:
+        rows = await session.scalars(
+            applied.where(LocationMerge.target_location_id == location_id)
+        )
+        return len(list(rows))
+
+    async def shops(location_id: UUID) -> int:
+        rows = await session.scalars(
+            select(Shop.id).where(Shop.location_id == location_id)
+        )
+        return len(list(rows))
+
+    return MergeScale(
+        source_shops=await shops(proposal.source_location_id),
+        target_shops=await shops(proposal.target_location_id),
+        source_absorbed=await absorbed(proposal.source_location_id),
+        target_absorbed=await absorbed(proposal.target_location_id),
+    )

@@ -396,3 +396,90 @@ class TestAMergeCanBeUndoneByAPerson:
             if m.status == STATUS_APPLIED
         ]
         assert applied.id not in {m.id for m in still_applied}
+
+
+class TestAReviewerCanSeeWhatAMergeWouldJoin:
+    """The chain a reviewer could not see, and now can.
+
+    `confirm_merge` applies immediately and the queue described one pair. So a
+    person answering *"are these two the same place"* had no way to know the
+    dock on the right had already absorbed four others — and a merge erases its
+    own seam, which is what it is for, so there is no moment afterwards when
+    the scale becomes visible.
+
+    `AGT-1` is what made the cost concrete: closing this detector's proposals
+    transitively over the real book produced a dock holding a municipal DPW,
+    two county departments and an unrelated business. Every edge individually
+    defensible, every reviewer shown one pair.
+    """
+
+    async def test_two_fresh_docks_raise_no_warning(self, db_session):
+        # The ordinary case, and most of them. A warning on every row is a
+        # warning nobody reads.
+        from app.api.routes import merge_proposals
+
+        await _two_docks(db_session)
+        await propose_duplicate_locations(db_session)
+        await db_session.flush()
+
+        view = (await merge_proposals(session=db_session, _ops=VIEWER))[0]
+
+        assert view.extends_a_chain is False
+        assert view.accounts_joined == 2
+
+    async def test_the_shops_behind_each_side_are_counted(self, db_session):
+        from app.api.routes import merge_proposals
+
+        await _two_docks(db_session)
+        await propose_duplicate_locations(db_session)
+        await db_session.flush()
+
+        view = (await merge_proposals(session=db_session, _ops=VIEWER))[0]
+
+        assert view.source_shops == 1
+        assert view.target_shops == 1
+
+    async def test_a_second_merge_onto_the_same_dock_says_it_extends_a_chain(
+        self, db_session
+    ):
+        from app.api.routes import confirm_merge_proposal, merge_proposals
+        from app.identity.merge import propose_merge
+
+        admin = await _admin(db_session)
+        first, second = await _two_docks(db_session)
+        await propose_duplicate_locations(db_session)
+        await db_session.flush()
+        proposal = (await merge_proposals(session=db_session, _ops=VIEWER))[0]
+        await confirm_merge_proposal(
+            proposal_id=proposal.id, session=db_session, admin=admin
+        )
+
+        # A third dock, proposed against whichever side survived the first
+        # merge. This is the click that quietly joins three records.
+        third = Location(
+            normalized_address="100tradestunitc",
+            address="100 Trade St Unit C",
+            lat=30.26,
+            lng=-97.74,
+        )
+        db_session.add(third)
+        await db_session.flush()
+        survivor = (
+            second if proposal.target_location_id == second.id else first
+        )
+        await propose_merge(
+            db_session,
+            source=third,
+            target=survivor,
+            reason="HIGH: same account root and branch, differing suffix",
+        )
+        await db_session.flush()
+
+        extending = [
+            m
+            for m in await merge_proposals(session=db_session, _ops=VIEWER)
+            if m.status == STATUS_PROPOSED
+        ][0]
+
+        assert extending.extends_a_chain is True
+        assert extending.accounts_joined == 3

@@ -97,6 +97,61 @@ class TestWhyTheseMightBeOnePlace:
         assert tier == TIER_HIGH
         assert "root and branch" in reason
 
+    def test_a_catch_all_stem_is_demoted_rather_than_called_high(self):
+        """Same stem, and the names share nothing at all.
+
+        `AGT-1` closed this resolver's proposals transitively and found a dock
+        holding a municipal DPW, a county department and an unrelated business.
+        One stem in the real book is a **catch-all bucket** for miscellaneous
+        accounts, so the distributor's id is not a statement that these are one
+        place — and every edge in the resulting chain looked defensible to the
+        reviewer who saw only that pair.
+
+        Demoted, not refused: the stem is real evidence and a business does get
+        renamed. It belongs in front of a person, just not at the top of the
+        list and not without saying what to check.
+        """
+        tier, reason = self._verdict(
+            ref_a="1960/0-A30", name_a="Arturo", address_a="x, 99001",
+            ref_b="1960/0-A45", name_b="Vosberg County Admin", address_b="y, 99002",
+        )
+        assert tier == TIER_REVIEW
+        assert "catch-all" in reason
+
+    def test_a_shared_word_keeps_a_differing_suffix_high(self):
+        """A renamed or re-spelled dock still reads as one place.
+
+        The demotion above must not catch the ordinary case, which is most of
+        them: one stem, two spellings, a word in common.
+        """
+        tier, _ = self._verdict(
+            ref_a="1841/1", name_a="Kowalczyk Road Auto Body", address_a="x, 99001",
+            ref_b="1841/1-A1", name_b="Kowalczyk Road Body Shop", address_b="y, 99002",
+        )
+        assert tier == TIER_HIGH
+
+    def test_the_trade_itself_is_not_a_distinctive_word(self):
+        """`repair` was missing from `_COMMON_TOKENS` and the cost was nine docks.
+
+        `distinctive_tokens("T & J Auto Repair")` was `{"repair"}`: the initials
+        are one character and dropped, `auto` is common, and the one surviving
+        token is the trade. Every *"X & Y Auto Repair"* therefore had 1.00
+        distinctive-word overlap with every other, and the transitive closure
+        welded nine unrelated shops in seven towns into one place.
+        """
+        assert rare_token_overlap("T & J Auto Repair", "V & M Auto Repair") == 0.0
+        assert self._verdict(
+            ref_a="1360/0", name_a="T & J Auto Repair", address_a="Ardenhoe, 99001",
+            ref_b="1402/0", name_b="V & M Auto Repair", address_b="Brillmoor, 99002",
+        ) is None
+
+    def test_the_municipal_category_words_identify_nobody_either(self):
+        """Two towns' public works departments are not one dock."""
+        assert self._verdict(
+            ref_a="1960/0-A53", name_a="Ardenhoe DPW", address_a="Ardenhoe, 99001",
+            ref_b="2490/0-A1", name_b="Brillmoor DPW", address_b="Brillmoor, 99002",
+        ) is None
+
     def test_identical_name_in_one_postcode_is_high(self):
         tier, _ = self._verdict(
             ref_a="1111/1", name_a="Kowalczyk Auto", address_a="a, 99001",
