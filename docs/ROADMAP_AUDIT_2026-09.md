@@ -91,6 +91,15 @@ cannot become a place names go to be forgotten.
 This is the same move `tests/test_architecture_boundaries.py` made for the
 core/edge rule: a convention nobody can quietly break.
 
+**`tests/test_no_unreachable_routes.py`** closes the hole that one leaves. The
+orphan check skips decorated functions — a FastAPI route has no Python caller by
+design — so an endpoint with tests and no console caller is invisible to it,
+which is the *exact* shape of the defect. This one checks all nine routers
+against all three front ends and found nine more, including two thirds of `W1`'s
+returns flow. It matches the last literal segment of a path rather than whole
+paths, for reasons the end of this file sets out at length: the whole-path
+version produced four false positives and was abandoned.
+
 **Roadmap statuses corrected** for `REC-2`, `REC-3`, `REC-4`, `IDN-2`, `IDN-4`
 and `ING-4`. None becomes `NEW` — the code is real and tested. They become
 `BUILT, NOT WIRED`, which is a different and more useful thing to read.
@@ -297,7 +306,13 @@ twenty-two changes rather than at the code I inherited.
 ### The orphan test skips decorated functions
 
 Which means **an endpoint with no caller in the console is invisible to it** —
-the exact `CON-4` shape. Checking the dashboard against `routes.py` and
+the exact `CON-4` shape.
+
+> **Now closed by `tests/test_no_unreachable_routes.py`.** The read below was
+> done by hand against `routes.py` and `admin_routes.py`; it is automated now,
+> so the next one does not need somebody to go looking. **It found nine more,
+> including a whole feature**: see *"What automating this found"* at the end of
+> this file. Checking the dashboard against `routes.py` and
 `admin_routes.py`:
 
 | | |
@@ -363,3 +378,80 @@ Across these changes the allowlists moved four times without my noticing first:
 "the list must not outlive the gap" test failed and told me to remove an entry.
 That is the mechanism working as intended — and it is the part of this audit
 that will still be working in six months.
+
+---
+
+## What automating the endpoint read found
+
+The hand read above checked two routers against the dashboard and found five
+curl-only admin routes. `tests/test_no_unreachable_routes.py` checks all nine
+routers against all three front ends, and found **nine more** that no front end
+can reach — one of them a whole feature.
+
+### `W1`'s returns flow shipped one third of its front end
+
+`W1` reads *"Done (PRs #13–#16)"* and four slices are listed. The **client** half
+is genuinely there — `client-portal/src/components/ReturnsPanel.tsx` lists what
+is awaiting pickup and flags cores as ready. The **driver** half and the **ops**
+half are not.
+
+| | |
+|---|---|
+| `POST /driver/stops/{id}/collect-return` | the driver collects cores at the shop |
+| `POST /driver/stops/{id}/return-not-ready` | they are not ready |
+| `POST /driver/stops/{id}/return-to-shop` | they go back |
+| `POST /admin/returns/{id}/mark-returned` | slice 3's *"ops manual mark"* |
+| `POST /admin/returns/{id}/reschedule` | slice 4's `not_ready → ready` move |
+
+So a counter person can say the cores are ready — and **the driver who arrives to
+collect them has no button, and the operator who has to close the loop has no
+list.** The feature is two thirds unreachable from the ends that do the work,
+and the end that requests it works fine, which is exactly the configuration that
+makes the gap invisible: the customer-facing half demos.
+
+`GET /admin/hubs/{id}/returns` is reachable as of `CON-1`'s panel work, which is
+the only reason it is not a sixth row.
+
+### The rest
+
+**`POST /driver/stops/{id}/scan-parcel`** — the app calls
+`/driver/stops/{id}/scan`, which takes a *count*. The per-parcel route has no
+screen, which means parcel-level scanning exists in the backend and has never
+been used.
+
+**`GET`/`PUT /admin/clients/{id}/sla-terms`** — what a client was promised, set
+by `scripts/set_client_sla_terms.py`. An operator cannot read back what they
+agreed to, which is the half that matters when a customer disputes a credit.
+
+**`POST /driver/me/gig-jobs/evaluate`** — the app has no gig screen at all;
+offers are answered on the platform's own app today.
+
+### Why the check matches segments rather than paths
+
+The obvious implementation — normalise both sides to `/admin/hubs/*/closures`
+and compare — was written first and abandoned after **four** false positives,
+each of which looked like a real finding:
+
+- a character class that excluded `?` and `=`, so every path with a query string
+  failed to match at all;
+- `` `/admin/signups?status=${encodeURIComponent(status)}` ``, whose `${...}`
+  contains parentheses;
+- `` `${apiBaseUrl()}/driver/me/route-events` ``, which does not start with `/`;
+- `` `...${status ? `?status=${x}` : ``}` ``, whose braces nest — a non-greedy
+  `[^}]*` stops at the first `}` and glues `${status` onto the path. That call
+  site had been written the same afternoon.
+
+Each reported a route as unreachable that a front end plainly calls, and the run
+ended on a count that could not be accounted for. **A check that cries wolf gets
+allowlisted into uselessness**, so the mechanism has to be wrong in the safe
+direction.
+
+Matching the last literal segment is that mechanism. It never reconstructs a
+path, so no interpolation shape can confuse it; it can miss a genuinely
+unreachable route whose segment appears somewhere for another reason, which is
+the harmless failure. **It is a floor, not a proof** — a route it passes is not
+certainly reachable, and a route it fails is worth a person's attention.
+
+Both halves were verified to bite before landing: removing an allowlist entry
+fails the check, and an entry that has become reachable fails its companion.
+
