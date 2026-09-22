@@ -202,3 +202,50 @@ Two earlier versions were regex and got it wrong in both directions, reporting
 `pin_verification_attempts += 1` and `basis.lmx_signed_by, ... = ...` as never
 written. It walks the syntax tree for that reason, and was checked by removing
 `state_code` from the allowlist and confirming it surfaces.
+
+
+---
+
+## The client-facing layer, audited the same way — 21 September
+
+`billing`, `client_auth`, `tracking`, `returns`, `webhooks`, `legal`, `settle`,
+the client API and the portal. Different risk profile from dispatch: a silent
+default here is visible to somebody outside the company.
+
+Four checks, three clean:
+
+| Check | Result |
+|---|---|
+| Client endpoints the portal never calls | 23 checked, **0 uncalled** |
+| Webhook event vocabulary vs what is emitted | One type, hardcoded — **nothing to drift** |
+| `PUBLIC_LABELS` (what an integration sees) | All 13 statuses covered |
+| Customer-facing tracking labels | **One missing, and it mattered** |
+
+### A recipient was told a finished delivery was still coming
+
+`OrderStatus.returned` is terminal and is produced by
+`app/delivery/resolution.py`. It had **no entry** in `tracking/service.py`'s
+`_RECIPIENT_STATUS`, so it fell through to the fallback: *"In progress. Your
+delivery is being handled."*
+
+Permanently. A recipient whose parcel had gone back to the hub refreshed a page
+that told them to keep waiting for something that was never coming. The other
+two terminal states, `delivered` and `cancelled`, were both covered.
+
+The sharpest part: `app/orders/state_machine.py`'s machine-facing map carried
+`RETURNED_TO_HUB` all along and **annotates it "already terminal, already
+notifies"**. The integration told the truth; the person did not.
+
+Fixed, with a test that every status has its own words and no terminal state
+reads as in progress. The fallback stays — a status added tomorrow without a
+line should render *something*, and "in progress" is the right thing to say when
+we genuinely do not know and the wrong thing when we do.
+
+### Two statuses nothing can produce
+
+`OrderStatus.classified` and `OrderStatus.accepted` are never assigned: intake
+goes `received → held` directly, and an order is already `assigned` before a
+driver accepts the offer. Both are harmless, because each shares its
+customer-facing wording with a reachable neighbour — whoever wrote that map
+anticipated overlapping states. Left alone; noted so the next person does not
+read them as live.
