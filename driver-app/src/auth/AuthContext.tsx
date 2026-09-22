@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react';
 
 import { api, setAuthToken } from '../api/client';
+import { adoptAuthToken, clearAuthToken, TOKEN_STORAGE_KEY } from './token';
 import type { DriverProfile } from '../api/types';
 import { stopReportingLocation } from '../location/reportDriverLocation';
 import { registerForPushNotifications } from '../notifications/registerForPushNotifications';
@@ -11,7 +12,6 @@ import { registerForPushNotifications } from '../notifications/registerForPushNo
 // SecureStore (Keychain on iOS, EncryptedSharedPreferences on Android), not
 // AsyncStorage - this token is a long-lived bearer credential for a real
 // driver session and shouldn't sit in plain, unencrypted app-sandbox storage.
-const TOKEN_STORAGE_KEY = 'lmx_driver_token';
 
 interface AuthContextValue {
   isLoading: boolean;
@@ -54,14 +54,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [pendingToken, setPendingToken] = useState<string | null>(null);
 
   const completeSignIn = useCallback(async (token: string) => {
+    // In memory only - the caller decides whether this token is worth
+    // persisting. `signIn` adopts it; the restore path below already read it
+    // from SecureStore and does not need to write it back.
     setAuthToken(token);
     const fetchedProfile = await api.getMyProfile();
     setProfileState(fetchedProfile);
     setIsSignedIn(true);
-    // Slides the session forward and keeps this device's last_seen_at
-    // fresh (app/api/driver_routes.py's /auth/refresh) - best-effort, a
-    // failure here shouldn't block sign-in.
-    api.refreshToken().catch(() => {});
+    // Slides the session forward and keeps this device's last_seen_at fresh
+    // (app/api/driver_routes.py's /auth/refresh) - best-effort, a failure here
+    // shouldn't block sign-in.
+    //
+    // **The returned token is now adopted.** It used to be discarded, so the
+    // app never took a refreshed token into use at all: when the original
+    // expired, every request 401'd - and the outbox marked a shift's queued
+    // stop events permanently failed as a result (DRV-4).
+    api
+      .refreshToken()
+      .then(({ access_token }) => adoptAuthToken(access_token))
+      .catch(() => {});
     // Registers this device for job-offer push notifications
     // (docs/ROADMAP.md A1) - also best-effort; no-ops entirely on a
     // build with no EAS project id configured yet, see that module.
@@ -83,8 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await completeSignIn(stored);
         } catch {
           // Stored token is stale/invalid - fall through to signed-out.
-          await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
-          setAuthToken(null);
+          await clearAuthToken();
         }
       }
       setIsLoading(false);
@@ -101,14 +111,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await completeSignIn(token);
     } catch {
-      await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
-      setAuthToken(null);
+      await clearAuthToken();
     }
   }, [pendingToken, completeSignIn]);
 
   const signIn = useCallback(
     async (token: string) => {
-      await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, token);
+      await adoptAuthToken(token);
       await completeSignIn(token);
     },
     [completeSignIn],
@@ -119,8 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // own timer, and a ping that lands between clearing auth and tearing the
     // watcher down would go out unauthenticated (docs/ROADMAP.md F1).
     stopReportingLocation();
-    await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
-    setAuthToken(null);
+    await clearAuthToken();
     setProfileState(null);
     setIsSignedIn(false);
     setNeedsBiometricRetry(false);
