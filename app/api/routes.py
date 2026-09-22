@@ -41,7 +41,13 @@ from app.models.location import Location
 from app.models.receiver_profile import ReceiverProfile
 from app.models.shop import Shop
 from app.models.location_merge import LocationMerge
-from app.identity.merge import confirm_merge, pending_merges, reject_merge, revert_merge
+from app.identity.merge import (
+    confirm_merge,
+    pending_merges,
+    recently_applied_merges,
+    reject_merge,
+    revert_merge,
+)
 from app.identity.node_class import classification_coverage, set_node_class
 from app.record.consequences import (
     CONSEQUENCE_LABELS,
@@ -230,7 +236,7 @@ async def attention_counts(
 
 @router.get("/operations/unlabelled-docks", response_model=list[UnlabelledDockView])
 async def unlabelled_docks(
-    limit: int = Query(default=50, ge=1, le=500),
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
     session: AsyncSession = Depends(get_db),
     _ops: AuthedOpsUser = Depends(get_current_ops_user),
 ) -> list[UnlabelledDockView]:
@@ -343,6 +349,15 @@ async def classification_coverage_view(
 
 @router.get("/operations/merge-proposals", response_model=list[MergeProposalView])
 async def merge_proposals(
+    # Annotated, not `= Query(default=...)`. Every test in this repo calls
+    # endpoint functions directly, and the older form hands those callers a
+    # `Query` object rather than a value - which for a bool is *truthy*, so the
+    # default silently inverts. `app/api/client_routes.py` documents the same
+    # trap; I walked into it here and a test caught it.
+    include_applied: Annotated[
+        bool,
+        Query(description="Also return recently applied merges, so one can be undone"),
+    ] = False,
     session: AsyncSession = Depends(get_db),
     _ops: AuthedOpsUser = Depends(get_current_ops_user),
 ) -> list[MergeProposalView]:
@@ -356,8 +371,19 @@ async def merge_proposals(
 
     Not hub-scoped, because the queue is not: the same physical dock can be
     reached from two hubs, and that pair is the most valuable merge to catch.
+
+    `include_applied` adds the recent ones that went through, so a merge
+    somebody has just realised was wrong can be undone. *"Every merge audited
+    and reversible"* is a clause of the done-when, and `revert_merge` delivered
+    the second half in code while nothing listed an applied merge for anybody
+    to reverse — reversible-by-curl is a thin reading of it.
     """
     proposals = await pending_merges(session)
+    if include_applied:
+        # Appended rather than interleaved: the queue is work to do and these
+        # are work already done, and a reviewer scanning for the next decision
+        # should not have to read past four merges they already made.
+        proposals = proposals + await recently_applied_merges(session)
     return [await _merge_view(session, proposal) for proposal in proposals]
 
 
@@ -459,7 +485,7 @@ async def revert_applied_merge(
 @router.get("/operations/record-health", response_model=RecordHealthView)
 async def record_health(
     hub_id: uuid.UUID,
-    window_days: int = Query(default=30, ge=1, le=365),
+    window_days: Annotated[int, Query(ge=1, le=365)] = 30,
     session: AsyncSession = Depends(get_db),
     _ops: AuthedOpsUser = Depends(get_current_ops_user),
 ) -> RecordHealthView:
@@ -730,8 +756,8 @@ async def override_order(
 @router.get("/operations/orders", response_model=OrderLookupPage)
 async def lookup_orders(
     hub_id: uuid.UUID,
-    q: str = Query(min_length=2, max_length=120),
-    limit: int = Query(default=25, ge=1, le=100),
+    q: Annotated[str, Query(min_length=2, max_length=120)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
     session: AsyncSession = Depends(get_db),
     _ops: AuthedOpsUser = Depends(get_current_ops_user),
 ) -> OrderLookupPage:

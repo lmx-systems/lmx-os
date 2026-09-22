@@ -199,7 +199,16 @@ export const api = {
   // Dock pairs waiting to be judged (docs/ROADMAP_1.5.md IDN-2). Not hub-scoped,
   // because the queue is not: the same physical dock can be reached from two
   // hubs, and that pair is the most valuable merge to catch.
-  mergeProposals: () => request<MergeProposal[]>('/operations/merge-proposals'),
+  mergeProposals: (includeApplied = false) =>
+    request<MergeProposal[]>(
+      `/operations/merge-proposals?include_applied=${includeApplied}`,
+    ),
+
+  // Undo a merge that went through. "Every merge audited and reversible" is a
+  // clause of IDN-2's done-when, and nothing listed an applied merge for
+  // anybody to reverse until this.
+  revertMerge: (id: string) =>
+    request<MergeProposal>(`/operations/merges/${id}/revert`, { method: 'POST' }),
 
   // Admin only. Confirming rewrites which dock a shop points at, and every
   // per-dock statistic moves with it.

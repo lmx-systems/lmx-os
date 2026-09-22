@@ -32,7 +32,7 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
 
   async function load() {
     try {
-      setProposals(await api.mergeProposals())
+      setProposals(await api.mergeProposals(true))
     } catch (e) {
       setError(e as Error)
     }
@@ -42,10 +42,12 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
     void load()
   }, [])
 
-  async function decide(id: string, decision: 'confirm' | 'reject') {
+  async function decide(id: string, decision: 'confirm' | 'reject' | 'revert') {
     setBusy(id)
     try {
-      await (decision === 'confirm' ? api.confirmMerge(id) : api.rejectMerge(id))
+      if (decision === 'confirm') await api.confirmMerge(id)
+      else if (decision === 'reject') await api.rejectMerge(id)
+      else await api.revertMerge(id)
       await load()
     } catch (e) {
       setError(e as Error)
@@ -54,10 +56,13 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
-  if (proposals !== null && proposals.length === 0) return null
+  const pending = (proposals ?? []).filter((p) => p.status === 'proposed')
+  const applied = (proposals ?? []).filter((p) => p.status === 'applied')
+
+  if (proposals !== null && pending.length === 0 && applied.length === 0) return null
 
   return (
-    <Card title="Same place?" meta={proposals ? `${proposals.length} to judge` : 'loading…'}>
+    <Card title="Same place?" meta={proposals ? `${pending.length} to judge` : 'loading…'}>
       {error && <p className="text-sm text-[var(--red)]">Couldn't load: {error.message}</p>}
 
       <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
@@ -66,7 +71,7 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
       </p>
 
       <ul className="space-y-2">
-        {(proposals ?? []).map((proposal) => (
+        {(proposals ?? []).filter((p) => p.status === 'proposed').map((proposal) => (
           <li
             key={proposal.id}
             className="rounded-[var(--radius)] border border-[var(--border)] px-2.5 py-2"
@@ -95,6 +100,38 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
           </li>
         ))}
       </ul>
+
+      {applied.length > 0 && isAdmin && (
+        <section className="mt-3 border-t border-[var(--border)] pt-2.5">
+          <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            Recently merged
+          </h3>
+          {/* The undo list. "Every merge audited and reversible" is a clause of
+              the done-when, and the revert existed in code with nothing listing
+              an applied merge for anybody to reverse. Capped and recent: undo is
+              for the one somebody has just realised was wrong, not a complete
+              history. */}
+          <ul className="space-y-1">
+            {applied.map((merge) => (
+              <li
+                key={merge.id}
+                className="flex items-start justify-between gap-3 text-[12px]"
+              >
+                <span className="text-[var(--text-secondary)]">
+                  {merge.source_address} → {merge.target_address}
+                </span>
+                <button
+                  disabled={busy === merge.id}
+                  onClick={() => decide(merge.id, 'revert')}
+                  className="flex-shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                >
+                  Undo
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </Card>
   )
 }
