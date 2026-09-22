@@ -26,6 +26,8 @@ thing a reviewer reads. If the queue ever needs sorting or filtering by tier in
 SQL, that is the moment to promote it.
 """
 import re
+from collections import Counter
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 TIER_HIGH = "HIGH"
@@ -45,14 +47,41 @@ _ZIP = re.compile(r"(?<!\d)(\d{5})(?:-\d{4})?\s*$")
 # Words that carry no identifying weight. A shared "auto" or "inc" between two
 # names says nothing; a shared rare token says a great deal, and the difference
 # is what makes name similarity usable rather than noise.
+#
+# **The second block was measured, not guessed.** `AGT-1`'s harness closed this
+# resolver's proposals transitively and found nine repair shops in seven towns
+# welded into one dock. The cause was `repair` - the commonest trade word in a
+# body-shop book - missing from the first block, so
+# `distinctive_tokens("T & J AUTO REPAIR")` is `{"repair"}`: the initials are one
+# character and dropped, `auto` is common, and the one surviving token is the
+# trade itself. Every "X & Y AUTO REPAIR" therefore had 1.00 distinctive-word
+# overlap with every other, which is precisely the signal `Vocabulary.overlap`
+# exists to avoid.
+#
+# The rest of the block comes from ranking every token in the real book by how
+# many accounts carry it, the same discipline `IDN-3` used to exhaust its rules.
+# `repair` 19 accounts, `body` 12, `county` 12, `dpw` 7, `boro` 6, `dba` 5,
+# `collision` 4, `township` 4, `care` 4 - trade words and municipal category
+# words, none of which identifies anybody.
 _COMMON_TOKENS = frozenset(
     {
         "auto", "automotive", "parts", "supply", "service", "services", "center",
         "centre", "inc", "llc", "ltd", "co", "corp", "company", "the", "and",
         "of", "shop", "garage", "sales", "group", "enterprises", "brothers",
         "bros", "son", "sons", "motor", "motors", "car", "cars", "truck",
+        # Measured against the real book - see above.
+        "repair", "repairs", "body", "collision", "care", "dba",
+        "county", "township", "boro", "borough", "dpw",
     }
 )
+
+# **The other half of the problem is not on this list and must not be.** The same
+# ranking shows town names used inside business names - `englewood` on 14
+# accounts, `bergen` 9, `teaneck` 8, `hackensack` 6 - identifying no better than
+# `auto` does. They are absent deliberately: the towns are *this* customer's
+# towns, and a hardcoded list of them would silently stop working for the next
+# customer while continuing to look like it worked. `Vocabulary` below derives
+# them from the book's own addresses instead.
 
 NAME_SIMILARITY_THRESHOLD = 0.75
 RARE_TOKEN_THRESHOLD = 0.40
@@ -100,21 +129,106 @@ def name_tokens(name: str | None) -> frozenset[str]:
 
 
 def distinctive_tokens(name: str | None) -> frozenset[str]:
-    """Tokens that actually identify. Digits kept - a branch number is rare."""
+    """Tokens that actually identify. Digits kept - a branch number is rare.
+
+    The **static** reading: trade words removed, nothing else. This is what
+    decides *whether* two names agree at all, and it deliberately does not
+    consult `Vocabulary` - see that class for why the two readings must not be
+    the same one.
+    """
     return frozenset(t for t in name_tokens(name) if t not in _COMMON_TOKENS and len(t) > 2)
 
 
-def rare_token_overlap(left: str | None, right: str | None) -> float:
-    """Jaccard over distinctive tokens only.
+# A place word has to turn up in this many accounts' addresses before it counts
+# as one. At 1 a single business named after the street it stands on would
+# silence its own name; at 2 the token has to be shared, which is what makes it
+# a place rather than a coincidence. Measured on the real book, 2 and 3 produce
+# the identical set - the separation is not balanced on this number.
+MIN_ACCOUNTS_FOR_A_PLACE_WORD = 2
 
-    Two body shops both called "... Auto Parts Inc" overlap heavily on common
-    words and share nothing that identifies them. This measures the part that
-    does.
+
+@dataclass(frozen=True)
+class Vocabulary:
+    """Which words identify a business *in this book*, derived from the book.
+
+    `_COMMON_TOKENS` is a hand-kept list of trade words and it cannot be
+    extended to cover the other half of the problem. Ranking every token in the
+    design partner's real book by how many accounts carry it puts town names
+    right among the trade words - `englewood` on 14 accounts, `bergen` 9,
+    `teaneck` 8 - and they identify no better than `auto` does: two businesses
+    both named after the town they stand in have told you where they are, which
+    the postcode already said.
+
+    **They must not go on the static list.** They are *this* customer's towns.
+    A hardcoded list of them would silently stop working for the next customer
+    while continuing to look like it worked, which is the worst failure
+    available here.
+
+    **Frequency alone cannot find them either**, and this is why the rule is
+    what it is rather than a threshold. On the real book `hackensack` is on 6
+    accounts and `arturo` on 5 - a family name. Any cut that suppresses the town
+    also suppresses the family, or neither.
+
+    So the rule reads the book's **addresses**: a token appearing in the address
+    of `MIN_ACCOUNTS_FOR_A_PLACE_WORD` or more accounts is a place word, and
+    counting it inside a business name double-counts the postcode signal that is
+    already being weighed separately. No list, no threshold on name frequency,
+    and it works for the next customer's towns without anybody editing anything.
+
+    ## The two readings, and why they are not one reading
+
+    `discounted` answers *"how much do these two names agree"*. `distinctive_tokens`
+    answers *"do they agree at all"*. They must stay separate, and the case that
+    proves it is real: suppressing `fort` and `lee` empties
+    `"FORT LEE RD AUTO BODY"` completely - `rd` is two characters, `auto` and
+    `body` are trade words - so under the discounted reading that name shares
+    nothing with anything, including with its own second spelling one account id
+    away.
+
+    An empty discounted set means *"this name is made of words this book uses
+    everywhere"*. That is a fact about the book. It is **not** evidence that two
+    records are unrelated, and the catch-all-stem check - which refuses to call a
+    pair `HIGH` when the names share nothing - would turn it into exactly that.
     """
-    a, b = distinctive_tokens(left), distinctive_tokens(right)
-    if not a or not b:
-        return 0.0
-    return len(a & b) / len(a | b)
+
+    place_words: frozenset[str] = frozenset()
+
+    @classmethod
+    def from_addresses(cls, addresses) -> "Vocabulary":
+        """Derive the place words from the addresses the book actually carries.
+
+        Digit-only tokens are skipped: a postcode in an address is not a word,
+        and `zip_of` already weighs it as a signal of its own.
+        """
+        seen: Counter = Counter()
+        for address in addresses:
+            for token in name_tokens(address):
+                if len(token) > 2 and not token.isdigit():
+                    seen[token] += 1
+        return cls(
+            place_words=frozenset(
+                token
+                for token, count in seen.items()
+                if count >= MIN_ACCOUNTS_FOR_A_PLACE_WORD
+            )
+        )
+
+    def discounted(self, name: str | None) -> frozenset[str]:
+        """Identifying tokens, with this book's place words taken out too."""
+        return frozenset(t for t in distinctive_tokens(name) if t not in self.place_words)
+
+    def overlap(self, left: str | None, right: str | None) -> float:
+        """Jaccard over what is left once the book's own words are discounted."""
+        a, b = self.discounted(left), self.discounted(right)
+        if not a or not b:
+            return 0.0
+        return len(a & b) / len(a | b)
+
+
+# The reading used when nobody has built a vocabulary: trade words only, which
+# is exactly what this module did before. Every existing caller keeps its
+# behaviour, and a caller that wants the corpus reading has to say so.
+STATIC_VOCABULARY = Vocabulary()
 
 
 def normalised_name(name: str | None) -> str:
@@ -130,6 +244,7 @@ def why_these_accounts_might_be_one_place(
     ref_b: str | None,
     name_b: str | None,
     address_b: str | None,
+    vocabulary: Vocabulary = STATIC_VOCABULARY,
 ) -> tuple[str, str] | None:
     """`(tier, reason)` if this pair is worth a person's attention, else None.
 
@@ -144,9 +259,25 @@ def why_these_accounts_might_be_one_place(
     if parsed_a and parsed_b and parsed_a.stem == parsed_b.stem:
         if names_agree:
             return TIER_HIGH, "same account root and branch, names agree"
-        # Differing only by suffix, names differ. Still the same stem, which is
-        # the distributor's own statement that these are one place.
-        return TIER_HIGH, "same account root and branch, differing suffix"
+        if distinctive_tokens(name_a) & distinctive_tokens(name_b):
+            # Differing only by suffix, names differ but overlap. Still the same
+            # stem, which is the distributor's own statement that these are one
+            # place, and a shared word says the two spellings are of it.
+            return TIER_HIGH, "same account root and branch, differing suffix"
+        # Same stem, and the two names share **nothing**. `AGT-1` found why this
+        # matters: one stem in the real book is a catch-all bucket for
+        # miscellaneous accounts, holding a municipal DPW, a county department
+        # and an unrelated business. Calling those HIGH chained four
+        # organisations into one dock by transitive closure, and every edge
+        # looked defensible to the reviewer who saw only that pair.
+        #
+        # Demoted rather than refused. The stem is real evidence and a business
+        # does get renamed, so this belongs in front of a person - just not at
+        # the top of their list, and not without saying what to check.
+        return TIER_REVIEW, (
+            "same account root and branch, but the names share no word - "
+            "may be a catch-all account rather than one place"
+        )
 
     if names_agree and same_zip:
         return TIER_HIGH, "identical name in the same postcode"
@@ -166,7 +297,11 @@ def why_these_accounts_might_be_one_place(
     # two-thirds noise gets cleared rather than read. Whole-string similarity
     # and distinctive-token overlap fail in different ways, so requiring both
     # is a real filter rather than a tighter threshold on the same thing.
-    overlap = rare_token_overlap(name_a, name_b)
+    # The corpus reading, when the caller has built one. Two businesses both
+    # named after the town they stand in have told us where they are, and the
+    # postcode signal above already weighed that - counting it again here is
+    # what put `englewood` on a par with a family name.
+    overlap = vocabulary.overlap(name_a, name_b)
     similarity = SequenceMatcher(None, (name_a or "").casefold(), (name_b or "").casefold()).ratio()
     if overlap >= RARE_TOKEN_THRESHOLD and similarity >= NAME_SIMILARITY_THRESHOLD:
         tier = TIER_REVIEW if same_zip else TIER_WEAK

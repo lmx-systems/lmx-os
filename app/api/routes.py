@@ -43,6 +43,7 @@ from app.models.shop import Shop
 from app.models.location_merge import LocationMerge
 from app.identity.merge import (
     confirm_merge,
+    merge_scale,
     pending_merges,
     recently_applied_merges,
     reject_merge,
@@ -388,11 +389,21 @@ async def merge_proposals(
 
 
 async def _merge_view(session: AsyncSession, proposal) -> MergeProposalView:
-    """Both addresses, resolved. "Are these the same place" cannot be answered
-    from two UUIDs, and a reviewer who has to look each one up will not."""
+    """Both addresses, resolved, and what confirming would join.
+
+    "Are these the same place" cannot be answered from two UUIDs, and a
+    reviewer who has to look each one up will not. Nor can it be answered
+    safely from the pair alone once either side has already absorbed
+    something - `merge_scale` is what says so.
+    """
     source = await session.get(Location, proposal.source_location_id)
     target = await session.get(Location, proposal.target_location_id)
+    scale = await merge_scale(session, proposal)
     return MergeProposalView(
+        source_shops=scale.source_shops,
+        target_shops=scale.target_shops,
+        accounts_joined=scale.accounts_joined,
+        extends_a_chain=scale.is_a_chain,
         id=proposal.id,
         status=proposal.status,
         reason=proposal.reason,

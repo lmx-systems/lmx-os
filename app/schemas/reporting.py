@@ -353,6 +353,16 @@ class MergeProposalView(BaseModel):
     decided_at: datetime | None
     decision_source: str | None
 
+    # What confirming this would actually join. A merge erases its own seam -
+    # that is what it is for - so the only moment a reviewer can see the scale
+    # of one is before they confirm it. Without these, twenty individually
+    # defensible confirmations in a sitting can weld four organisations into one
+    # dock, which is what `AGT-1` found by closing the proposals transitively.
+    source_shops: int = 0
+    target_shops: int = 0
+    accounts_joined: int = 2
+    extends_a_chain: bool = False
+
 
 class UnlabelledDockView(BaseModel):
     """A dock nobody has classified, and how much it matters (`IDN-3`).
