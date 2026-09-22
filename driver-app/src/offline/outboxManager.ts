@@ -1,10 +1,39 @@
 import NetInfo from '@react-native-community/netinfo';
 
 import { api, ApiError } from '../api/client';
+import { adoptAuthToken } from '../auth/token';
 import { loadOutbox, saveOutbox } from './outboxStore';
 import type { OutboxActionType, OutboxItem } from './types';
 
 const BACKOFF_STEPS_MS = [2000, 5000, 15000, 30000, 60000];
+
+// 4xx statuses that are the server asking us to come back rather than telling
+// us the request was wrong. Retrying these is the whole point; treating a 401
+// as permanent is what lost a shift's stop events.
+const RETRYABLE_4XX = new Set([401, 408, 429]);
+
+/**
+ * Is this failure worth giving up on?
+ *
+ * Exported and pure so it can be tested without standing up a queue, a
+ * network stub and a clock — the classification *is* the bug this fixes, and
+ * it deserves to be checkable on its own.
+ *
+ * - **Not an `ApiError`**: the request never reached the server. Transient.
+ * - **5xx**: the server fell over. Transient.
+ * - **401 / 408 / 429**: the server is asking us to come back — refresh the
+ *   token, wait, slow down. Transient, and 401 is the one whose
+ *   misclassification cost a shift's stop events (DRV-4).
+ * - **Any other 4xx**: a business-rule rejection. "Not all parcels scanned
+ *   yet" returns the identical error however many times it is retried, so the
+ *   item stays in the queue with `lastError` set for the driver to notice
+ *   rather than retrying for ever.
+ */
+export function isPermanentFailure(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  if (err.status < 400 || err.status >= 500) return false;
+  return !RETRYABLE_4XX.has(err.status);
+}
 
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -96,16 +125,27 @@ class OutboxManager {
           await this.persistAndNotify();
         } catch (err) {
           failedStopIds.add(item.stopId);
-          // A 4xx from the server (business-rule rejection, e.g. "not all
-          // parcels scanned yet", or a stale/rejected auth token) will
-          // return the exact same error no matter how many times it's
-          // retried - mark it permanently failed rather than retrying
-          // forever. It stays in the queue with lastError set
-          // (SyncStatusPill's warning state) instead of vanishing, since
-          // a driver needs to notice it didn't go through. A network-level
-          // failure (no response reached at all) is presumed transient -
-          // keep retrying with backoff once connectivity returns.
-          const isPermanent = err instanceof ApiError && err.status >= 400 && err.status < 500;
+          // A 4xx from the server is usually a business-rule rejection
+          // ("not all parcels scanned yet") that will return the exact same
+          // error however many times it is retried - mark it permanently
+          // failed rather than retrying forever. It stays in the queue with
+          // lastError set (SyncStatusPill's warning state) instead of
+          // vanishing, since a driver needs to notice it didn't go through.
+          // A network-level failure (no response reached at all) is presumed
+          // transient - keep retrying with backoff once connectivity returns.
+          //
+          // **401 is the exception, and treating it as permanent lost a
+          // shift's work.** This is DRV-4's done-when exactly: "a full shift
+          // with no signal loses no stop events". Queue up a day of stops in a
+          // dead zone, have the access token expire while you are down there,
+          // come back into signal - and every queued item 401s at once, gets
+          // marked permanent, and is never sent. A stale token is the textbook
+          // transient failure: it is fixed by refreshing, which is what
+          // `refreshOnce` below does before the next pass.
+          //
+          // 408 and 429 are retryable for the same reason - the server is
+          // telling us to come back, not that the request was wrong.
+          const isPermanent = isPermanentFailure(err);
           const attempts = item.attempts + 1;
           const backoffMs = BACKOFF_STEPS_MS[Math.min(attempts - 1, BACKOFF_STEPS_MS.length - 1)];
           this.items = this.items.map((i) =>
@@ -120,6 +160,15 @@ class OutboxManager {
               : i,
           );
           await this.persistAndNotify();
+
+          // A 401 means every remaining item will 401 too. Refresh once and
+          // stop the pass: the next flush goes out with a live token rather
+          // than burning the whole queue's retry budget against a dead one.
+          if (err instanceof ApiError && err.status === 401) {
+            await this.refreshOnce();
+            break;
+          }
+
           // A network-level failure (not an ApiError, i.e. the request
           // never reached the server) means the rest of the queue will
           // fail identically right now - stop this pass instead of
@@ -129,6 +178,24 @@ class OutboxManager {
       }
     } finally {
       this.flushing = false;
+    }
+  }
+
+  /**
+   * Swap a stale access token for a live one, best-effort.
+   *
+   * The queued stop events are the point: without this, excluding 401 from
+   * "permanent" would only mean retrying forever against a token that is
+   * never going to work. Failure is silent on purpose - the driver is offline
+   * or genuinely signed out, and either way the items stay queued and
+   * retryable rather than being thrown away.
+   */
+  private async refreshOnce(): Promise<void> {
+    try {
+      const { access_token } = await api.refreshToken();
+      await adoptAuthToken(access_token);
+    } catch {
+      // Left for the next flush. The items are still in the queue.
     }
   }
 
