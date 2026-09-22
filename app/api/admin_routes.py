@@ -59,6 +59,7 @@ from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user, requi
 from app.payroll import get_payroll_provider
 from app.redis_client import get_client as get_redis_client
 from app.schemas.admin import (
+    AdminDriverDeviceView,
     ClientOnboardingBody,
     ClientOnboardingResult,
     DriverOnboardingBody,
@@ -386,6 +387,45 @@ async def onboard_driver(
         # a number somebody will later have to defend.
         hourly_rate_is_placeholder=driver.hourly_rate_cents is None,
     )
+
+
+@router.get("/drivers/{driver_id}/devices", response_model=list[AdminDriverDeviceView])
+async def admin_list_driver_devices(
+    driver_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[AdminDriverDeviceView]:
+    """Which devices this driver is signed in on (`docs/ROADMAP_AUDIT_2026-09.md`).
+
+    **The revocation below could not be used without this.** It documents itself
+    as the *"driver calls dispatch, ops revokes on their behalf - lost phone, no
+    app access"* path, and it takes a `device_id`. The only list of device ids
+    was `GET /driver/me/devices`, which is driver-authenticated - so ops had to
+    already know an id they could only have got from the driver, who has lost
+    the phone. That is the one case the route exists for.
+
+    **Revoked devices are returned too**, unlike the driver-facing list. An
+    admin is answering *"why can this driver not sign in"*, and *"no device"* and
+    *"a device somebody revoked on Tuesday"* are different answers to it.
+
+    Newest activity first, so the phone in somebody's hand is at the top and the
+    one in a drawer is not.
+    """
+    result = await session.execute(
+        select(DriverDevice)
+        .where(DriverDevice.driver_id == uuid.UUID(driver_id))
+        .order_by(DriverDevice.last_seen_at.desc())
+    )
+    return [
+        AdminDriverDeviceView(
+            device_id=device.device_id,
+            device_name=device.device_name,
+            last_seen_at=device.last_seen_at,
+            registered_at=device.created_at,
+            revoked_at=device.revoked_at,
+        )
+        for device in result.scalars().all()
+    ]
 
 
 @router.delete("/drivers/{driver_id}/devices/{device_id}", status_code=204)
