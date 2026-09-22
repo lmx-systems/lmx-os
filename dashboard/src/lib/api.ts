@@ -2,6 +2,8 @@ import { clearToken, getToken } from './auth'
 import type {
   ClientOnboardingBody,
   ClientOnboardingResult,
+  DriverOnboardingBody,
+  DriverOnboardingResult,
   CreditExposure,
   DriverDocumentReviewBody,
   DriverDocumentReviewResult,
@@ -246,6 +248,15 @@ export const api = {
   // own separate client-JWT auth domain - see that app's lib/api.ts).
   onboardClient: (body: ClientOnboardingBody) =>
     request<ClientOnboardingResult>('/admin/clients', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  // Provision a driver. Nothing created one before this - every row was a
+  // hand-written insert, while the OTP path's own comment says drivers are
+  // "provisioned by ops, not self-registered".
+  onboardDriver: (body: DriverOnboardingBody) =>
+    request<DriverOnboardingResult>('/admin/drivers', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

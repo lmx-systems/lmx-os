@@ -39,10 +39,6 @@ KNOWN_UNWRITTEN: dict[str, str] = {
     # because `STATE_OVERTIME_RULES` is empty - the trap springs when somebody
     # registers a state rule and it silently never fires.
     "state_code": "A9: Hub.state_code selects an overtime rule and nothing sets it",
-    # Nothing in app/ or scripts/ creates a Driver at all - a row can only be
-    # made by hand. The default of 1 unit is at least the safe direction: a
-    # hand-made driver is under-assigned rather than over-assigned.
-    "vehicle_capacity_units": "A-series: no driver-creation path exists; default 1 is the safe direction",
     "stripe_connect_account_id": "A11: gig payout is stubbed - app/config.py says no driver has a real one",
     # Dead rather than dangerous: read by nothing either, so a flag simply does
     # not record who raised it.

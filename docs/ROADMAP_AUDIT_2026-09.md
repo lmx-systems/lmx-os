@@ -182,10 +182,22 @@ isolation and ships it — and it never fires, because no hub carries `"CA"`. Th
 module docstring anticipates the registry being empty and says nothing about the
 key being unset.
 
-**Nothing creates a `Driver`.** No endpoint, no script: a driver row can only be
-made by a hand-written insert. `vehicle_capacity_units` then holds its default of
-1, which the optimizer's capacity check reads. At least the safe direction — a
-hand-made driver is under-assigned rather than over-assigned.
+~~**Nothing creates a `Driver`.**~~ **Fixed.** No endpoint and no script created
+one: a driver row could only be made by a hand-written insert, while
+`driver_routes.py`'s OTP path says in its own comment that *"drivers are
+provisioned by ops, not self-registered"* — describing an intention rather than
+a route. `POST /admin/drivers` and a console form now do it, with
+`vehicle_capacity_units` **required rather than defaulted**: the column defaults
+to 1 and the optimizer's capacity check reads it, so a driver provisioned without
+thinking about it gets one order at a time — the safe direction and the wrong
+answer.
+
+Building it turned up a second thing. **`drivers.phone` had no unique
+constraint**, and the OTP path consumes its lookup with `scalar_one_or_none`,
+which *raises* on two rows — so a duplicate number would lock **both** drivers
+out of the app with a 500 rather than one of them with an error. Migration `0063`
+makes it unique at the database, because the endpoint is not the only writer and
+on today's evidence is not even the usual one.
 
 Minor: `StopFlag.created_by_driver_id` is neither written nor read, so a flag
 does not record who raised it.

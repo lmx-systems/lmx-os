@@ -15,6 +15,7 @@ import { FleetRoster } from './components/FleetRoster'
 import { MeasurementPanel } from './components/MeasurementPanel'
 import { OperationsPanel } from './components/OperationsPanel'
 import { OnboardClientForm } from './components/OnboardClientForm'
+import { OnboardDriverForm } from './components/OnboardDriverForm'
 import { UrgencyRulesPanel } from './components/UrgencyRulesPanel'
 import { DriverDocumentsPanel } from './components/DriverDocumentsPanel'
 import { PendingSignupsPanel } from './components/PendingSignupsPanel'
@@ -267,6 +268,11 @@ function App() {
                         unreviewed license keeps a driver off the road everywhere. */}
                     <DriverDocumentsPanel onToast={showToast} />
                     <OnboardClientForm hubId={hubId} onToast={showToast} />
+                    {/* Beside client onboarding, because it is the same kind of
+                        act: creating the identity somebody logs in with. Nothing
+                        created a driver before this - every row was a
+                        hand-written insert (docs/ROADMAP_AUDIT_2026-09.md). */}
+                    <OnboardDriverForm hubId={hubId} onToast={showToast} />
                     <UrgencyRulesPanel key={`urgency-${hubId}`} hubId={hubId} onToast={showToast} />
                     <ProposedRulesPanel key={`proposed-${hubId}`} hubId={hubId} onToast={showToast} />
                     {/* No hub key: these are fleet-wide distributions over durable

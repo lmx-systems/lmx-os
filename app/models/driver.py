@@ -7,6 +7,21 @@ from app.db import Base
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 
 
+# Which pay model, document set and onboarding path applies. Stated as a tuple
+# rather than left as literals scattered through the tree, for the reason
+# `NODE_CLASSES` and `CONSEQUENCES` are: `app/api/admin_routes.py` and
+# `app/api/driver_routes.py` both branch on `== "gig"`, and a fourth value
+# arriving by typo would take a driver down a path nobody wrote.
+EMPLOYMENT_W2 = "w2"
+EMPLOYMENT_1099 = "contractor_1099"
+EMPLOYMENT_GIG = "gig"
+EMPLOYMENT_TYPES = (EMPLOYMENT_W2, EMPLOYMENT_1099, EMPLOYMENT_GIG)
+
+# Driver-app onboarding (screen 1c). Null means "setup incomplete" and the app
+# routes there, so this is deliberately not defaulted.
+VEHICLE_TYPES = ("car", "van", "bike")
+
+
 class Driver(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "drivers"
 

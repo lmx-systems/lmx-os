@@ -275,3 +275,43 @@ class ClientSlaTermBody(BaseModel):
 
 class ClientSlaTermView(ClientSlaTermBody):
     term_id: str
+
+
+class DriverOnboardingBody(BaseModel):
+    """Provision a driver (`docs/ROADMAP_AUDIT_2026-09.md`).
+
+    Nothing created a `Driver` before this — every row was a hand-written
+    insert, while `app/api/driver_routes.py`'s OTP path says in its own comment
+    that *"drivers are provisioned by ops, not self-registered"*. The
+    provisioning it refers to did not exist.
+
+    **`vehicle_capacity_units` is required and has no default here**, though the
+    column defaults to 1. The optimizer's capacity check reads it, so a driver
+    provisioned without thinking about it gets one order at a time — which is
+    the safe direction and the wrong answer. Asking makes it a decision.
+
+    `hourly_rate_cents` is optional because `scripts/set_driver_rate.py` already
+    owns it and a second writer would be a second place for the number to be
+    wrong. Left null, payroll falls back to `PLACEHOLDER_HOURLY_RATE_CENTS` and
+    says so.
+    """
+
+    hub_id: str
+    name: str = Field(min_length=1, max_length=120)
+    # The login identity: OTP looks a driver up by this, and `scalar_one_or_none`
+    # raises on two rows. Unique at the database since migration `0063`.
+    phone: str = Field(min_length=5, max_length=32)
+    vehicle_capacity_units: int = Field(ge=1, le=500)
+    employment_type: str = Field(description="w2 | contractor_1099 | gig")
+    vehicle_type: str | None = None
+    plate_number: str | None = Field(default=None, max_length=32)
+    hourly_rate_cents: int | None = Field(default=None, ge=0)
+
+
+class DriverOnboardingResult(BaseModel):
+    driver_id: str
+    name: str
+    phone: str
+    employment_type: str
+    vehicle_capacity_units: int
+    hourly_rate_is_placeholder: bool

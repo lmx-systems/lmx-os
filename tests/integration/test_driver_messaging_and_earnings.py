@@ -80,7 +80,18 @@ async def _seed_driver_only(db_session):
     hub_id, driver_id = uuid.uuid4(), uuid.uuid4()
     db_session.add(Hub(id=hub_id, name="Earnings Test Hub", lat=34.05, lng=-118.25))
     await db_session.commit()
-    db_session.add(Driver(id=driver_id, hub_id=hub_id, name="Sam E.", phone="+15555550299", vehicle_capacity_units=5))
+    # A distinct number per driver. `drivers.phone` is unique as of migration
+    # 0063 - it is the login identity, and the OTP lookup raises on two rows -
+    # so a shared one here collided as soon as a test seeded two drivers. The
+    # number this file is actually about is the *counterparty* support line,
+    # which is unaffected.
+    db_session.add(
+        Driver(
+            id=driver_id, hub_id=hub_id, name="Sam E.",
+            phone=f"+1555555{uuid.uuid4().int % 10000:04d}",
+            vehicle_capacity_units=5,
+        )
+    )
     await db_session.commit()
     return hub_id, driver_id
 
