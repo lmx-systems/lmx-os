@@ -150,5 +150,55 @@ its reason: two paths into the merge table that §2.2(c) gates behind the
 founding set, a per-order consequence label nothing reads back yet, and a
 superseded cost function.
 
-`ING-4` is separate and already reopened: it is blocked on `REC-5`'s definition
-of a stop.
+`ING-4` is separate, and was reopened here in error — see `ROADMAP_1.5.md`. Its
+done-when asked for something the data cannot support.
+
+---
+
+## The dispatch layer, audited the same way — 21 September
+
+`batch_queue`, `optimizer`, `sla`, `fleet_state`, `delivery`, `compliance`. The
+six CORE packages. Function-level orphans there were already covered by
+`tests/test_no_new_orphans.py`, so this looked for the shapes that check cannot
+see — the ones §"What this does not say" named.
+
+**The dispatch layer is markedly cleaner than the record layer was**, and that is
+worth saying rather than manufacturing findings to justify the exercise. Three
+checks came back empty or near-empty:
+
+| Check | Result |
+|---|---|
+| Module-level vocabulary constants nothing references | 163 checked, **0 dead** |
+| Enum members nothing references | 2 candidates, **both false positives** — `SLATier` is a column type written as strings; `StopFailureReason` is a request enum whose values the exception queue consumes |
+| Settings nothing consults | 55 checked, 1 false positive (`dashboard_cors_origins` is read through a derived property), **2 genuinely dead** — `epicor_base_url` and `epicor_api_key`, for a client that makes no calls |
+
+### Two findings with teeth
+
+**`Hub.state_code` is set by nothing** — not `app/`, not `scripts/`, not tests.
+It is read once, by `app/payroll/hours.py`, to select an overtime rule. Harmless
+*today* only because `STATE_OVERTIME_RULES` is empty. The trap springs the day
+somebody writes a California daily-overtime rule, registers it, tests it in
+isolation and ships it — and it never fires, because no hub carries `"CA"`. The
+module docstring anticipates the registry being empty and says nothing about the
+key being unset.
+
+**Nothing creates a `Driver`.** No endpoint, no script: a driver row can only be
+made by a hand-written insert. `vehicle_capacity_units` then holds its default of
+1, which the optimizer's capacity check reads. At least the safe direction — a
+hand-made driver is under-assigned rather than over-assigned.
+
+Minor: `StopFlag.created_by_driver_id` is neither written nor read, so a flag
+does not record who raised it.
+
+### The check that found them
+
+`tests/test_no_write_only_columns.py`. **A column read and never written is worse
+than a dead one** — dead is merely unused, while read-and-never-written is a
+permanent silent default that looks like a value somebody chose. Thirteen
+allowlisted, each with its reason, and two companion tests so the list cannot
+outlive the gaps.
+
+Two earlier versions were regex and got it wrong in both directions, reporting
+`pin_verification_attempts += 1` and `basis.lmx_signed_by, ... = ...` as never
+written. It walks the syntax tree for that reason, and was checked by removing
+`state_code` from the allowlist and confirming it surfaces.
