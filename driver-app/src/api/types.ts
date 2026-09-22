@@ -28,6 +28,11 @@ export interface DriverProfile {
   // this app (no rating-submission system exists, so there's nothing real
   // to show; see app/schemas/driver_app.py's DriverProfileView docstring).
   trip_count: number;
+  // Where the warehouse is, so the app can put a fence round it (DRV-3).
+  // Nullable: a hub created before coordinates were required has none, and a
+  // fence at (0, 0) is in the Gulf of Guinea.
+  hub_lat: number | null;
+  hub_lng: number | null;
 }
 
 export type DocType = 'license' | 'insurance';

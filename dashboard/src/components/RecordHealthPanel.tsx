@@ -158,6 +158,32 @@ export function RecordHealthPanel({ hubId }: { hubId: string }) {
             </section>
           )}
 
+          {data.turnaround_median_seconds !== null && (
+            <section className="mb-3">
+              <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                Turnaround in the yard
+              </h3>
+              <p className="text-[13px] text-[var(--text-primary)]">
+                <span className="tabular-nums font-medium">
+                  {Math.round(data.turnaround_median_seconds / 60)} min
+                </span>{' '}
+                median
+                <span className="text-[var(--text-muted)]">
+                  {' '}
+                  · {data.turnaround_trips} return trip
+                  {data.turnaround_trips === 1 ? '' : 's'}
+                </span>
+              </p>
+              {data.turnaround_pairing_rate !== null && data.turnaround_pairing_rate < 0.8 && (
+                <p className="mt-0.5 text-[11px] text-[var(--amber)]">
+                  Only {Math.round(data.turnaround_pairing_rate * 100)}% of arrivals paired
+                  with a departure — the fence is probably missing crossings, so treat the
+                  median with care.
+                </p>
+              )}
+            </section>
+          )}
+
           <section>
             <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
               Consequence labels

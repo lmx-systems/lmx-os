@@ -328,6 +328,10 @@ class RecordHealthView(BaseModel):
     geofence_coverage: float | None
     geofence_lead_p50_seconds: float | None
     geofence_comparable_stops: int
+    # DRV-3. Reported with its pairing rate, never alone.
+    turnaround_median_seconds: float | None
+    turnaround_pairing_rate: float | None
+    turnaround_trips: int
     # From `label_counts`: observed_consequences, silences, labelled_total,
     # by_type, and the band's two ends. Passed through rather than flattened,
     # because the band is a range the brief declines to collapse and a view that

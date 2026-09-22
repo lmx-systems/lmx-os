@@ -6,6 +6,9 @@ import type { Stop } from '../api/types';
 import {
   GEOFENCE_RADIUS_M,
   MAX_MONITORED_REGIONS,
+  hubIdFromRegion,
+  hubRegionIdentifier,
+  isHubRegion,
   regionsForRoute,
 } from './geofenceWindow';
 
@@ -64,6 +67,20 @@ async function queueCrossing(stopId: string, kind: Crossing, at: Date): Promise<
 }
 
 /**
+ * The same, for the warehouse fence (DRV-3).
+ *
+ * A separate outbox action because it posts to a different endpoint, not
+ * because the crossing differs. Everything else about it is identical: the
+ * device's clock, queued rather than posted, idempotent on replay.
+ */
+async function queueHubCrossing(hubId: string, kind: Crossing, at: Date): Promise<void> {
+  await outboxManager.enqueue('hub_geofence', hubId, {
+    kind,
+    occurred_at: at.toISOString(),
+  });
+}
+
+/**
  * Defined at module scope, which the OS requires: iOS relaunches the app into
  * the background to deliver a region event, and the task has to already exist
  * by the time the JS bundle finishes evaluating. Registering it inside a
@@ -87,10 +104,23 @@ TaskManager.defineTask(STOP_GEOFENCE_TASK, async ({ data, error }) => {
   // The crossing happened now, by this device's clock. There is no timestamp
   // on the region event itself.
   const at = new Date();
-  if (eventType === Location.GeofencingEventType.Enter) {
-    await queueCrossing(region.identifier, 'enter', at);
-  } else if (eventType === Location.GeofencingEventType.Exit) {
-    await queueCrossing(region.identifier, 'exit', at);
+  const kind: Crossing | null =
+    eventType === Location.GeofencingEventType.Enter
+      ? 'enter'
+      : eventType === Location.GeofencingEventType.Exit
+        ? 'exit'
+        : null;
+  if (kind === null) {
+    return;
+  }
+
+  // One region set carries both sensors, distinguished by identifier - see
+  // `HUB_REGION_PREFIX`. A second geofencing task would fight this one for the
+  // per-app region cap, or replace it outright.
+  if (isHubRegion(region.identifier)) {
+    await queueHubCrossing(hubIdFromRegion(region.identifier), kind, at);
+  } else {
+    await queueCrossing(region.identifier, kind, at);
   }
 });
 
@@ -107,8 +137,27 @@ TaskManager.defineTask(STOP_GEOFENCE_TASK, async ({ data, error }) => {
  * gets a fully working app that falls back to tapping arrive and complete. The
  * measurement is lost for that shift, not the shift.
  */
-export async function syncStopGeofences(stops: Stop[]): Promise<void> {
+export async function syncStopGeofences(
+  stops: Stop[],
+  hub?: { id: string; lat: number; lng: number } | null,
+): Promise<void> {
   const regions = regionsForRoute(stops);
+
+  // The warehouse rides along in the same set (DRV-3). Registered whenever the
+  // driver is on duty, not only when they have a route: a driver back in the
+  // yard with nothing assigned is exactly the turnaround worth measuring, and
+  // that is the moment a route-only fence would be switched off.
+  if (hub) {
+    regions.push({
+      identifier: hubRegionIdentifier(hub.id),
+      latitude: hub.lat,
+      longitude: hub.lng,
+      radius: GEOFENCE_RADIUS_M,
+      notifyOnEnter: true,
+      notifyOnExit: true,
+    });
+  }
+
   if (regions.length === 0) {
     await stopStopGeofencing();
     return;

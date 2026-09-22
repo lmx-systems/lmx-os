@@ -454,6 +454,12 @@ export interface RecordHealth {
   geofence_coverage: number | null
   geofence_lead_p50_seconds: number | null
   geofence_comparable_stops: number
+  // DRV-3's warehouse turnaround. Never shown without its pairing rate: a
+  // hub where half the crossings never pair has a fence problem that a
+  // median over the other half would hide.
+  turnaround_median_seconds: number | null
+  turnaround_pairing_rate: number | null
+  turnaround_trips: number
   writers: WriterHealth[]
   labels: {
     observed_consequences: number

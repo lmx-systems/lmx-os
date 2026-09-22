@@ -2,6 +2,9 @@ import type { Stop } from '../api/types';
 import {
   GEOFENCE_RADIUS_M,
   MAX_MONITORED_REGIONS,
+  hubIdFromRegion,
+  hubRegionIdentifier,
+  isHubRegion,
   pendingStops,
   regionsForRoute,
 } from './geofenceWindow';
@@ -124,5 +127,34 @@ describe('regionsForRoute', () => {
 
   it('registers nothing for an empty route', () => {
     expect(regionsForRoute([])).toEqual([]);
+  });
+});
+
+/**
+ * DRV-3's warehouse fence shares this region set rather than getting its own
+ * task. iOS caps monitored regions per *app* and `startGeofencingAsync`
+ * replaces the whole set, so a second task would either fight this one for the
+ * cap or replace it outright. They are told apart by identifier.
+ */
+describe('telling the warehouse fence from a stop', () => {
+  it('marks a hub region with a prefix a stop id cannot have', () => {
+    const identifier = hubRegionIdentifier('9f1c2f7e-0000-4000-8000-000000000001');
+
+    expect(isHubRegion(identifier)).toBe(true);
+    // A stop identifier is a bare UUID.
+    expect(isHubRegion('9f1c2f7e-0000-4000-8000-000000000001')).toBe(false);
+  });
+
+  it('gets the hub id back out', () => {
+    const hubId = '9f1c2f7e-0000-4000-8000-000000000001';
+
+    expect(hubIdFromRegion(hubRegionIdentifier(hubId))).toBe(hubId);
+  });
+
+  it('leaves room for the hub inside the per-app cap', () => {
+    // The stop window caps at 18 and iOS allows 20 per app, so the hub is the
+    // 19th and nothing is silently evicted - iOS does not say which region it
+    // dropped, which is why the headroom exists at all.
+    expect(MAX_MONITORED_REGIONS).toBeLessThan(20);
   });
 });

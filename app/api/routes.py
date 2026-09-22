@@ -523,6 +523,9 @@ async def record_health(
         geofence_coverage=health.geofence_coverage,
         geofence_lead_p50_seconds=health.geofence_lead_p50_seconds,
         geofence_comparable_stops=health.geofence_comparable_stops,
+        turnaround_median_seconds=health.turnaround_median_seconds,
+        turnaround_pairing_rate=health.turnaround_pairing_rate,
+        turnaround_trips=health.turnaround_trips,
         writers=[
             WriterHealthView(
                 name=w.name,

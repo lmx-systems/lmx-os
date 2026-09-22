@@ -212,6 +212,13 @@ class OutboxManager {
         return api.completeStop(item.stopId, item.payload as Parameters<typeof api.completeStop>[1]);
       case 'flag':
         return api.flagStop(item.stopId, item.payload as Parameters<typeof api.flagStop>[1]);
+      case 'hub_geofence':
+        // DRV-3. The server takes the hub from the driver's token, so the id
+        // carried here is only the outbox's own key - a phone that could name
+        // its hub could name somebody else's.
+        return api.recordHubGeofenceEvents([
+          item.payload as { kind: 'enter' | 'exit'; occurred_at: string },
+        ]);
       case 'geofence':
         // One crossing per item. The endpoint takes a batch and the server
         // de-duplicates on (stop, kind, occurred_at), so a retry after a

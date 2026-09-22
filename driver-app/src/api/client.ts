@@ -180,6 +180,14 @@ export const api = {
   // flushes several crossings at once; the endpoint is idempotent on
   // (stop, kind, occurred_at), so a replay is a no-op rather than a second
   // arrival that would double a dwell sample.
+  // The warehouse fence (DRV-3). No hub in the path: the server takes it from
+  // the token.
+  recordHubGeofenceEvents: (events: { kind: 'enter' | 'exit'; occurred_at: string }[]) =>
+    request<{ accepted: number; duplicates: number; rejected: number }>(
+      '/driver/hub/geofence-events',
+      { method: 'POST', body: JSON.stringify({ events }) },
+    ),
+
   recordGeofenceEvents: (
     stopId: string,
     events: { kind: 'enter' | 'exit'; occurred_at: string; accuracy_m?: number | null }[],
