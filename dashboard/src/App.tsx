@@ -6,6 +6,7 @@ import { HoldQueueTable } from './components/HoldQueueTable'
 import { ExceptionsPanel } from './components/ExceptionsPanel'
 import { Tabs } from './components/ui/Tabs'
 import { DockLabellingPanel } from './components/DockLabellingPanel'
+import { HubSettingsPanel } from './components/HubSettingsPanel'
 import { MergeReviewPanel } from './components/MergeReviewPanel'
 import { OrderLookupPanel } from './components/OrderLookupPanel'
 import { RecordHealthPanel } from './components/RecordHealthPanel'
@@ -273,6 +274,16 @@ function App() {
                         created a driver before this - every row was a
                         hand-written insert (docs/ROADMAP_AUDIT_2026-09.md). */}
                     <OnboardDriverForm hubId={hubId} onToast={showToast} />
+                    {/* Beside the two onboarding forms, because it is the third
+                        thing nothing could do: `Hub.state_code` selects a
+                        driver's overtime rule and was set by nothing at all
+                        (docs/ROADMAP_AUDIT_2026-09.md). */}
+                    <HubSettingsPanel
+                      key={`hub-${hubId}`}
+                      hubId={hubId}
+                      isAdmin={opsProfile.role === 'admin'}
+                      onToast={showToast}
+                    />
                     <UrgencyRulesPanel key={`urgency-${hubId}`} hubId={hubId} onToast={showToast} />
                     <ProposedRulesPanel key={`proposed-${hubId}`} hubId={hubId} onToast={showToast} />
                     {/* No hub key: these are fleet-wide distributions over durable

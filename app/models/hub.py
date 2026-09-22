@@ -27,3 +27,15 @@ class Hub(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # federal-only default applies, same behavior as before this column
     # existed.
     state_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
+
+
+# The two-letter codes `state_code` may hold. Fifty states plus DC, which is
+# where LMX operates or plausibly will; a territory can be added the day one is
+# needed. Stated as a set rather than left to a length check because "XX" and a
+# transposed "AZ"/"AR" both pass a length check, and the consequence of a wrong
+# one is an overtime rule that does not apply - or, worse, one that does.
+US_STATE_CODES = frozenset(
+    """AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN
+    MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV
+    WI WY""".split()
+)

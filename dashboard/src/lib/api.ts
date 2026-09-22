@@ -4,6 +4,7 @@ import type {
   ClientOnboardingResult,
   DriverOnboardingBody,
   DriverOnboardingResult,
+  HubSettings,
   CreditExposure,
   DriverDocumentReviewBody,
   DriverDocumentReviewResult,
@@ -258,6 +259,19 @@ export const api = {
   onboardDriver: (body: DriverOnboardingBody) =>
     request<DriverOnboardingResult>('/admin/drivers', {
       method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  // One hub's settings, including which overtime rule applies. Any ops session:
+  // somebody wondering why a driver's overtime looks wrong should not need an
+  // admin to find out.
+  hubSettings: (hubId: string) => request<HubSettings>(`/admin/hubs/${hubId}`),
+
+  // Admin. `Hub.state_code` selects a driver's overtime rule and was set by
+  // nothing until this existed (docs/ROADMAP_AUDIT_2026-09.md).
+  updateHub: (hubId: string, body: { state_code?: string | null; name?: string }) =>
+    request<HubSettings>(`/admin/hubs/${hubId}`, {
+      method: 'PATCH',
       body: JSON.stringify(body),
     }),
 

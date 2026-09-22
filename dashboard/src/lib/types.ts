@@ -587,3 +587,28 @@ export const EMPLOYMENT_TYPES = [
 ] as const
 
 export const VEHICLE_TYPES = ['car', 'van', 'bike'] as const
+
+/**
+ * One hub's settings, and which overtime rule its drivers get
+ * (docs/ROADMAP_AUDIT_2026-09.md).
+ *
+ * `overtime_rule` is reported because "no state set" and "a state with no rule
+ * registered" produce identical payroll, and only one of them is somebody's
+ * oversight.
+ */
+export interface HubSettings {
+  id: string
+  name: string
+  timezone: string
+  lat: number
+  lng: number
+  state_code: string | null
+  active: boolean
+  overtime_rule: string
+}
+
+export const US_STATE_CODES = (
+  'AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN ' +
+  'MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA ' +
+  'WV WI WY'
+).split(' ')

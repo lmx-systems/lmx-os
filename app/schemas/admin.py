@@ -315,3 +315,53 @@ class DriverOnboardingResult(BaseModel):
     employment_type: str
     vehicle_capacity_units: int
     hourly_rate_is_placeholder: bool
+
+
+class HubCreateBody(BaseModel):
+    """Create a hub (`docs/ROADMAP_AUDIT_2026-09.md`).
+
+    `Hub.state_code`'s own comment said it: *"no Hub creation/edit API or UI
+    exists yet (hubs are seed/DB-provisioned only)"*. So the column that picks a
+    driver's overtime rule could not be set, and every hub was federal-only for
+    ever regardless of where it is.
+
+    `state_code` is optional here rather than required, and that is the one
+    concession: a hub in a state with no rule registered is genuinely unaffected
+    by leaving it blank, and demanding it would imply we know what to do with
+    it. But it is asked for at creation, which is the moment somebody knows the
+    answer without looking it up.
+    """
+
+    name: str = Field(min_length=1, max_length=120)
+    timezone: str = Field(default="America/Los_Angeles", max_length=64)
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    state_code: str | None = Field(default=None, min_length=2, max_length=2)
+
+
+class HubUpdateBody(BaseModel):
+    """Change a hub. Every field optional; absent means "leave it".
+
+    Distinguishing *absent* from *null* matters for `state_code`: absent leaves
+    the current value, and an explicit null clears it. A single optional field
+    that treated those the same would make it impossible to correct a hub
+    somebody coded wrongly.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    timezone: str | None = Field(default=None, max_length=64)
+    state_code: str | None = Field(default=None, min_length=2, max_length=2)
+    active: bool | None = None
+
+
+class HubView(BaseModel):
+    id: str
+    name: str
+    timezone: str
+    lat: float
+    lng: float
+    state_code: str | None
+    active: bool
+    # Said out loud, because "no state set" and "a state with no rule yet" look
+    # identical from the outside and only one of them is somebody's oversight.
+    overtime_rule: str
