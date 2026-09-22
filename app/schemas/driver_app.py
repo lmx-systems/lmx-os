@@ -223,6 +223,33 @@ class StopProofRequirementView(BaseModel):
     signature_required: bool
 
 
+class StopReturnsView(BaseModel):
+    """Cores to handle at this stop, sent with the stop (`W1`).
+
+    The same argument `CodObligationView` makes, for the same reason: a driver
+    who learns at the counter that there is a core to collect has already put
+    the box down and said goodbye. `W1`'s backend has been able to record all
+    three of these since PRs #13–#16, and the app was never told a stop had any
+    of them — so the buttons could not exist even if somebody had drawn them.
+
+    Both halves in one object because a stop is only ever one of them: expected
+    cores are confirmed at a **dropoff**, and collected cores are dropped back
+    at a **pickup** at their destination shop. Splitting them into two fields
+    would invite a screen to render both.
+    """
+
+    # Cores this delivery was expected to bring back, still uncollected.
+    # Non-empty only at a dropoff.
+    expected_manifests: list[str] = Field(default_factory=list)
+    # Cores already collected and bound for *this* shop, waiting to be dropped.
+    # Non-empty only at a pickup stop whose shop is their destination.
+    to_drop_manifests: list[str] = Field(default_factory=list)
+
+    @property
+    def anything_to_do(self) -> bool:
+        return bool(self.expected_manifests or self.to_drop_manifests)
+
+
 class StopView(BaseModel):
     stop_id: str
     sequence: int
@@ -248,6 +275,10 @@ class StopView(BaseModel):
     proof: StopProofRequirementView | None = None
     # Money to collect here, if any (W2). Empty for the overwhelming majority of stops.
     cod: list[CodObligationView] = Field(default_factory=list)
+    # Cores to collect or drop here, if any (W1). Same shape of argument as
+    # `cod`: sent with the stop so the app can show a button, rather than
+    # discovered by a driver who has already left.
+    returns: StopReturnsView | None = None
 
 
 class RouteView(BaseModel):

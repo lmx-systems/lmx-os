@@ -345,3 +345,104 @@ async def test_list_my_shops_is_scoped_to_the_client(db_session):
     shops = await list_my_shops(client=_authed_client(client_a), session=db_session)
     assert [s.shop_id for s in shops] == [str(shop_a)]
     assert shops[0].external_ref == "SHOP-A"
+
+
+class TestTheOutboxWillRetryTheseAndMustNotDouble:
+    """`W1`'s three driver endpoints, sent through `DRV-4`'s outbox.
+
+    Until now nothing retried them: there was no driver screen, so the only
+    caller was a test calling once. Putting a button on them makes every one of
+    these a queued action that survives a dead zone and flushes on reconnect —
+    and **a queued action is delivered more than once**, which is the whole
+    reason `complete_stop` returns the existing result rather than a 409.
+
+    Two different costs, and the first is the expensive one:
+
+    * `collect-return` **with a manifest created a second core on retry.** An
+      ad-hoc core is invented from what the driver typed, so nothing stopped the
+      same alternator being recorded twice — and a phantom core is a part a shop
+      is owed that was never in the van.
+    * All three answered `409` once the work was done. The outbox classifies a
+      4xx as permanent (`isPermanentFailure`), so a retry after a dead zone
+      would mark a collection that *succeeded* as failed for ever, and tell the
+      driver so.
+    """
+
+    async def test_collecting_twice_does_not_invent_a_second_core(
+        self, db_session, real_redis_client
+    ):
+        hub_id, client_id, _shop = await _seed_hcs(db_session)
+        order = await _ingest(db_session, hub_id, client_id)  # nothing expected
+        authed, stop = await _arrived_dropoff(db_session, hub_id, order)
+        body = CollectReturnBody(manifest="unexpected core: starter")
+
+        first = await collect_return(str(stop.id), body, driver=authed, session=db_session)
+        second = await collect_return(str(stop.id), body, driver=authed, session=db_session)
+
+        assert len(await _returns_for(db_session, order.id)) == 1
+        assert [v.return_id for v in first] == [v.return_id for v in second]
+
+    async def test_a_genuinely_different_core_on_the_same_stop_still_records(
+        self, db_session, real_redis_client
+    ):
+        # The dedupe is on the manifest text, so this is the boundary: two cores
+        # described differently are two cores.
+        hub_id, client_id, _shop = await _seed_hcs(db_session)
+        order = await _ingest(db_session, hub_id, client_id)
+        authed, stop = await _arrived_dropoff(db_session, hub_id, order)
+
+        await collect_return(
+            str(stop.id), CollectReturnBody(manifest="core: starter"), driver=authed, session=db_session
+        )
+        await collect_return(
+            str(stop.id), CollectReturnBody(manifest="core: alternator"), driver=authed, session=db_session
+        )
+
+        assert len(await _returns_for(db_session, order.id)) == 2
+
+    async def test_re_collecting_an_expected_core_is_a_success_not_a_409(
+        self, db_session, real_redis_client
+    ):
+        hub_id, client_id, _shop = await _seed_hcs(db_session)
+        order = await _ingest(db_session, hub_id, client_id, return_manifest="core: caliper")
+        authed, stop = await _arrived_dropoff(db_session, hub_id, order)
+
+        await collect_return(str(stop.id), CollectReturnBody(), driver=authed, session=db_session)
+        again = await collect_return(str(stop.id), CollectReturnBody(), driver=authed, session=db_session)
+
+        assert [v.status for v in again] == ["collected"]
+
+    async def test_marking_not_ready_twice_is_a_success_not_a_409(
+        self, db_session, real_redis_client
+    ):
+        hub_id, client_id, _shop = await _seed_hcs(db_session)
+        order = await _ingest(db_session, hub_id, client_id, return_manifest="core: caliper")
+        authed, stop = await _arrived_dropoff(db_session, hub_id, order)
+
+        await return_not_ready(str(stop.id), driver=authed, session=db_session)
+        again = await return_not_ready(str(stop.id), driver=authed, session=db_session)
+
+        assert [v.status for v in again] == ["not_ready"]
+
+    async def test_dropping_cores_twice_is_a_success_not_a_409(self, db_session):
+        hub_id, _client_id, shop_id = await _seed_hcs(db_session, external_ref="SHOP-RETRY")
+        await _collected_return(db_session, hub_id, shop_id)
+        authed, stop = await _pickup_at_shop(db_session, hub_id, shop_id)
+
+        await return_cores_to_shop(str(stop.id), driver=authed, session=db_session)
+        again = await return_cores_to_shop(str(stop.id), driver=authed, session=db_session)
+
+        assert [v.status for v in again] == ["returned_to_shop"]
+
+    async def test_a_stop_with_genuinely_nothing_still_refuses(
+        self, db_session, real_redis_client
+    ):
+        # The refusal has to survive, or the idempotency has quietly turned a
+        # real mistake into a silent success.
+        hub_id, client_id, _shop = await _seed_hcs(db_session)
+        order = await _ingest(db_session, hub_id, client_id)
+        authed, stop = await _arrived_dropoff(db_session, hub_id, order)
+
+        with pytest.raises(HTTPException) as exc:
+            await collect_return(str(stop.id), CollectReturnBody(), driver=authed, session=db_session)
+        assert exc.value.status_code == 409
