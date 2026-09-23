@@ -8,6 +8,8 @@ fire regardless of Sentry being configured.
 """
 from unittest.mock import MagicMock, patch
 
+import structlog
+
 from app.logging_config import _forward_to_sentry, configure_logging
 
 
@@ -85,3 +87,52 @@ def test_configure_logging_skips_sentry_init_when_unconfigured():
         configure_logging()
 
     mock_sentry.init.assert_not_called()
+
+
+class TestWhichRendererProductionGets:
+    """The one the deployment actually asks for, not a hypothetical.
+
+    This was `settings.environment == "production"`, and
+    `infra/aws/variables.tf` sets `ENVIRONMENT` to **`prod`** - so the equality
+    was false in production and CloudWatch would have received colour-escaped
+    console text. Logs Insights cannot query a field it cannot parse, and the
+    escapes are in every line.
+
+    Nothing tested it, which is how a string comparison survives review: it is
+    correct-looking, and only wrong against a value that lives in another
+    repository directory.
+    """
+
+    @staticmethod
+    def _renderer_for(environment: str):
+        with patch("app.logging_config.settings") as mock_settings, patch(
+            "app.logging_config.structlog.configure"
+        ) as configure:
+            mock_settings.environment = environment
+            mock_settings.sentry_dsn = None
+            mock_settings.log_level = "INFO"
+            configure_logging()
+            return configure.call_args.kwargs["processors"][-1]
+
+    def test_the_value_terraform_sets_gets_json(self):
+        # `infra/aws/variables.tf`'s `environment` default.
+        assert isinstance(
+            self._renderer_for("prod"), structlog.processors.JSONRenderer
+        )
+
+    def test_production_spelled_out_also_gets_json(self):
+        assert isinstance(
+            self._renderer_for("production"), structlog.processors.JSONRenderer
+        )
+
+    def test_staging_gets_json_too(self):
+        # Anything that is not a human at a terminal wants machine-readable
+        # logs. Listing environments that do would be a list to forget to add to.
+        assert isinstance(
+            self._renderer_for("staging"), structlog.processors.JSONRenderer
+        )
+
+    def test_only_development_gets_the_pretty_one(self):
+        assert isinstance(
+            self._renderer_for("development"), structlog.dev.ConsoleRenderer
+        )

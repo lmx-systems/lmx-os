@@ -62,6 +62,20 @@ infra/
    certificate for those names and add an HTTPS listener to
    `infra/aws/alb.tf` using it - not automated here for the same reason.
 
+   > **This step is not optional-later, it is a prerequisite for anything
+   > working.** The ALB ships with an HTTP:80 listener only, while the
+   > dashboard and portal containers are built with
+   > `API_BASE_URL=https://api.lmxit.com` and the API is given
+   > `DASHBOARD_CORS_ORIGINS=https://ops.lmxit.com,https://portal.lmxit.com`.
+   > So until the certificate and HTTPS listener exist, both front ends load
+   > over `http://` and then fail every single request - once because there is
+   > nothing listening on 443, and again because an `http://` origin is not in
+   > the allow-list even if there were.
+   >
+   > The failure looks like a broken deployment rather than a missing step,
+   > which is the expensive way to discover it. Do DNS, ACM and the listener in
+   > one sitting, and only then look at whether the stack works.
+
 4. **Wire up CI/CD**:
    - `terraform output github_actions_deploy_role_arn` → set as the
      `AWS_DEPLOY_ROLE_ARN` repository variable (Settings → Secrets and
