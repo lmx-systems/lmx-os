@@ -54,6 +54,39 @@ docker compose exec app python -m scripts.create_client_user \
 screen to `http://<your LAN ip>:8000`. Sign in as the seeded driver; the OTP
 comes back in the response because Twilio is unconfigured.
 
+### Which build, and what each one can show
+
+This decides whether the audience sees a delivery app or a measurement system.
+
+| | Expo Go | Development build |
+|---|---|---|
+| Sign in, route, camera, **real POD photo** | yes | yes |
+| Arrive by tapping | yes | yes |
+| **Automatic arrival on a geofence (`DRV-1`)** | **no** | yes |
+| **Push: the offer arriving on a locked phone** | not from this project | yes |
+
+`docs/BACKGROUND_LOCATION_CONSENT.md` §101 is blunt about the first: *neither
+permission tier is verifiable in Expo Go.* And geofencing is not a nice-to-have
+here — it is the measurement the product rests on. On Expo Go you tap Arrived
+and say what the built version does, which is honest and much weaker.
+
+**Android builds today; iOS does not.**
+
+```bash
+cd driver-app && npx eas build --profile development --platform android
+```
+
+The `development` profile already exists in `eas.json`, and `app.json` carries a
+real `extra.eas.projectId` — so the Expo side is done. An **iOS** dev build
+additionally needs an Apple Developer account for device provisioning, which is
+the same thing phase `0.8` is still open on. So if the only handset is an
+iPhone, the geofence beat is blocked on that account and not on any code here.
+
+**Push is available and switched off.** `EXPO_PUSH_ENABLED=false` by default and
+nothing else stands in the way — the client-side blocker `A1` described is gone.
+Turn it on for the demo if you have the dev build; the offer landing on a locked
+phone is the strongest thirty seconds available to you.
+
 **Rehearse it once end to end on the actual network you will present on.** The
 LAN address is the fragile part, and a conference wifi with client isolation
 will break the handset half while everything else keeps working.

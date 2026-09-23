@@ -64,14 +64,21 @@ class Settings(BaseSettings):
 
     # Push notifications for new job offers (docs/ROADMAP.md A1,
     # app/messaging/push_client.py). Unlike Twilio/Rippling, Expo's push
-    # service needs no account/credential to call in the basic case - the
-    # real gap is client-side: the driver app has no EAS project id
-    # configured yet (see driver-app/app.json), which
-    # Notifications.getExpoPushTokenAsync() requires to mint a real push
-    # token, so no device can register one regardless of this flag today.
-    # Defaults to disabled (not credential-gated, since there's no
-    # credential to gate on) so a real send is never attempted before
-    # that's deliberately turned on.
+    # service needs no account/credential to call in the basic case, so there
+    # is nothing to gate selection on except this switch.
+    #
+    # **The client-side gap this used to describe is gone.** It said the driver
+    # app had no EAS project id, which `getExpoPushTokenAsync()` needs to mint a
+    # routable token - `driver-app/app.json` now carries one at
+    # `extra.eas.projectId`, which is exactly where
+    # `registerForPushNotifications.ts` reads it. Nothing else stands between
+    # this flag and a real send; verifying one still needs a dev build, because
+    # a token minted in Expo Go is not the same thing as one from your own
+    # build.
+    #
+    # Still defaults to disabled - not credential-gated, since there is no
+    # credential to gate on - so a real send is never attempted before somebody
+    # turns it on deliberately.
     expo_push_enabled: bool = False
     # Optional - Expo's "enhanced security" mode. Unset is a fully valid,
     # working configuration; only needed if that mode is turned on for the
