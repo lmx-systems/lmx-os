@@ -64,19 +64,59 @@ comes back in the response because Twilio is unconfigured.
 
 This decides whether the audience sees a delivery app or a measurement system.
 
-| | Expo Go | Development build |
-|---|---|---|
-| Sign in, route, camera, **real POD photo** | yes | yes |
-| Arrive by tapping | yes | yes |
-| **Automatic arrival on a geofence (`DRV-1`)** | **no** | yes |
-| **Push: the offer arriving on a locked phone** | not from this project | yes |
+| | Expo Go | iOS Simulator | Dev / preview build |
+|---|---|---|---|
+| Sign in, route, arrive by tapping | yes | yes | yes |
+| **Real POD photo from a camera** | yes | **no camera** | yes |
+| POD by signature | yes | yes | yes |
+| **Automatic arrival on a geofence (`DRV-1`)** | **no** | **yes** (simulate location) | yes |
+| **Push to a locked device** | not from this project | no | yes |
+| Needs an Apple Developer account | no | **no** | iOS only |
+| On the same screen as the browser | no | **yes** | no |
 
 `docs/BACKGROUND_LOCATION_CONSENT.md` §101 is blunt about the first: *neither
 permission tier is verifiable in Expo Go.* And geofencing is not a nice-to-have
 here — it is the measurement the product rests on. On Expo Go you tap Arrived
 and say what the built version does, which is honest and much weaker.
 
-**Android builds today; iOS does not.**
+### The iOS Simulator, which needs no Apple account at all
+
+```bash
+cd driver-app && npx eas build --profile simulator --platform ios
+```
+
+`"simulator": true` produces an **unsigned** `.app`, so none of phase `0.8`'s
+Apple Developer enrolment applies. Download the artifact, then:
+
+```bash
+tar -xzf ~/Downloads/build-*.tar.gz
+xcrun simctl boot "iPhone 16 Pro" ; open -a Simulator
+xcrun simctl install booted LMXDriver.app
+```
+
+**`localhost` works here.** A simulator shares the Mac's network, so the
+build-time default `http://localhost:8000` reaches the API and you do not touch
+the Profile screen at all - one less thing to get wrong.
+
+**This is how you show the geofence without hardware.** `Features ▸ Location ▸
+Custom Location…`, then put the driver on a stop:
+
+| Stop | Latitude | Longitude |
+|---|---|---|
+| Pickup (the shop) | `30.2729` | `-97.7513` |
+| Drop — 500 Congress Ave | `30.267483` | `-97.743622` |
+| Drop — 1200 E 6th St | `30.264642` | `-97.730218` |
+
+The fence is 75 m (`GEOFENCE_RADIUS_M`), so set the location a few hundred
+metres away first and then move it onto the stop — a driver already standing
+inside a region when it is registered does not generate a crossing.
+
+**What a simulator cannot do is take a photograph.** `PhotoCaptureModal` uses
+`expo-camera`, and there is no camera. Use the **signature** pad instead: it
+works with a trackpad, `CompleteStopBody` has always accepted it, and the
+recipient's page renders it captioned *"Signed for at the door"*.
+
+**Android builds today; iOS on a real device does not.**
 
 ```bash
 cd driver-app && npx eas build --profile development --platform android

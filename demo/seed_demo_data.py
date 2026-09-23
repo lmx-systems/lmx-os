@@ -33,16 +33,48 @@ from app.schemas.fleet import DriverLocation, DriverState
 from demo.ids import CLIENT_ID, DRIVER_ID, HUB_ID, SHOP_EXTERNAL_REF, SHOP_ID
 
 # Hub is downtown; the shop and driver sit a couple miles apart within it -
-# close enough that the stub nearest-neighbor optimizer assigns the driver
-# to the order in one cycle, which is the point of the demo.
-HUB_LAT, HUB_LNG = 33.7490, -84.3880
-SHOP_LAT, SHOP_LNG = 33.7756, -84.3963
-DRIVER_LAT, DRIVER_LNG = 33.7803, -84.3900
+# close enough that the stub nearest-neighbor optimizer assigns the driver to
+# the order in one cycle, which is the point of the demo.
+#
+# **Austin, because that is where the deliveries are.** These were Atlanta until
+# somebody noticed the fleet map: `run_full_loop`'s manifest carries Austin drop
+# addresses, which geocode to 30.26/-97.74, so the demo showed a driver about a
+# thousand kilometres from every stop on his route. The "couple miles apart"
+# above stopped being true the day that manifest was written, and the map is on
+# the first screen an investor looks at.
+#
+# Austin is also the deliberate choice `scripts/seed_austin_world.py` explains:
+# the design partner is nowhere near Texas, so a synthetic row can never be
+# mistaken for a real one (`CLAUDE.md`'s naming rule).
+HUB_LAT, HUB_LNG = 30.2672, -97.7431
+SHOP_LAT, SHOP_LNG = 30.2729, -97.7513
+DRIVER_LAT, DRIVER_LNG = 30.2785, -97.7460
 
 
 async def _get_or_create(session: AsyncSession, model, id_, **fields):
+    """Create the row, or bring an existing one up to date.
+
+    **It used to return an existing row untouched**, which made "safe to re-run"
+    mean *skips* rather than *converges* - so moving the demo hub from Atlanta to
+    Austin changed this file and nothing in the database, and the fleet map went
+    on showing a driver a thousand kilometres from his own stops. A seeder whose
+    second run cannot correct its first is a seeder you have to remember to
+    delete around.
+
+    Only the fields named here are written, so anything a demo run has since put
+    on the row - a driver's shift state, a shop's location link - is left alone.
+    """
     existing = await session.get(model, id_)
     if existing:
+        changed = [
+            name
+            for name, value in fields.items()
+            if getattr(existing, name, None) != value
+        ]
+        for name in changed:
+            setattr(existing, name, fields[name])
+        if changed:
+            await session.commit()
         return existing, False
     row = model(id=id_, **fields)
     session.add(row)
@@ -57,7 +89,13 @@ async def seed() -> None:
     async with session_factory() as session:
         hub, hub_created = await _get_or_create(
             session, Hub, HUB_ID,
-            name="LMX Demo Hub", timezone="America/New_York", lat=HUB_LAT, lng=HUB_LNG,
+            name="LMX Demo Hub",
+            # Austin, matching the coordinates and the manifest's addresses.
+            # It was America/New_York, which the hold windows and the nightly
+            # job both read - a demo hub whose clock disagrees with its own
+            # geography is a quiet way to produce deadlines nobody can explain.
+            timezone="America/Chicago",
+            lat=HUB_LAT, lng=HUB_LNG,
         )
         client, client_created = await _get_or_create(
             session, Client, CLIENT_ID,
