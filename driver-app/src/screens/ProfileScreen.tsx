@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -10,6 +10,15 @@ import { useAuth } from '../auth/AuthContext';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
 import type { DriverDocument } from '../api/types';
+
+// The standalone dock survey, for docks LMX does not serve yet (`DRV-7`).
+//
+// **Not built at the time of writing**, and deliberately a constant rather than
+// a setting: it is one page on our own portal, not a per-install address like
+// `serverUrl.ts`'s. When `portal.lmxit.com` is deployed and `/dock-log` exists,
+// this works; until then it 404s, which is why it sits in Profile rather than
+// anywhere a driver meets during a shift.
+const DOCK_LOG_URL = 'https://portal.lmxit.com/dock-log';
 import type { ProfileStackParamList } from '../navigation/types';
 import { spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
@@ -126,6 +135,26 @@ export function ProfileScreen({ navigation }: Props) {
           <View style={styles.rowText}>
             <Text style={styles.rowBody}>Server</Text>
             <Text style={styles.rowSmall}>{getApiBaseUrl()}</Text>
+          </View>
+          <ChevronRight size={20} color={colors.textMuted} />
+        </Card>
+      </Pressable>
+
+      {/* The standalone Dock Log (docs/ROADMAP.md DRV-7). Our own drivers
+          survey through the app - `DockSurveyModal`, after a delivery
+          completes - so this is the other half: the page for mapping docks we
+          do not serve yet, which a driver might be asked to fill in off-shift.
+          Opened in a browser rather than embedded, because it is a separate
+          surface with its own lifetime and nothing here should look like it
+          owns it. */}
+      <Text style={styles.sectionLabel}>Dock Log</Text>
+      <Pressable onPress={() => Linking.openURL(DOCK_LOG_URL)}>
+        <Card style={styles.row}>
+          <View style={styles.rowText}>
+            <Text style={styles.rowBody}>Map a dock we don't serve</Text>
+            <Text style={styles.rowSmall}>
+              Opens the survey page in your browser
+            </Text>
           </View>
           <ChevronRight size={20} color={colors.textMuted} />
         </Card>

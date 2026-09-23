@@ -114,7 +114,7 @@ def _login_client(http: httpx.Client) -> str:
     return response.json()["access_token"]
 
 
-def run(base_url: str, poll_seconds: float) -> int:
+def run(base_url: str, poll_seconds: float, stop_after_offer: bool = False) -> int:
     with httpx.Client(base_url=base_url, timeout=30.0) as http:
         try:
             http.get("/health").raise_for_status()
@@ -155,6 +155,19 @@ def run(base_url: str, poll_seconds: float) -> int:
         clocked_on = _clock_on(http, driver_token)
         offers = _wait_for_offer(http, driver_token, _ops_token(http), poll_seconds)
         detail(f"{len(offers)} offer(s) reached the driver with no button pressed")
+
+        if stop_after_offer:
+            detail(
+                f"{len(offers)} offer(s) waiting. Stopping here - accept it on the "
+                "handset."
+            )
+            print(
+                "\nThe rest of the demo is yours: accept on the phone, drive the "
+                "geofence,\ncapture proof, and watch the ops board follow. Re-run "
+                "without --stop-after-offer\nto have the script play the driver "
+                "instead."
+            )
+            return 0
 
         step(3, "The driver accepts",
              look_at="the handset - the offer arrives without anybody pressing anything")
@@ -434,6 +447,15 @@ def main() -> int:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--poll-seconds", type=float, default=1.5)
     parser.add_argument(
+        "--stop-after-offer",
+        action="store_true",
+        help=(
+            "stop once the offer reaches the driver, leaving the route for a real "
+            "handset to accept and run. Without it the script plays the driver "
+            "through to delivery, which leaves nothing for the phone to do"
+        ),
+    )
+    parser.add_argument(
         "--pace",
         type=float,
         default=0.0,
@@ -448,7 +470,7 @@ def main() -> int:
     global _PACE
     _PACE = args.pace
     try:
-        return run(args.base_url, args.poll_seconds)
+        return run(args.base_url, args.poll_seconds, args.stop_after_offer)
     except DemoFailed as failure:
         print(f"\n{failure}", file=sys.stderr)
         return 1
