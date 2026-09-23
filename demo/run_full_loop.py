@@ -37,6 +37,12 @@ from demo.ids import CLIENT_ID, DRIVER_PHONE, HUB_ID, SHOP_ID
 
 DEFAULT_BASE_URL = "http://localhost:8000"
 
+# Mirrors `app/api/driver_routes.py`'s `_TERMINAL_STOP_STATUSES` - a stop that
+# is done with, one way or the other. Kept to exactly those two rather than a
+# guessed-wider set: inventing a `skipped` this system does not have would make
+# the count quietly wrong.
+_FINISHED_STOP_STATUSES = frozenset({"completed", "failed"})
+
 CLIENT_EMAIL = "demo-client@example.com"
 CLIENT_PASSWORD = "demo-password-123"
 OPS_EMAIL = "demo@lmxit.com"
@@ -49,18 +55,45 @@ OPS_PASSWORD = "demo-password"
 # Addresses are quoted because they contain commas. An unquoted address in a
 # file with other columns shifts every field after it, which the parser then
 # correctly rejects - a realistic failure, but not the one this demo is for.
-MANIFEST_CSV = """Ship To Address,Contact Name,Priority
-"1200 E 6th St, Austin, TX 78702",J. Rivera,HOT SHOT
-"500 Congress Ave, Austin, TX 78701",M. Chen,HOT SHOT
+# A recipient phone is what decides whether this delivery gets a tracking link:
+# `send_tracking_link_to_recipient` mints the token only when there is a number
+# to text it to, so an order with no phone never gets one. Until the manifest
+# parser learned this column, the CSV path - LMX Link's whole premise - could
+# not produce a customer tracking page for anything.
+MANIFEST_CSV = """Ship To Address,Contact Name,Contact Phone,Priority
+"1200 E 6th St, Austin, TX 78702",J. Rivera,+15125550137,HOT SHOT
+"500 Congress Ave, Austin, TX 78701",M. Chen,+15125550164,HOT SHOT
 """
 
 
-def step(number: int, text: str) -> None:
+# Presenter mode. Zero by default, so CI and a rehearsal run at full speed and
+# only a live audience pays for the pauses.
+_PACE = 0.0
+
+
+def step(number: int, text: str, *, look_at: str | None = None) -> None:
+    """One beat of the demo, and where to point while it happens.
+
+    `look_at` exists because the interesting thing is rarely in the terminal.
+    The terminal is the narration; the product is the three screens beside it,
+    and a presenter reading output aloud while the audience watches the wrong
+    window is the failure this avoids.
+    """
     print(f"\n{number}. {text}")
+    if look_at:
+        print(f"   [ on screen: {look_at} ]")
+    _beat()
+
+
+def _beat(multiplier: float = 1.0) -> None:
+    """Let an audience catch up. A no-op unless --pace was asked for."""
+    if _PACE:
+        time.sleep(_PACE * multiplier)
 
 
 def detail(text: str) -> None:
     print(f"   -> {text}")
+    _beat(0.35)
 
 
 class DemoFailed(Exception):
@@ -81,7 +114,7 @@ def _login_client(http: httpx.Client) -> str:
     return response.json()["access_token"]
 
 
-def run(base_url: str, poll_seconds: float) -> int:
+def run(base_url: str, poll_seconds: float, stop_after_offer: bool = False) -> int:
     with httpx.Client(base_url=base_url, timeout=30.0) as http:
         try:
             http.get("/health").raise_for_status()
@@ -91,7 +124,8 @@ def run(base_url: str, poll_seconds: float) -> int:
                 f"(`docker compose up -d`). {unreachable}"
             ) from unreachable
 
-        step(1, "A distributor drops a CSV manifest (LMX Link, T3)")
+        step(1, "A distributor drops a CSV manifest (LMX Link, T3)",
+             look_at="client portal :5174 - Orders appear as the file is parsed")
         client_token = _login_client(http)
         upload = http.post(
             "/client/orders/manifest",
@@ -114,14 +148,29 @@ def run(base_url: str, poll_seconds: float) -> int:
         if result["accepted"] == 0:
             raise DemoFailed("Nothing was accepted, so there is nothing to deliver.")
 
-        step(2, "The SLA engine held them; the optimizer offers the work")
+        step(2, "The SLA engine held them; the optimizer offers the work",
+             look_at="ops console :5173 - Hold Queue, then the order leaving it")
         detail("held rather than dispatched instantly - that hold is the product")
         driver_token = _sign_in_driver(http)
         clocked_on = _clock_on(http, driver_token)
         offers = _wait_for_offer(http, driver_token, _ops_token(http), poll_seconds)
         detail(f"{len(offers)} offer(s) reached the driver with no button pressed")
 
-        step(3, "The driver accepts")
+        if stop_after_offer:
+            detail(
+                f"{len(offers)} offer(s) waiting. Stopping here - accept it on the "
+                "handset."
+            )
+            print(
+                "\nThe rest of the demo is yours: accept on the phone, drive the "
+                "geofence,\ncapture proof, and watch the ops board follow. Re-run "
+                "without --stop-after-offer\nto have the script play the driver "
+                "instead."
+            )
+            return 0
+
+        step(3, "The driver accepts",
+             look_at="the handset - the offer arrives without anybody pressing anything")
         accepted = http.post(
             f"/driver/offers/{offers[0]['offer_id']}/accept",
             headers={"Authorization": f"Bearer {driver_token}"},
@@ -240,10 +289,11 @@ def _drive_route(http: httpx.Client, token: str) -> None:
                 json={"scanned_count": stop.get("parcel_count", 1)},
             ).raise_for_status()
 
+        photo_url = _capture_pod_photo(http, headers, stop_id, kind)
         http.post(
             f"/driver/stops/{stop_id}/complete",
             headers=headers,
-            json={"method": "photo", "photo_url": "https://example.invalid/pod.jpg"},
+            json={"method": "photo", "photo_url": photo_url},
         ).raise_for_status()
 
         left_at = datetime.now(timezone.utc)
@@ -253,6 +303,63 @@ def _drive_route(http: httpx.Client, token: str) -> None:
             json={"events": [{"kind": "exit", "occurred_at": left_at.isoformat()}]},
         ).raise_for_status()
         detail(f"{kind} {stop_id[:8]}: crossed, arrived, completed")
+
+
+def _capture_pod_photo(http: httpx.Client, headers: dict, stop_id: str, kind: str) -> str:
+    """Take a proof-of-delivery photo the way the handset does.
+
+    This used to post `https://example.invalid/pod.jpg` - a placeholder that
+    made the run pass and made "delivered, with proof" undemonstrable, because
+    there was no image anywhere to look at.
+
+    It now walks the real two-step path: ask for an upload URL, PUT the bytes,
+    submit the URL that comes back. Which backend serves it is not this script's
+    business - with `PHOTO_UPLOAD_BUCKET` the PUT goes to S3, with
+    `PHOTO_STORAGE_DIR` it goes to this API's own `/media`, and with neither the
+    stub says `requires_upload=False` and there is nothing to upload. The first
+    two put a real photo on the ops console and the recipient's tracking page.
+    """
+    minted = http.post(
+        f"/driver/stops/{stop_id}/upload-url",
+        headers=headers,
+        json={"kind": "photo", "content_type": "image/jpeg"},
+    )
+    minted.raise_for_status()
+    upload = minted.json()
+
+    if not upload["requires_upload"]:
+        # No storage configured. Say so once rather than letting somebody
+        # discover it in front of an audience by clicking a dead image.
+        detail("no photo storage configured - POD is a marker, not an image")
+        return upload["final_url"]
+
+    http.put(
+        upload["upload_url"],
+        content=_pod_jpeg(stop_id, kind),
+        headers={**headers, "Content-Type": "image/jpeg"},
+    ).raise_for_status()
+    return upload["final_url"]
+
+
+def _pod_jpeg(stop_id: str, kind: str) -> bytes:
+    """A stand-in doorstep photo, labelled so nobody mistakes it for one.
+
+    The script is playing a driver who has no camera. A photo that *looked*
+    real would be the one thing in this demo pretending to be something it is
+    not, so it says what it is on its face. A real handset running the app
+    takes a real photo through this same endpoint.
+    """
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (640, 480), (28, 32, 38))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((16, 16, 624, 464), outline=(90, 170, 130), width=3)
+    draw.text((40, 200), "SIMULATED PROOF OF DELIVERY", fill=(232, 236, 240))
+    draw.text((40, 230), f"{kind} stop {stop_id[:8]}", fill=(150, 160, 170))
+    draw.text((40, 260), "captured by demo/run_full_loop.py", fill=(150, 160, 170))
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=85)
+    return buffer.getvalue()
 
 
 def _clock_on(http: httpx.Client, token: str) -> bool:
@@ -294,8 +401,16 @@ def _clock_off(http: httpx.Client, token: str) -> None:
 
 def _report(http: httpx.Client, token: str, clocked_on: bool = False) -> None:
     route = http.get("/driver/me/route", headers={"Authorization": f"Bearer {token}"})
+    outstanding = 0
     if route.status_code == 200 and route.json():
-        detail("the driver still has an active route - some stop did not complete")
+        stops = route.json().get("stops", [])
+        outstanding = sum(1 for stop in stops if stop["status"] not in _FINISHED_STOP_STATUSES)
+    if outstanding:
+        detail(f"the driver still has {outstanding} stop(s) outstanding on an active route")
+        detail(
+            "usually a previous run of this script: new orders join the driver's "
+            "existing route rather than starting a new one, so runs accumulate"
+        )
     else:
         detail("the driver's route is finished")
     costing = (
@@ -306,12 +421,24 @@ def _report(http: httpx.Client, token: str, clocked_on: bool = False) -> None:
             "driver documents and R4 will let the clock start"
         )
     )
+    # Conditional, because it used to say "the route is completed" unconditionally
+    # - directly above a line reporting that it was not. A demo that contradicts
+    # itself in its own output is worse than one that admits a loose end.
+    route_state = (
+        "this run's orders are delivered and its stops are done"
+        if outstanding
+        else "the orders are delivered and the route is completed"
+    )
     print(
-        "\nThe orders are delivered, the route is completed, every stop has a\n"
+        f"\n{route_state[0].upper()}{route_state[1:]}, every stop has a\n"
         f"machine-recorded arrival beside the driver's tap, {costing}.\n"
         "Dashboard:\n"
         "  http://localhost:5173    (ops)\n"
         "  http://localhost:5174    (client portal)"
+    )
+    print(
+        "\nThe recipient's page, with the photo on it:\n"
+        "  python -m demo.tracking_links"
     )
 
 
@@ -319,9 +446,31 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--poll-seconds", type=float, default=1.5)
+    parser.add_argument(
+        "--stop-after-offer",
+        action="store_true",
+        help=(
+            "stop once the offer reaches the driver, leaving the route for a real "
+            "handset to accept and run. Without it the script plays the driver "
+            "through to delivery, which leaves nothing for the phone to do"
+        ),
+    )
+    parser.add_argument(
+        "--pace",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help=(
+            "pause this long between beats so an audience can follow. 2.5 is "
+            "about right in front of people; the default 0 is for rehearsal "
+            "and CI"
+        ),
+    )
     args = parser.parse_args()
+    global _PACE
+    _PACE = args.pace
     try:
-        return run(args.base_url, args.poll_seconds)
+        return run(args.base_url, args.poll_seconds, args.stop_after_offer)
     except DemoFailed as failure:
         print(f"\n{failure}", file=sys.stderr)
         return 1

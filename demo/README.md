@@ -14,7 +14,10 @@ driver automatically.
 | `seed_demo_data.py` | Creates the one Hub / Client / Shop / Driver this payload needs to actually ingest and dispatch. Safe to re-run. |
 | `send_demo_order.py` | Sends the order, watches it get classified and automatically dispatched, prints each step. |
 | `ids.py` | Shared, fixed IDs (and the driver's phone) so the scripts agree on which Hub/Client/Shop/Driver they mean. |
-| `run_full_loop.py` | **The whole pipeline in one command** - a CSV manifest lands, the hold queue holds it, the optimizer offers it, and a driver delivers it. |
+| `run_full_loop.py` | **The whole pipeline in one command** - a CSV manifest lands, the hold queue holds it, the optimizer offers it, and a driver delivers it with a real photo. `--pace` slows it for an audience. |
+| `INVESTOR_RUNBOOK.md` | **Presenting it live** - the four screens, the handset setup, what the two-minute hold is for, and what to disclaim before being asked. |
+| `reset.py` | Clears the demo hub's orders and the demo driver's routes, keeping the seed. Runs accumulate on one route, so a rehearsal otherwise leaves its stops on the board. |
+| `tracking_links.py` | Prints the recipient tracking links for delivered orders. The only thing here that reads the database directly - a tracking token is disclosed by SMS and nothing else, deliberately. |
 
 ## Running it
 
@@ -95,4 +98,21 @@ the response. Both are deliberate unconfigured-to-stub paths.
 - **Real geography.** The addresses are Austin; the design partner is not.
 - **A real phone.** The script plays the driver over HTTP. To use the app
   itself, set the server address in the app's Profile - the built-in default is
-  `localhost`, which on a handset means the handset.
+  `localhost`, which on a handset means the handset. `INVESTOR_RUNBOOK.md`
+  covers doing it this way, which is the version worth showing.
+
+### Proof of delivery is now an actual photo
+
+`run_full_loop` used to complete each stop with
+`photo_url: "https://example.invalid/pod.jpg"` - a placeholder that made the run
+pass and made *"delivered, with proof"* undemonstrable.
+
+It now walks the real two-step path: request an upload URL, PUT the bytes,
+submit what comes back. Set `PHOTO_STORAGE_DIR` and `MEDIA_BASE_URL` and the
+photo is stored by this API and **rendered on the recipient's tracking page** -
+which it never was before. `Stop.pod_photo_url` had been written since the app
+got a camera and read by exactly one thing in the backend, an idempotency
+comparison.
+
+With no storage configured the stub still issues a `local-capture://` marker,
+the run still passes, and the page renders nothing rather than a broken frame.

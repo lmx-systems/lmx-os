@@ -142,6 +142,26 @@ class TrackingView:
     # Whether this holder may rate the delivery, and what they said if they have
     # (docs/ROADMAP.md F13, app/tracking/ratings.py).
     rating: RatingState
+    # The delivery photo, once there is one. **Written since the app has had a
+    # camera and read by nobody** - `Stop.pod_photo_url` had exactly one reader
+    # in `app/api/driver_routes.py`, the idempotency comparison, so proof of
+    # delivery was captured, stored, and shown to no human anywhere.
+    #
+    # Here rather than only in the ops console because the recipient is who the
+    # proof is *for*. The same argument `RecipientRatingView` makes: it
+    # discloses nothing the delivery itself did not - it is a photo of their own
+    # doorstep, taken because they were sent something, shown to the holder of a
+    # link scoped to that one delivery.
+    #
+    # After delivery only. Proof cannot exist before then, and a field that is
+    # sometimes-null-sometimes-hidden is one the page has to reason about twice.
+    pod_photo_url: str | None
+    # The other half. `pod_signature_url` has exactly the same history as the
+    # photo - written since the app got a signature pad, read by one idempotency
+    # comparison - so a delivery signed for rather than photographed was proved
+    # to nobody at all. Both are here because both are valid proof and the page
+    # shows whichever exists.
+    pod_signature_url: str | None
 
 
 class TrackingTokenInvalid(Exception):
@@ -315,6 +335,18 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
 
     headline, detail = _RECIPIENT_STATUS.get(order.status, _FALLBACK_STATUS)
 
+    # Fetched on its own rather than reusing the `stop` below, because that one
+    # is deliberately not looked up for a delivered order - which is the only
+    # state a proof-of-delivery photo can exist in. One extra query, on
+    # precisely the orders that have stopped polling.
+    pod_photo_url: str | None = None
+    pod_signature_url: str | None = None
+    if order.delivered_at is not None:
+        delivered_stop = await _dropoff_stop_for(session, order)
+        if delivered_stop is not None:
+            pod_photo_url = delivered_stop.pod_photo_url
+            pod_signature_url = delivered_stop.pod_signature_url
+
     position: DriverPosition | None = None
     # This drop's own stop ETA, which is route-aware and available whether or not the
     # recipient is next. Fetched outside the current-stop check below because the two
@@ -344,6 +376,8 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
         destination_hint=_destination_hint(order),
         estimated_arrival=_estimated_arrival(order, position, stop_eta),
         delivered_at=order.delivered_at,
+        pod_photo_url=pod_photo_url,
+        pod_signature_url=pod_signature_url,
         driver_position=position,
         rating=rating,
         is_live=order.status

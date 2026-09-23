@@ -22,6 +22,13 @@
         "buildType": "apk"
       }
     },
+    "simulator": {
+      "extends": "preview",
+      "ios": {
+        "resourceClass": "m-medium",
+        "simulator": true
+      }
+    },
     "production": {
       "distribution": "store",
       "channel": "production",

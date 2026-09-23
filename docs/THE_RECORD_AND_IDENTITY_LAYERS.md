@@ -220,7 +220,7 @@ hold rather than an oversight.
 | `REC-2` | `consequence_label`, `record_driver_day_cost` | No per-order reader; the second is superseded |
 | `REC-3` | `current_outcome`, `supersede_outcome` | A correction path with no operator surface |
 | `IDN-2` | `propose_merge`, `merge_locations` | Auto-merge is gated behind confirming the founding set (§2.2c) |
-| `IDN-4` | `set_access`, `set_autonomy_fit`, `set_receiving_hours` | Stated facts; nothing asks a receiver yet |
+| `IDN-4` | `set_receiving_hours` | **Stated, by the receiver.** A driver's guess at a dock's hours is exactly the soft label `IDN-4` separates by source, so it stays here until a dispatcher or the client portal asks. `set_access` and `set_autonomy_fit` came off this list when `DRV-7` gave them a writer |
 | `EXP-1` | `arm_for_order` | Inert until a client contracts an arm |
 | `ING-3` | `backfill_orders` | No order-level history exists to import |
 | `CON-3` | `labelled_overrides` | The training-set export has no reader yet |

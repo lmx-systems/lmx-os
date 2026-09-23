@@ -77,6 +77,7 @@ ROUTERS = (
     "public_api_routes",
     "internal_routes",
     "webhooks",
+    "media_routes",
 )
 
 # Routers whose callers are not people with browsers, so a front-end reference
@@ -92,6 +93,13 @@ NOT_CALLED_BY_A_FRONT_END: dict[str, str] = {
     "public_api_routes": (
         "a customer's own integration (docs/ORDER_API.md), which is not in this "
         "repository"
+    ),
+    "media_routes": (
+        "the URL is handed out at runtime by POST /driver/stops/{id}/upload-url, "
+        "not written into any front end - the app PUTs to whatever it was given, "
+        "and a console renders whatever `photo_url` says. A literal /media/ would "
+        "appear in a front end only if somebody had hardcoded what the server is "
+        "supposed to decide"
     ),
 }
 
@@ -154,12 +162,30 @@ KNOWN_UNREACHABLE: dict[str, str] = {
 }
 
 
+def _routers_in(module: str):
+    """Every `APIRouter` a module exports, not just one called `router`.
+
+    `media_routes` exports two - the upload under `/driver` and the fetch under
+    `/public`, because the ops middleware exempts each of those prefixes for a
+    different and separately valid reason. Looking only for `router` raised an
+    `AttributeError` on it, which is this file making a structural assumption
+    about a layout nothing had promised.
+    """
+    from fastapi import APIRouter
+
+    imported = importlib.import_module(f"app.api.{module}")
+    return [
+        value
+        for name, value in vars(imported).items()
+        if isinstance(value, APIRouter) and not name.startswith("_")
+    ]
+
+
 def _routes() -> list[tuple[str, str, str]]:
     """`(router module, method, path)` for every registered endpoint."""
     found: list[tuple[str, str, str]] = []
     for module in ROUTERS:
-        router = importlib.import_module(f"app.api.{module}").router
-        for route in router.routes:
+        for route in [r for router in _routers_in(module) for r in router.routes]:
             methods = getattr(route, "methods", None)
             if not methods:
                 continue

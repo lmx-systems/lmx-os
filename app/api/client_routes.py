@@ -950,6 +950,7 @@ async def submit_orders_batch(
             pickup_address=pickup_address,
             drop_address_raw=row.drop_address,
             drop_contact_name=row.drop_contact_name,
+            drop_contact_phone=row.drop_contact_phone,
             sla_owner="LMX",
             # The paste's total time, recorded on every order it produced. The
             # alternative - attributing it to one arbitrary row - would make the
@@ -1531,6 +1532,7 @@ async def upload_order_manifest(
                             drop_address=row.drop_address,
                             reference=row.reference,
                             drop_contact_name=row.drop_contact_name,
+                            drop_contact_phone=row.drop_contact_phone,
                         )
                         for row in chunk
                     ],

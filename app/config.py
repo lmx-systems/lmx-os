@@ -64,14 +64,21 @@ class Settings(BaseSettings):
 
     # Push notifications for new job offers (docs/ROADMAP.md A1,
     # app/messaging/push_client.py). Unlike Twilio/Rippling, Expo's push
-    # service needs no account/credential to call in the basic case - the
-    # real gap is client-side: the driver app has no EAS project id
-    # configured yet (see driver-app/app.json), which
-    # Notifications.getExpoPushTokenAsync() requires to mint a real push
-    # token, so no device can register one regardless of this flag today.
-    # Defaults to disabled (not credential-gated, since there's no
-    # credential to gate on) so a real send is never attempted before
-    # that's deliberately turned on.
+    # service needs no account/credential to call in the basic case, so there
+    # is nothing to gate selection on except this switch.
+    #
+    # **The client-side gap this used to describe is gone.** It said the driver
+    # app had no EAS project id, which `getExpoPushTokenAsync()` needs to mint a
+    # routable token - `driver-app/app.json` now carries one at
+    # `extra.eas.projectId`, which is exactly where
+    # `registerForPushNotifications.ts` reads it. Nothing else stands between
+    # this flag and a real send; verifying one still needs a dev build, because
+    # a token minted in Expo Go is not the same thing as one from your own
+    # build.
+    #
+    # Still defaults to disabled - not credential-gated, since there is no
+    # credential to gate on - so a real send is never attempted before somebody
+    # turns it on deliberately.
     expo_push_enabled: bool = False
     # Optional - Expo's "enhanced security" mode. Unset is a fully valid,
     # working configuration; only needed if that mode is turned on for the
@@ -91,6 +98,23 @@ class Settings(BaseSettings):
     # access-key settings here on purpose.
     photo_upload_bucket: str | None = None
     photo_upload_region: str = "us-east-1"
+
+    # Proof-of-delivery photos on local disk, for a demo or a dev stack with no
+    # AWS account (`app/storage/photo_upload_client.py`).
+    #
+    # **Development only, and refused outside it.** Local disk loses every photo
+    # on redeploy, has no lifecycle policy and no CDN, and a POD photo is
+    # evidence in a dispute - the failure mode is discovering months later that
+    # the proof is gone. It is a demo backend, and the code says no rather than
+    # trusting nobody points it at production.
+    #
+    # Set it and captured photos are written here and served back by
+    # `app/api/media_routes.py`, so a real photo taken on a real handset appears
+    # in the ops console and on the recipient's tracking page.
+    photo_storage_dir: str | None = None
+    # Where this API is reachable from the *handset*, which is not `localhost`:
+    # on a phone that means the phone. Used to build the upload and final URLs.
+    media_base_url: str = "http://localhost:8000"
 
     # Inbound-webhook signature verification (app/api/webhooks.py,
     # app/messaging/twilio_signature.py) needs the exact public URL Twilio
