@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,6 +59,7 @@ from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user, requi
 from app.payroll import get_payroll_provider
 from app.redis_client import get_client as get_redis_client
 from app.schemas.admin import (
+    AdminClientView,
     AdminDriverDeviceView,
     ClientOnboardingBody,
     ClientOnboardingResult,
@@ -1316,6 +1317,67 @@ async def cod_dispute_report(
 # Both are CONTRACT data - what a client agreed to pay and what we agreed to deliver. They
 # live together because a credit is a percentage of a fee, so the two cannot sensibly be
 # maintained apart.
+
+
+@router.get("/hubs/{hub_id}/clients", response_model=list[AdminClientView])
+async def list_hub_clients(
+    hub_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[AdminClientView]:
+    """Clients on this hub (`docs/ROADMAP_AUDIT_2026-09.md`).
+
+    **Nothing listed clients.** `POST /admin/clients` created one and four
+    endpoints took a `client_id` — rates, SLA terms, invoice generation — with
+    no way to obtain one short of reading the database. Every one of them was
+    therefore unreachable in practice rather than merely unsurfaced, which is
+    the same shape as the driver-device gap: the action existed and the thing
+    that hands you its argument did not.
+
+    Hub-scoped, because the console is. Every other list on the ops board is.
+
+    Carries `rate_tiers` because zero is the state that matters and nothing else
+    on the row would show it: an approved client with no rate table can submit
+    orders and cannot be invoiced for them.
+    """
+    clients = (
+        await session.execute(
+            select(Client)
+            .where(Client.hub_id == uuid.UUID(hub_id))
+            .order_by(Client.name)
+        )
+    ).scalars().all()
+    if not clients:
+        return []
+
+    now = datetime.now(timezone.utc)
+    # One query for every client's tiers rather than one per client. A distinct
+    # count of tiers with a rate in force, which is what "can this be invoiced"
+    # turns on - a future-dated rate is not today's rate, exactly as
+    # `list_client_rates` and pricing both read it.
+    counted = (
+        await session.execute(
+            select(ClientRate.client_id, func.count(func.distinct(ClientRate.sla_tier)))
+            .where(
+                ClientRate.client_id.in_([c.id for c in clients]),
+                ClientRate.effective_from <= now,
+            )
+            .group_by(ClientRate.client_id)
+        )
+    ).all()
+    tiers = {row[0]: row[1] for row in counted}
+
+    return [
+        AdminClientView(
+            client_id=str(client.id),
+            name=client.name,
+            pos_system=client.pos_system,
+            active=client.active,
+            signup_status=client.signup_status,
+            rate_tiers=int(tiers.get(client.id, 0)),
+        )
+        for client in clients
+    ]
 
 
 @router.get("/clients/{client_id}/rates", response_model=list[ClientRateView])

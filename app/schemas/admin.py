@@ -210,6 +210,35 @@ class ShopDisputeRowView(BaseModel):
     dispute_rate: float
 
 
+class AdminClientView(BaseModel):
+    """One client on a hub, enough to pick one and know what you picked.
+
+    **Nothing listed clients.** Four endpoints take a `client_id` — rates, SLA
+    terms, invoice generation — and the only way to obtain one was to create a
+    client or read it out of the database, so every one of them was unreachable
+    in practice rather than merely unsurfaced
+    (`docs/ROADMAP_AUDIT_2026-09.md`). Same shape as the driver-device gap: the
+    action existed and the thing that hands you its argument did not.
+
+    `signup_status` and `active` are both here and are not the same question. A
+    churned client is `active=false`; a never-approved applicant is
+    `signup_status='pending'`. `Client.active`'s own comment says why conflating
+    them would make either impossible to query for, and a picker that showed one
+    without the other would invite somebody to set a rate on an applicant who
+    cannot order.
+    """
+
+    client_id: str
+    name: str
+    pos_system: str
+    active: bool
+    signup_status: str
+    # How many tiers this client has a rate for. Zero is the state that matters:
+    # an approved client with no rate table cannot be invoiced, and nothing else
+    # on this row would say so.
+    rate_tiers: int
+
+
 class AdminDriverDeviceView(BaseModel):
     """One device a driver has signed in on, as an admin needs to see it.
 
