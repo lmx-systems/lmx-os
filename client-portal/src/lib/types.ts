@@ -262,6 +262,9 @@ export interface TrackingView {
   // camera and rendered by nothing until now — `Stop.pod_photo_url` had one
   // reader in the whole backend, an idempotency comparison.
   pod_photo_url: string | null
+  /** A signature is proof too, and had the same history as the photo:
+   *  captured since the app got a pad, rendered by nothing. */
+  pod_signature_url: string | null
   // Present only while this recipient's drop is the driver's CURRENT stop.
   driver_position: DriverPositionView | null
   // False on a finished delivery, so a forgotten open tab stops polling.

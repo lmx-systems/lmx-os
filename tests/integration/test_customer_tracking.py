@@ -720,7 +720,9 @@ class TestEveryStatusSaysSomethingTrue:
 # portal, and not here, on the page belonging to the person it is proof for.
 
 
-async def _delivered_with_photo(db_session, hub_id, client_id, shop_id, driver_id, photo):
+async def _delivered_with_photo(
+    db_session, hub_id, client_id, shop_id, driver_id, photo, signature=None
+):
     order = await _order(db_session, hub_id, client_id, shop_id, status=OrderStatus.delivered)
     order.delivered_at = datetime.now(timezone.utc)
     route = await _route_with_stops(
@@ -735,6 +737,7 @@ async def _delivered_with_photo(db_session, hub_id, client_id, shop_id, driver_i
         )
     ).scalar_one()
     dropoff.pod_photo_url = photo
+    dropoff.pod_signature_url = signature
     await db_session.commit()
     return order
 
@@ -780,3 +783,51 @@ async def test_a_delivery_proved_another_way_has_no_photo(db_session, real_redis
     view = await resolve_tracking(db_session, order.tracking_token)
 
     assert view.pod_photo_url is None
+
+
+async def test_a_delivery_signed_for_shows_the_signature(db_session, real_redis_client):
+    """The other half of the same gap.
+
+    `pod_signature_url` has exactly the history `pod_photo_url` had - written
+    since the app got a signature pad, read by one idempotency comparison - so a
+    delivery *signed* for rather than photographed was proved to nobody at all.
+    """
+    hub_id, client_id, shop_id, driver_id = await _seed(db_session)
+    order = await _delivered_with_photo(
+        db_session, hub_id, client_id, shop_id, driver_id,
+        None, signature="http://localhost:8000/public/media/pod/a/b/signature-c.png",
+    )
+
+    view = await resolve_tracking(db_session, order.tracking_token)
+
+    assert view.pod_photo_url is None
+    assert view.pod_signature_url.endswith("signature-c.png")
+
+
+async def test_both_kinds_of_proof_survive_together(db_session, real_redis_client):
+    # A client can require a photo *and* a signature (`ProofRequirements`), so
+    # the page has to be able to show both rather than picking one.
+    hub_id, client_id, shop_id, driver_id = await _seed(db_session)
+    order = await _delivered_with_photo(
+        db_session, hub_id, client_id, shop_id, driver_id,
+        "http://localhost:8000/public/media/pod/a/b/photo-c.jpg",
+        signature="http://localhost:8000/public/media/pod/a/b/signature-c.png",
+    )
+
+    view = await resolve_tracking(db_session, order.tracking_token)
+
+    assert view.pod_photo_url and view.pod_signature_url
+
+
+async def test_an_undelivered_order_shows_no_signature(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id = await _seed(db_session)
+    order = await _order(db_session, hub_id, client_id, shop_id, status=OrderStatus.en_route_drop)
+    await _route_with_stops(
+        db_session, hub_id, driver_id,
+        stops=[(order, "pickup", "completed"), (order, "dropoff", "pending")],
+    )
+
+    view = await resolve_tracking(db_session, order.tracking_token)
+
+    assert view.pod_signature_url is None
+

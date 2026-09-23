@@ -28,17 +28,33 @@ import sys
 class SinglePageApp(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 - the stdlib spells it this way
         path = self.translate_path(self.path)
-        if (not os.path.exists(path) or os.path.isdir(path)) and not self.path.startswith(
-            "/assets"
+        if (not os.path.exists(path) or os.path.isdir(path)) and _looks_like_a_route(
+            self.path
         ):
-            # Anything that is not a real file is a client-side route. `/assets`
-            # is excluded so a genuinely missing bundle 404s loudly rather than
-            # returning HTML that the browser then fails to parse as JavaScript.
             self.path = "/index.html"
         return super().do_GET()
 
     def log_message(self, *args):
         pass
+
+
+def _looks_like_a_route(path: str) -> bool:
+    """Whether a missing path is a client-side route or a missing file.
+
+    **A path with a file extension is a file**, and a missing one must 404
+    rather than return the index. The first version excluded only `/assets`,
+    which was too narrow: the dashboard's `index.html` loads `/env-config.js`,
+    a file written at container start that does not exist when serving a plain
+    build - so the fallback handed the browser HTML to parse as JavaScript and
+    it threw a syntax error in the console on every page load. Harmless
+    (`src/lib/api.ts` falls back to the build-time value when
+    `window.__RUNTIME_CONFIG__` is unset) and alarming, which is the worst
+    combination to have on screen in front of somebody.
+
+    `/track/bJZ_Tg...` has no extension and is a route. `/env-config.js` has one
+    and is not.
+    """
+    return "." not in path.rsplit("/", 1)[-1]
 
 
 def main() -> int:

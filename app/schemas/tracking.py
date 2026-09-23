@@ -68,6 +68,9 @@ class TrackingView(BaseModel):
     # is for: a photo of their own doorstep, taken because they were sent
     # something, shown to the holder of a link scoped to that one delivery.
     pod_photo_url: str | None = None
+    # A signature is proof too, with the same history: written since the app got
+    # a pad, rendered by nothing. A delivery signed for was proved to nobody.
+    pod_signature_url: str | None = None
 
 
 class SubmitRatingBody(BaseModel):

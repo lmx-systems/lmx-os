@@ -153,9 +153,15 @@ class TrackingView:
     # doorstep, taken because they were sent something, shown to the holder of a
     # link scoped to that one delivery.
     #
-    # After delivery only. A photo cannot exist before then, and a field that is
+    # After delivery only. Proof cannot exist before then, and a field that is
     # sometimes-null-sometimes-hidden is one the page has to reason about twice.
     pod_photo_url: str | None
+    # The other half. `pod_signature_url` has exactly the same history as the
+    # photo - written since the app got a signature pad, read by one idempotency
+    # comparison - so a delivery signed for rather than photographed was proved
+    # to nobody at all. Both are here because both are valid proof and the page
+    # shows whichever exists.
+    pod_signature_url: str | None
 
 
 class TrackingTokenInvalid(Exception):
@@ -334,10 +340,12 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
     # state a proof-of-delivery photo can exist in. One extra query, on
     # precisely the orders that have stopped polling.
     pod_photo_url: str | None = None
+    pod_signature_url: str | None = None
     if order.delivered_at is not None:
         delivered_stop = await _dropoff_stop_for(session, order)
         if delivered_stop is not None:
             pod_photo_url = delivered_stop.pod_photo_url
+            pod_signature_url = delivered_stop.pod_signature_url
 
     position: DriverPosition | None = None
     # This drop's own stop ETA, which is route-aware and available whether or not the
@@ -369,6 +377,7 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
         estimated_arrival=_estimated_arrival(order, position, stop_eta),
         delivered_at=order.delivered_at,
         pod_photo_url=pod_photo_url,
+        pod_signature_url=pod_signature_url,
         driver_position=position,
         rating=rating,
         is_live=order.status
