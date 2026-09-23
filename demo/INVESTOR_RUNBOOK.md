@@ -74,6 +74,23 @@ docker compose exec app python -m demo.run_full_loop --pace 2.5
 you where to look. The terminal is the narration; the product is the windows
 beside it.
 
+**The last beat needs one more command.** A tracking token is disclosed in
+exactly one place — the SMS — and Twilio is stubbed, so nothing tells you the
+URL:
+
+```bash
+docker compose exec app python -m demo.tracking_links
+```
+
+That reads the database directly, which nothing else in `demo/` does. The link
+is a capability: anyone holding it sees the delivery photo, so no API hands one
+out, not even to the client who owns the order. In front of a customer the
+recipient gets it by text.
+
+**Open it last.** It is the beat an investor recognises without explanation —
+they have received one of these from a courier — and it is the only screen in
+the demo showing the photo the driver just took.
+
 **To drive the driver half from the real phone instead of the script**, stop
 after step 2 and do it by hand on the handset: accept the offer, tap Arrived,
 photograph something, confirm. The script's driver and the app's driver are the
@@ -126,7 +143,35 @@ alike.
 
 ---
 
-## 6. If something breaks
+## 6. What the rehearsal caught
+
+This runbook was written from the code and then run against a live stack, which
+found three things the entire test suite did not. All three are fixed; they are
+recorded because they are the shape of what a rehearsal is for.
+
+**The delivery photo would not have loaded.** `GET /media/...` sat behind
+`OpsUserAuthMiddleware` and answered `401`, so the `<img>` on the recipient's
+page would have shown nothing. Every test calls route functions directly and
+never crosses middleware, so 2,254 of them stayed green. The upload now lives
+under `/driver` and the fetch under `/public` — each in the prefix whose
+exemption rationale actually covers it, rather than widening the exemption list
+for a GET that does not authenticate itself.
+
+**A CSV manifest could not carry a recipient phone.** The parser had no such
+column, `send_tracking_link_to_recipient` mints a token only when there is a
+number to text, and so **the CSV path — LMX Link's whole premise — could never
+produce a tracking page for anything.** The demo's delivered order had a null
+token and the recipient's page could not be opened at all.
+
+**And the phone was dropped halfway.** `upload_order_manifest` delegates to the
+batch path, and `ClientOrderBatchRow` had no phone field — Pydantic accepted the
+keyword and discarded it, so the wiring looked complete and the order still had
+no number.
+
+The lesson worth keeping: **rehearse on a live stack, not against the suite.**
+Tests here call functions, not URLs.
+
+## 7. If something breaks
 
 | Symptom | Cause |
 |---|---|
@@ -135,4 +180,13 @@ alike.
 | `R4 refused to clock the driver on` | **Working as designed.** The compliance gate refuses a driver with no reviewed documents. The run continues and says what the refusal costs. It is a good thing to be asked about |
 | Nothing was accepted from the manifest | The seeded shop id changed — re-run `seed_demo_data` |
 
-Re-running the loop sends fresh orders; nothing needs resetting between runs.
+**Runs accumulate, and this matters between your rehearsal and the real thing.**
+New orders join the driver's *existing* active route rather than starting a new
+one, so a second run leaves the first run's stops on the board. After three
+rehearsal runs the demo driver had 44 stops, most of them pending — which reads
+badly on the ops console in front of an audience.
+
+Between the rehearsal and the live run, either clock the driver off and let the
+route close, or reset the demo rows (`demo/austin_persist.py` tags everything it
+writes for exactly this). The loop now reports the outstanding count rather than
+claiming the route finished, so you will see it if it happens.

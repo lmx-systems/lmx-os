@@ -114,11 +114,16 @@ class LocalPhotoUploadClient(PhotoUploadClient):
         self._base_url = base_url.rstrip("/")
 
     def create_upload(self, key: str, content_type: str) -> PresignedUpload:
-        # One URL for both. The PUT is authenticated as the driver, which is
-        # stronger than a presigned URL rather than weaker - S3 has no way to
-        # check who is holding the signature.
-        url = f"{self._base_url}/media/{key}"
-        return PresignedUpload(upload_url=url, final_url=url, requires_upload=True)
+        # Different addresses, as on S3, where a presigned PUT and a plain
+        # object URL also differ. The upload authenticates as the driver and so
+        # lives under `/driver`; the fetch is a capability URL and so lives
+        # under `/public` - see `app/api/media_routes.py` for why that split is
+        # the security design rather than a routing detail.
+        return PresignedUpload(
+            upload_url=f"{self._base_url}/driver/media/{key}",
+            final_url=f"{self._base_url}/public/media/{key}",
+            requires_upload=True,
+        )
 
 
 def get_photo_upload_client() -> PhotoUploadClient:

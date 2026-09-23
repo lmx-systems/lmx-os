@@ -91,6 +91,28 @@ _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
         "contact",
         "name",
     ),
+    # Without this a manifest could not carry a recipient's number at all, and
+    # `LmxOrderIn` has had the field all along - so the CSV path, which is LMX
+    # Link's whole premise, was the one intake that could never produce a
+    # customer tracking link. `send_tracking_link_to_recipient` mints the token
+    # only when there is a phone to text it to, by design, so no phone meant no
+    # `F3` link for any order a distributor sent as a file.
+    #
+    # Deliberately not `mobile` alone or `number`: a column headed `number` in a
+    # delivery manifest is as likely to be an order number, and texting a
+    # tracking link to whatever is in it is a disclosure to a stranger.
+    "drop_contact_phone": (
+        "delivery phone",
+        "contact phone",
+        "customer phone",
+        "ship to phone",
+        "recipient phone",
+        "phone number",
+        "mobile number",
+        "cell",
+        "phone",
+        "telephone",
+    ),
 }
 
 
@@ -155,6 +177,9 @@ class ParsedRow:
     drop_address: str
     reference: str | None
     drop_contact_name: str | None
+    #: The recipient's number, when the file carries one. What decides whether
+    #: this delivery gets a tracking link at all.
+    drop_contact_phone: str | None = None
     #: None when the file says nothing, in which case the upload's own deadline
     #: applies. A row that names its own urgency overrides it.
     deadline: str | None = None
@@ -250,6 +275,7 @@ def parse_manifest(text: str) -> ParsedManifest:
         )
     reference_column = _match_column(headers, "reference")
     contact_column = _match_column(headers, "drop_contact_name")
+    phone_column = _match_column(headers, "drop_contact_phone")
     deadline_column = _match_column(headers, "deadline")
 
     mapping = {"drop_address": address_column}
@@ -257,6 +283,8 @@ def parse_manifest(text: str) -> ParsedManifest:
         mapping["reference"] = reference_column
     if contact_column:
         mapping["drop_contact_name"] = contact_column
+    if phone_column:
+        mapping["drop_contact_phone"] = phone_column
     if deadline_column:
         mapping["deadline"] = deadline_column
 
@@ -314,6 +342,7 @@ def parse_manifest(text: str) -> ParsedManifest:
                 drop_address=address,
                 reference=_cell(raw, reference_column, 120),
                 drop_contact_name=_cell(raw, contact_column, 120),
+                drop_contact_phone=_cell(raw, phone_column, 32),
                 deadline=deadline,
             )
         )

@@ -43,7 +43,24 @@ from app.driver_auth.dependencies import AuthedDriver, get_current_driver
 
 logger = structlog.get_logger(__name__)
 
-router = APIRouter(prefix="/media", tags=["media"])
+# **Two routers, two prefixes, and the split is the security design.**
+#
+# `OpsUserAuthMiddleware` guards everything that is not explicitly exempt, and
+# its exemption list carries a warning in capitals: *add nothing here that does
+# not authenticate itself*. A single `/media` prefix would have needed a new
+# exemption covering a GET that genuinely does not - so instead each half lands
+# under the prefix whose documented rationale already covers it.
+#
+# `/driver` is exempt because "each has its own real per-account auth already",
+# which is exactly true of the upload: it depends on `get_current_driver`.
+#
+# `/public` is exempt because it is "genuinely unauthenticated ... safe for
+# anyone on the internet to call", which is exactly what a capability URL is.
+#
+# The upload and fetch URLs therefore differ, as they do on S3, where a
+# presigned PUT and a plain object URL are also not the same address.
+driver_router = APIRouter(prefix="/driver/media", tags=["media"])
+public_router = APIRouter(prefix="/public/media", tags=["media"])
 
 # Exactly what `app/storage/photo_upload_client.py`'s `generate_object_key`
 # emits: `pod/<driver uuid>/<stop uuid>/<kind>-<uuid4 hex>.<ext>`. Anchored, and
@@ -81,7 +98,7 @@ def _resolved(key: str) -> Path:
     return candidate
 
 
-@router.put("/{key:path}", status_code=204)
+@driver_router.put("/{key:path}", status_code=204)
 async def upload_media(
     key: str,
     request: Request,
@@ -111,7 +128,7 @@ async def upload_media(
     return Response(status_code=204)
 
 
-@router.get("/{key:path}")
+@public_router.get("/{key:path}")
 async def fetch_media(key: str) -> FileResponse:
     """Serve one stored file.
 

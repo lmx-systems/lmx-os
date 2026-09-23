@@ -37,6 +37,12 @@ from demo.ids import CLIENT_ID, DRIVER_PHONE, HUB_ID, SHOP_ID
 
 DEFAULT_BASE_URL = "http://localhost:8000"
 
+# Mirrors `app/api/driver_routes.py`'s `_TERMINAL_STOP_STATUSES` - a stop that
+# is done with, one way or the other. Kept to exactly those two rather than a
+# guessed-wider set: inventing a `skipped` this system does not have would make
+# the count quietly wrong.
+_FINISHED_STOP_STATUSES = frozenset({"completed", "failed"})
+
 CLIENT_EMAIL = "demo-client@example.com"
 CLIENT_PASSWORD = "demo-password-123"
 OPS_EMAIL = "demo@lmxit.com"
@@ -49,9 +55,14 @@ OPS_PASSWORD = "demo-password"
 # Addresses are quoted because they contain commas. An unquoted address in a
 # file with other columns shifts every field after it, which the parser then
 # correctly rejects - a realistic failure, but not the one this demo is for.
-MANIFEST_CSV = """Ship To Address,Contact Name,Priority
-"1200 E 6th St, Austin, TX 78702",J. Rivera,HOT SHOT
-"500 Congress Ave, Austin, TX 78701",M. Chen,HOT SHOT
+# A recipient phone is what decides whether this delivery gets a tracking link:
+# `send_tracking_link_to_recipient` mints the token only when there is a number
+# to text it to, so an order with no phone never gets one. Until the manifest
+# parser learned this column, the CSV path - LMX Link's whole premise - could
+# not produce a customer tracking page for anything.
+MANIFEST_CSV = """Ship To Address,Contact Name,Contact Phone,Priority
+"1200 E 6th St, Austin, TX 78702",J. Rivera,+15125550137,HOT SHOT
+"500 Congress Ave, Austin, TX 78701",M. Chen,+15125550164,HOT SHOT
 """
 
 
@@ -377,8 +388,16 @@ def _clock_off(http: httpx.Client, token: str) -> None:
 
 def _report(http: httpx.Client, token: str, clocked_on: bool = False) -> None:
     route = http.get("/driver/me/route", headers={"Authorization": f"Bearer {token}"})
+    outstanding = 0
     if route.status_code == 200 and route.json():
-        detail("the driver still has an active route - some stop did not complete")
+        stops = route.json().get("stops", [])
+        outstanding = sum(1 for stop in stops if stop["status"] not in _FINISHED_STOP_STATUSES)
+    if outstanding:
+        detail(f"the driver still has {outstanding} stop(s) outstanding on an active route")
+        detail(
+            "usually a previous run of this script: new orders join the driver's "
+            "existing route rather than starting a new one, so runs accumulate"
+        )
     else:
         detail("the driver's route is finished")
     costing = (
@@ -389,12 +408,24 @@ def _report(http: httpx.Client, token: str, clocked_on: bool = False) -> None:
             "driver documents and R4 will let the clock start"
         )
     )
+    # Conditional, because it used to say "the route is completed" unconditionally
+    # - directly above a line reporting that it was not. A demo that contradicts
+    # itself in its own output is worse than one that admits a loose end.
+    route_state = (
+        "this run's orders are delivered and its stops are done"
+        if outstanding
+        else "the orders are delivered and the route is completed"
+    )
     print(
-        "\nThe orders are delivered, the route is completed, every stop has a\n"
+        f"\n{route_state[0].upper()}{route_state[1:]}, every stop has a\n"
         f"machine-recorded arrival beside the driver's tap, {costing}.\n"
         "Dashboard:\n"
         "  http://localhost:5173    (ops)\n"
         "  http://localhost:5174    (client portal)"
+    )
+    print(
+        "\nThe recipient's page, with the photo on it:\n"
+        "  python -m demo.tracking_links"
     )
 
 

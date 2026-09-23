@@ -148,7 +148,7 @@ class TestChoosingTheBackend:
         with pytest.raises(RuntimeError, match="development-only"):
             LocalPhotoUploadClient(directory="/tmp/pod", base_url="http://x")
 
-    def test_the_upload_and_final_urls_are_the_same_place(self, monkeypatch):
+    def test_the_upload_and_fetch_urls_sit_under_their_own_prefixes(self, monkeypatch):
         monkeypatch.setattr(settings, "environment", "development")
         client = LocalPhotoUploadClient(directory="/tmp/pod", base_url="http://10.0.0.5:8000/")
         key = generate_object_key(DRIVER, STOP, "photo", "jpg")
@@ -159,7 +159,15 @@ class TestChoosingTheBackend:
         # that this is configurable at all: on a handset `localhost` means the
         # handset, so a demo pointed at the default fails in the one place it
         # is meant to work.
-        assert upload.upload_url == upload.final_url == f"http://10.0.0.5:8000/media/{key}"
+        # Different addresses, and the difference is the security design: the
+        # upload authenticates as the driver so it sits under `/driver`, which
+        # the ops middleware exempts *because* that prefix self-authenticates;
+        # the fetch is a capability URL so it sits under `/public`, which is
+        # exempt because it is genuinely open. A single prefix would have
+        # required a new exemption for a GET that does not authenticate itself,
+        # against that list's own warning.
+        assert upload.upload_url == f"http://10.0.0.5:8000/driver/media/{key}"
+        assert upload.final_url == f"http://10.0.0.5:8000/public/media/{key}"
         assert upload.requires_upload is True
 
 
@@ -225,3 +233,35 @@ class TestARoundTrip:
 class _FakeDriver:
     driver_id = DRIVER
     device_id = "device-1"
+
+
+class TestTheOpsMiddlewareLetsBothThrough:
+    """The failure a direct-call test cannot see.
+
+    Every test above calls the route functions directly, so none of them passes
+    through `OpsUserAuthMiddleware` - which guards everything not explicitly
+    exempt and answered `401` to the fetch when both halves lived under a single
+    `/media` prefix. An `<img src>` on the recipient's tracking page would have
+    loaded nothing, and the suite would have stayed green.
+
+    This asserts the prefixes against the real exemption list, so moving either
+    half fails here rather than in front of an audience.
+    """
+
+    def test_the_fetch_is_exempt_because_public_is(self):
+        from app.ops_auth.middleware import _is_exempt
+
+        assert _is_exempt("/public/media/pod/a/b/photo-c.jpg")
+
+    def test_the_upload_is_exempt_because_driver_is(self):
+        from app.ops_auth.middleware import _is_exempt
+
+        assert _is_exempt("/driver/media/pod/a/b/photo-c.jpg")
+
+    def test_a_bare_media_prefix_would_not_have_been(self):
+        # Why the two halves are where they are. `/media` is not exempt, and
+        # adding it would have meant exempting a GET that does not authenticate
+        # itself - which that list warns against in capitals.
+        from app.ops_auth.middleware import _is_exempt
+
+        assert not _is_exempt("/media/pod/a/b/photo-c.jpg")

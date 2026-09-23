@@ -162,12 +162,30 @@ KNOWN_UNREACHABLE: dict[str, str] = {
 }
 
 
+def _routers_in(module: str):
+    """Every `APIRouter` a module exports, not just one called `router`.
+
+    `media_routes` exports two - the upload under `/driver` and the fetch under
+    `/public`, because the ops middleware exempts each of those prefixes for a
+    different and separately valid reason. Looking only for `router` raised an
+    `AttributeError` on it, which is this file making a structural assumption
+    about a layout nothing had promised.
+    """
+    from fastapi import APIRouter
+
+    imported = importlib.import_module(f"app.api.{module}")
+    return [
+        value
+        for name, value in vars(imported).items()
+        if isinstance(value, APIRouter) and not name.startswith("_")
+    ]
+
+
 def _routes() -> list[tuple[str, str, str]]:
     """`(router module, method, path)` for every registered endpoint."""
     found: list[tuple[str, str, str]] = []
     for module in ROUTERS:
-        router = importlib.import_module(f"app.api.{module}").router
-        for route in router.routes:
+        for route in [r for router in _routers_in(module) for r in router.routes]:
             methods = getattr(route, "methods", None)
             if not methods:
                 continue
