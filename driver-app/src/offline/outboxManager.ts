@@ -1,5 +1,6 @@
 import NetInfo from '@react-native-community/netinfo';
 
+import type { DockSurveyBody } from '../api/types';
 import { api, ApiError } from '../api/client';
 import { adoptAuthToken } from '../auth/token';
 import { loadOutbox, saveOutbox } from './outboxStore';
@@ -236,6 +237,11 @@ class OutboxManager {
         return api.returnNotReady(item.stopId);
       case 'return-to-shop':
         return api.returnToShop(item.stopId);
+      case 'survey':
+        // Safe to retry: the server overwrites the same columns on the same
+        // dock and re-stamps `surveyed_at`. It cannot create a second profile -
+        // `profile_for` is keyed on the canonical dock.
+        return api.recordDockSurvey(item.stopId, item.payload as DockSurveyBody);
     }
   }
 

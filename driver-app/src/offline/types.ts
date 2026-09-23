@@ -12,7 +12,10 @@ export type OutboxActionType =
   // second core.
   | 'collect-return'
   | 'return-not-ready'
-  | 'return-to-shop';
+  | 'return-to-shop'
+  // DRV-7. Idempotent on the server by overwrite: a retry writes the same
+  // answers to the same columns rather than creating a second profile.
+  | 'survey';
 
 export interface OutboxItem {
   id: string;

@@ -79,8 +79,6 @@ KNOWN_ORPHANS: dict[str, str] = {
     # identity layer at all because `link_shop_to_dock` runs at creation. The
     # profile's *stated* fields still have no live writer: they are what a
     # person tells us, and nothing asks.
-    "set_access": "IDN-4: profile field with no live writer",
-    "set_autonomy_fit": "IDN-4: profile field with no live writer",
     "set_receiving_hours": "IDN-4: profile field with no live writer",
     # EXP-1 - a reader for an arm no client has contracted. Inert rather than
     # broken, and it becomes live the day somebody signs the clause.

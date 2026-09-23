@@ -65,6 +65,21 @@ DOOR_PATHS = ("ground_level", "steps", "ramp", "loading_dock", "freight_lift")
 OBSTRUCTIONS = ("none", "gate", "security_desk", "narrow_access", "overhead_limit")
 WHO_RECEIVES = ("anyone", "named_person", "counter_staff", "dock_crew", "unattended_ok")
 
+# Where a driver can legally leave the vehicle (`DRV-7`). The one survey answer
+# that had no column: every other thing the dock survey asks was already here,
+# validated and tested and written by nothing. This is the fact that decides
+# whether a stop is servable at all, and `none_legal` is a real answer - a dock
+# a van cannot lawfully stop at is exactly what an autonomy programme needs to
+# know about, and rounding it to `street_legal` would hide it.
+STOP_POINTS = (
+    "loading_dock",
+    "marked_bay",
+    "lot",
+    "street_legal",
+    "double_parked",
+    "none_legal",
+)
+
 CARRY_EFFORTS = ("hand_carry", "two_person", "trolley", "forklift")
 WALK_DISTANCE_BANDS = ("at_vehicle", "under_20m", "under_100m", "over_100m")
 
@@ -144,8 +159,19 @@ class ReceiverProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     obstruction: Mapped[str | None] = mapped_column(String(24), nullable=True)
     who_receives: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
+    # Where the vehicle can stop (DRV-7). One of STOP_POINTS.
+    stop_point: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
     surveyed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    # Who stood at the door. An unattributed judgement is not much better than
+    # no judgement - these answers become `M5`'s training labels, and a bad
+    # surveyor has to be findable so their rows can be discounted. Nullable:
+    # profiles surveyed before this existed have no answer, and inventing one
+    # would be worse than the gap.
+    surveyed_by_driver_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("drivers.id"), nullable=True
     )
 
     @property

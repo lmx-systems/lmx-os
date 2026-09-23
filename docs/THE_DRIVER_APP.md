@@ -23,6 +23,7 @@ returns.
 | `complete` | `complete_stop` returns the existing result rather than a 409 |
 | `flag` | idempotent on the server |
 | `geofence` | the endpoint de-duplicates on `(stop, kind, occurred_at)` |
+| `survey` | the server overwrites the same dock's columns; `profile_for` is keyed on the canonical dock, so a replay cannot make a second profile |
 
 Backoff is `2s, 5s, 15s, 30s, 60s`, then 60s thereafter.
 
