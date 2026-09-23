@@ -16,6 +16,7 @@ driver automatically.
 | `ids.py` | Shared, fixed IDs (and the driver's phone) so the scripts agree on which Hub/Client/Shop/Driver they mean. |
 | `run_full_loop.py` | **The whole pipeline in one command** - a CSV manifest lands, the hold queue holds it, the optimizer offers it, and a driver delivers it with a real photo. `--pace` slows it for an audience. |
 | `INVESTOR_RUNBOOK.md` | **Presenting it live** - the four screens, the handset setup, what the two-minute hold is for, and what to disclaim before being asked. |
+| `reset.py` | Clears the demo hub's orders and the demo driver's routes, keeping the seed. Runs accumulate on one route, so a rehearsal otherwise leaves its stops on the board. |
 | `tracking_links.py` | Prints the recipient tracking links for delivered orders. The only thing here that reads the database directly - a tracking token is disclosed by SMS and nothing else, deliberately. |
 
 ## Running it

@@ -41,6 +41,12 @@ export PHOTO_STORAGE_DIR=/tmp/lmx-pod
 export MEDIA_BASE_URL=http://$(ipconfig getifaddr en0):8000
 export ENVIRONMENT=development
 
+# The client portal is blocked without this. DASHBOARD_CORS_ORIGINS defaults to
+# the ops console alone, so every request the portal makes fails preflight -
+# found by standing the demo up, not by any test, because the tests call route
+# functions and never cross CORS.
+export DASHBOARD_CORS_ORIGINS="http://localhost:5173,http://localhost:5174"
+
 docker compose exec app python -m demo.seed_demo_data
 docker compose exec app python -m scripts.create_ops_user \
     --email demo@lmxit.com --password "demo-password" --name "Demo" --role admin
@@ -212,6 +218,8 @@ Tests here call functions, not URLs.
 | POD photo is a broken image | `PHOTO_STORAGE_DIR` unset — the stub issues a `local-capture://` marker and stores nothing. The page renders nothing rather than a broken frame, so you will see a missing photo, not an error |
 | `R4 refused to clock the driver on` | **Working as designed.** The compliance gate refuses a driver with no reviewed documents. The run continues and says what the refusal costs. It is a good thing to be asked about |
 | Nothing was accepted from the manifest | The seeded shop id changed — re-run `seed_demo_data` |
+| Client portal shows errors on every action | `DASHBOARD_CORS_ORIGINS` does not include `http://localhost:5174` |
+| Ops board cluttered with old stops | A previous run. `python -m demo.reset --confirm`, then re-seed |
 
 **Runs accumulate, and this matters between your rehearsal and the real thing.**
 New orders join the driver's *existing* active route rather than starting a new
@@ -219,7 +227,18 @@ one, so a second run leaves the first run's stops on the board. After three
 rehearsal runs the demo driver had 44 stops, most of them pending — which reads
 badly on the ops console in front of an audience.
 
-Between the rehearsal and the live run, either clock the driver off and let the
-route close, or reset the demo rows (`demo/austin_persist.py` tags everything it
-writes for exactly this). The loop now reports the outstanding count rather than
-claiming the route finished, so you will see it if it happens.
+Between the rehearsal and the live run:
+
+```bash
+docker compose exec app python -m demo.reset            # counts what it would delete
+docker compose exec app python -m demo.reset --confirm  # deletes it
+docker compose exec app python -m demo.seed_demo_data   # driver back on shift
+```
+
+It clears the demo hub's orders and the demo driver's routes and stops, and
+keeps the hub, client, shop, driver and both logins - so you do not redo §2. Dry
+by default, and it takes no hub argument, so it can only ever touch the demo
+hub's own id.
+
+The loop reports the outstanding count rather than claiming the route finished,
+so you will see it if you forget.
