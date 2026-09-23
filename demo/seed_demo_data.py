@@ -19,15 +19,23 @@ this works unmodified against a local docker-compose stack).
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+import uuid
+from datetime import date, datetime, timedelta, timezone
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from app.config import settings
 from app.fleet_state.manager import FleetStateManager
 from app.models.client import Client
 from app.models.driver import Driver
+from app.models.driver_document import (
+    REQUIRED_DOC_TYPES,
+    REVIEW_VERIFIED,
+    DriverDocument,
+)
 from app.models.hub import Hub
+from app.models.ops_user import OpsUser
 from app.models.shop import Shop
 from app.schemas.fleet import DriverLocation, DriverState
 from demo.ids import CLIENT_ID, DRIVER_ID, HUB_ID, SHOP_EXTERNAL_REF, SHOP_ID
@@ -82,6 +90,76 @@ async def _get_or_create(session: AsyncSession, model, id_, **fields):
     return row, True
 
 
+async def _seed_compliance_documents(session_factory) -> None:
+    """Put a verified licence and insurance on the demo driver (`R4`).
+
+    **Not a bypass of the compliance gate - the gate's own happy path.** `R4`
+    refuses to put a driver on shift until every required document is on file,
+    reviewed by a named ops user, and unexpired, and that refusal is correct and
+    worth demonstrating. What it is not is something to hit by accident: without
+    these rows the driver app stops at the documents screen before a demo ever
+    reaches a delivery, and `run_full_loop` has been printing "seed reviewed
+    driver documents and R4 will let the clock start" on every run.
+
+    It matters beyond the app blocking. No shift means no `driver_shift_event`,
+    which means `REC-2` has no wage to attribute and `app/record/cost.py`
+    reports a day of drops it cannot cost - so the whole cost-per-drop half of
+    the story is unavailable until this exists.
+
+    **Attributed to a real ops user**, because `reviewed_by_ops_user_id` is a
+    foreign key and the column's own comment says why: *"an unattributed
+    compliance decision is not much better than no decision - if a driver turns
+    out to have been cleared on a bad document, the question 'who cleared it'
+    has to have an answer."* A demo should not be the thing that makes that
+    answer null.
+    """
+    expires = date.today() + timedelta(days=365)
+    async with session_factory() as session:
+        reviewer = (
+            await session.execute(select(OpsUser).order_by(OpsUser.created_at).limit(1))
+        ).scalar_one_or_none()
+        if reviewer is None:
+            print(
+                "  (no ops user exists yet, so documents were not seeded - run "
+                "scripts/create_ops_user.py, then this again)"
+            )
+            return
+
+        for doc_type in REQUIRED_DOC_TYPES:
+            existing = (
+                await session.execute(
+                    select(DriverDocument).where(
+                        DriverDocument.driver_id == DRIVER_ID,
+                        DriverDocument.doc_type == doc_type,
+                    )
+                )
+            ).scalar_one_or_none()
+            document = existing or DriverDocument(driver_id=DRIVER_ID, doc_type=doc_type)
+            document.claimed_expires_at = expires
+            # The only expiry any gate may act on, which is why it is set
+            # separately from the claimed one rather than copied blindly in
+            # real life.
+            document.verified_expires_at = expires
+            document.review_status = REVIEW_VERIFIED
+            document.reviewed_at = datetime.now(timezone.utc)
+            document.reviewed_by_ops_user_id = uuid.UUID(str(reviewer.id))
+            # **Not None.** `evaluate_driver_documents` treats a row with no
+            # `file_url` as *missing*, not as pending - "a row with nothing
+            # uploaded against it ... means we hold no evidence", which is the
+            # case the old gate scored as a pass. Seeding the row without this
+            # produced two verified documents and a driver the gate still
+            # refused, which is the check being right and the seed being wrong.
+            #
+            # A marker rather than a fabricated image: the stub upload client
+            # issues exactly this shape when no storage is configured, and a
+            # demo should not manufacture a photograph of a licence.
+            document.file_url = f"local-capture://demo/{doc_type}-not-a-real-document"
+            if existing is None:
+                session.add(document)
+        await session.commit()
+    print(f"  Docs   : licence + insurance verified to {expires.isoformat()}")
+
+
 async def seed() -> None:
     engine = create_async_engine(settings.database_url)
     session_factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
@@ -116,6 +194,8 @@ async def seed() -> None:
 
     # Redis fleet state - always re-upserted "available" so the demo works
     # even if a prior run left the driver mid-route.
+    await _seed_compliance_documents(session_factory)
+
     fleet_state = FleetStateManager()
     await fleet_state.upsert_driver_state(
         DriverState(
