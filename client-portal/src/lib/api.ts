@@ -4,6 +4,8 @@ import type {
   ApiKeyView,
   ClientAuthToken,
   ClientOrderBatchBody,
+  DockLogSubmissionBody,
+  DockLogSubmissionResult,
   ClientOrderBatchResult,
   ClientOrderBody,
   ClientOrderDetailView,
@@ -206,6 +208,19 @@ export const api = {
   // Which terms are current, and whether signup is open at all. No token, and
   // callable before an account exists - it has to be, since it is what the signup
   // page needs in order to render honestly.
+  // The public Dock Log (docs/ROADMAP.md DRV-7). Unauthenticated, like the
+  // tracking page and the legal documents above - the audience is a courier
+  // who does not work for us, standing at a door we have never delivered to.
+  //
+  // The response deliberately carries no submission id and no matched dock: a
+  // reply that varied by whether we already hold an address would turn this
+  // form into a way to enumerate our customers' docks one guess at a time.
+  submitDockLog: (body: DockLogSubmissionBody) =>
+    request<DockLogSubmissionResult>('/public/dock-log', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   legalDocuments: () => request<LegalDocumentsView>('/public/legal'),
 
   legalDocument: (kind: 'terms' | 'privacy') =>

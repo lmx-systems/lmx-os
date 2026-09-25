@@ -13,6 +13,7 @@ import { LoginPage } from './components/LoginPage'
 import { LegalPage } from './components/LegalPage'
 import { SignupPage } from './components/SignupPage'
 import { TrackingPage } from './components/TrackingPage'
+import { DockLogPage } from './components/DockLogPage'
 import { WebhooksPanel } from './components/WebhooksPanel'
 import { ResetPasswordPage } from './components/ResetPasswordPage'
 import { NewOrderForm } from './components/NewOrderForm'
@@ -79,6 +80,15 @@ export default function App() {
     if (path === '/privacy') return 'privacy'
     return null
   })
+  // /dock-log. Public, and checked before every auth branch for the same reason
+  // the tracking page is: the audience is a courier who works for somebody else,
+  // and whether a client happens to be signed in on this browser has nothing to
+  // do with whether they can map a dock (docs/ROADMAP.md DRV-7).
+  const [isDockLog] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.location.pathname.replace(/\/$/, '') === '/dock-log',
+  )
   const [profile, setProfile] = useState<ClientProfileView | null>(null)
   // Terms re-acceptance (docs/ROADMAP.md L8). Fetched alongside the profile so the
   // banner is up before the first order can be attempted, rather than appearing after a
@@ -213,6 +223,10 @@ export default function App() {
 
   if (trackingToken) {
     return <TrackingPage token={trackingToken} />
+  }
+
+  if (isDockLog) {
+    return <DockLogPage />
   }
 
   if (!loggedIn && resetToken) {

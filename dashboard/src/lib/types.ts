@@ -811,3 +811,30 @@ export interface ClientRate {
   rate_per_weight_unit_cents: number
   minimum_charge_cents: number | null
 }
+
+/** A dock we might already hold, near a submission's coordinates (DRV-7). */
+export interface DockLogCandidate {
+  location_id: string
+  address: string
+}
+
+/**
+ * One public Dock Log submission awaiting review (docs/ROADMAP.md DRV-7).
+ *
+ * `answers` is a map rather than eight nullable fields so a submission that
+ * answered one question renders one row instead of one row and seven blanks.
+ *
+ * `candidates` are a shortlist, never a match. Coordinates can be falsified as
+ * easily as a name, so the dock is chosen by the person reviewing.
+ */
+export interface DockLogSubmission {
+  submission_id: string
+  business_name: string | null
+  submitted_address: string | null
+  lat: number | null
+  lng: number | null
+  created_at: string
+  answers_recorded: number
+  answers: Record<string, string | boolean>
+  candidates: DockLogCandidate[]
+}

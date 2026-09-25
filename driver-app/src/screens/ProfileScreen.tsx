@@ -15,11 +15,14 @@ import type { DriverDocument } from '../api/types';
 
 // The standalone dock survey, for docks LMX does not serve yet (`DRV-7`).
 //
-// **Not built at the time of writing**, and deliberately a constant rather than
-// a setting: it is one page on our own portal, not a per-install address like
-// `serverUrl.ts`'s. When `portal.lmxit.com` is deployed and `/dock-log` exists,
-// this works; until then it 404s, which is why it sits in Profile rather than
-// anywhere a driver meets during a shift.
+// **The page is built** (`client-portal/src/components/DockLogPage.tsx`) and the
+// route exists. What is still missing is the deployment: `infra/aws/` has never
+// been applied, so `portal.lmxit.com` does not resolve and this 404s in the
+// hands of anybody who taps it today. That is why it sits in Profile rather
+// than anywhere a driver meets during a shift.
+//
+// Deliberately a constant rather than a setting: it is one page on our own
+// portal, not a per-install address like `serverUrl.ts`'s.
 const DOCK_LOG_URL = 'https://portal.lmxit.com/dock-log';
 import type { ProfileStackParamList } from '../navigation/types';
 import { spacing, typography, useThemeColors } from '../theme';

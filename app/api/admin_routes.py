@@ -36,6 +36,7 @@ from app.driver_auth.dependencies import revoked_devices_key
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.models.client_sla_term import ClientSlaTerm
+from app.models.dock_log_submission import DockLogSubmission
 from app.models.invoice import Invoice
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.models.driver import EMPLOYMENT_TYPES, VEHICLE_TYPES, Driver
@@ -96,6 +97,21 @@ from app.schemas.admin import (
     UrgencyRuleView,
 )
 from app.schemas.billing import InvoiceDetailView, InvoiceGenerateBody, InvoiceSummaryView
+from app.schemas.dock_log import (
+    DockLogCandidateView,
+    DockLogImportBody,
+    DockLogRejectBody,
+    DockLogReviewResult,
+    DockLogSubmissionView,
+)
+from app.identity.dock_log import (
+    ANSWER_VOCABULARIES,
+    AlreadyImported,
+    DockAlreadySurveyed,
+    NotReviewed,
+    candidate_locations,
+    import_submission,
+)
 from app.gig_platform import service as gig_store
 from app.messaging.client_emails import send_signup_approved_email
 from app.gig_platform.density import hub_density_report
@@ -1627,3 +1643,134 @@ async def upsert_client_sla_term(
         credit_percent=body.credit_percent,
     )
     return ClientSlaTermView(term_id=str(term.id), **body.model_dump())
+
+
+@router.get("/dock-log/submissions", response_model=list[DockLogSubmissionView])
+async def list_dock_log_submissions(
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[DockLogSubmissionView]:
+    """The public Dock Log's review queue (`DRV-7`).
+
+    Unreviewed only, oldest first. This queue is the whole reason
+    `dock_log_submissions` exists as a separate table: a stranger's answers are
+    inert until somebody here matches them to a dock, so without a screen the
+    staging table would be write-only and the public form would be a way to
+    fill a table nobody reads.
+
+    Each row carries `candidates` — docks within about 150 m of the submitted
+    coordinates. **A suggestion, never a match.** Coordinates can be falsified
+    as easily as a name, so nothing is attached automatically; the list exists
+    to save a reviewer a search, not to make the decision.
+    """
+    result = await session.execute(
+        select(DockLogSubmission)
+        .where(DockLogSubmission.reviewed_at.is_(None))
+        .order_by(DockLogSubmission.created_at)
+        .limit(100)
+    )
+    submissions = list(result.scalars().all())
+    views: list[DockLogSubmissionView] = []
+    for submission in submissions:
+        nearby = await candidate_locations(session, submission)
+        views.append(
+            DockLogSubmissionView(
+                submission_id=str(submission.id),
+                business_name=submission.business_name,
+                submitted_address=submission.submitted_address,
+                lat=submission.lat,
+                lng=submission.lng,
+                created_at=submission.created_at.isoformat(),
+                answers_recorded=submission.answered_count,
+                answers={
+                    field: getattr(submission, field)
+                    for field, _ in ANSWER_VOCABULARIES
+                    if getattr(submission, field) is not None
+                },
+                candidates=[
+                    DockLogCandidateView(location_id=str(loc.id), address=loc.address)
+                    for loc in nearby
+                ],
+            )
+        )
+    return views
+
+
+@router.post("/dock-log/submissions/{submission_id}/import", response_model=DockLogReviewResult)
+async def import_dock_log_submission(
+    submission_id: str,
+    body: DockLogImportBody,
+    session: AsyncSession = Depends(get_db),
+    admin: AuthedOpsUser = Depends(require_admin),
+) -> DockLogReviewResult:
+    """Attach a submission to a dock and apply its answers (`DRV-7`).
+
+    The `location_id` comes from the operator, never from the coordinates. That
+    is the rule the roadmap row states and the reason this is a POST a person
+    makes rather than a nightly job: matching on anything a submitter typed
+    would let them choose which dock their answers landed on.
+
+    409 rather than a silent skip when one of our own drivers has already
+    surveyed the dock. A skip that returned 200 would be indistinguishable from
+    an import that worked, and the reviewer would never learn their approval
+    changed nothing.
+    """
+    submission = await session.get(DockLogSubmission, uuid.UUID(submission_id))
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    submission.location_id = uuid.UUID(body.location_id)
+    try:
+        await import_submission(
+            session, submission, reviewed_by_ops_user_id=uuid.UUID(admin.ops_user_id)
+        )
+    except DockAlreadySurveyed as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (NotReviewed, AlreadyImported) as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    await session.commit()
+    logger.info(
+        "dock_log_submission_imported",
+        submission_id=submission_id,
+        location_id=body.location_id,
+        ops_user_id=admin.ops_user_id,
+    )
+    return DockLogReviewResult(submission_id=submission_id, imported=True, rejected=False)
+
+
+@router.post("/dock-log/submissions/{submission_id}/reject", response_model=DockLogReviewResult)
+async def reject_dock_log_submission(
+    submission_id: str,
+    body: DockLogRejectBody,
+    session: AsyncSession = Depends(get_db),
+    admin: AuthedOpsUser = Depends(require_admin),
+) -> DockLogReviewResult:
+    """Dismiss a submission, keeping the row (`DRV-7`).
+
+    Kept rather than deleted, and the reason is the only way this surface's
+    abuse becomes visible: a pattern of plausible junk from one address is
+    evidence, and it is invisible if each row disappears as it is dismissed.
+    The row is inert either way - nothing reads an unimported submission.
+
+    A reason is required for the same reason `CON-2`'s override demands one.
+    """
+    submission = await session.get(DockLogSubmission, uuid.UUID(submission_id))
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if submission.imported_at is not None:
+        raise HTTPException(status_code=409, detail="This submission has already been imported")
+
+    submission.rejected_reason = body.reason
+    submission.reviewed_at = datetime.now(timezone.utc)
+    submission.reviewed_by_ops_user_id = uuid.UUID(admin.ops_user_id)
+    await session.commit()
+    logger.info(
+        "dock_log_submission_rejected",
+        submission_id=submission_id,
+        reason=body.reason,
+        ops_user_id=admin.ops_user_id,
+    )
+    return DockLogReviewResult(submission_id=submission_id, imported=False, rejected=True)

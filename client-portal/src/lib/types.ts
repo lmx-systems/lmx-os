@@ -388,3 +388,27 @@ export interface ClientPerformanceView {
   delivered_count: number
   hit_rates: PerformanceRateView[]
 }
+
+/**
+ * A public Dock Log submission (docs/ROADMAP.md DRV-7).
+ *
+ * The eight answers are open-ended here rather than union-typed: the server
+ * owns the vocabulary (`app/models/receiver_profile.py`) and validates against
+ * it, returning a 422 that names the field. Restating the closed sets in
+ * TypeScript would be a second place they live, and the two would drift the
+ * first time a value was added to one - the same mistake `THE_DRIVER_APP.md`
+ * §6 records twice.
+ */
+export interface DockLogSubmissionBody {
+  business_name: string
+  submitted_address: string | null
+  lat: number | null
+  lng: number | null
+  [answer: string]: string | number | boolean | null
+}
+
+/** Deliberately almost nothing. See `app/schemas/dock_log.py`. */
+export interface DockLogSubmissionResult {
+  accepted: boolean
+  answers_recorded: number
+}
