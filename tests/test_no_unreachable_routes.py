@@ -154,11 +154,12 @@ KNOWN_UNREACHABLE: dict[str, str] = {
         "G3 - the app has no gig screen; offers arrive and are answered on the "
         "platform's own app today"
     ),
-    "GET /admin/clients/{client_id}/sla-terms": (
-        "W3 - what a client was promised, set by scripts/set_client_sla_terms.py. "
-        "An operator cannot read back what they agreed to"
+    "POST /admin/clients/{client_id}/invoices/generate": (
+        "C3 - a statement can only be raised by scripts/settle_month.py. This "
+        "was passing on a collision: /generate matched two dashboard comments "
+        "about docker/generate-env-config.sh, a shell script. Visible only "
+        "after comments stopped counting as callers"
     ),
-    "PUT /admin/clients/{client_id}/sla-terms": "W3 - same",
 }
 
 
@@ -196,12 +197,65 @@ def _routes() -> list[tuple[str, str, str]]:
     return found
 
 
+def _without_comments(source: str) -> str:
+    """The same source with `//` and `/* */` comments removed.
+
+    **A comment is not a caller, and this check could not tell the difference.**
+    Every panel in this repo opens with a docstring naming the endpoints it
+    calls, so writing *"`PUT /admin/clients/{id}/sla-terms`"* in a comment was
+    enough to mark the route reachable — while the component called nothing.
+    Found by breaking a call site on purpose to see the check fail, and watching
+    it pass. The `/returns` collision the leading slash was added for is the
+    same bug: a word that appears in prose rather than in a request.
+
+    It was hiding one. `POST /admin/clients/{id}/invoices/generate` matched
+    `/generate` in two comments pointing at `docker/generate-env-config.sh`,
+    which is a shell script. It is now in `KNOWN_UNREACHABLE` where it belongs.
+
+    **Scanned character by character, not with a regex**, and the reason is a
+    line in the client portal: ``// /client/* is exempt from the ops-dashboard
+    auth gate``. A `/\\*.*?\\*/` pass over the concatenated blob treats that
+    `/*` as opening a block comment, finds no `*/` in the file, and eats
+    everything after it — which reported thirty routes as unreachable, every one
+    of them plainly called. Same family as the four false positives in this
+    file's own header, and it cost the same afternoon. A `//` comment cannot
+    open a block, so the state machine has to see the line.
+    """
+    out: list[str] = []
+    in_block = False
+    for line in source.split("\n"):
+        kept: list[str] = []
+        i = 0
+        while i < len(line):
+            pair = line[i : i + 2]
+            if in_block:
+                if pair == "*/":
+                    in_block = False
+                    i += 2
+                else:
+                    i += 1
+            elif pair == "//":
+                break  # rest of the line is a comment
+            elif pair == "/*":
+                in_block = True
+                i += 2
+            else:
+                kept.append(line[i])
+                i += 1
+        out.append("".join(kept))
+    return "\n".join(out)
+
+
 def _front_end_source(directories: tuple[str, ...] = FRONTENDS) -> str:
-    """The named front ends' source, concatenated.
+    """The named front ends' source, concatenated, with comments stripped.
 
     One blob rather than per-file, because *which* file mentions a segment is
     not the question — whether the right front end does is, and `AUDIENCE`
     decides which that is.
+
+    Strings survive, including the template literals every call site is built
+    from; only comments go. A string is still not proof a request is made, so
+    the floor this file describes is a little higher and still a floor.
     """
     text: list[str] = []
     for directory in directories:
@@ -209,7 +263,7 @@ def _front_end_source(directories: tuple[str, ...] = FRONTENDS) -> str:
         if not root.exists():  # pragma: no cover - all three are in the repo
             continue
         for path in root.rglob("*.ts*"):
-            text.append(path.read_text())
+            text.append(_without_comments(path.read_text()))
     return "\n".join(text)
 
 

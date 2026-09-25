@@ -26,6 +26,7 @@ import { DriverDevicesPanel } from './components/DriverDevicesPanel'
 import { GigPathPanel } from './components/GigPathPanel'
 import { ReturnsPanel } from './components/ReturnsPanel'
 import { ClientRatesPanel } from './components/ClientRatesPanel'
+import { ClientSlaTermsPanel } from './components/ClientSlaTermsPanel'
 import { LoginPage } from './components/LoginPage'
 import { Toast } from './components/ui/Toast'
 import { usePolling } from './hooks/usePolling'
@@ -298,6 +299,15 @@ function App() {
                         either, which is why this needed an endpoint and not just
                         a form. */}
                     <ClientRatesPanel key={`rates-${hubId}`} hubId={hubId} onToast={showToast} />
+                    {/* Directly beneath the rates panel because price and
+                        promise are one contract and a credit is computed from
+                        both - credit_percent is a percentage of the fee the
+                        rate card produced. Both endpoints existed with no
+                        caller, so an operator could set a term with a script
+                        and then had no way to read back what they agreed to,
+                        which is the half that matters when a client disputes a
+                        credit (tests/test_no_unreachable_routes.py). */}
+                    <ClientSlaTermsPanel key={`sla-${hubId}`} hubId={hubId} onToast={showToast} />
                     {/* Beside client onboarding, because it is the same kind of
                         act: creating the identity somebody logs in with. Nothing
                         created a driver before this - every row was a
