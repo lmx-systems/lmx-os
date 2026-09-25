@@ -1,10 +1,17 @@
 """
-The only unauthenticated write surface in this application
-(docs/LMX_LINK_PLAN.md).
+The unauthenticated write surfaces in this application
+(docs/LMX_LINK_PLAN.md, docs/ROADMAP.md DRV-7).
 
-Everything else here is behind driver auth, client auth or ops auth. This
-endpoint is reachable by anyone on the internet and creates rows, which makes it
-worth being explicit about what protects it:
+**Two of them now**: client signup, and the public Dock Log at the bottom of
+this file. This docstring read "the only" until the second arrived, which is
+the kind of sentence that is true when written and quietly false afterwards -
+so the three protections below are stated once and every unauthenticated write
+in this file is expected to satisfy all three. If a future one cannot, it does
+not belong here.
+
+Everything else here is behind driver auth, client auth or ops auth. These
+endpoints are reachable by anyone on the internet and create rows, which makes
+it worth being explicit about what protects them:
 
   - **Rate limited by IP before anything else happens**, including before the
     duplicate-email check. That ordering is deliberate and matches what the S6
@@ -14,7 +21,10 @@ worth being explicit about what protects it:
   - **Creates nothing that can act.** The client lands in `pending` and its first
     user is created inactive, so C4's existing per-request `is_active` check
     already prevents login. No new state in the auth path, and no window where a
-    self-signed-up stranger can dispatch a van.
+    self-signed-up stranger can dispatch a van. The Dock Log's version of this
+    is `dock_log_submissions`, a staging table nothing operational reads: a
+    submission reaches `receiver_profiles` - the layer `M5` trains on - only
+    through an operator who has matched it to a dock.
   - **Says almost nothing back.** No client id, no internal state beyond
     "pending". An unauthenticated caller has no business learning our
     identifiers.
@@ -41,6 +51,9 @@ from app.client_auth.password_reset import PasswordResetStore, ResetRequestRateL
 from app.client_auth.passwords import hash_password
 from app.client_auth.signup_rate_limit import SignupRateLimiter, SignupRateLimitExceeded
 from app.config import settings
+from app.identity.dock_log import VocabularyError, stage_submission
+from app.identity.dock_log_rate_limit import DockLogRateLimiter, DockLogRateLimitExceeded
+from app.schemas.dock_log import DockLogSubmissionBody, DockLogSubmissionResult
 from app.db import get_db
 from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
@@ -537,3 +550,73 @@ async def rate_delivery(
         ),
         is_live=view.is_live,
     )
+
+
+@router.post("/dock-log", response_model=DockLogSubmissionResult, status_code=202)
+async def submit_dock_log(
+    body: DockLogSubmissionBody,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> DockLogSubmissionResult:
+    """Map a dock, for anyone willing to (`DRV-7`).
+
+    The second unauthenticated write surface in this application, and it earns
+    that the same three ways the signup above does:
+
+    **Rate limited by IP before anything else happens**, including before the
+    vocabulary check. Charging afterwards would let an attacker probe our label
+    space for free — submit a junk value, read the 422 naming the field, learn
+    the shape of `M5`'s vocabularies without ever spending a write.
+
+    **Creates nothing that can act.** A submission lands in
+    `dock_log_submissions`, which nothing operational reads. It reaches
+    `receiver_profiles` only through `import_submission`, which refuses a row
+    no operator has matched to a dock and refuses again if one of our own
+    drivers has already surveyed it. There is no path from this endpoint to the
+    data `M5` trains on that does not pass through a person.
+
+    **Says almost nothing back.** 202, and a count of the answers recorded. Not
+    whether we hold this dock, not which one it matched, not an id — a response
+    that varied by whether the address was known would make this a way to
+    enumerate our customers' docks one guess at a time.
+
+    202 rather than 201 for the same reason signup uses it: this accepted a
+    submission, it did not create anything the caller can now use.
+    """
+    try:
+        await DockLogRateLimiter().check_and_increment(_client_ip(request))
+    except DockLogRateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+    # A submission nobody can attach to a place is worth nothing, and one with
+    # no answers costs a reviewer a row to dismiss. Both are refused here
+    # rather than stored and triaged, because the reviewer's attention is the
+    # scarce resource this whole staging design is protecting.
+    if body.lat is None and not (body.submitted_address or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Give an address or allow location, so somebody can tell which dock this is",
+        )
+
+    try:
+        submission = await stage_submission(
+            session, body, submitted_from_ip=_client_ip(request)
+        )
+    except VocabularyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if submission.answered_count == 0:
+        # Rolled back rather than kept. The driver app's equivalent accepts an
+        # empty survey and returns 200, because there the submission itself is
+        # information - that driver stood at this dock and had nothing to say.
+        # Here it carries none.
+        await session.rollback()
+        raise HTTPException(status_code=422, detail="Answer at least one question")
+
+    await session.commit()
+    logger.info(
+        "dock_log_submission_received",
+        answers=submission.answered_count,
+        has_coordinates=submission.lat is not None,
+    )
+    return DockLogSubmissionResult(accepted=True, answers_recorded=submission.answered_count)
