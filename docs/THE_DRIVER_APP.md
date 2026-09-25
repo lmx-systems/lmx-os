@@ -46,6 +46,22 @@ than unlucky; and 401 is now retryable, triggering one refresh before the next
 pass. `isPermanentFailure` is a pure exported function with its own tests,
 because the classification *is* the bug.
 
+### The same failure has a second door, and it was unlatched
+
+Treating a 401 as transient works **only while the driver can still
+authenticate.** Log out was a bare `onPress={signOut}` — no confirmation, no
+count — and signing out with queued work neither sends it nor discards it: it
+strands it. The token goes, every subsequent flush 401s, and `refreshOnce` has
+no session left to refresh with, so the queue retries against nothing until
+somebody signs back in on that same phone.
+
+`logOutWarning` (`src/utils/logOutWarning.ts`) is now in front of it, and says
+nothing at all when the queue is empty — a dialog on every log out is one
+drivers learn to dismiss, and it would stop working on the day it mattered.
+The same constraint is why `DevicesScreen` shows the current phone without a
+sign-out button: revoking the session your own queue drains through is the
+identical bug wearing a different name.
+
 ---
 
 ## 2. What is best-effort on purpose
@@ -122,9 +138,10 @@ loading the van, before anything had been delivered to anybody.
 
 ## 5. What is not built
 
-- **`DRV-3`, the warehouse geofence.** Anticipated — the region cap leaves room
-  for it — and not written. Needs a crossing that is not keyed to a stop, which
-  `stop_geofence_events` cannot carry as it stands.
+- ~~**`DRV-3`, the warehouse geofence.**~~ **Built** (`bb8e101`, PR #96). This
+  bullet was stale for over a week. `hub_geofence_events` is the separate table
+  the old text said was needed, and the hub region rides in the stop set behind
+  a `hub:` identifier prefix — the 18-stop window always left the slot.
 - **`DRV-5`'s battery clause.** "Under 4% per 8-hour shift with background on"
   is measured on a real phone over a real shift and cannot be verified from a
   repository. The permission half is done.

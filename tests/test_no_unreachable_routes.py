@@ -132,13 +132,8 @@ KNOWN_UNREACHABLE: dict[str, str] = {
         "W1 - per-parcel scanning. The app calls /driver/stops/{id}/scan, which "
         "takes a count; this takes one parcel at a time and no screen does"
     ),
-    "GET /driver/me/devices": (
-        "S1 - a driver cannot see or sign out their own sessions. An admin can, "
-        "as of the CON-1 panel work; the driver's own half has no screen"
-    ),
-    "DELETE /driver/me/devices/{device_id}": "S1 - same",
     "GET /driver/stops/{stop_id}/parcels": (
-        "W10 - the per-parcel list, sibling of scan-parcel below and unreachable "
+        "W10 - the per-parcel list, sibling of scan-parcel above and unreachable "
         "for the same reason: the app scans a count, not parcels"
     ),
     "GET /driver/me/gig-jobs": "G3 - the app has no gig screen",

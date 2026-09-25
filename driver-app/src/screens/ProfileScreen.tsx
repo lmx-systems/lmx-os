@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -9,6 +9,8 @@ import { getApiBaseUrl } from '../api/serverUrl';
 import { useAuth } from '../auth/AuthContext';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { outboxManager } from '../offline/outboxManager';
+import { logOutWarning } from '../utils/logOutWarning';
 import type { DriverDocument } from '../api/types';
 
 // The standalone dock survey, for docks LMX does not serve yet (`DRV-7`).
@@ -45,6 +47,18 @@ export function ProfileScreen({ navigation }: Props) {
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { profile, signOut } = useAuth();
   const [documents, setDocuments] = useState<DriverDocument[] | null>(null);
+
+  function handleLogOut() {
+    const warning = logOutWarning(outboxManager.pendingCount());
+    if (warning === null) {
+      void signOut();
+      return;
+    }
+    Alert.alert('Log out anyway?', warning, [
+      { text: 'Stay signed in', style: 'cancel' },
+      { text: 'Log out', style: 'destructive', onPress: () => void signOut() },
+    ]);
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -130,6 +144,16 @@ export function ProfileScreen({ navigation }: Props) {
         </Card>
       </Pressable>
 
+      <Pressable onPress={() => navigation.navigate('Devices')}>
+        <Card style={styles.row}>
+          <View style={styles.rowText}>
+            <Text style={styles.rowBody}>Your phones</Text>
+            <Text style={styles.rowSmall}>Where you are signed in, and how to sign a phone out</Text>
+          </View>
+          <ChevronRight size={20} color={colors.textMuted} />
+        </Card>
+      </Pressable>
+
       <Pressable onPress={() => navigation.navigate('Server')}>
         <Card style={styles.row}>
           <View style={styles.rowText}>
@@ -172,7 +196,14 @@ export function ProfileScreen({ navigation }: Props) {
       </Pressable>
 
       <View style={styles.spacer} />
-      <Text style={styles.rowSmall} onPress={signOut}>
+      {/* Never a bare tap. Logging out with queued stop events does not send
+          them and does not discard them - it strands them: the token goes,
+          every flush 401s, and `refreshOnce` has no session left to refresh
+          with. `flush` treats a 401 as transient precisely so a shift in a
+          dead zone survives (DRV-4), and that only holds while the driver is
+          still signed in. The rule lives in `logOutWarning` so this screen
+          cannot drift from it. */}
+      <Text style={styles.rowSmall} onPress={handleLogOut}>
         Log out
       </Text>
     </ScreenContainer>
