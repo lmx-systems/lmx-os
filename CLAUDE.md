@@ -32,6 +32,24 @@ This repo moves fast — a stale local clone has previously caused a full
 roadmap audit to report shipped work as unbuilt. Verify item status against
 the code, not against memory or a PR title.
 
+**A roadmap status is a claim, not a fact.** `BUILT` has meant *written,
+tested, and called by nothing*; `NEW` has meant *shipped ten days ago*. Five
+tests are the only status that cannot go stale, and they are where to look
+first:
+
+| Check | Fails when |
+|---|---|
+| `tests/test_no_new_orphans.py` | a public function has no caller |
+| `tests/test_no_unreachable_routes.py` | an endpoint no front end can reach. **Comments do not count as callers** |
+| `tests/test_no_write_only_columns.py` | a column nothing writes |
+| `tests/test_architecture_boundaries.py` | the dispatch engine imports an adapter |
+| `tests/test_no_stale_roadmap_claims.py` | a document cites a path that is gone, a `BUILT` row names nothing openable, or a `NEW` row has commits named after it |
+
+Each carries an allowlist where an entry is a debt with a roadmap item and a
+reason on it. Removing an entry is how work gets finished; adding one needs an
+argument. All five have fired on the person who wrote them, usually the same
+day.
+
 **Pushing works — but verify it.** SSH credentials are present and functional
 in the sandbox; the previous rule here ("Claude cannot push. No SSH keys or
 credentials in the sandbox") was stale and was corrected in August 2026 after a
