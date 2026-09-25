@@ -1,6 +1,8 @@
 # LMX 1.5 — Build Roadmap
 
-**v1.2 · 18 September 2026 · Sourabh**
+**v1.3 · 25 September 2026 · Sourabh**
+
+*v1.3 adds `DRV-7`, the dock survey at the stop — the missing writer for `IDN-4`'s surveyed and `M5` columns — with its spec kept beside the built row. It also corrects two statuses that had gone stale: `DRV-1` read `NEW` ten days after it shipped, and `MODEL_AND_DATA_BRIEF.md` recorded gates `0.4` and `0.8` as closed when this document, which holds jurisdiction over gate status, said open. Nothing else changes.*
 
 *v1.2 adds the `agents/` module to Phase 1 and amends §2.1, in response to the external review of 17 September. The decision path is unchanged; the edges of the system are not. See `MODEL_AND_DATA_BRIEF.md` §14.*
 
@@ -179,15 +181,77 @@ The app exists and is good. Its location layer is pointed at the wrong job: `src
 
 | ID | Feature | Status | Done when |
 |---|---|---|---|
-| **DRV-1** | Geofence arrive/depart per stop — `startGeofencingAsync` + TaskManager, emitting **stop events**, not position. **Rolling registration**, iOS caps at 20 regions (§2.2a) | `NEW` | Arrive and depart recorded to the second with no driver tap, on a route of 25+ stops |
+| **DRV-1** | Geofence arrive/depart per stop — `startGeofencingAsync` + TaskManager, emitting **stop events**, not position. **Rolling registration**, iOS caps at 20 regions (§2.2a) | `BUILT · UNVERIFIED ON A HANDSET` | **The row read `NEW` until 25 Sep and had been wrong since 15 Sep** — `REC-2`'s row three tables down already said *"`DRV-1` shipped `stop_geofence_event`"*, which is how a contradiction survives inside one document. Shipped as **#39** (backend: `app/models/stop_geofence_event.py`, `POST /driver/stops/{stop_id}/geofence-events`, idempotent on `uq_stop_geofence_event_crossing`) and **#41** (app: `stopGeofences.ts`, every crossing through the outbox). Rolling registration is real and tested: `MAX_MONITORED_REGIONS = 18`, leaving two of the iOS per-*app* 20 under `DRV-3`'s hub fence, with `geofenceWindow.test.ts` asserting the window on a 25-stop route. **What is not done is the done-when**, and it cannot be from here: "recorded to the second with no driver tap" is measured on a real handset over a real route, which needs `0.4` for the drivers and an Android device or `0.8` for iOS. Same class of outstanding as `DRV-5`'s battery clause — the code is not the gap |
 | **DRV-2** | Background geofencing enabled, consent copy rewritten to the §2.2(a) wording. **No background breadcrumb** | `RESHAPE` | Geofence events continue when backgrounded; position pings stay foreground-only. **Blocked on 0.4 and 0.8** |
 | **DRV-3** | Warehouse geofence | `BUILT` | `hub_geofence_events` (migration `0064`) + `app/delivery/turnaround.py`. **A separate table from `stop_geofence_events`**, whose `stop_id` is a non-nullable FK — widening it would mean every reader of a dwell sample remembering to exclude the depot, and the first to forget gets the hub in the dwell distribution. Keyed on `(hub_id, driver_id, kind, occurred_at)` because several drivers cross one fence within a minute. **In the app it shares the stop region set**, marked by a `hub:` identifier prefix: iOS caps regions per *app* and `startGeofencingAsync` replaces the whole set, so a second task would fight the first for the cap — the 18-stop window always left this slot. Registered whenever a driver is on duty, **not only when they have a route**, because a driver back in the yard with nothing assigned is exactly the turnaround worth measuring. **Pairing is deliberately not the sensor's job:** three things are not turnarounds and each inflates the figure — an arrival with no departure (open, not zero), a departure with no arrival (pairing backwards reports an overnight), and anything past four hours (a car park). All three are counted and reported, with a `pairing_rate`, because a hub where half the crossings never pair has a fence problem that a median over the other half would hide |
 | **DRV-4** | Stop-event outbox | `BUILT` | **The outbox already did the hard part, and one line undid it.** Arrive, scan, complete, flag and geofence crossings all queue to AsyncStorage and survive the app being killed — but `isPermanent = status >= 400 && status < 500` treated a **401** as a business-rule rejection, and the comment beside it named "a stale/rejected auth token" as something that returns the identical error however often it is retried. It is the one thing that does not. Queue a day of stops in a dead zone, let the token expire down there, come back into signal: every item 401s at once, every one is marked permanently failed, `flush` skips them for ever and nothing clears the flag. **The whole shift is lost, visibly, in the queue.** 401/408/429 are retryable now, a 401 triggers one token refresh before the next pass, and the classification is a pure exported function with its own tests. Two nested causes: `/auth/refresh` returned a fresh token and **nothing adopted it** — `AuthContext` discarded the result — so expiry was certain rather than unlucky; `src/auth/token.ts` now owns taking a token into use in both places it has to live. **Location pings stay fire-and-forget deliberately:** a ping is a sample of a continuous signal, and replaying a twenty-minute-old position would report where a driver *was* as where they are. The ops map already draws a stale fix hollow rather than hiding it |
 | **DRV-5** | Battery and permission degradation | `PERMISSION HALF BUILT · BATTERY UNVERIFIED` | **"Clear state when permission is denied" is done.** Permission was checked when the watcher started and when geofences registered, and never again — so a driver who granted it at 6am and revoked it in Settings at 10am left the app holding state that claimed a sensor it no longer had: regions registered but silently not firing, `DRV-1`'s second-precision dwell quietly degrading to tap-grade for the shift. `useLocationDegradation` re-checks on foreground (the only moment it can have changed), tears down geofences and the watcher for whichever tier is gone, and tells the driver what stopped and what to do instead. It never re-requests — a cold prompt after a deliberate refusal is how an app earns a permanent denial (`docs/BACKGROUND_LOCATION_CONSENT.md` §4.4). The judgement is a pure function with eight tests, including that the copy never tells a driver to turn it back on. **The battery clause is not verified and cannot be from here:** "under 4% per 8-hour shift" is measured on a real phone over a real shift |
-| **DRV-7** | Dock survey at the stop — the writer `IDN-4`'s surveyed columns never had | `BUILT` | `app/identity/dock_survey.py`, `POST /driver/stops/{id}/dock-survey`, `DockSurveyModal`, migration `0065`. **Seven allowlist entries came off in the same change**: `set_access` and `set_autonomy_fit` from the orphan list, and `curb_access`, `door_path`, `landing_surface`, `obstruction`, `who_receives` from the write-only-column list — all of them complete, validated and tested, and written by nothing since the day they were added. **The decision is server-side.** `dock_needs_survey` weighs the 365-day interval, the three-per-shift cap and the stop type together, and the app renders what it is told; restating any of it on the phone is the mistake `THE_DRIVER_APP.md` §6 records twice. **It opens after `complete_stop` is queued, never before** — a measurement may fail, a delivery may not — every question has a skip, an empty submission is a valid 200, and the whole thing goes through the outbox as a sixth action type. **`stop_point` is the one question that had no column** (`STOP_POINTS`, migration `0065`), and `none_legal` is a real answer: a dock a van cannot lawfully stop at is exactly what an autonomy programme needs to know, and rounding it to `street_legal` would hide it. `surveyed_by_driver_id` is a foreign key so a bad surveyor can be found and their rows discounted — these become `M5`'s labels. A value outside a vocabulary is a 422 naming the field, not a stored surprise; a stop whose address names no place is a 409 rather than a silent write to `IDN-1`'s deliberately-null dock. **Not yet done:** the 80% coverage figure the done-when names is measured after go-live. **The standalone Dock Log is a link and not yet a page** — Profile points at `portal.lmxit.com/dock-log`, which 404s until the portal is deployed (`infra/aws/` is written and has never been applied) and the page is built. Two things have to be true before a single Dock Log row is imported: its answer set moves to these vocabularies rather than being translated afterwards, and **a stranger's submission must never write to `receiver_profiles` directly** — it is an unauthenticated public surface writing into the layer `M5` trains on, so it needs a staging table and an import that honours the rule the spec already states: match a `Location` by coordinates, write only to a dock none of our own drivers has surveyed, never overwrite one that has |
 | **DRV-6** | Exception capture at the stop | `BUILT` | `FlagIssueScreen` exists — verify reason codes match `REC-3` and that it is under 3 seconds |
+| **DRV-7** | Dock survey at the stop — the writer `IDN-4`'s surveyed columns never had | `BUILT` | `app/identity/dock_survey.py`, `POST /driver/stops/{id}/dock-survey`, `DockSurveyModal`, migration `0065`. **Seven allowlist entries came off in the same change**: `set_access` and `set_autonomy_fit` from the orphan list, and `curb_access`, `door_path`, `landing_surface`, `obstruction`, `who_receives` from the write-only-column list — all of them complete, validated and tested, and written by nothing since the day they were added. **The decision is server-side.** `dock_needs_survey` weighs the 365-day interval, the three-per-shift cap and the stop type together, and the app renders what it is told; restating any of it on the phone is the mistake `THE_DRIVER_APP.md` §6 records twice. **It opens after `complete_stop` is queued, never before** — a measurement may fail, a delivery may not — every question has a skip, an empty submission is a valid 200, and the whole thing goes through the outbox as a sixth action type. **`stop_point` is the one question that had no column** (`STOP_POINTS`, migration `0065`), and `none_legal` is a real answer: a dock a van cannot lawfully stop at is exactly what an autonomy programme needs to know, and rounding it to `street_legal` would hide it. `surveyed_by_driver_id` is a foreign key so a bad surveyor can be found and their rows discounted — these become `M5`'s labels. A value outside a vocabulary is a 422 naming the field, not a stored surprise; a stop whose address names no place is a 409 rather than a silent write to `IDN-1`'s deliberately-null dock. **Not yet done:** the 80% coverage figure the done-when names is measured after go-live. **The standalone Dock Log is a link and not yet a page** — Profile points at `portal.lmxit.com/dock-log`, which 404s until the portal is deployed (`infra/aws/` is written and has never been applied) and the page is built. Two things have to be true before a single Dock Log row is imported: its answer set moves to these vocabularies rather than being translated afterwards, and **a stranger's submission must never write to `receiver_profiles` directly** — it is an unauthenticated public surface writing into the layer `M5` trains on, so it needs a staging table and an import that honours the rule the spec already states: match a `Location` by coordinates, write only to a dock none of our own drivers has surveyed, never overwrite one that has |
 
 > **DRV-1 and DRV-2 are the whole of Phase 1's risk.** Everything else in this phase is plumbing.
+>
+> **That risk has moved but not gone.** `DRV-1` is written, and writing it was
+> never the risky part — the sensor is only real once a driver's own phone has
+> run a route with it, and no phone has. Until then Phase 1's risk is a handset
+> and two gates (`0.4`, `0.8`), which is the same risk it always was wearing
+> different clothes. Do not read `BUILT` on a sensor row as a measurement.
+
+#### DRV-7 — the dock survey, specified
+
+**Why it exists.** `app/identity/profile.py` already holds everything `M5` needs to learn from — `landing_surface`, `curb_access`, `door_path`, `obstruction`, `who_receives` — plus the access facts (`walk_distance_band`, `carry_effort`, `appointment_required`). Every one of them is validated against a fixed vocabulary, tested, and **written by nothing**: `set_access` and `set_autonomy_fit` sit in `tests/test_no_new_orphans.py` as *"profile field with no live writer."* `MODEL_AND_DATA_BRIEF.md` §6 says `M5` is a discovery process capped at the customer's dock count, and that the survey is weeks of fieldwork regardless of volume. It is weeks of fieldwork only if somebody has to go and do it. Our drivers are already standing at every one of those docks.
+
+**The rule it inherits.** A measurement may fail; a delivery may not (`docs/THE_DRIVER_APP.md` §2). The survey appears **after** `complete_stop` has been queued, never before it, and every question has a skip.
+
+**What the driver sees.** One screen, eight single-tap questions, in this order. Answer codes are the existing constants in `app/models/receiver_profile.py` — no new vocabulary on the phone.
+
+| # | Question on screen | Writes | Values |
+|---|---|---|---|
+| 1 | Where could you stop the vehicle? | `stop_point` **(new, see below)** | `loading_dock`, `marked_bay`, `lot`, `street_legal`, `double_parked`, `none_legal` |
+| 2 | Could a vehicle pull up at the kerb by the door? | `curb_access` | `CURB_ACCESS` |
+| 3 | How far from the vehicle to the handover? | `walk_distance_band` | `WALK_DISTANCE_BANDS` |
+| 4 | The way in to the door | `door_path` | `DOOR_PATHS` |
+| 5 | Anything in the way? | `obstruction` | `OBSTRUCTIONS` |
+| 6 | Who took it? | `who_receives` | `WHO_RECEIVES` |
+| 7 | Open ground nearby a drone could set down on? | `landing_surface` | `LANDING_SURFACES` |
+| 8 | Did you need an appointment or booking? | `appointment_required` | yes / no |
+
+Optional: one photo of the drop point from where the vehicle stopped, through the existing `PodCapture` upload path. No people, plates or paperwork, stated on screen.
+
+**What it deliberately does not ask.**
+
+- **Time on site.** `DRV-1`'s geofence already measures it to the second. A driver-pressed timer would reintroduce the tap-grade dwell Phase 1 exists to remove.
+- **Weight and size of the goods.** These belong to the order, from invoice lines, not to the dock. `carry_effort` is asked only where a stop has no line-item weights, and then as a property of that delivery, not the dock.
+- **Receiving hours.** `set_receiving_hours` is *stated, by the receiver*. A driver's guess at a dock's hours is exactly the soft label `IDN-4` separates by source. Hours come from the dispatcher or the client portal.
+
+**When it is shown.**
+
+- The stop's dock has no profile, or `is_surveyed` is false, or `surveyed_at` is older than 365 days.
+- At most **three surveys per driver per shift**, so a first week at a new customer does not turn every stop into paperwork. The remaining docks wait for the next visit.
+- Never on a pickup, never on a failed stop, never while the vehicle is moving.
+
+**Build.**
+
+1. **Migration.** `receiver_profiles.stop_point` (`String(16)`, nullable) with `STOP_POINTS` beside the other constants, and `surveyed_by_driver_id` (nullable FK) so a bad surveyor can be found and their answers discounted. No other schema change.
+2. **Endpoint.** `POST /driver/stops/{stop_id}/dock-survey` resolves stop → shop → `location_id` and calls `set_access` and `set_autonomy_fit` with whatever was answered. A stop whose shop has no `location_id` returns 409 with a reason, not a silent write to nothing (`IDN-1`).
+3. **Stop payload.** The driver's route response carries `dock_needs_survey: bool`, computed server-side from the rules above, so the phone never restates the condition (`THE_DRIVER_APP.md` §6).
+4. **Outbox.** A sixth action type, `survey`, idempotent on `(location_id, driver_id, service_date)`. Same retry classification as the other five; nothing new in `isPermanentFailure`.
+5. **Tests.** Endpoint round trip and vocabulary refusal; the `dock_needs_survey` rule including the 365-day and three-per-shift limits; an outbox test that a survey queued offline survives a kill and flushes once. Remove the two allowlist entries in the same change, or `test_no_new_orphans` fails on its second check, correctly.
+6. **Docs.** `THE_RECORD_AND_IDENTITY_LAYERS.md` §7 loses the `IDN-4` row; `THE_DRIVER_APP.md` §1 gains the sixth action.
+
+**The standalone Dock Log.** A separate survey page exists for drivers who are not ours, to map docks before we serve them. It currently uses its own answer set (feet not metres, "one hand" not `hand_carry`), which `_require_in` would reject. It moves to this vocabulary before any of its rows are imported. Imported rows match a `Location` by coordinates, write only to a dock that none of our own drivers has surveyed, and never overwrite one that has — the same "never blend two sources" rule as `inherited_dwell_*`.
+
+**Open questions.**
+
+- Whether `curb_access` and `stop_point` are one question or two in practice. Keep both until the first 50 surveys show whether drivers answer them differently.
+- Whether the three-per-shift cap should rise once the founding dock set is covered, since after that almost every survey is a genuinely new dock.
+
+> **This is the spec as written on 23 September, kept as written.** `DRV-7`
+> shipped two days later and the row above is what was built; where the two
+> disagree the row wins. It is kept because a spec edited to match its build
+> stops being evidence of anything — the two places this one was wrong
+> (`stop.shop_id` carries the *pickup* shop, and the Dock Log cannot write to
+> `receiver_profiles` directly) are the reason the next spec gets read harder.
 
 ### identity/ — new module
 
@@ -413,7 +477,7 @@ app/
   messaging/      NTF-1      BUILT
   gig_platform/   SUP-1..5   RESHAPE
   returns/        —          deferred
-driver-app/       DRV-1..6   RESHAPE  geofence + background are the gap
+driver-app/       DRV-1..7   BUILT    except DRV-2; the gap is handset time, not code
 dashboard/        CON-1..4   RESHAPE
 lmx-dwell/        PRD-3..4   BUILT    promote into app/
 ```
