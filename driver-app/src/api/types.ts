@@ -309,3 +309,19 @@ export interface DockSurveyResult {
   surveyed_at: string | null;
   surveys_remaining_today: number;
 }
+
+/**
+ * One phone this driver is signed in on (`docs/ROADMAP.md` S1).
+ *
+ * `is_current` is decided by the server from the device id inside the token,
+ * not by the app comparing ids. The app knows its own installation id, but a
+ * token minted for a different device would still look "current" to it, and
+ * "which session am I actually using" is the one question this screen exists
+ * to answer.
+ */
+export interface DriverDevice {
+  device_id: string;
+  device_name: string | null;
+  last_seen_at: string;
+  is_current: boolean;
+}
