@@ -2,6 +2,7 @@ import { clearToken, getToken } from './auth'
 import type {
   AdminClient,
   ClientOnboardingBody,
+  ClientInvoice,
   ClientRate,
   ClientSlaTerm,
   ClientOnboardingResult,
@@ -396,6 +397,21 @@ export const api = {
     request<ClientRate>(`/admin/clients/${clientId}/rates`, {
       method: 'PUT',
       body: JSON.stringify(body),
+    }),
+
+  // Statements (docs/ROADMAP.md C3). `generate_invoice` had exactly one call
+  // site - the POST below - and that endpoint had no caller in any front end,
+  // so nothing in this system had ever raised an invoice. The client portal
+  // meanwhile ships a full viewer reading a table nothing could write. The
+  // list is what makes the generate button safe to press: raising a statement
+  // blind is the one billing action nobody should take.
+  listClientInvoices: (clientId: string) =>
+    request<ClientInvoice[]>(`/admin/clients/${clientId}/invoices`),
+
+  generateClientInvoice: (clientId: string, periodStart: string, periodEnd: string) =>
+    request<ClientInvoice>(`/admin/clients/${clientId}/invoices/generate`, {
+      method: 'POST',
+      body: JSON.stringify({ period_start: periodStart, period_end: periodEnd }),
     }),
 
   // The other half of the contract (docs/ROADMAP.md W3): what we promised and

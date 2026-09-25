@@ -22,7 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.payroll.hours as payroll_hours
 from app.batch_queue.store import HoldQueueStore
-from app.billing.service import NoBillableOrdersError, generate_invoice, invoice_detail_view
+from app.billing.service import (
+    NoBillableOrdersError,
+    generate_invoice,
+    invoice_detail_view,
+    invoice_summary_view,
+)
 from app.client_auth.passwords import hash_password
 from app.db import get_db
 from app.identity import link_shop_to_dock
@@ -31,6 +36,7 @@ from app.driver_auth.dependencies import revoked_devices_key
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.models.client_sla_term import ClientSlaTerm
+from app.models.invoice import Invoice
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.models.driver import EMPLOYMENT_TYPES, VEHICLE_TYPES, Driver
 from app.compliance.driver_documents import evaluate_driver_documents
@@ -89,7 +95,7 @@ from app.schemas.admin import (
     UrgencyRuleUpdateBody,
     UrgencyRuleView,
 )
-from app.schemas.billing import InvoiceDetailView, InvoiceGenerateBody
+from app.schemas.billing import InvoiceDetailView, InvoiceGenerateBody, InvoiceSummaryView
 from app.gig_platform import service as gig_store
 from app.messaging.client_emails import send_signup_approved_email
 from app.gig_platform.density import hub_density_report
@@ -525,6 +531,45 @@ async def run_payroll_for_hub(
         )
 
     return PayrollRunResult(hub_id=hub_id, engine=provider.engine_name, submissions=submissions)
+
+
+@router.get("/clients/{client_id}/invoices", response_model=list[InvoiceSummaryView])
+async def list_client_invoices(
+    client_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[InvoiceSummaryView]:
+    """What has already been billed to this client (`docs/ROADMAP.md` C3).
+
+    **Nothing had ever raised an invoice.** `generate_invoice` is called from
+    exactly one place — `POST /clients/{id}/invoices/generate`, immediately
+    below — and that endpoint had no caller in any front end. No scheduler, no
+    script, nothing. Meanwhile the client portal ships a complete invoice
+    viewer: list, detail and PDF, three endpoints reading a table nothing could
+    write. A read-only feature is the mirror image of
+    `tests/test_no_write_only_columns.py`'s complaint and just as empty.
+
+    This is the half that makes the generate button safe to press. Raising a
+    statement is the one billing action nobody should take blind — an operator
+    who cannot see what has already been billed cannot tell a first run from a
+    second, and `NoBillableOrdersError` is a weak guard to rely on for that: it
+    protects the *orders* from being billed twice, not the operator from
+    believing a period is unbilled when it is not.
+
+    Newest first, matching `list_my_invoices` — the client and the operator
+    should be reading the same list in the same order when they are on the
+    phone to each other about it.
+    """
+    client = await session.get(Client, uuid.UUID(client_id))
+    if client is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    result = await session.execute(
+        select(Invoice)
+        .where(Invoice.client_id == uuid.UUID(client_id))
+        .order_by(Invoice.period_start.desc())
+    )
+    return [await invoice_summary_view(session, invoice) for invoice in result.scalars().all()]
 
 
 @router.post("/clients/{client_id}/invoices/generate", response_model=InvoiceDetailView)
