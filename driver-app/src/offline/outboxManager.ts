@@ -226,6 +226,16 @@ class OutboxManager {
         return api.recordGeofenceEvents(item.stopId, [
           item.payload as { kind: 'enter' | 'exit'; occurred_at: string },
         ]);
+      case 'collect-return':
+        // Safe to retry. The server recognises an identical ad-hoc manifest on
+        // the same stop as this request arriving twice - before that it created
+        // a second core, and a phantom core is a part a shop is owed that was
+        // never in the van.
+        return api.collectReturn(item.stopId, item.payload.manifest as string | undefined);
+      case 'return-not-ready':
+        return api.returnNotReady(item.stopId);
+      case 'return-to-shop':
+        return api.returnToShop(item.stopId);
     }
   }
 

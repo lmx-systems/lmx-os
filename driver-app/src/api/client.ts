@@ -16,6 +16,7 @@ import type {
   Message,
   PodMethod,
   RequestOtpResult,
+  ReturnItem,
   Route,
   TripSummary,
   UploadContentType,
@@ -196,6 +197,24 @@ export const api = {
       `/driver/stops/${stopId}/geofence-events`,
       { method: 'POST', body: JSON.stringify({ events }) },
     ),
+
+  // W1's reverse leg. All three are idempotent on the server as of the retry
+  // work that landed with these screens: a repeat of a collection returns the
+  // existing cores rather than a 409, and an identical ad-hoc manifest is
+  // recognised as this request arriving twice rather than a second alternator.
+  // Without that, queueing them would have invented parts that were never in
+  // the van.
+  collectReturn: (stopId: string, manifest?: string) =>
+    request<ReturnItem[]>(`/driver/stops/${stopId}/collect-return`, {
+      method: 'POST',
+      body: JSON.stringify({ manifest: manifest ?? null }),
+    }),
+
+  returnNotReady: (stopId: string) =>
+    request<ReturnItem[]>(`/driver/stops/${stopId}/return-not-ready`, { method: 'POST' }),
+
+  returnToShop: (stopId: string) =>
+    request<ReturnItem[]>(`/driver/stops/${stopId}/return-to-shop`, { method: 'POST' }),
 
   scanParcels: (stopId: string, scannedCount: number) =>
     request<Route['stops'][number]>(`/driver/stops/${stopId}/scan`, {

@@ -81,23 +81,20 @@ NOT_CALLED_BY_A_FRONT_END: dict[str, str] = {
 # tolerated and what would close it. Same discipline as `KNOWN_ORPHANS`: an
 # entry is a debt with a name on it, not a silence.
 #
-# `W1`'s returns flow is most of this list, which is the finding the check was
-# built to make visible - and the shape of it is worth stating precisely. The
-# *client* half shipped: `client-portal/src/components/ReturnsPanel.tsx` lists
-# what is awaiting pickup and flags cores as ready. The **driver** half and the
-# **ops** half did not. So a counter person can say the cores are ready, and the
-# driver who arrives to collect them has no button and the operator who has to
-# close the loop has no list.
+# `W1`'s returns flow was most of this list when the check was written - the
+# finding it was built to make visible. The *client* half had shipped
+# (`client-portal/src/components/ReturnsPanel.tsx`); the **driver** and **ops**
+# halves had not, so a counter person could say the cores were ready and the
+# driver who arrived to collect them had no button.
+#
+# **The driver half is built now** and its three entries came straight back off
+# this list - which is the companion test doing its job within the hour, on the
+# person who wrote it. The ops half is still here.
 KNOWN_UNREACHABLE: dict[str, str] = {
     "POST /driver/stops/{stop_id}/scan-parcel": (
         "W1 - per-parcel scanning. The app calls /driver/stops/{id}/scan, which "
         "takes a count; this takes one parcel at a time and no screen does"
     ),
-    "POST /driver/stops/{stop_id}/collect-return": (
-        "W1 slice 3 - the driver leg exists on the backend and the app has no screen for it"
-    ),
-    "POST /driver/stops/{stop_id}/return-not-ready": "W1 slice 3 - same",
-    "POST /driver/stops/{stop_id}/return-to-shop": "W1 slice 3 - same",
     "POST /admin/returns/{return_id}/mark-returned": (
         "W1 slice 3 - the ops manual mark the item names, with no panel to make it "
         "from. The client half shipped (ReturnsPanel); this half did not"

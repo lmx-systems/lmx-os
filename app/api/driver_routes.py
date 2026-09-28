@@ -103,6 +103,7 @@ from app.schemas.driver_app import (
     ScorecardMetricView,
     SendMessageBody,
     StopProofRequirementView,
+    StopReturnsView,
     StopView,
     TripSummaryView,
     UploadUrlRequestBody,
@@ -1271,6 +1272,7 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     flag_note=stop.flag_note,
                     proof=await _stop_proof_view(session, stop.id),
                     cod=await _stop_cod_view(session, stop.id),
+                    returns=await _stop_returns_view(session, stop),
                 )
             )
         else:
@@ -1300,6 +1302,7 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     # already put the box down.
                     proof=await _stop_proof_view(session, stop.id),
                     cod=await _stop_cod_view(session, stop.id),
+                    returns=await _stop_returns_view(session, stop),
                 )
             )
 
@@ -1837,6 +1840,101 @@ async def list_stop_parcels(
     return [ParcelView(barcode=p.barcode, scanned=p.scanned_at is not None) for p in result.scalars().all()]
 
 
+async def _stop_returns_view(
+    session: AsyncSession, stop: Stop
+) -> StopReturnsView | None:
+    """Cores to handle at this stop (`W1`), or None when there are none.
+
+    None rather than an empty object, so a stop with no cores costs the app
+    nothing to think about - the overwhelming majority of them.
+
+    **The two halves are asymmetric, because the endpoints are.**
+    `collect-return` and `return-not-ready` work on cores expected *by this
+    dropoff's orders*; `return-to-shop` works on every collected core bound for
+    *this pickup's shop*, whoever collected it. Reading them the same way would
+    put a button on a stop whose endpoint would then 409.
+    """
+    if stop.stop_type == "dropoff":
+        expected = await _expected_returns_for_stop(session, stop.id)
+        if not expected:
+            return None
+        return StopReturnsView(expected_manifests=[item.manifest or "core" for item in expected])
+
+    if stop.stop_type == "pickup" and stop.shop_id is not None:
+        result = await session.execute(
+            select(ReturnItem).where(
+                ReturnItem.shop_id == stop.shop_id, ReturnItem.status == "collected"
+            )
+        )
+        waiting = list(result.scalars().all())
+        if not waiting:
+            return None
+        return StopReturnsView(to_drop_manifests=[item.manifest or "core" for item in waiting])
+
+    return None
+
+
+async def _returns_already_collected_for_stop(
+    session: AsyncSession, stop_id: uuid.UUID
+) -> list[ReturnItem]:
+    """Cores from this stop's orders that are already collected.
+
+    The difference between *"there was nothing to collect"* and *"you already
+    collected it"*, which `collect-return` could not tell apart and answered
+    `409` to both. Under `DRV-4`'s outbox that is the expensive confusion: a
+    4xx is classified permanent, so a retry after a dead zone would mark a
+    collection that had actually succeeded as failed forever.
+    """
+    order_ids = await _stop_order_ids(session, stop_id)
+    if not order_ids:
+        return []
+    result = await session.execute(
+        select(ReturnItem).where(
+            ReturnItem.origin_order_id.in_(order_ids),
+            ReturnItem.status.in_(("collected", "returned_to_shop")),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def _returns_already_not_ready_for_stop(
+    session: AsyncSession, stop_id: uuid.UUID
+) -> list[ReturnItem]:
+    """Cores from this stop's orders already marked not-ready."""
+    order_ids = await _stop_order_ids(session, stop_id)
+    if not order_ids:
+        return []
+    result = await session.execute(
+        select(ReturnItem).where(
+            ReturnItem.origin_order_id.in_(order_ids), ReturnItem.status == "not_ready"
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def _adhoc_return_already_recorded(
+    session: AsyncSession, order_ids: list[uuid.UUID], manifest: str
+) -> list[ReturnItem]:
+    """An identical ad-hoc core already recorded against these orders.
+
+    Keyed on the manifest text because that is all an ad-hoc core has - it is
+    created on the spot from what the driver typed. Two genuinely different
+    cores described identically on one stop are indistinguishable here, and
+    that is the right trade: the cost is one under-recorded core, against a
+    retry inventing parts that were never in the van.
+    """
+    if not order_ids:
+        return []
+    result = await session.execute(
+        select(ReturnItem).where(
+            ReturnItem.origin_order_id.in_(order_ids),
+            ReturnItem.manifest == manifest,
+            ReturnItem.status.in_(("collected", "returned_to_shop")),
+        )
+    )
+    return list(result.scalars().all())
+
+
 async def _expected_returns_for_stop(session: AsyncSession, stop_id: uuid.UUID) -> list[ReturnItem]:
     order_ids = await _stop_order_ids(session, stop_id)
     if not order_ids:
@@ -1995,18 +2093,32 @@ async def collect_return(
         order_ids = await _stop_order_ids(session, stop.id)
         if not order_ids:
             raise HTTPException(status_code=409, detail="This stop has no order to attach a return to")
-        order = await session.get(Order, order_ids[0])
-        adhoc = ReturnItem(
-            hub_id=order.hub_id, origin_order_id=order.id, shop_id=order.shop_id,
-            manifest=body.manifest, status="collected", collected_at=now,
-        )
-        session.add(adhoc)
-        collected = [adhoc]
+        # An identical ad-hoc core already recorded here is this request
+        # arriving twice, not a second alternator. `DRV-4`'s outbox retries
+        # after a dead zone, and without this the retry invents a core that
+        # was never in the van - which then goes on to owe a shop a part.
+        already = await _adhoc_return_already_recorded(session, order_ids, body.manifest)
+        if already:
+            collected = already
+        else:
+            order = await session.get(Order, order_ids[0])
+            adhoc = ReturnItem(
+                hub_id=order.hub_id, origin_order_id=order.id, shop_id=order.shop_id,
+                manifest=body.manifest, status="collected", collected_at=now,
+            )
+            session.add(adhoc)
+            collected = [adhoc]
     else:
-        raise HTTPException(
-            status_code=409,
-            detail="No return expected on this stop - include a manifest to record an ad-hoc core",
-        )
+        # Nothing expected and no manifest. Before answering, check whether
+        # this stop's cores were collected already: a retry of a successful
+        # call lands here, and a 409 would tell the outbox the work failed
+        # permanently when it had in fact succeeded.
+        collected = await _returns_already_collected_for_stop(session, stop.id)
+        if not collected:
+            raise HTTPException(
+                status_code=409,
+                detail="No return expected on this stop - include a manifest to record an ad-hoc core",
+            )
     await session.commit()
     return await return_views(session, collected)
 
@@ -2025,6 +2137,12 @@ async def return_not_ready(
         raise HTTPException(status_code=409, detail="Returns are handled at the delivery (dropoff) stop")
     expected = await _expected_returns_for_stop(session, stop.id)
     if not expected:
+        # Already marked is not a failure. The outbox retries, and a 409 here
+        # would be classified permanent and reported to the driver as an error
+        # for work that went through.
+        already = await _returns_already_not_ready_for_stop(session, stop.id)
+        if already:
+            return await return_views(session, already)
         raise HTTPException(status_code=409, detail="No expected return on this stop to mark not-ready")
     for item in expected:
         item.status = "not_ready"
@@ -2055,6 +2173,16 @@ async def return_cores_to_shop(
     )
     items = list(result.scalars().all())
     if not items:
+        # Same retry story as the two above: cores already dropped at this shop
+        # mean the work is done, not that the request was wrong.
+        dropped = await session.execute(
+            select(ReturnItem).where(
+                ReturnItem.shop_id == stop.shop_id, ReturnItem.status == "returned_to_shop"
+            )
+        )
+        already = list(dropped.scalars().all())
+        if already:
+            return await return_views(session, already)
         raise HTTPException(status_code=409, detail="No collected cores are destined for this shop")
 
     now = datetime.now(timezone.utc)
