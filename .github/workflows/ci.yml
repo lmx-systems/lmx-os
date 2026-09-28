@@ -64,13 +64,40 @@ jobs:
       - name: Type check (mypy)
         run: mypy app || true  # advisory only until Phase 1 models settle
 
+      # `set -o pipefail` is the whole point of this line, and its absence made
+      # every CI run since this step was written incapable of failing. A bash
+      # pipeline returns the status of its LAST command, so `pytest | tee`
+      # reports tee's exit code - zero, always. A red suite went green.
+      #
+      # Found on 28 September, on the first PR that ever targeted main from a
+      # twelve-deep stack: `tests/integration` could not be collected at all
+      # (greenlet missing - see requirements.txt) and the job passed in 1m0s
+      # with **zero tests executed**.
       - name: Test (unit + integration - real Postgres/Redis service containers above)
-        run: pytest tests/ -v --cov=app --cov-report=term-missing | tee /tmp/pytest-output.txt
+        run: |
+          set -o pipefail
+          pytest tests/ -v --cov=app --cov-report=term-missing | tee /tmp/pytest-output.txt
 
-      - name: Verify integration tests actually ran (didn't silently skip)
+      # Three ways the suite can produce no result while the step above is
+      # happy. Each one has actually happened or nearly did, so each is checked
+      # by name rather than by a single clever pattern.
+      - name: Verify the suite actually ran
         run: |
           if grep -q "SKIPPED.*Skipping integration tests" /tmp/pytest-output.txt; then
             echo "::error::Integration tests were skipped - the postgres/redis service containers weren't reachable. This should never happen in CI; check the services: block above."
+            exit 1
+          fi
+          # A collection error stops pytest before any test runs. This is what
+          # was happening, and the skip check above could not see it because a
+          # suite that never collected also never skipped.
+          if grep -qE "error during collection|Interrupted:" /tmp/pytest-output.txt; then
+            echo "::error::pytest stopped during collection - no tests ran. Read the ERRORS block in the step above."
+            exit 1
+          fi
+          # A summary line is the proof of work. No "N passed" means the run
+          # produced nothing, whatever its exit code claimed.
+          if ! grep -qE "[0-9]+ passed" /tmp/pytest-output.txt; then
+            echo "::error::No 'N passed' summary in the pytest output - the suite produced no result."
             exit 1
           fi
 
