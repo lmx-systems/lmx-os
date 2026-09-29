@@ -71,6 +71,30 @@ markers = [
 # So the goal here is not zero. It is **a number that means something**, held
 # at a baseline that cannot grow - the same bargain the five invariant tests
 # make, where an entry is a debt with a name on it rather than a silence.
+#
+# **197 -> 111 so far, and the two big wins were both one unwritten fact:**
+#
+#   * 42 of 43 model files annotated `Mapped[UUID]` with SQLAlchemy's dialect
+#     type instead of `uuid.UUID`, so every id read as a type object rather
+#     than a value. 93 annotations, -48 errors, provably schema-neutral.
+#   * `profile_for(create=True)` cannot return None and did not say so. One
+#     `@overload`, -22 errors, and `identity/profile.py` went to zero.
+#
+# **What is left is the genuinely hard tail**, and it does not reduce by
+# cleverness:
+#
+#   * ~9 from redis-py's `bytes | str` replies. `decode_responses=True` makes
+#     them `str`, but `redis.Redis` is not generic in the installed version -
+#     tried `redis.Redis[str]` and it is a `type-arg` error - so closing these
+#     means a typed wrapper or nine casts, which is more machinery than the
+#     bug it prevents.
+#   * `record/cost.py`'s `StopTiming`, where `source is not None` guarantees
+#     both timestamps are set. Expressing that needs a second dataclass for
+#     complete timings, which is a change to REC-2's data flow and wants its
+#     own decision rather than being swept into a cleanup.
+#   * A long tail of real optionality - `float | None`, `SLATier | None`,
+#     `Order | None` - each needing a judgement at its own call site about
+#     whether the None is possible and what should happen if it is.
 [tool.mypy]
 python_version = "3.11"
 files = ["app"]
