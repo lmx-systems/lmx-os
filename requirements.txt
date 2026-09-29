@@ -1,6 +1,12 @@
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
-sqlalchemy>=2.0.30
+# The `[asyncio]` extra is greenlet, and it is not decoration: every session in
+# this app is an AsyncSession. SQLAlchemy 2.0.36+ stopped installing greenlet as
+# a default dependency, so it arrives transitively on some platforms and not
+# others - present on macOS and in our own image, absent on the GitHub runner.
+# That asymmetry hid a broken CI for weeks: `tests/integration` could not even be
+# collected there, and the run went green anyway (see ci.yml's pipefail comment).
+sqlalchemy[asyncio]>=2.0.30
 alembic>=1.13.1
 asyncpg>=0.29.0
 psycopg2-binary>=2.9.9
