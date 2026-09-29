@@ -149,12 +149,6 @@ KNOWN_UNREACHABLE: dict[str, str] = {
         "G3 - the app has no gig screen; offers arrive and are answered on the "
         "platform's own app today"
     ),
-    "POST /admin/clients/{client_id}/invoices/generate": (
-        "C3 - a statement can only be raised by scripts/settle_month.py. This "
-        "was passing on a collision: /generate matched two dashboard comments "
-        "about docker/generate-env-config.sh, a shell script. Visible only "
-        "after comments stopped counting as callers"
-    ),
 }
 
 

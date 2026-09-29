@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.api.admin_routes import generate_client_invoice
+from app.api.admin_routes import generate_client_invoice, list_client_invoices
 from app.api.client_routes import get_my_invoice, get_my_invoice_pdf, list_my_invoices
 from app.billing.service import NoBillableOrdersError, generate_invoice, invoice_detail_view
 from app.client_auth.dependencies import AuthedClient
@@ -147,6 +147,63 @@ async def test_admin_generate_invoice_404s_when_nothing_to_bill(db_session):
             str(client_id), InvoiceGenerateBody(period_start=date(2026, 6, 1), period_end=date(2026, 7, 1)),
             session=db_session,
         )
+    assert exc_info.value.status_code == 404
+
+
+async def test_admin_can_list_what_has_been_billed(db_session):
+    """The half that makes the generate button safe to press (`C3`).
+
+    `generate_invoice` had exactly one call site - the endpoint above - and
+    that endpoint had no caller in any front end, no scheduler and no script.
+    So nothing had ever raised an invoice, while the client portal shipped a
+    full viewer reading a table nothing could write.
+    """
+    client_id, shop_id, hub_id = await _seed_client_with_shop(db_session)
+    db_session.add(_delivered_order(client_id, shop_id, hub_id, fee_cents=1_100, delivered_on=date(2026, 6, 5), ref="LIST-1"))
+    db_session.add(_delivered_order(client_id, shop_id, hub_id, fee_cents=2_200, delivered_on=date(2026, 7, 5), ref="LIST-2"))
+    await db_session.commit()
+
+    assert await list_client_invoices(str(client_id), session=db_session) == []
+
+    await generate_client_invoice(
+        str(client_id), InvoiceGenerateBody(period_start=date(2026, 6, 1), period_end=date(2026, 7, 1)),
+        session=db_session,
+    )
+    await generate_client_invoice(
+        str(client_id), InvoiceGenerateBody(period_start=date(2026, 7, 1), period_end=date(2026, 8, 1)),
+        session=db_session,
+    )
+
+    listed = await list_client_invoices(str(client_id), session=db_session)
+    assert [i.total_cents for i in listed] == [2_200, 1_100], "newest period first"
+    # Same order the client sees in their own portal. When the two are on the
+    # phone about a statement, "the second one down" has to mean the same row.
+    assert [i.period_start for i in listed] == [date(2026, 7, 1), date(2026, 6, 1)]
+
+
+async def test_admin_invoice_list_is_scoped_to_one_client(db_session):
+    """A list that leaked would put one client's turnover on another's screen."""
+    client_a_id, shop_a_id, hub_a_id = await _seed_client_with_shop(db_session, name="List A")
+    client_b_id, shop_b_id, hub_b_id = await _seed_client_with_shop(db_session, name="List B")
+    db_session.add(_delivered_order(client_a_id, shop_a_id, hub_a_id, fee_cents=500, delivered_on=date(2026, 6, 5), ref="SCOPE-A"))
+    db_session.add(_delivered_order(client_b_id, shop_b_id, hub_b_id, fee_cents=900, delivered_on=date(2026, 6, 5), ref="SCOPE-B"))
+    await db_session.commit()
+    for cid in (client_a_id, client_b_id):
+        await generate_client_invoice(
+            str(cid), InvoiceGenerateBody(period_start=date(2026, 6, 1), period_end=date(2026, 7, 1)),
+            session=db_session,
+        )
+
+    assert [i.total_cents for i in await list_client_invoices(str(client_a_id), session=db_session)] == [500]
+    assert [i.total_cents for i in await list_client_invoices(str(client_b_id), session=db_session)] == [900]
+
+
+async def test_admin_invoice_list_404s_for_unknown_client(db_session):
+    """Not an empty list. A client that does not exist and a client with no
+    statements are different answers, and an empty list for the first would
+    let a mistyped id read as "nothing billed yet"."""
+    with pytest.raises(HTTPException) as exc_info:
+        await list_client_invoices(str(uuid.uuid4()), session=db_session)
     assert exc_info.value.status_code == 404
 
 

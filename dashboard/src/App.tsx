@@ -27,6 +27,7 @@ import { GigPathPanel } from './components/GigPathPanel'
 import { ReturnsPanel } from './components/ReturnsPanel'
 import { ClientRatesPanel } from './components/ClientRatesPanel'
 import { ClientSlaTermsPanel } from './components/ClientSlaTermsPanel'
+import { ClientInvoicesPanel } from './components/ClientInvoicesPanel'
 import { LoginPage } from './components/LoginPage'
 import { Toast } from './components/ui/Toast'
 import { usePolling } from './hooks/usePolling'
@@ -308,6 +309,14 @@ function App() {
                         which is the half that matters when a client disputes a
                         credit (tests/test_no_unreachable_routes.py). */}
                     <ClientSlaTermsPanel key={`sla-${hubId}`} hubId={hubId} onToast={showToast} />
+                    {/* Third of the client-contract trio, and last for a
+                        reason: price, then promise, then the bill that is
+                        computed from both. Nothing in this system had ever
+                        raised an invoice - generate_invoice's only call site
+                        was an endpoint no front end reached - while the client
+                        portal shipped a full viewer reading a table nothing
+                        could write. */}
+                    <ClientInvoicesPanel key={`invoices-${hubId}`} hubId={hubId} onToast={showToast} />
                     {/* Beside client onboarding, because it is the same kind of
                         act: creating the identity somebody logs in with. Nothing
                         created a driver before this - every row was a

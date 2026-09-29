@@ -756,6 +756,29 @@ export interface AdminClient {
 }
 
 /**
+ * One statement raised against a client (docs/ROADMAP.md C3).
+ *
+ * `gross`, `credit` and `total` are all three carried deliberately: a statement
+ * showing only the net is one a client cannot reconcile, and one that hid the
+ * credit would also hide that we missed something.
+ *
+ * `period_end` is **exclusive** — the same convention `generate_invoice` uses,
+ * so a month is the 1st to the 1st and two consecutive periods cannot both
+ * claim the last day.
+ */
+export interface ClientInvoice {
+  invoice_id: string
+  invoice_number: number
+  period_start: string
+  period_end: string
+  generated_at: string
+  gross_cents: number
+  credit_cents: number
+  total_cents: number
+  order_count: number
+}
+
+/**
  * What one client was promised on one tier, and what missing it costs
  * (docs/ROADMAP.md W3).
  *
