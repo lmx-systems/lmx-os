@@ -31,7 +31,12 @@ from app.billing.service import (
 from app.client_auth.passwords import hash_password
 from app.db import get_db
 from app.identity import link_shop_to_dock
-from app.delivery.resolution import RESOLUTION_ACTIONS, OrderNotFailedError, resolve_failed_order
+from app.delivery.resolution import (
+    RESOLUTION_ACTIONS,
+    OrderNotFailedError,
+    ShopMissingError,
+    resolve_failed_order,
+)
 from app.driver_auth.dependencies import revoked_devices_key
 from app.models.client import Client
 from app.models.client_rate import ClientRate
@@ -642,6 +647,11 @@ async def resolve_order(
         resolved = await resolve_failed_order(session, HoldQueueStore(), order, body.action)
     except OrderNotFailedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ShopMissingError as exc:
+        # 422, not 409: 409 means "the order is in the wrong state", which is a
+        # thing an operator can reason about. A missing shop is a broken row and
+        # nothing they do to the order will fix it.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return OrderResolutionResult(
         order_id=str(resolved.id),

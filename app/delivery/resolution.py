@@ -38,6 +38,17 @@ class OrderNotFailedError(Exception):
     delivered/cancelled/in-flight order has no failure to resolve."""
 
 
+class ShopMissingError(Exception):
+    """The order points at a shop that is not there.
+
+    Its own exception rather than reusing `OrderNotFailedError`, whose name
+    would then be lying about half the cases it covers. A redelivery needs
+    somewhere to re-pick from, and `shop_id` is a non-nullable FK - so this is
+    a broken row, not an ordinary miss, and the operator should be told that
+    rather than shown a 409 about a failure state that is perfectly fine.
+    """
+
+
 async def resolve_failed_order(
     session: AsyncSession, hold_queue: HoldQueueStore, order: Order, action: str
 ) -> Order:
@@ -69,6 +80,19 @@ async def _redeliver(session: AsyncSession, hold_queue: HoldQueueStore, order: O
     already back at the hub) is the deeper returns/cores question tracked as
     W1 - out of scope here."""
     shop = await session.get(Shop, order.shop_id)
+    if shop is None:
+        # `order.shop_id` is a non-nullable FK, so this is a broken row rather
+        # than an ordinary miss - and redelivering is an ops action taken on an
+        # order that has ALREADY failed once. Letting it raise `AttributeError:
+        # 'NoneType' object has no attribute 'lat'` three lines down would tell
+        # the operator nothing about which order or why, at the moment they are
+        # trying to rescue a delivery. Found by mypy, which had been advisory
+        # since it was added and reported this among 196 findings that were not
+        # this.
+        raise ShopMissingError(
+            f"Order {order.id} points at shop {order.shop_id}, which does not exist - "
+            "there is nowhere to re-pick the parts from"
+        )
     now = datetime.now(timezone.utc)
     # order.sla_tier is an SLATier enum when freshly loaded from Postgres,
     # but a plain string when set on an un-refreshed ORM instance - getattr
