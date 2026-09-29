@@ -237,6 +237,13 @@ class AdminClientView(BaseModel):
     # an approved client with no rate table cannot be invoiced, and nothing else
     # on this row would say so.
     rate_tiers: int
+    # How many tiers this client has an agreed SLA term for. Zero is a different
+    # state from `rate_tiers: 0` and is not necessarily wrong: a client we have
+    # priced but promised no delivery window to is uncredited by design, and
+    # `credit_exposure` reports that separately rather than as nothing owed.
+    # Surfaced because the picker is where somebody decides which client to
+    # look at, and "priced, no promise" is exactly the row worth opening.
+    sla_term_tiers: int = 0
 
 
 class AdminDriverDeviceView(BaseModel):

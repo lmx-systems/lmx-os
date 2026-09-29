@@ -3,6 +3,7 @@ import type {
   AdminClient,
   ClientOnboardingBody,
   ClientRate,
+  ClientSlaTerm,
   ClientOnboardingResult,
   CodDisputeReport,
   DriverDevice,
@@ -393,6 +394,20 @@ export const api = {
 
   upsertClientRate: (clientId: string, body: Omit<ClientRate, 'rate_id'>) =>
     request<ClientRate>(`/admin/clients/${clientId}/rates`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  // The other half of the contract (docs/ROADMAP.md W3): what we promised and
+  // what missing it costs. Both endpoints existed and neither had a caller -
+  // an operator could set a term with scripts/set_client_sla_terms.py and then
+  // had no way to read back what they had agreed to, which is the half that
+  // matters when a client disputes a credit.
+  listClientSlaTerms: (clientId: string) =>
+    request<ClientSlaTerm[]>(`/admin/clients/${clientId}/sla-terms`),
+
+  upsertClientSlaTerm: (clientId: string, body: Omit<ClientSlaTerm, 'term_id'>) =>
+    request<ClientSlaTerm>(`/admin/clients/${clientId}/sla-terms`, {
       method: 'PUT',
       body: JSON.stringify(body),
     }),

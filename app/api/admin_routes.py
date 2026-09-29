@@ -1339,6 +1339,12 @@ async def list_hub_clients(
     Carries `rate_tiers` because zero is the state that matters and nothing else
     on the row would show it: an approved client with no rate table can submit
     orders and cannot be invoiced for them.
+
+    Carries `sla_term_tiers` for the other half of the contract, and the two
+    zeroes do not mean the same thing. No rate is always a fault. No term is a
+    client we have priced and promised nothing to — uncredited by design, which
+    `credit_exposure` already reports separately from nothing owed. Both belong
+    on the picker because the picker is where somebody chooses what to look at.
     """
     clients = (
         await session.execute(
@@ -1367,6 +1373,18 @@ async def list_hub_clients(
     ).all()
     tiers = {row[0]: row[1] for row in counted}
 
+    # Terms have no effective-from - a contract term is in force until it is
+    # renegotiated, and the table carries one row per (client, tier). So this is
+    # a plain count, deliberately not mirroring the rate query's `<= now` filter.
+    termed = (
+        await session.execute(
+            select(ClientSlaTerm.client_id, func.count(func.distinct(ClientSlaTerm.sla_tier)))
+            .where(ClientSlaTerm.client_id.in_([c.id for c in clients]))
+            .group_by(ClientSlaTerm.client_id)
+        )
+    ).all()
+    term_tiers = {row[0]: row[1] for row in termed}
+
     return [
         AdminClientView(
             client_id=str(client.id),
@@ -1375,6 +1393,7 @@ async def list_hub_clients(
             active=client.active,
             signup_status=client.signup_status,
             rate_tiers=int(tiers.get(client.id, 0)),
+            sla_term_tiers=int(term_tiers.get(client.id, 0)),
         )
         for client in clients
     ]

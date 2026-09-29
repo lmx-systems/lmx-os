@@ -747,6 +747,33 @@ export interface AdminClient {
   signup_status: string
   /** Tiers with a rate in force today. Zero means they cannot be invoiced. */
   rate_tiers: number
+  /**
+   * Tiers with an agreed SLA term. Not the same kind of zero as `rate_tiers`:
+   * no rate is always a fault, no term is a client we priced and promised
+   * nothing to — uncredited by design, and reported that way.
+   */
+  sla_term_tiers: number
+}
+
+/**
+ * What one client was promised on one tier, and what missing it costs
+ * (docs/ROADMAP.md W3).
+ *
+ * `delivery_target_minutes` runs from when the order reached us, not from
+ * pickup — the client knows when they sent it and does not know when our
+ * driver happened to collect it.
+ *
+ * `credit_percent` is a percentage of that order's fee, so a credit scales
+ * with what was charged. The floor and ceiling are for contracts written as
+ * "the greater of 20% or $5", and most use one or neither.
+ */
+export interface ClientSlaTerm {
+  term_id: string
+  sla_tier: string
+  delivery_target_minutes: number
+  credit_percent: number
+  credit_minimum_cents: number | null
+  credit_maximum_cents: number | null
 }
 
 /** One tier's price for one client (docs/ROADMAP.md F5). Components are
