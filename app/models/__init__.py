@@ -4,6 +4,7 @@ from app.models.decision_snapshot import DecisionSnapshot
 from app.models.cod_collection import CodCollection
 from app.models.client_rate import ClientRate
 from app.models.client_sla_term import ClientSlaTerm
+from app.models.dock_log_submission import DockLogSubmission
 from app.models.client_api_key import ClientApiKey
 from app.models.client_user import ClientUser
 from app.models.client_webhook import ClientWebhookEndpoint, WebhookDelivery
@@ -71,6 +72,7 @@ __all__ = [
     "ReturnItem",
     "Route",
     "ClientSlaTerm",
+    "DockLogSubmission",
     "CodCollection",
     "InvoiceCredit",
     "ClientApiKey",

@@ -173,6 +173,20 @@ class ReceiverProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     surveyed_by_driver_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("drivers.id"), nullable=True
     )
+    # Where the access answers above came from: SOURCE_SURVEYED when one of our
+    # drivers stood there, SOURCE_STATED when somebody told us - the public Dock
+    # Log (`DRV-7`) being the second case.
+    #
+    # **`surveyed_at` cannot carry this distinction**, and that is why the
+    # column exists. A public submission deliberately does not stamp
+    # `surveyed_at`, so `is_surveyed` stays false and `dock_needs_survey` will
+    # still put the survey in front of the next driver who delivers there -
+    # which is right. But without this column the *answers* a stranger gave
+    # would sit in the same fields as a driver's observation with nothing to
+    # tell them apart, and `M5` would learn from both as though somebody had
+    # been to the door. Same argument the inherited-dwell columns make: two
+    # different measurements by two different people are not one measurement.
+    access_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     @property
     def has_dwell(self) -> bool:

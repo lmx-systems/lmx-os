@@ -6,6 +6,7 @@ import { HoldQueueTable } from './components/HoldQueueTable'
 import { ExceptionsPanel } from './components/ExceptionsPanel'
 import { Tabs } from './components/ui/Tabs'
 import { DockLabellingPanel } from './components/DockLabellingPanel'
+import { DockLogReviewPanel } from './components/DockLogReviewPanel'
 import { HubSettingsPanel } from './components/HubSettingsPanel'
 import { MergeReviewPanel } from './components/MergeReviewPanel'
 import { OrderLookupPanel } from './components/OrderLookupPanel'
@@ -237,6 +238,13 @@ function App() {
                     {/* Also not hub-scoped: a dock is a physical place and its
                         class does not change with which hub serves it (IDN-3). */}
                     <DockLabellingPanel />
+                    {/* Beside dock labelling because it is the same act on the
+                        same rows - deciding what a dock is. This queue is why
+                        dock_log_submissions exists as a separate table: a
+                        stranger's answers never reach receiver_profiles, the
+                        layer M5 trains on, without a person here matching them
+                        to a dock (docs/ROADMAP.md DRV-7). */}
+                    <DockLogReviewPanel onToast={showToast} />
                     {/* Last, because it is the read-back rather than the work:
                         is the record being written at all (REC-1..REC-4). */}
                     <RecordHealthPanel key={`health-${hubId}`} hubId={hubId} />

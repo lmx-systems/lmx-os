@@ -5,6 +5,7 @@ import type {
   ClientInvoice,
   ClientRate,
   ClientSlaTerm,
+  DockLogSubmission,
   ClientOnboardingResult,
   CodDisputeReport,
   DriverDevice,
@@ -397,6 +398,28 @@ export const api = {
     request<ClientRate>(`/admin/clients/${clientId}/rates`, {
       method: 'PUT',
       body: JSON.stringify(body),
+    }),
+
+  // The public Dock Log's review queue (docs/ROADMAP.md DRV-7). This queue is
+  // why dock_log_submissions is a separate table: a stranger's answers are
+  // inert until somebody here matches them to a dock, and without a screen the
+  // staging table would be write-only.
+  listDockLogSubmissions: () =>
+    request<DockLogSubmission[]>('/admin/dock-log/submissions'),
+
+  // location_id comes from the operator, never from the coordinates - matching
+  // on anything the submitter typed would let them choose which dock their
+  // answers landed on.
+  importDockLogSubmission: (submissionId: string, locationId: string) =>
+    request<{ imported: boolean }>(`/admin/dock-log/submissions/${submissionId}/import`, {
+      method: 'POST',
+      body: JSON.stringify({ location_id: locationId }),
+    }),
+
+  rejectDockLogSubmission: (submissionId: string, reason: string) =>
+    request<{ rejected: boolean }>(`/admin/dock-log/submissions/${submissionId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
     }),
 
   // Statements (docs/ROADMAP.md C3). `generate_invoice` had exactly one call
