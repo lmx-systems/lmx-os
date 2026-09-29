@@ -25,6 +25,7 @@ import { CodDisputesPanel } from './components/CodDisputesPanel'
 import { DriverDevicesPanel } from './components/DriverDevicesPanel'
 import { GigPathPanel } from './components/GigPathPanel'
 import { ReturnsPanel } from './components/ReturnsPanel'
+import { ClientRatesPanel } from './components/ClientRatesPanel'
 import { LoginPage } from './components/LoginPage'
 import { Toast } from './components/ui/Toast'
 import { usePolling } from './hooks/usePolling'
@@ -289,6 +290,14 @@ function App() {
                         unreviewed license keeps a driver off the road everywhere. */}
                     <DriverDocumentsPanel onToast={showToast} />
                     <OnboardClientForm hubId={hubId} onToast={showToast} />
+                    {/* Beside client onboarding because it is what happens next:
+                        rates were set once inside signup approval and then could
+                        not be read back at all, so "what are we charging them?"
+                        lived only in the database
+                        (docs/ROADMAP_AUDIT_2026-09.md). Nothing listed clients
+                        either, which is why this needed an endpoint and not just
+                        a form. */}
+                    <ClientRatesPanel key={`rates-${hubId}`} hubId={hubId} onToast={showToast} />
                     {/* Beside client onboarding, because it is the same kind of
                         act: creating the identity somebody logs in with. Nothing
                         created a driver before this - every row was a

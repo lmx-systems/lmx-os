@@ -167,3 +167,124 @@ async def test_different_tiers_are_independent(db_session, real_redis_client):
     listed = {r.sla_tier: r.rate_per_drop_cents for r in
               await list_client_rates(str(client.id), session=db_session, _admin=None)}
     assert listed == {"T1": 2400, "T2": 1950}
+
+
+class TestSomethingFinallyListsClients:
+    """The read that made four endpoints reachable
+    (`docs/ROADMAP_AUDIT_2026-09.md`).
+
+    `POST /admin/clients` created a client and **nothing listed them**. Four
+    endpoints take a `client_id` — these rates, SLA terms, invoice generation —
+    so obtaining one meant reading the database. Every one of them was therefore
+    unreachable in practice rather than merely unsurfaced, which is the same
+    shape as the driver-device gap: the action existed, and the thing that hands
+    you its argument did not.
+    """
+
+    async def _admin(self, db_session):
+        from app.models.ops_user import OpsUser
+        from app.ops_auth.dependencies import AuthedOpsUser
+
+        ops_id = uuid.uuid4()
+        db_session.add(
+            OpsUser(
+                id=ops_id,
+                email=f"ops-{ops_id.hex[:6]}@lmxit.com",
+                password_hash="x",
+                name="Ops Admin",
+                role="admin",
+            )
+        )
+        await db_session.commit()
+        return AuthedOpsUser(
+            ops_user_id=str(ops_id), email="ops@lmxit.com", name="Ops Admin", role="admin"
+        )
+
+    async def test_it_lists_the_hubs_clients_by_name(self, db_session):
+        from app.api.admin_routes import list_hub_clients
+
+        client = await _seed_client(db_session)
+        admin = await self._admin(db_session)
+
+        listed = await list_hub_clients(
+            hub_id=str(client.hub_id), session=db_session, _admin=admin
+        )
+
+        assert [c.client_id for c in listed] == [str(client.id)]
+        assert listed[0].name == "Design Partner"
+
+    async def test_a_client_with_no_rate_table_says_zero(self, db_session):
+        # The state that matters and that nothing else on the row would show: an
+        # approved client can submit orders and cannot be invoiced for them.
+        from app.api.admin_routes import list_hub_clients
+
+        client = await _seed_client(db_session)
+        admin = await self._admin(db_session)
+
+        listed = await list_hub_clients(
+            hub_id=str(client.hub_id), session=db_session, _admin=admin
+        )
+
+        assert listed[0].rate_tiers == 0
+
+    async def test_it_counts_tiers_not_versions(self, db_session):
+        # Since migration 0045 every edit is a new row. Counting rows would say
+        # a client with one tier edited three times has three tiers.
+        from app.api.admin_routes import list_hub_clients
+
+        client = await _seed_client(db_session)
+        admin = await self._admin(db_session)
+        for cents in (800, 900, 1000):
+            await upsert_client_rate(
+                str(client.id), _body(cents), session=db_session, _admin=admin
+            )
+
+        listed = await list_hub_clients(
+            hub_id=str(client.hub_id), session=db_session, _admin=admin
+        )
+
+        assert listed[0].rate_tiers == 1
+
+    async def test_a_future_dated_rate_is_not_todays_rate(self, db_session):
+        # Read the same way `list_client_rates` and pricing both read it: a
+        # scheduled change is not a rate in force, and counting it would tell an
+        # operator a client is invoiceable today when it is not.
+        from app.api.admin_routes import list_hub_clients
+
+        client = await _seed_client(db_session)
+        admin = await self._admin(db_session)
+        db_session.add(
+            ClientRate(
+                client_id=client.id,
+                sla_tier="T1",
+                rate_per_drop_cents=1200,
+                effective_from=datetime.now(timezone.utc) + timedelta(days=7),
+            )
+        )
+        await db_session.commit()
+
+        listed = await list_hub_clients(
+            hub_id=str(client.hub_id), session=db_session, _admin=admin
+        )
+
+        assert listed[0].rate_tiers == 0
+
+    async def test_another_hubs_clients_are_not_listed(self, db_session):
+        from app.api.admin_routes import list_hub_clients
+        from app.models.hub import Hub as HubModel
+
+        client = await _seed_client(db_session)
+        admin = await self._admin(db_session)
+        other = HubModel(id=uuid.uuid4(), name="Other Hub", timezone="UTC", lat=30.1, lng=-97.1)
+        db_session.add(other)
+        await db_session.flush()
+        db_session.add(
+            Client(id=uuid.uuid4(), hub_id=other.id, name="Somebody Else", pos_system="flat_file")
+        )
+        await db_session.commit()
+
+        listed = await list_hub_clients(
+            hub_id=str(client.hub_id), session=db_session, _admin=admin
+        )
+
+        assert [c.name for c in listed] == ["Design Partner"]

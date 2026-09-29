@@ -734,3 +734,30 @@ export interface ReturnItem {
   collected_at: string | null
   returned_at: string | null
 }
+
+
+/** One client on a hub (docs/ROADMAP_AUDIT_2026-09.md). */
+export interface AdminClient {
+  client_id: string
+  name: string
+  pos_system: string
+  /** false = churned/deactivated. Not the same question as signup_status. */
+  active: boolean
+  /** pending | active | rejected — where they are in the signup funnel. */
+  signup_status: string
+  /** Tiers with a rate in force today. Zero means they cannot be invoiced. */
+  rate_tiers: number
+}
+
+/** One tier's price for one client (docs/ROADMAP.md F5). Components are
+ *  ADDITIVE: fee = base + miles*per_mile + pieces*per_piece + weight*per_weight,
+ *  floored at minimum_charge_cents. */
+export interface ClientRate {
+  rate_id: string
+  sla_tier: string
+  rate_per_drop_cents: number
+  rate_per_mile_cents: number
+  rate_per_piece_cents: number
+  rate_per_weight_unit_cents: number
+  minimum_charge_cents: number | null
+}

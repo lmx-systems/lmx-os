@@ -136,12 +136,6 @@ KNOWN_UNREACHABLE: dict[str, str] = {
     "GET /driver/me/gig-jobs": "G3 - the app has no gig screen",
     "POST /driver/me/gig-jobs": "G3 - same",
     "PATCH /driver/me/gig-jobs/{gig_job_id}": "G3 - same",
-    "GET /admin/clients/{client_id}/rates": (
-        "F5 - the dashboard sets rates once, inside signup approval, and has no "
-        "panel to read or change them afterwards. A rate is a contract term "
-        "nobody can look up"
-    ),
-    "PUT /admin/clients/{client_id}/rates": "F5 - same",
     "POST /fleet/{hub_id}/drivers/location": (
         "F1 - the superseded ops-admin write path. The app posts to "
         "/driver/me/location; F1's own note says this one would never have "
