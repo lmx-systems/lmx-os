@@ -13,6 +13,7 @@ Nothing here predicts anything. `M1`/`PRD-5` is the dwell model and it reads
 this table as one input; if a promise is ever made from `dwell_p50_seconds`
 directly, that is the bug this docstring exists to prevent.
 """
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import Select, func, select
@@ -29,6 +30,7 @@ from app.models.receiver_profile import (
     SOURCE_OBSERVED,
     SOURCE_STATED,
     SOURCE_SURVEYED,
+    STOP_POINTS,
     WALK_DISTANCE_BANDS,
     WHO_RECEIVES,
     ReceiverProfile,
@@ -277,6 +279,8 @@ async def set_autonomy_fit(
     door_path: str | None = None,
     obstruction: str | None = None,
     who_receives: str | None = None,
+    stop_point: str | None = None,
+    surveyed_by_driver_id: uuid.UUID | None = None,
 ) -> ReceiverProfile:
     """The `M5` labels - whether anything other than a van can serve this door.
 
@@ -289,6 +293,7 @@ async def set_autonomy_fit(
     _require_in("door_path", door_path, DOOR_PATHS)
     _require_in("obstruction", obstruction, OBSTRUCTIONS)
     _require_in("who_receives", who_receives, WHO_RECEIVES)
+    _require_in("stop_point", stop_point, STOP_POINTS)
 
     profile = await profile_for(session, location, create=True)
     for field, value in (
@@ -297,9 +302,15 @@ async def set_autonomy_fit(
         ("door_path", door_path),
         ("obstruction", obstruction),
         ("who_receives", who_receives),
+        ("stop_point", stop_point),
     ):
         if value is not None:
             setattr(profile, field, value)
+    if surveyed_by_driver_id is not None:
+        # Overwritten on a re-survey rather than appended to: the question this
+        # answers is "whose judgement is in these columns now", and the columns
+        # hold one answer each.
+        profile.surveyed_by_driver_id = surveyed_by_driver_id
     profile.surveyed_at = datetime.now(timezone.utc)
     await session.flush()
     return profile

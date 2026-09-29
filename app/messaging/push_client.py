@@ -6,8 +6,12 @@ Same "unconfigured -> stub/dev mode" shape as app/messaging/sms_client.py,
 with one real difference: Expo's push service needs no account or
 credential to call in the basic case (unlike Twilio), so there's nothing
 to gate ExpoPushClient's selection on except a deliberate on/off switch
-(EXPO_PUSH_ENABLED) - see that setting's docstring in app/config.py for the
-actual remaining gap (no EAS project id configured client-side yet).
+(EXPO_PUSH_ENABLED).
+
+The client-side gap this used to point at - no EAS project id - no longer
+exists; `driver-app/app.json` carries one where the app reads it. Proving a real
+send still needs a dev build, since a token minted in Expo Go is not one from
+your own project.
 """
 from __future__ import annotations
 

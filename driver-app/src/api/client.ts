@@ -9,6 +9,8 @@ import type {
   DriverDocument,
   DriverProfile,
   DeclineReason,
+  DockSurveyBody,
+  DockSurveyResult,
   DriverScorecard,
   Earnings,
   FlagReasonCode,
@@ -197,6 +199,14 @@ export const api = {
       `/driver/stops/${stopId}/geofence-events`,
       { method: 'POST', body: JSON.stringify({ events }) },
     ),
+
+  // DRV-7's dock survey. Sent after the completion is queued, never before -
+  // a measurement may fail, a delivery may not.
+  recordDockSurvey: (stopId: string, body: DockSurveyBody) =>
+    request<DockSurveyResult>(`/driver/stops/${stopId}/dock-survey`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   // W1's reverse leg. All three are idempotent on the server as of the retry
   // work that landed with these screens: a repeat of a collection returns the

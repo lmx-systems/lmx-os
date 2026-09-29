@@ -481,3 +481,69 @@ class TestPerRowUrgency:
         parsed = parse_manifest("Delivery Address\n1 Main St\n")
         assert "deadline" not in parsed.column_mapping
         assert parsed.rows[0].deadline is None
+
+
+class TestARecipientPhoneMakesATrackingLinkPossible:
+    """The column the CSV path never had.
+
+    `send_tracking_link_to_recipient` mints a tracking token **only when the
+    order has a `delivery_contact_phone`** - deliberately, so that a credential
+    is created at the moment it is first disclosed rather than for every order
+    that ever existed. `LmxOrderIn` has carried the field all along.
+
+    The manifest parser did not, and nothing mapped a phone column. So the CSV
+    path - which is LMX Link's whole premise, *"how you send us orders"* - was
+    the one intake that could never produce an `F3` tracking page for anything.
+    Found by rehearsing the investor demo: the delivered order had a null token
+    and the recipient's page could not be opened at all.
+    """
+
+    ROW = '"14 Quillon Lane, Ardenhoe, TX 99001"'
+
+    def test_a_phone_column_reaches_the_order(self):
+        parsed = parse_manifest(
+            f"Ship To Address,Contact Name,Contact Phone\n{self.ROW},J. Rivera,+15125550137\n"
+        )
+
+        assert parsed.column_mapping["drop_contact_phone"] == "Contact Phone"
+        assert parsed.rows[0].drop_contact_phone == "+15125550137"
+
+    def test_a_file_with_no_phone_column_still_imports(self):
+        # The common case, and not an error - it is a delivery the shop fields
+        # questions about itself, exactly as before this column existed.
+        parsed = parse_manifest(f"Ship To Address,Contact Name\n{self.ROW},J. Rivera\n")
+
+        assert "drop_contact_phone" not in parsed.column_mapping
+        assert parsed.rows[0].drop_contact_phone is None
+
+    def test_a_bare_number_column_is_not_taken_for_a_phone(self):
+        # A column headed `Number` in a delivery manifest is as likely to be an
+        # order number, and texting a tracking link to whatever is in it is a
+        # disclosure to a stranger.
+        parsed = parse_manifest(f"Ship To Address,Number\n{self.ROW},SO-44718\n")
+
+        assert "drop_contact_phone" not in parsed.column_mapping
+
+    def test_the_usual_spellings_are_recognised(self):
+        for header in ("Phone", "Contact Phone", "Delivery Phone", "Recipient Phone", "Cell"):
+            parsed = parse_manifest(
+                f"Ship To Address,{header}\n{self.ROW},+15125550137\n"
+            )
+            assert parsed.column_mapping.get("drop_contact_phone") == header, header
+
+    def test_the_batch_row_can_carry_it(self):
+        """The link in the chain that silently dropped it.
+
+        `upload_order_manifest` delegates to the batch path, so a phone parsed
+        out of a file has to survive `ClientOrderBatchRow` to reach the order.
+        It had no such field - and Pydantic accepted the keyword and discarded
+        it, so the wiring looked done and the order still had no number. The
+        live run is what caught it; every unit test passed throughout.
+        """
+        from app.schemas.client_order import ClientOrderBatchRow
+
+        row = ClientOrderBatchRow(
+            drop_address="14 Quillon Lane", drop_contact_phone="+15125550137"
+        )
+
+        assert row.drop_contact_phone == "+15125550137"

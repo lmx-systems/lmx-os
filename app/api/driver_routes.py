@@ -30,6 +30,13 @@ from app.driver_auth.dependencies import AuthedDriver, get_current_driver, revok
 from app.driver_auth.otp_store import OtpRateLimitExceeded, OtpStore
 from app.driver_auth.tokens import issue_token
 from app.fleet_state.manager import FleetStateManager
+from app.identity.dock_survey import (
+    MAX_SURVEYS_PER_SHIFT,
+    dock_needs_survey,
+    location_for_stop,
+    surveys_recorded_today,
+)
+from app.identity.profile import set_access, set_autonomy_fit
 import app.payroll.hours as payroll_hours
 from app.payroll import get_payout_provider
 from app.payroll.gig_pricing import estimate_delivery_pay_cents
@@ -102,6 +109,8 @@ from app.schemas.driver_app import (
     ScanParcelsBody,
     ScorecardMetricView,
     SendMessageBody,
+    DockSurveyBody,
+    DockSurveyResult,
     StopProofRequirementView,
     StopReturnsView,
     StopView,
@@ -1273,6 +1282,11 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     proof=await _stop_proof_view(session, stop.id),
                     cod=await _stop_cod_view(session, stop.id),
                     returns=await _stop_returns_view(session, stop),
+                    # `route.driver_id`, not the authenticated caller: the
+                    # per-shift cap belongs to whoever is running this route.
+                    dock_needs_survey=await dock_needs_survey(
+                        session, stop, route.driver_id
+                    ),
                 )
             )
         else:
@@ -1303,6 +1317,11 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     proof=await _stop_proof_view(session, stop.id),
                     cod=await _stop_cod_view(session, stop.id),
                     returns=await _stop_returns_view(session, stop),
+                    # `route.driver_id`, not the authenticated caller: the
+                    # per-shift cap belongs to whoever is running this route.
+                    dock_needs_survey=await dock_needs_survey(
+                        session, stop, route.driver_id
+                    ),
                 )
             )
 
@@ -2064,6 +2083,81 @@ async def raise_cod_dispute(
     await session.commit()
 
     return await _stop_view_after_reload(session, stop)
+
+
+@router.post("/stops/{stop_id}/dock-survey", response_model=DockSurveyResult)
+async def record_dock_survey(
+    stop_id: str,
+    body: DockSurveyBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> DockSurveyResult:
+    """Eight taps at the door, written to the dock's profile (`DRV-7`).
+
+    **The writer `IDN-4`'s surveyed columns never had.** `set_access` and
+    `set_autonomy_fit` were complete, validated and tested, and nothing called
+    them - they sat in the orphan allowlist as *"profile field with no live
+    writer"*. `MODEL_AND_DATA_BRIEF.md` §6 calls surveying weeks of fieldwork,
+    and it is, for anybody who has to travel to the docks. Our drivers are
+    already standing at them.
+
+    **A 409 when the stop's shop has no dock**, rather than a silent write to
+    nothing. `IDN-1` leaves `location_id` null when an address names no place -
+    deliberately, because the alternative was every such address collapsing into
+    one shared fictional dock that then accumulated a dozen unrelated
+    businesses' answers. Writing this survey there would be the same failure
+    with worse data.
+
+    **Idempotent by overwrite, not by refusal.** A retry from the outbox writes
+    the same answers to the same columns and re-stamps `surveyed_at`; a driver
+    correcting themselves at the same door writes the better answer. Neither is
+    a conflict. What it must not do is create a second profile, and it cannot -
+    `profile_for` is keyed on the canonical dock.
+    """
+    stop = await _get_owned_stop(session, stop_id, driver)
+    location = await location_for_stop(session, stop)
+    if location is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This stop's address is not linked to a dock, so there is "
+                "nothing to survey against"
+            ),
+        )
+
+    driver_uuid = uuid.UUID(driver.driver_id)
+    try:
+        await set_access(
+            session,
+            location,
+            appointment_required=body.appointment_required,
+            walk_distance_band=body.walk_distance_band,
+        )
+        profile = await set_autonomy_fit(
+            session,
+            location,
+            landing_surface=body.landing_surface,
+            curb_access=body.curb_access,
+            door_path=body.door_path,
+            obstruction=body.obstruction,
+            who_receives=body.who_receives,
+            stop_point=body.stop_point,
+            surveyed_by_driver_id=driver_uuid,
+        )
+    except ValueError as bad_value:
+        # The vocabulary check in `profile.py`. A 422 rather than a 500: the
+        # phone sent a value this system does not have, which is a request
+        # problem, and the message names the field and the allowed set.
+        raise HTTPException(status_code=422, detail=str(bad_value)) from bad_value
+
+    await session.commit()
+    remaining = MAX_SURVEYS_PER_SHIFT - await surveys_recorded_today(session, driver_uuid)
+    return DockSurveyResult(
+        location_id=str(location.id),
+        is_surveyed=profile.is_surveyed,
+        surveyed_at=profile.surveyed_at,
+        surveys_remaining_today=max(0, remaining),
+    )
 
 
 @router.post("/stops/{stop_id}/collect-return", response_model=list[ReturnItemView])

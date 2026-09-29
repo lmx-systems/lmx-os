@@ -19,6 +19,11 @@ from app.storage.photo_upload_client import (
 def test_get_photo_upload_client_defaults_to_stub():
     with patch("app.storage.photo_upload_client.settings") as mock_settings:
         mock_settings.photo_upload_bucket = None
+        # Also no local directory. Patching the whole settings object makes
+        # every unset attribute a truthy MagicMock, so a new backend added to
+        # this chooser silently captures this test unless it opts out - which
+        # is exactly what happened when `LocalPhotoUploadClient` landed.
+        mock_settings.photo_storage_dir = None
         client = get_photo_upload_client()
     assert isinstance(client, StubPhotoUploadClient)
     assert client.engine_name == "stub"

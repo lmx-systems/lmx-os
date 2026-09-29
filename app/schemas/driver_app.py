@@ -279,6 +279,11 @@ class StopView(BaseModel):
     # `cod`: sent with the stop so the app can show a button, rather than
     # discovered by a driver who has already left.
     returns: StopReturnsView | None = None
+    # Whether to ask the eight dock questions here (`DRV-7`). Computed
+    # server-side from the rules in `app/identity/dock_survey.py`, so the phone
+    # never restates a condition another module owns - which is what produced
+    # both bugs `THE_DRIVER_APP.md` §6 records.
+    dock_needs_survey: bool = False
 
 
 class RouteView(BaseModel):
@@ -297,6 +302,47 @@ class ScanParcelBody(BaseModel):
     # order at the pickup stop - unlike ScanParcelsBody's bare count, which
     # stays as the manual "can't scan? confirm manually" fallback.
     barcode: str = Field(min_length=1, max_length=128)
+
+
+class DockSurveyBody(BaseModel):
+    """Eight taps at the door (`DRV-7`).
+
+    **Every field is optional, and that is the contract.** *A measurement may
+    fail; a delivery may not* (`THE_DRIVER_APP.md` §2) - the survey appears
+    after `complete_stop` has been queued, never before it, and skipping any
+    question must never be harder than answering it. A body with nothing in it
+    is a valid request that records nothing and returns 200.
+
+    Values are validated against the vocabularies in
+    `app/models/receiver_profile.py` at the service layer rather than here, so
+    there is one definition of what `hand_carry` means rather than two. An
+    unrecognised value is refused rather than stored: these become `M5`'s
+    labels, and a stray value does not fail at write time - it fails months
+    later as a class the model has one example of, indistinguishable from noise.
+    """
+
+    stop_point: str | None = None
+    curb_access: str | None = None
+    walk_distance_band: str | None = None
+    door_path: str | None = None
+    obstruction: str | None = None
+    who_receives: str | None = None
+    landing_surface: str | None = None
+    appointment_required: bool | None = None
+    # One photo of the drop point, through the existing upload path. No people,
+    # plates or paperwork - stated on the screen that asks for it.
+    photo_url: str | None = Field(default=None, max_length=500)
+
+
+class DockSurveyResult(BaseModel):
+    """What was recorded, so the app can stop asking."""
+
+    location_id: str
+    is_surveyed: bool
+    surveyed_at: datetime | None
+    # How many more this driver will be asked for today. Returned so the app
+    # does not have to count, and cannot disagree with the server about the cap.
+    surveys_remaining_today: int
 
 
 class StopGeofenceEventBody(BaseModel):

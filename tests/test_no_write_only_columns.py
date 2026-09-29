@@ -40,11 +40,6 @@ KNOWN_UNWRITTEN: dict[str, str] = {
     "created_by_driver_id": "R5: StopFlag does not record who raised it - read by nothing either",
     # M5's survey answers. `set_autonomy_fit` writes them and is itself an
     # allowlisted orphan: nothing asks a receiver yet.
-    "curb_access": "M5: survey answer, nothing asks a receiver yet",
-    "door_path": "M5: survey answer, nothing asks a receiver yet",
-    "landing_surface": "M5: survey answer, nothing asks a receiver yet",
-    "obstruction": "M5: survey answer, nothing asks a receiver yet",
-    "who_receives": "M5: survey answer, nothing asks a receiver yet",
     # Stated decisions, both documented where they live.
     "cost_actuals_cents": "REC-2: costs go to the ledger instead, deliberately - see app/record/cost.py",
     "modality_eligible": "M5: carried now, used later - see the column's own comment",

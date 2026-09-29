@@ -71,10 +71,18 @@ def configure_logging() -> None:
     if settings.sentry_dsn:
         shared_processors.append(_forward_to_sentry)
 
+    # **`!= "development"`, not `== "production"`.** `infra/aws/variables.tf`
+    # sets `ENVIRONMENT` to `prod`, so the equality check this used to make was
+    # false in production: CloudWatch would have received colour-escaped console
+    # text instead of JSON, and Logs Insights cannot query a field it cannot
+    # parse. Every other environment check in this codebase is spelled
+    # `!= "development"` for exactly this reason - a staging or preview
+    # environment should get machine-readable logs too, and only a human at a
+    # terminal wants the pretty one.
     renderer = (
-        structlog.processors.JSONRenderer()
-        if settings.environment == "production"
-        else structlog.dev.ConsoleRenderer()
+        structlog.dev.ConsoleRenderer()
+        if settings.environment == "development"
+        else structlog.processors.JSONRenderer()
     )
 
     structlog.configure(

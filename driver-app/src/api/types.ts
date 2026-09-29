@@ -121,6 +121,11 @@ export interface Stop {
   // driver who learns at the counter that there is a core to collect has
   // already put the box down and said goodbye.
   returns: StopReturns | null;
+  // Whether to ask the eight dock questions here (docs/ROADMAP.md DRV-7).
+  // Decided by the server from the rules in `app/identity/dock_survey.py` - the
+  // app renders what it is told rather than restating a condition another
+  // module owns, which is what produced both bugs in THE_DRIVER_APP.md §6.
+  dock_needs_survey: boolean;
 }
 
 /** One core, as the three W1 endpoints hand it back. */
@@ -282,3 +287,25 @@ export type DeclineReason =
   | 'vehicle_unsuitable'
   | 'ending_shift'
   | 'other';
+
+
+/** Eight taps at the door (docs/ROADMAP.md DRV-7). Every field optional: a
+ *  measurement may fail, a delivery may not, so every question has a skip. */
+export interface DockSurveyBody {
+  stop_point?: string | null;
+  curb_access?: string | null;
+  walk_distance_band?: string | null;
+  door_path?: string | null;
+  obstruction?: string | null;
+  who_receives?: string | null;
+  landing_surface?: string | null;
+  appointment_required?: boolean | null;
+  photo_url?: string | null;
+}
+
+export interface DockSurveyResult {
+  location_id: string;
+  is_surveyed: boolean;
+  surveyed_at: string | null;
+  surveys_remaining_today: number;
+}

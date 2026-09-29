@@ -9,6 +9,7 @@ import { Card } from '../components/Card';
 import { ParcelScanPanel } from '../components/ParcelScanPanel';
 import { CodPanel } from '../components/CodPanel';
 import { ReturnsPanel } from '../components/ReturnsPanel';
+import { DockSurveyModal } from '../components/DockSurveyModal';
 import { PodCapture } from '../components/PodCapture';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SyncStatusPill } from '../components/SyncStatusPill';
@@ -141,6 +142,9 @@ export function StopDetailScreen({ route, navigation }: Props) {
     }
   }
 
+  // Shown after a dropoff completes, when the server says this dock is due.
+  const [surveying, setSurveying] = useState(false);
+
   async function handlePickupComplete() {
     await outboxManager.enqueue('complete', stopId, { method: 'photo' });
     navigation.navigate('Home');
@@ -171,6 +175,15 @@ export function StopDetailScreen({ route, navigation }: Props) {
       signature_url: signatureUrl ?? undefined,
       left_at: leftAt.trim() || undefined,
     });
+
+    // DRV-7. **After the completion is queued, never before it** - a
+    // measurement may fail, a delivery may not. The driver is already free to
+    // walk away; this asks while they are still at the door, and dismissing it
+    // costs nothing.
+    if (stop?.dock_needs_survey) {
+      setSurveying(true);
+      return;
+    }
     navigation.navigate('Home');
   }
 
@@ -243,6 +256,15 @@ export function StopDetailScreen({ route, navigation }: Props) {
             stop first has said goodbye, and the core is still on the shelf.
             W1's endpoints have existed since PRs #13-#16 with no button at all
             (tests/test_no_unreachable_routes.py). */}
+        <DockSurveyModal
+          visible={surveying}
+          stopId={stopId}
+          onClose={() => {
+            setSurveying(false);
+            navigation.navigate('Home');
+          }}
+        />
+
         {stop.returns && (
           <ReturnsPanel stop={stop} onDone={() => setLoadToken((t) => t + 1)} />
         )}

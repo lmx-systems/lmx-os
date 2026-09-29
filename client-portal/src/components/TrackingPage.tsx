@@ -240,13 +240,88 @@ function RatingPrompt({
   )
 }
 
+/**
+ * The proof the driver captured, shown to the person it is proof for.
+ *
+ * **It was captured and shown to nobody.** `Stop.pod_photo_url` and
+ * `pod_signature_url` have both been written since the app had a camera and a
+ * signature pad, and the only thing in the backend that read either was an
+ * idempotency comparison — so proof of delivery existed as a row and never as
+ * something a human could look at.
+ *
+ * Here first, rather than in the ops console, because the recipient is who the
+ * proof is *for*. It discloses nothing the delivery did not: a photo of their
+ * own doorstep or the signature they gave, shown to the holder of a link scoped
+ * to that one delivery.
+ *
+ * **Both, because both are proof**, and which one exists is a property of the
+ * stop rather than of this page. `CompleteStopBody` also accepts a PIN and a
+ * left-with note, neither of which is an image — those render nothing, because
+ * an empty frame captioned "no photo" reads as a failure rather than as a
+ * different method.
+ */
+function ProofOfDelivery({
+  photoUrl,
+  signatureUrl,
+}: {
+  photoUrl: string | null
+  signatureUrl: string | null
+}) {
+  // A `local-capture://` marker is the stub backend saying nothing was stored.
+  // It is not a URL a browser can load, and rendering it gives a broken image
+  // where the proof should be.
+  const usable = (url: string | null) => (url && /^https?:\/\//i.test(url) ? url : null)
+  const photo = usable(photoUrl)
+  const signature = usable(signatureUrl)
+  if (!photo && !signature) return null
+
+  return (
+    <div className="mt-4 space-y-4">
+      {photo && (
+        <figure>
+          <img
+            src={photo}
+            alt="Photo taken at the delivery"
+            loading="lazy"
+            className="w-full max-w-sm rounded-lg border border-slate-200"
+          />
+          <figcaption className="mt-1.5 text-xs text-slate-500">
+            Taken by the driver at the door.
+          </figcaption>
+        </figure>
+      )}
+      {signature && (
+        <figure>
+          <img
+            src={signature}
+            alt="Signature captured at the delivery"
+            loading="lazy"
+            // White ground: a signature is dark ink on transparency, which
+            // disappears entirely if the page ever renders dark.
+            className="w-full max-w-sm rounded-lg border border-slate-200 bg-white"
+          />
+          <figcaption className="mt-1.5 text-xs text-slate-500">
+            Signed for at the door.
+          </figcaption>
+        </figure>
+      )}
+    </div>
+  )
+}
+
 function Arrival({ view }: { view: TrackingView }) {
   if (view.delivered_at) {
     return (
-      <p className="mt-6 text-lg text-slate-900">
-        Delivered at{' '}
-        <span className="font-semibold">{formatTime(view.delivered_at)}</span>
-      </p>
+      <>
+        <p className="mt-6 text-lg text-slate-900">
+          Delivered at{' '}
+          <span className="font-semibold">{formatTime(view.delivered_at)}</span>
+        </p>
+        <ProofOfDelivery
+          photoUrl={view.pod_photo_url}
+          signatureUrl={view.pod_signature_url}
+        />
+      </>
     )
   }
   if (!view.estimated_arrival) return null

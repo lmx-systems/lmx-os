@@ -62,6 +62,15 @@ class TrackingView(BaseModel):
     # Ratings (docs/ROADMAP.md F13). A deliberate addition to this boundary - see
     # RecipientRatingView for why it discloses nothing new.
     rating: RecipientRatingView
+    # The delivery photo, after delivery. `Stop.pod_photo_url` has been written
+    # since the app got a camera and read by nobody, so proof of delivery was
+    # captured, stored, and shown to no human anywhere. The recipient is who it
+    # is for: a photo of their own doorstep, taken because they were sent
+    # something, shown to the holder of a link scoped to that one delivery.
+    pod_photo_url: str | None = None
+    # A signature is proof too, with the same history: written since the app got
+    # a pad, rendered by nothing. A delivery signed for was proved to nobody.
+    pod_signature_url: str | None = None
 
 
 class SubmitRatingBody(BaseModel):

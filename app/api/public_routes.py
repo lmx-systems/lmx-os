@@ -438,6 +438,8 @@ async def track_delivery(
         destination_hint=view.destination_hint,
         estimated_arrival=view.estimated_arrival,
         delivered_at=view.delivered_at,
+        pod_photo_url=view.pod_photo_url,
+        pod_signature_url=view.pod_signature_url,
         driver_position=(
             DriverPositionView(
                 lat=view.driver_position.lat,

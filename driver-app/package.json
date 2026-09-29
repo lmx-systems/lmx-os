@@ -21,6 +21,7 @@
     "@react-navigation/native-stack": "^6.9.26",
     "expo": "~51.0.0",
     "expo-camera": "~15.0.16",
+    "expo-dev-client": "~4.0.29",
     "expo-device": "~6.0.2",
     "expo-font": "~12.0.10",
     "expo-local-authentication": "~14.0.1",
