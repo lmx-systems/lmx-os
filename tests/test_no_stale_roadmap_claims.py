@@ -69,6 +69,11 @@ CITING_DOCS = (
     "docs/ROADMAP.md",
     "docs/ROADMAP_RECONCILIATION.md",
     "docs/MODEL_AND_DATA_BRIEF.md",
+    # Column-level definitions written for an external review, and the
+    # companion this brief defers to. It states which models exist as code and
+    # which are specification only - exactly the kind of claim that goes stale
+    # the week somebody builds one.
+    "docs/MODEL_FEATURE_SCHEMA.md",
     "docs/THE_DRIVER_APP.md",
     "docs/THE_RECORD_AND_IDENTITY_LAYERS.md",
 )
@@ -100,9 +105,19 @@ STATUS_ROW = re.compile(
 
 ANY_BACKTICKED = re.compile(r"`([A-Za-z0-9_./-]+)`")
 
-# Paths a document may cite that are deliberately absent from the tree.
-# `lmx-dwell/` is the design partner's raw operational export and is gitignored
-# (`CLAUDE.md`), so a checkout has the documents describing it and not the data.
+# Prefixes that are gitignored by design, so a citation into them resolves on a
+# developer's machine and does not exist in CI. `lmx-dwell/` is the design
+# partner's raw operational export (`CLAUDE.md`).
+#
+# Skipped rather than allowlisted one path at a time, because the failure mode
+# is the one this file most wants to avoid: a check that passes locally and
+# fails in CI teaches people that CI is flaky. Nothing cites an extensioned
+# path under here today — `MODEL_FEATURE_SCHEMA.md` says `lmx-dwell/dwell/`,
+# which has no extension and never matched — so this closes a trap rather than
+# excusing a break.
+GITIGNORED_PREFIXES = ("lmx-dwell/",)
+
+# Paths a document may cite that are deliberately absent for some other reason.
 ALLOWED_MISSING: dict[str, str] = {}
 
 # Rows whose status may claim NEW despite a commit named for them, with the
@@ -221,6 +236,8 @@ def test_every_cited_path_exists():
             # match anything with that name anywhere. Skipped rather than
             # guessed at.
             if "/" not in candidate:
+                continue
+            if candidate.startswith(GITIGNORED_PREFIXES):
                 continue
             if candidate in ALLOWED_MISSING or _resolves(candidate):
                 continue

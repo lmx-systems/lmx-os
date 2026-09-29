@@ -56,6 +56,16 @@ docker compose exec app python -m scripts.create_client_user \
     --name "Demo Client" --role admin
 ```
 
+> **If you run the API natively instead of in the container** — which is what a
+> rehearsal with `--reload` and local photo storage ends up doing — start it
+> with `python -m demo.serve_api`, not `uvicorn`. The iOS Simulator resolves
+> `localhost` to `::1`, `uvicorn --host 0.0.0.0` listens on IPv4 only, and
+> `--host ::` then breaks the browsers and `demo/run_full_loop.py` because
+> macOS sets `IPV6_V6ONLY` by default. `demo/serve_api.py` clears that flag on
+> one socket, which is the only arrangement where `localhost` means the same
+> thing to the simulator, a browser and a script. Found by standing the demo
+> up, not by any test.
+
 **The handset:** same wifi, then set the server address in the app's Profile
 screen to `http://<your LAN ip>:8000`. Sign in as the seeded driver; the OTP
 comes back in the response because Twilio is unconfigured.
