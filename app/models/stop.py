@@ -2,10 +2,11 @@
 A physical stop on a route (usually 1:1 with a shop delivery, but can carry
 multiple commingled orders per Section 8's multi-client commingling design).
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -15,10 +16,10 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "stops"
 
-    route_id: Mapped[UUID] = mapped_column(ForeignKey("routes.id"), nullable=False)
+    route_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("routes.id"), nullable=False)
     # Only set for stop_type="pickup" - a dropoff stop is at the customer's
     # delivery address (Order.delivery_lat/lng), not a shop.
-    shop_id: Mapped[UUID | None] = mapped_column(ForeignKey("shop_profiles.id"), nullable=True)
+    shop_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("shop_profiles.id"), nullable=True)
 
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False)
@@ -117,8 +118,8 @@ class StopOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
     __tablename__ = "stop_orders"
 
-    stop_id: Mapped[UUID] = mapped_column(ForeignKey("stops.id"), nullable=False)
-    order_id: Mapped[UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
+    stop_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("stops.id"), nullable=False)
+    order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
 
 
 class StopFlag(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -128,7 +129,7 @@ class StopFlag(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
     __tablename__ = "stop_flags"
 
-    stop_id: Mapped[UUID] = mapped_column(ForeignKey("stops.id"), nullable=False)
+    stop_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("stops.id"), nullable=False)
     flag_type: Mapped[str] = mapped_column(String(64), nullable=False)
     note: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_by_driver_id: Mapped[UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
+    created_by_driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)

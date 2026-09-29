@@ -34,10 +34,11 @@ are `M5`'s labels and `SUP-3`/`SUP-4`'s input - the weight-and-dock join a drone
 operator asked for and could get nowhere. Adding them later means sending
 somebody back to all ~230 doors.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -89,7 +90,7 @@ class ReceiverProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Unique: one profile per dock. A second row would mean two answers to "how
     # long does this place take", and nothing could choose between them.
-    location_id: Mapped[UUID] = mapped_column(
+    location_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("locations.id"), nullable=False, unique=True, index=True
     )
 
@@ -170,7 +171,7 @@ class ReceiverProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # surveyor has to be findable so their rows can be discounted. Nullable:
     # profiles surveyed before this existed have no answer, and inventing one
     # would be worse than the gap.
-    surveyed_by_driver_id: Mapped[UUID | None] = mapped_column(
+    surveyed_by_driver_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("drivers.id"), nullable=True
     )
     # Where the access answers above came from: SOURCE_SURVEYED when one of our

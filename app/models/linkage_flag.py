@@ -29,6 +29,7 @@ after every cycle, or nightly over a window - and a queue that re-raises the
 same pair every run is a queue people stop reading. That is the same failure
 IDN-2's merge queue was tuned to avoid.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, String, UniqueConstraint
@@ -51,7 +52,7 @@ class LinkageFlag(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UniqueConstraint("kind", "fingerprint", name="uq_linkage_flags_kind_fingerprint"),
     )
 
-    hub_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    hub_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
 
     kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
 

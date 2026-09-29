@@ -21,10 +21,10 @@ silently treated as zero** (app/billing/credits.py). "We owe nothing" and "nobod
 down what we promised" are different answers, and only one of them is safe to put on a
 statement.
 """
+import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -37,7 +37,7 @@ class ClientSlaTerm(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UniqueConstraint("client_id", "sla_tier", name="uq_client_sla_terms_client_tier"),
     )
 
-    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), nullable=False, index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id"), nullable=False, index=True)
     # Plain string, matching ClientRate's reasoning: a new tier shouldn't need an enum
     # migration before terms can be agreed for it.
     sla_tier: Mapped[str] = mapped_column(String(16), nullable=False)

@@ -1,6 +1,6 @@
 """A shop/store location that places orders on behalf of a client."""
+import uuid
 from sqlalchemy import ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -10,7 +10,7 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 class Shop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "shop_profiles"
 
-    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     address: Mapped[str] = mapped_column(String(255), nullable=False)
     lat: Mapped[float] = mapped_column(nullable=False)
@@ -25,6 +25,6 @@ class Shop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Many shops may share one location: a Shop is a customer account, a Location
     # is a place. Nullable and staying that way - a shop whose address does not
     # normalize to anything usable has no dock, and forcing one would invent it.
-    location_id: Mapped[UUID | None] = mapped_column(
+    location_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("locations.id"), nullable=True, index=True
     )

@@ -24,6 +24,7 @@ on it, and make an unsigned change visible instead of letting it pass as
 routine - which is the whole of what "sign-off from both sides" can mean inside
 a database.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Integer, String
@@ -52,7 +53,7 @@ class SettlementBasis(Base, UUIDPrimaryKeyMixin):
     # No foreign key, the reason `experiment_assignments` and `outcome_ledger`
     # both record: this is evidence about an agreement, and it must stay
     # readable if the client row is ever purged.
-    client_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
 
     # Per client, from 1. The number a statement cites, so a customer can ask
     # "which basis was that under" and get an answer shorter than a date range.

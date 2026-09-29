@@ -26,12 +26,12 @@ nothing.
 portal after the full value is gone - which is what makes rotation usable, since
 revoking the wrong key is otherwise a coin flip.
 """
+import uuid
 import hashlib
 import secrets
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -62,7 +62,7 @@ def hash_api_key(token: str) -> str:
 class ClientApiKey(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "client_api_keys"
 
-    client_id: Mapped[UUID] = mapped_column(
+    client_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("clients.id"), nullable=False, index=True
     )
 

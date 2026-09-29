@@ -32,10 +32,11 @@ otherwise have to remember to follow the chain, and the first query that forgets
 silently splits a dock back into two - which is the exact defect IDN-1 exists to
 remove. Repointing makes the correct answer the default one.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -68,10 +69,10 @@ class LocationMerge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # The dock being absorbed, and the dock it is absorbed into. Direction
     # matters and is not symmetric: `source` keeps its row and its address as an
     # alias, `target` is the one everything ends up pointing at.
-    source_location_id: Mapped[UUID] = mapped_column(
+    source_location_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("locations.id"), nullable=False, index=True
     )
-    target_location_id: Mapped[UUID] = mapped_column(
+    target_location_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("locations.id"), nullable=False, index=True
     )
 
@@ -86,7 +87,7 @@ class LocationMerge(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Null until decided. `automatic` decisions have a source but no user.
     decision_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    decided_by_ops_user_id: Mapped[UUID | None] = mapped_column(
+    decided_by_ops_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("ops_users.id"), nullable=True
     )
     decided_at: Mapped[datetime | None] = mapped_column(

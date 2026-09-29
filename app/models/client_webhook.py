@@ -22,6 +22,7 @@ POSTed inline could tell a client an order was delivered on a transaction that
 then rolled back. A row written in the caller's session cannot: if the delivery
 doesn't happen, neither does the notification.
 """
+import uuid
 import secrets
 from datetime import datetime
 
@@ -35,7 +36,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -64,7 +65,7 @@ def new_webhook_secret() -> str:
 class ClientWebhookEndpoint(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "client_webhook_endpoints"
 
-    client_id: Mapped[UUID] = mapped_column(
+    client_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("clients.id"), nullable=False, index=True
     )
     # Validated for scheme and destination before it is ever stored - see
@@ -105,10 +106,10 @@ class WebhookDelivery(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UniqueConstraint("endpoint_id", "event_id", name="uq_webhook_delivery_event"),
     )
 
-    endpoint_id: Mapped[UUID] = mapped_column(
+    endpoint_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("client_webhook_endpoints.id"), nullable=False, index=True
     )
-    order_id: Mapped[UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
+    order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
 
     # Stable id for this transition, sent in the payload and in a header so a
     # consumer can dedupe at-least-once delivery on their side.

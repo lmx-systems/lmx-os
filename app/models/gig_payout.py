@@ -8,8 +8,8 @@ from ever being paid twice (complete_stop's own idempotent early-return
 already prevents a retried request from reaching this code path at all,
 but this constraint holds even if that ever changes).
 """
+import uuid
 from sqlalchemy import ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -19,9 +19,9 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 class GigPayout(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "gig_payouts"
 
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
-    driver_id: Mapped[UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
-    stop_id: Mapped[UUID] = mapped_column(ForeignKey("stops.id"), nullable=False, unique=True)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
+    driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
+    stop_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("stops.id"), nullable=False, unique=True)
 
     # app/payroll/gig_pricing.py's estimate at the moment this stop was
     # completed - a placeholder formula (see that module's docstring), but

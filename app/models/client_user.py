@@ -11,8 +11,8 @@ user only ever sees their own company's orders/invoices). Multiple rows
 per client are the whole point - e.g. an accounts-payable contact and an
 operations contact at the same warehouse, the example C4 calls out.
 """
+import uuid
 from sqlalchemy import Boolean, ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -35,7 +35,7 @@ CLIENT_USER_ROLES = (CLIENT_ADMIN_ROLE, CLIENT_MEMBER_ROLE)
 class ClientUser(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "client_users"
 
-    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)
     # Globally unique, not just per-client - a portal login is an email +
     # password with no company field, so two different clients can't share
     # an address without making login ambiguous. Same constraint the old

@@ -35,10 +35,10 @@ themselves.
 presigned upload (app/storage/document_upload_client.py) - a driver can no longer
 hand us a URL to somewhere we've never stored anything.
 """
+import uuid
 from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -64,7 +64,7 @@ REVIEW_STATUSES = (REVIEW_PENDING, REVIEW_VERIFIED, REVIEW_REJECTED)
 class DriverDocument(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "driver_documents"
 
-    driver_id: Mapped[UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
+    driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
     doc_type: Mapped[str] = mapped_column(String(16), nullable=False)
     # One of REQUIRED_DOC_TYPES, validated at the endpoint.
 
@@ -86,7 +86,7 @@ class DriverDocument(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Who established this. An unattributed compliance decision is not much better
     # than no decision - if a driver turns out to have been cleared on a bad
     # document, the question "who cleared it" has to have an answer.
-    reviewed_by_ops_user_id: Mapped[UUID | None] = mapped_column(
+    reviewed_by_ops_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("ops_users.id"), nullable=True
     )
     # Shown to the driver so a rejection is actionable ("photo is cut off",

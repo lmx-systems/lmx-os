@@ -32,10 +32,10 @@ address. `lat`/`lng` come from the browser's geolocation, so they are nullable
 having) and frequently imprecise. `business_name` and `submitted_address` are
 free text for the person doing the matching — never parsed, never matched on.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -64,11 +64,11 @@ class DockLogSubmission(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     appointment_required: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # Null until somebody decides which dock this is. Nothing infers it.
-    location_id: Mapped[UUID | None] = mapped_column(
+    location_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("locations.id"), nullable=True, index=True
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    reviewed_by_ops_user_id: Mapped[UUID | None] = mapped_column(
+    reviewed_by_ops_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("ops_users.id"), nullable=True
     )
     imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

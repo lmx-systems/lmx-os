@@ -24,6 +24,7 @@ Not a trigger-enforced append-only table like `experiment_assignments` - this is
 configuration with a history, not evidence of a decision, and it has to be
 changeable by the people whose accounts it protects.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, String
@@ -42,7 +43,7 @@ class ExperimentExclusion(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # No foreign key, for the reason the assignments table records: this is
     # evidence about what a customer asked for, and it must stay readable if the
     # client row is ever purged under a retention policy.
-    client_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
 
     # The dock, as `app/identity/` normalises it. A string rather than a
     # `Location` FK because the experiment package must not depend on identity -

@@ -10,10 +10,10 @@ migration). Payment collection (a status field, a paid_at timestamp, a
 processor reference) is explicitly out of scope for this pass - see this
 model's absence of any such field, and docs/ROADMAP.md C3's note on why.
 """
+import uuid
 from datetime import date
 
 from sqlalchemy import Date, ForeignKey, Integer, text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -23,7 +23,7 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 class Invoice(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "invoices"
 
-    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)
     # server_default must be declared here, matching the migration's
     # nextval('invoice_number_seq') default, not just in the migration -
     # otherwise SQLAlchemy has no way to know this column should be

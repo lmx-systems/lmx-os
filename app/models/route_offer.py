@@ -18,10 +18,11 @@ the driver agreed to mid-review. Same shape as StopCandidate
 (app/schemas/optimizer.py) plus whatever the driver app needs to render an
 offer card (shop name, address) that StopCandidate doesn't carry.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -31,8 +32,8 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 class RouteOffer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "route_offers"
 
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
-    driver_id: Mapped[UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
+    driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
 
     status: Mapped[str] = mapped_column(String(16), default="offered", nullable=False)
     # offered | accepted | declined | expired
@@ -65,4 +66,4 @@ class RouteOffer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Set once accept_offer() creates the real Route - lets the driver app
     # go straight from "I accepted" to "here's my route" with one id.
-    route_id: Mapped[UUID | None] = mapped_column(ForeignKey("routes.id"), nullable=True)
+    route_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("routes.id"), nullable=True)

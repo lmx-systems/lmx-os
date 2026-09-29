@@ -11,6 +11,7 @@ whether on_break time counts as paid time is a policy decision this log
 deliberately doesn't resolve; nothing yet reads from this table to
 compute pay.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String
@@ -24,8 +25,8 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 class DriverShiftEvent(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "driver_shift_events"
 
-    driver_id: Mapped[UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
-    hub_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
+    hub_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     # available | off_shift | on_break | en_route - mirrors
     # DriverAvailabilityUpdate.status 1:1 (app/schemas/driver_app.py), the
     # same vocabulary POST /driver/me/state already receives on every

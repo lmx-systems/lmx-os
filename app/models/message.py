@@ -8,8 +8,8 @@ customer's/support's real number either (it's stored server-side only,
 never returned to the app - see DriverDocumentView-style read models in
 app/schemas/driver_app.py).
 """
+import uuid
 from sqlalchemy import ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -19,13 +19,13 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 class Message(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "messages"
 
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
-    driver_id: Mapped[UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
+    driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
     # Only set for channel="customer" - which dropoff this conversation is
     # about, so a driver with several deliveries today doesn't get threads
     # mixed together. Null for channel="support" (one ongoing thread with
     # dispatch, not tied to any single stop).
-    stop_id: Mapped[UUID | None] = mapped_column(ForeignKey("stops.id"), nullable=True)
+    stop_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("stops.id"), nullable=True)
 
     channel: Mapped[str] = mapped_column(String(16), nullable=False)
     # customer | support

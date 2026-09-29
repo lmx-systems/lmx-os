@@ -30,6 +30,7 @@ Outcomes are deliberately absent. REC-3's ledger attaches them by key, so
 recording what happened never requires touching the row that says what was
 decided.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, Integer, String
@@ -59,7 +60,7 @@ class DecisionSnapshot(Base, UUIDPrimaryKeyMixin):
     # Not a foreign key - see the migration. A decision about a hub that is
     # later removed must still be readable, and the optimizer runs cycles for
     # hubs that have no row.
-    hub_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    hub_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
 
     # When the cycle planned, by the planner's own clock, carried from the plan
     # rather than stamped on write - a slow commit must not move the decision.

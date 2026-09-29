@@ -20,10 +20,10 @@ satisfaction number becomes a performance instrument the moment someone builds t
 view, and that belongs in the conversation `W4` frames rather than falling out of a
 capture mechanism.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -55,7 +55,7 @@ class DeliveryRating(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UniqueConstraint("order_id", "rated_by", name="uq_delivery_rating_order_rater"),
     )
 
-    order_id: Mapped[UUID] = mapped_column(
+    order_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("orders.id"), nullable=False, index=True
     )
 

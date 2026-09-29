@@ -31,10 +31,10 @@ breadcrumb trail should be kept, which is a privacy/retention question
 (docs/ROADMAP.md R3) and not one to answer unilaterally in a model
 docstring.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -56,10 +56,10 @@ class DriverLocationPing(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ),
     )
 
-    driver_id: Mapped[UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
+    driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
     # Denormalized from the driver so a hub's whole fleet trail is queryable
     # without a join, matching why app/models/parcel.py carries hub_id.
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
 
     lat: Mapped[float] = mapped_column(Float, nullable=False)
     lng: Mapped[float] = mapped_column(Float, nullable=False)

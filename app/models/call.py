@@ -6,8 +6,8 @@ carries its own lifecycle (initiated -> connected -> completed/failed/
 no-answer, updated by Twilio's status-callback webhook) that Message's
 single created_at timestamp per row has no way to represent.
 """
+import uuid
 from sqlalchemy import ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -17,9 +17,9 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 class Call(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "calls"
 
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
-    driver_id: Mapped[UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
-    stop_id: Mapped[UUID] = mapped_column(ForeignKey("stops.id"), nullable=False)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
+    driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
+    stop_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("stops.id"), nullable=False)
 
     # The real customer number this call bridges to - never serialized
     # back to the driver app (see CallView in app/schemas/driver_app.py),

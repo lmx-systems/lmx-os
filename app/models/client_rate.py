@@ -10,10 +10,10 @@ column (HeldOrder, BatchDecision, StopCandidate all do the same). Keeps
 this table decoupled from the enum, so a future tier doesn't need an
 enum migration before a rate can be configured for it.
 """
+import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -46,7 +46,7 @@ class ClientRate(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ),
     )
 
-    client_id: Mapped[UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id"), nullable=False)
     sla_tier: Mapped[str] = mapped_column(String(16), nullable=False)  # T1 | T2 | T3 | HOT_SHOT
 
     # When this version starts applying. Pricing takes the newest version at or before the
