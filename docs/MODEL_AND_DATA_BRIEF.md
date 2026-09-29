@@ -171,7 +171,7 @@ The two KPIs are not independent, and **we cannot yet state the conversion betwe
 
 `[ASSUMPTION]` The ~30-per-dock figure is inherited and derived nowhere. The repo's own baseline uses `prior_strength = 10.0`. One of the two is wrong.
 
-**The blocker is not volume, it is the clock.** The dispatch export is minute-resolution, so **65.5% of stops compute to zero dwell.** The second-precision file proves those same stops really took 3–50 seconds. No filter recovers it. `DRV-1` and `DRV-2` are the prerequisite and both were gated on Phase 0.4 — now closed.
+**The blocker is not volume, it is the clock.** The dispatch export is minute-resolution, so **65.5% of stops compute to zero dwell.** The second-precision file proves those same stops really took 3–50 seconds. No filter recovers it. `DRV-1` and `DRV-2` are the prerequisite and both are gated on Phase 0.4, which is **open**. (This sentence read "now closed" until 25 Sep. What closed on 16 Sep was Sourabh approving the *consent approach*; 0.4 as written is Matan negotiating driver-app access into the *pilot terms*, a different act by a different person. `ROADMAP_1.5.md` holds jurisdiction over gate status and always said open — this brief does not get a vote on it.)
 
 **M1b — censored dwell.** Failed and abandoned stops never produced a true dwell; we only know it exceeded some value. Ordinary regression either drops them or treats "gave up at 12 minutes" as "took 12 minutes," biasing estimates downward on exactly the worst docks. **XGBoost `survival:aft`** or `lifelines` — not because that problem has no categorical (it has the same one) but because `survival:aft` has no LightGBM equivalent, and M1b consumes the hand-rolled priors rather than raw `location_id`.
 
@@ -425,7 +425,7 @@ Four limits to state before someone else does:
 |---|---|---|
 | 10 customers in **one** catchment | Account count is the Phase 4 gate, not volume | No customer-count gate exists |
 | Eligibility outcomes | One operator agreement before the false-positive rate is measurable | `SUP-5`, Phase 5 — and it costs a call |
-| Second-precision dwell | `DRV-1`/`DRV-2` before any dwell number is real | Unblocked — 0.4 and 0.8 closed |
+| Second-precision dwell | `DRV-1`/`DRV-2` before any dwell number is real | **Blocked — 0.4 and 0.8 are both open.** `DRV-1` is built and has never run on a handset |
 | A measured false-positive rate | A build item that does not exist | Proposed as `SUP-6` |
 | One definition of a stop | Three sources report three different counts | `REC-5`, unbuilt |
 
