@@ -49,6 +49,24 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # Everything a person can click, in all three of them.
 FRONTENDS = ("dashboard/src", "client-portal/src", "driver-app/src")
 
+# **Which front end is supposed to reach which router.** Matching against all
+# three was the first version, and it let a real one through within hours:
+# `GET /admin/hubs/{id}/returns` has no dashboard caller, and the segment
+# `returns` matched anyway because `client-portal` has a `ReturnsPanel` calling
+# a *different* endpoint. An admin route referenced only in the client portal is
+# not reachable by an admin.
+#
+# Scoping is the fix, and it is also the more honest question: not "does anybody
+# anywhere mention this word" but "can the person this route is for get to it".
+AUDIENCE: dict[str, tuple[str, ...]] = {
+    "routes": ("dashboard/src",),           # ops console
+    "admin_routes": ("dashboard/src",),     # ops console, admin-gated
+    "ops_auth_routes": ("dashboard/src",),
+    "client_routes": ("client-portal/src",),
+    "driver_routes": ("driver-app/src",),
+    "public_routes": ("client-portal/src", "dashboard/src"),  # the tracking page
+}
+
 ROUTERS = (
     "routes",
     "admin_routes",
@@ -87,19 +105,49 @@ NOT_CALLED_BY_A_FRONT_END: dict[str, str] = {
 # halves had not, so a counter person could say the cores were ready and the
 # driver who arrived to collect them had no button.
 #
-# **The driver half is built now** and its three entries came straight back off
-# this list - which is the companion test doing its job within the hour, on the
-# person who wrote it. The ops half is still here.
+# **Both halves are built now**, and all five entries came straight back off
+# this list within hours of it existing - the companion test doing its job on
+# the person who wrote it, twice in one afternoon.
+# Endpoints that exist for a machine, not a person. Distinct from
+# `KNOWN_UNREACHABLE` on purpose: that list is debt with a name on it, and these
+# are never going to have a screen. Folding them together would make the debt
+# list longer and less believable.
+NOT_A_FEATURE: frozenset[str] = frozenset(
+    {
+        "GET /health",   # the load balancer
+        "GET /metrics",  # Prometheus
+    }
+)
+
 KNOWN_UNREACHABLE: dict[str, str] = {
     "POST /driver/stops/{stop_id}/scan-parcel": (
         "W1 - per-parcel scanning. The app calls /driver/stops/{id}/scan, which "
         "takes a count; this takes one parcel at a time and no screen does"
     ),
-    "POST /admin/returns/{return_id}/mark-returned": (
-        "W1 slice 3 - the ops manual mark the item names, with no panel to make it "
-        "from. The client half shipped (ReturnsPanel); this half did not"
+    "GET /driver/me/devices": (
+        "S1 - a driver cannot see or sign out their own sessions. An admin can, "
+        "as of the CON-1 panel work; the driver's own half has no screen"
     ),
-    "POST /admin/returns/{return_id}/reschedule": "W1 slice 4 - the not_ready -> ready reschedule, ops side",
+    "DELETE /driver/me/devices/{device_id}": "S1 - same",
+    "GET /driver/stops/{stop_id}/parcels": (
+        "W10 - the per-parcel list, sibling of scan-parcel below and unreachable "
+        "for the same reason: the app scans a count, not parcels"
+    ),
+    "GET /driver/me/gig-jobs": "G3 - the app has no gig screen",
+    "POST /driver/me/gig-jobs": "G3 - same",
+    "PATCH /driver/me/gig-jobs/{gig_job_id}": "G3 - same",
+    "GET /admin/clients/{client_id}/rates": (
+        "F5 - the dashboard sets rates once, inside signup approval, and has no "
+        "panel to read or change them afterwards. A rate is a contract term "
+        "nobody can look up"
+    ),
+    "PUT /admin/clients/{client_id}/rates": "F5 - same",
+    "POST /fleet/{hub_id}/drivers/location": (
+        "F1 - the superseded ops-admin write path. The app posts to "
+        "/driver/me/location; F1's own note says this one would never have "
+        "populated a position in production"
+    ),
+    "POST /fleet/{hub_id}/drivers/state": "F1 - same",
     "POST /driver/me/gig-jobs/evaluate": (
         "G3 - the app has no gig screen; offers arrive and are answered on the "
         "platform's own app today"
@@ -128,14 +176,15 @@ def _routes() -> list[tuple[str, str, str]]:
     return found
 
 
-def _front_end_source() -> str:
-    """Every front-end source file, concatenated.
+def _front_end_source(directories: tuple[str, ...] = FRONTENDS) -> str:
+    """The named front ends' source, concatenated.
 
-    One blob rather than per-file, because which file mentions a segment is not
-    the question — whether anything does is.
+    One blob rather than per-file, because *which* file mentions a segment is
+    not the question — whether the right front end does is, and `AUDIENCE`
+    decides which that is.
     """
     text: list[str] = []
-    for directory in FRONTENDS:
+    for directory in directories:
         root = ROOT / directory
         if not root.exists():  # pragma: no cover - all three are in the repo
             continue
@@ -145,14 +194,21 @@ def _front_end_source() -> str:
 
 
 def _distinguishing_segment(path: str) -> str | None:
-    """The last part of a path that is not a parameter.
+    """The last part of a path that is not a parameter, with its leading slash.
 
-    `/admin/hubs/{hub_id}/closures` -> `closures`. It is what separates a route
+    `/admin/hubs/{hub_id}/closures` -> `/closures`. It is what separates a route
     from its siblings, and therefore the thing a caller must name. A path that
     is nothing but parameters has none, and is skipped rather than guessed at.
+
+    **The slash is not decoration.** Matching the bare word let
+    `GET /admin/hubs/{id}/returns` pass while nothing in the dashboard called
+    it: `returns` is ordinary English and appears in a dozen comments
+    ("this returns the ..."). `/returns` appears in none of them. Every other
+    segment in this codebase is hyphenated or plural enough not to collide, and
+    this one word was enough to hide a whole panel's absence.
     """
     literal = [part for part in path.strip("/").split("/") if not part.startswith("{")]
-    return literal[-1] if literal else None
+    return f"/{literal[-1]}" if literal else None
 
 
 def test_every_router_is_classified():
@@ -174,6 +230,14 @@ def test_every_router_is_classified():
         "should call them: " + ", ".join(sorted(on_disk - set(ROUTERS)))
     )
 
+    # Every checked router must say *whose* front end is supposed to reach it.
+    # Without this a new router would be silently checked against nothing.
+    unplaced = set(ROUTERS) - set(AUDIENCE) - set(NOT_CALLED_BY_A_FRONT_END)
+    assert not unplaced, (
+        "say which front end should reach these, in AUDIENCE: "
+        + ", ".join(sorted(unplaced))
+    )
+
 
 def test_no_endpoint_is_unreachable_from_every_front_end():
     """An endpoint nothing a person uses can reach.
@@ -183,17 +247,20 @@ def test_no_endpoint_is_unreachable_from_every_front_end():
     (`docs/ROADMAP_AUDIT_2026-09.md`). The cost is the same either way: a
     capability that exists, is tested, and does nothing for anybody.
     """
-    source = _front_end_source()
+    sources = {
+        module: _front_end_source(directories)
+        for module, directories in AUDIENCE.items()
+    }
 
     unreachable: dict[str, str] = {}
     for module, method, path in _routes():
         if module in NOT_CALLED_BY_A_FRONT_END:
             continue
-        segment = _distinguishing_segment(path)
-        if segment is None or segment in source:
-            continue
         key = f"{method} {path}"
-        if key in KNOWN_UNREACHABLE:
+        if key in NOT_A_FEATURE or key in KNOWN_UNREACHABLE:
+            continue
+        segment = _distinguishing_segment(path)
+        if segment is None or segment in sources[module]:
             continue
         unreachable[key] = module
 
@@ -212,15 +279,20 @@ def test_the_allowlist_does_not_outlive_the_gap():
     what was true the day somebody wrote it and then quietly stops being true —
     which is how an allowlist becomes the thing it was meant to prevent.
     """
-    source = _front_end_source()
-    registered = {f"{method} {path}" for _, method, path in _routes()}
+    registered = {
+        f"{method} {path}": module for module, method, path in _routes()
+    }
+    sources = {
+        module: _front_end_source(directories)
+        for module, directories in AUDIENCE.items()
+    }
 
     now_reachable = {
         key
         for key in KNOWN_UNREACHABLE
         if key in registered
         and (segment := _distinguishing_segment(key.split(" ", 1)[1])) is not None
-        and segment in source
+        and segment in sources[registered[key]]
     }
     assert not now_reachable, (
         "these are reachable now - remove them from KNOWN_UNREACHABLE: "
@@ -259,15 +331,16 @@ def test_the_check_would_notice_a_new_one():
     asserts the mechanism directly: a segment no front end mentions is not
     found in the front-end source, and one that is, is.
     """
-    source = _front_end_source()
+    source = _front_end_source(("dashboard/src",))
 
-    assert _distinguishing_segment("/admin/hubs/{hub_id}/closures") == "closures"
-    assert _distinguishing_segment("/admin/orders/{order_id}") == "orders"
+    assert _distinguishing_segment("/admin/hubs/{hub_id}/closures") == "/closures"
+    assert _distinguishing_segment("/admin/orders/{order_id}") == "/orders"
     assert _distinguishing_segment("/{anything}") is None
 
-    # A segment invented for this test, which nothing can mention.
-    assert "cod-disputes" in source
-    assert "kowalczyk-disputes" not in source
+    # The slash is what makes this a path rather than a word. `returns` is
+    # ordinary English and appears in comments; `/returns` does not.
+    assert "/cod-disputes" in source
+    assert "/kowalczyk-disputes" not in source
 
 
 def test_the_routers_are_all_importable_and_carry_routes():

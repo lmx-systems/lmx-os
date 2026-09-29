@@ -7,6 +7,7 @@ import type {
   GigDensityReport,
   GigJob,
   HubClosure,
+  ReturnItem,
   DriverOnboardingBody,
   DriverOnboardingResult,
   HubSettings,
@@ -375,6 +376,19 @@ export const api = {
   // Repeat COD disputes per account (docs/ROADMAP.md W2).
   codDisputes: (hubId: string, windowDays = 30) =>
     request<CodDisputeReport>(`/admin/hubs/${hubId}/cod-disputes?window_days=${windowDays}`),
+
+  // The reverse leg (docs/ROADMAP.md W1). `awaiting=true` is the counter-facing
+  // cut: everything still waiting on a pickup, oldest first.
+  listReturns: (hubId: string, awaiting = false) =>
+    request<ReturnItem[]>(
+      `/admin/hubs/${hubId}/returns${awaiting ? '?awaiting=true' : ''}`,
+    ),
+
+  markReturnReturned: (returnId: string) =>
+    request<ReturnItem>(`/admin/returns/${returnId}/mark-returned`, { method: 'POST' }),
+
+  rescheduleReturn: (returnId: string) =>
+    request<ReturnItem>(`/admin/returns/${returnId}/reschedule`, { method: 'POST' }),
 
   // The gig path (docs/ROADMAP.md G3, G12).
   listGigJobs: (hubId: string, status?: string) =>

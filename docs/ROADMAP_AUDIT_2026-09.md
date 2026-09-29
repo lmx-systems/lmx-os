@@ -403,11 +403,21 @@ half are not.
 | `POST /admin/returns/{id}/mark-returned` | slice 3's *"ops manual mark"* |
 | `POST /admin/returns/{id}/reschedule` | slice 4's `not_ready → ready` move |
 
-So a counter person can say the cores are ready — and **the driver who arrives to
-collect them has no button, and the operator who has to close the loop has no
-list.** The feature is two thirds unreachable from the ends that do the work,
-and the end that requests it works fine, which is exactly the configuration that
-makes the gap invisible: the customer-facing half demos.
+So a counter person could say the cores were ready — and **the driver who
+arrived to collect them had no button, and the operator who had to close the
+loop had no list.** The feature was two thirds unreachable from the ends that do
+the work, and the end that requests it worked fine, which is exactly the
+configuration that makes such a gap invisible: the customer-facing half demos.
+
+> **Both halves are built now.** `ReturnsPanel` in the driver app with the
+> decision in `stopReturns.ts`, and `ReturnsPanel` in the dashboard for the ops
+> side. All five entries came off `KNOWN_UNREACHABLE` within hours of it
+> existing — the companion test firing twice in one afternoon on the person who
+> wrote it. Two backend changes were needed first and neither was obvious from
+> the outside: `StopView` carried no returns field, so the app could not have
+> known when to show a button; and all three driver endpoints had to become
+> idempotent, because `collect-return` with a manifest **created a second core
+> on every retry**.
 
 `GET /admin/hubs/{id}/returns` is reachable as of `CON-1`'s panel work, which is
 the only reason it is not a sixth row.
@@ -425,6 +435,34 @@ agreed to, which is the half that matters when a customer disputes a credit.
 
 **`POST /driver/me/gig-jobs/evaluate`** — the app has no gig screen at all;
 offers are answered on the platform's own app today.
+
+### Two things the first version of the check still missed
+
+Both found by using it, within hours, and both now fixed.
+
+**It matched any front end, not the right one.** `GET /admin/hubs/{id}/returns`
+has no dashboard caller and passed anyway, because the segment `returns` appears
+in `client-portal`'s own `ReturnsPanel` — a different front end calling a
+different endpoint. An admin route referenced only in the client portal is not
+reachable by an admin. `AUDIENCE` now says which front end is supposed to reach
+which router, and that is the more honest question: not *"does anybody anywhere
+mention this word"* but *"can the person this route is for get to it"*.
+
+**It matched a bare word, not a path.** `returns` is ordinary English and
+appears in a dozen comments — *"this returns the ..."*. `/returns` appears in
+none of them. Matching the leading slash costs nothing and was the difference
+between finding a missing panel and not.
+
+Scoping and the slash together took the list from 9 to 13, and every one of the
+four new ones is real: a driver cannot see or sign out their own sessions
+(`S1`), nobody can read back a client's rate table after signup (`F5`), and the
+two `/fleet/` write paths have no caller at all — which `F1`'s own note
+predicted, since the app posts to `/driver/me/location` instead.
+
+`GET /health` and `GET /metrics` moved to a separate `NOT_A_FEATURE` set rather
+than the allowlist. The allowlist is debt with a name on it; those two are never
+going to have a screen, and folding them in would make the debt list longer and
+less believable.
 
 ### Why the check matches segments rather than paths
 
