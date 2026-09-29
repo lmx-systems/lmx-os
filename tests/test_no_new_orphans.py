@@ -172,6 +172,13 @@ ONE_OFF_SCRIPTS: dict[str, str] = {
     "docx_house_style.py": "a helper for the document renderers",
     "generate_m2_corpus.py": "generates a synthetic corpus for the M2 harness",
     "load_identity_from_export.py": "one-off identity seed from a historical export",
+    "mypy_baseline.py": (
+        "a CI gate, not an app caller - it runs mypy and fails when a file's "
+        "error count grows past mypy-baseline.json. Here rather than in "
+        "OPERATIONAL_SCRIPTS deliberately: an operator never runs it, and "
+        "counting it as a caller would let app code stay alive on the strength "
+        "of a tool that only reads types"
+    ),
     "run_m2_harness.py": "runs the M2 calibration harness",
     "seed_austin_world.py": "seeds a development database",
     "train_m1_dwell.py": "runs M1's release gate offline",
