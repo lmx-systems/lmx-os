@@ -40,6 +40,10 @@ export type ProfileStackParamList = {
   // and the build-time default is useless on a handset.
   Server: undefined;
   EditVehicle: undefined;
+  // The phones this account is signed in on (S1). Under Profile rather than
+  // behind a debug flag: it is the driver's own security surface, and an admin
+  // could already see these while the driver could not.
+  Devices: undefined;
   Documents: undefined;
   PaymentMethod: undefined;
   Support: undefined;

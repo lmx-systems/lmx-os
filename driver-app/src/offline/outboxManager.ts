@@ -62,6 +62,20 @@ class OutboxManager {
     this.flush();
   }
 
+  /**
+   * How many actions have not reached the server yet.
+   *
+   * For the one caller that has to ask before doing something irreversible:
+   * signing out, or revoking the session these items would be sent under.
+   * Clearing the token does not empty this queue - it strands it, because
+   * every subsequent flush 401s and `refreshOnce` has nothing to refresh
+   * with. `flush` treats a 401 as transient precisely so a shift is not lost
+   * (DRV-4), and that reasoning only holds while a driver can still sign in.
+   */
+  pendingCount(): number {
+    return this.items.length;
+  }
+
   subscribe(fn: (items: OutboxItem[]) => void): () => void {
     this.listeners.add(fn);
     fn(this.items);

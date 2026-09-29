@@ -6,6 +6,7 @@ import type {
   CodMethod,
   DocType,
   DriverCompliance,
+  DriverDevice,
   DriverDocument,
   DriverProfile,
   DeclineReason,
@@ -125,6 +126,19 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ bank_last4: bankLast4 }),
     }),
+
+  // The phones this driver is signed in on, and signing one out (S1).
+  //
+  // Both endpoints existed from the first auth commit and neither had a
+  // caller: an admin could see a driver's sessions, the driver could not see
+  // their own. A revoked device stops working on its very next request rather
+  // than at its next refresh, which is what makes this worth a screen - a
+  // driver who left a phone in a van can end that session before the van gets
+  // where it is going.
+  getMyDevices: () => request<DriverDevice[]>('/driver/me/devices'),
+
+  revokeDevice: (deviceId: string) =>
+    request<void>(`/driver/me/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' }),
 
   getMyDocuments: () => request<DriverDocument[]>('/driver/me/documents'),
 

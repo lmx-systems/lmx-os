@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { useAuth } from '../auth/AuthContext';
 import { BiometricLockScreen } from '../screens/BiometricLockScreen';
+import { DevicesScreen } from '../screens/DevicesScreen';
 import { DocumentsScreen } from '../screens/DocumentsScreen';
 import { EarningsScreen } from '../screens/EarningsScreen';
 import { EditVehicleScreen } from '../screens/EditVehicleScreen';
@@ -79,6 +80,7 @@ function ProfileNavigator() {
       <ProfileStack.Screen name="ProfileHome" component={ProfileScreen} options={{ title: 'Profile' }} />
       <ProfileStack.Screen name="EditVehicle" component={EditVehicleScreen} options={{ title: 'Edit vehicle' }} />
       <ProfileStack.Screen name="Documents" component={DocumentsScreen} options={{ title: 'Documents' }} />
+      <ProfileStack.Screen name="Devices" component={DevicesScreen} options={{ title: 'Your phones' }} />
       <ProfileStack.Screen name="PaymentMethod" component={PaymentMethodScreen} options={{ title: 'Payment method' }} />
       <ProfileStack.Screen name="Support" component={SupportScreen} options={{ title: 'Contact support' }} />
       <ProfileStack.Screen name="Server" component={ServerScreen} options={{ title: 'Server' }} />
