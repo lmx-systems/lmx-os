@@ -22,6 +22,25 @@ allowed to be large. It is not allowed to grow quietly.
 **Deliberately not a pytest test.** mypy needs the app's dependencies resolved
 and takes a few seconds; running it inside the suite would slow every local
 `pytest` for a check that belongs beside `ruff` in CI. `ci.yml` calls it there.
+
+## The baseline is environment-sensitive, and that is a real limitation
+
+`requirements.txt` pins with `>=`, so CI resolves newer libraries than a venv
+created months ago - and mypy's findings move with them. The very first CI run
+against a locally-recorded baseline disagreed in four files: two lower, and two
+higher by one, both from stubs that had tightened.
+
+Neither of those two was noise, as it turned out - a push token the SQL
+guaranteed non-null, and a `session.scalar` over an aggregate that cannot
+return None - so fixing them was the right answer rather than re-baselining.
+But the next drift might not be, and the failure to expect is a green local run
+and a red CI one with no code change between them.
+
+**When that happens, read the diff before re-baselining.** Real findings get
+fixed. Stub churn gets a baseline recorded from a CI run rather than a laptop -
+the environment that enforces the number should be the one that sets it.
+Pinning the dev dependencies exactly would remove the ambiguity and is the
+better long-term answer.
 """
 from __future__ import annotations
 

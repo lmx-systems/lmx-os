@@ -189,12 +189,18 @@ async def issue(
         # the change - and if it was agreed, the new one is not yet.
         existing.superseded_at = now
 
+    # `coalesce(max(version), 0) + 1` over an aggregate with no GROUP BY always
+    # returns exactly one row, so this is never None - but `session.scalar` is
+    # typed as optional for the general case, and `int(None)` would be a
+    # TypeError at the moment a basis is being issued. `or 1` states the floor
+    # the expression already guarantees: the first version is 1.
     next_version = int(
         await session.scalar(
             select(func.coalesce(func.max(SettlementBasis.version), 0) + 1).where(
                 SettlementBasis.client_id == statement.client_id
             )
         )
+        or 1
     )
     basis = SettlementBasis(
         client_id=statement.client_id,

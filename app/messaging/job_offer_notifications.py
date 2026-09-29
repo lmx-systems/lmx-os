@@ -41,7 +41,11 @@ async def notify_driver_of_new_offer(driver_id: str, stop_count: int, ttl_second
                 DriverDevice.expo_push_token.isnot(None),
             )
         )
-        tokens = [row[0] for row in result.all()]
+        # The `isnot(None)` above already guarantees this in SQL, and mypy
+        # cannot see a WHERE clause - but restating it here costs one
+        # comparison and means the guarantee survives somebody loosening the
+        # query later without reading this line.
+        tokens = [row[0] for row in result.all() if row[0] is not None]
 
     if not tokens:
         return
