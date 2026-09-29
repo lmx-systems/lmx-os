@@ -493,3 +493,55 @@ certainly reachable, and a route it fails is worth a person's attention.
 Both halves were verified to bite before landing: removing an allowlist entry
 fails the check, and an entry that has become reachable fails its companion.
 
+---
+
+## The fifth invariant — 25 September
+
+Four checks now cover the code. **None of them reads a document**, and that is
+where this repository actually goes wrong. Three status claims turned out to be
+stale in a single day of ordinary work, and not one was found by looking:
+
+| Claim | Reality | Found while |
+|---|---|---|
+| `DRV-1` — `NEW` | Shipped ten days earlier as #39 and #41 | Compiling an inventory |
+| `0.4` / `0.8` — "closed" in `MODEL_AND_DATA_BRIEF.md` | Both open; `ROADMAP_1.5.md` holds jurisdiction and always said so | Correcting `DRV-1` |
+| `DRV-3` — "not built", `THE_DRIVER_APP.md` §5 | Built in `bb8e101` a week earlier | Building the devices screen |
+
+The `DRV-1` case is the one worth dwelling on: **the contradiction was already
+inside the file.** `REC-2`'s row said *"`DRV-1` shipped `stop_geofence_event`,
+and the old row predates it"*, three tables below the row reading `NEW`. Nobody
+reads a roadmap top to bottom, so a row can stay wrong next to the sentence
+correcting it indefinitely.
+
+`tests/test_no_stale_roadmap_claims.py` checks four things: every cited path
+resolves; every `BUILT` row names a file, symbol, table or migration a reader
+can open; no row claims `NEW` for an item that has commits named after it; and
+the table still parses, so a reformat cannot turn the other three green by
+making them inspect nothing.
+
+**It caught `AGT-4` on its first run** — marked `BUILT`, citing only `REC-1`,
+another roadmap id. It was genuinely built (`app/record/explain.py`) and was
+the only `BUILT` row in the table naming nothing openable. The fourth
+invariant in a row to fire on the person writing it.
+
+**What it deliberately does not check is gate status in prose**, which is the
+one bug of the three it cannot catch. `BACKGROUND_LOCATION_CONSENT.md` contains
+*"0.4 and 0.8 are not closed by this document"*, so a phrase-match for
+"0.4 … closed" fires on the document that gets it right. `test_no_unreachable_routes.py`
+learned that lesson expensively and wrote it down: a check that cries wolf gets
+allowlisted into uselessness.
+
+### A weakness found in an existing invariant
+
+While verifying the SLA-terms panel, the reachability check was tested by
+breaking its call site on purpose. **It passed** — the route matched
+`/sla-terms` in the new panel's own *docstring*. Every panel here opens by
+naming the endpoints it calls, so any documented-but-uncalled endpoint passed
+the same way. Comments no longer count, and it was hiding
+`POST /admin/clients/{id}/invoices/generate`, which matched `/generate` in two
+comments about `docker/generate-env-config.sh` — a shell script.
+
+The first attempt at stripping comments used `/\*.*?\*/` and reported **thirty**
+routes as unreachable, all plainly called: `client-portal/src/lib/api.ts:33` is
+a *line* comment containing `/*`, so the block-match ate the rest of the file.
+The shipped version is a character scan for exactly that reason.
