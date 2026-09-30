@@ -467,6 +467,46 @@ async def test_accept_offer_never_commingles_a_hot_shot_pickup(db_session, real_
     assert max(p.sequence for p in pickups) < min(d.sequence for d in dropoffs)
 
 
+async def test_an_order_with_no_pickup_location_is_refused_not_routed_to_nowhere(
+    db_session, real_redis_client
+):
+    """The unplanned path groups pickups by shop. Ingestion resolves every pickup
+    to a Shop (`_resolve_or_create_shop`), so an order without one has broken
+    that invariant - and grouped under `None` it became a pickup rendered at
+    0,0 with no name, merged with every other shopless order on the offer.
+    Refusing is the only honest answer: there is no location to send a driver."""
+    hub_id, client_id, _shop_id, driver_id, regular_order = await _seed(db_session)
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+
+    now = datetime.now(timezone.utc)
+    shopless = Order(
+        hub_id=hub_id, client_id=client_id, shop_id=None,
+        external_order_ref="ORD-DRIVER-APP-NOSHOP-1", source_system="flat_file", raw_payload={},
+        sla_tier="T2", hold_deadline=now + timedelta(minutes=30), weight_units=1,
+        status=OrderStatus.assigned, requested_at=now,
+        delivery_address="4 Nowhere Rd", delivery_lat=34.0530, delivery_lng=-118.2530,
+        delivery_contact_name="B. Lin", delivery_contact_phone="+15555550178",
+    )
+    db_session.add(shopless)
+    await db_session.commit()
+
+    offer = RouteOffer(
+        hub_id=hub_id, driver_id=driver_id, status="offered",
+        stop_payload=[
+            {"order_id": str(regular_order.id), "lat": 34.051, "lng": -118.251, "sla_tier": "T2"},
+            {"order_id": str(shopless.id), "lat": 34.053, "lng": -118.253, "sla_tier": "T2"},
+        ],
+        offered_at=now, expires_at=now + timedelta(minutes=5),
+    )
+    db_session.add(offer)
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as refused:
+        await accept_offer(str(offer.id), driver=authed, session=db_session)
+    assert refused.value.status_code == 409
+    assert "no pickup location" in refused.value.detail
+
+
 async def _shop_messages(db_session, stop_id):
     result = await db_session.execute(
         select(Message).where(Message.channel == "shop", Message.stop_id == uuid.UUID(stop_id))
