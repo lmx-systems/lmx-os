@@ -200,21 +200,25 @@ async def _deliveries_by_driver_day(
     from app.models.route import Route
 
     route_ids = {r[0] for r in rows}
-    drivers = dict(
-        (
-            await session.execute(
-                select(Route.id, Route.driver_id).where(
-                    Route.id.in_(route_ids),
-                    *([Route.hub_id == hub_id] if hub_id is not None else []),
-                )
+    driver_rows = (
+        await session.execute(
+            select(Route.id, Route.driver_id).where(
+                Route.id.in_(route_ids),
+                *([Route.hub_id == hub_id] if hub_id is not None else []),
             )
-        ).all()
-    )
+        )
+    ).all()
+    drivers: dict[uuid.UUID, uuid.UUID] = {
+        route_id: driver_id for route_id, driver_id in driver_rows
+    }
 
     counts: dict[tuple[uuid.UUID, date], int] = defaultdict(int)
     for route_id, completed_at, _stop_id in rows:
         driver_id = drivers.get(route_id)
-        if driver_id is None:
+        # The query filters `completed_at IS NOT NULL`, and SQLAlchemy 2.1 types the
+        # column as declared, so the guard says so. Reachable only since `drivers` got
+        # a real type - as `dict[Never, Never]` it made this line dead to the checker.
+        if driver_id is None or completed_at is None:
             continue
         counts[(driver_id, completed_at.date())] += 1
     return counts
@@ -355,12 +359,15 @@ async def _sla_hit_rates(
 
         tier = _tier_label(order.sla_tier)
         commitment = delivery_commitment(order, terms_by_client[order.client_id].get(order.sla_tier))
-        if not commitment.exists:
+        promised_by = commitment.promised_delivery_by
+        # `commitment.exists`, and the query's `delivered_at IS NOT NULL`, spelled out:
+        # the comparison below needs both sides, and the type checker can see neither.
+        if promised_by is None or order.delivered_at is None:
             unassessable += 1
             continue
 
         totals[tier] += 1
-        if order.delivered_at <= commitment.promised_delivery_by:
+        if order.delivered_at <= promised_by:
             hits[tier] += 1
 
     rates = [
@@ -768,15 +775,14 @@ async def _offer_outcomes(session: AsyncSession, since: datetime) -> list[Rate]:
     population that could have given one - a rate over every offer would make the reasons
     look rarer the more offers were accepted.
     """
-    outcomes = dict(
-        (
-            await session.execute(
-                select(RouteOffer.status, func.count())
-                .where(RouteOffer.offered_at >= since)
-                .group_by(RouteOffer.status)
-            )
-        ).all()
-    )
+    outcome_rows = (
+        await session.execute(
+            select(RouteOffer.status, func.count())
+            .where(RouteOffer.offered_at >= since)
+            .group_by(RouteOffer.status)
+        )
+    ).all()
+    outcomes: dict[str, int] = {status: count for status, count in outcome_rows}
     total = sum(outcomes.values())
     if not total:
         return [
@@ -813,19 +819,21 @@ async def _offer_outcomes(session: AsyncSession, since: datetime) -> list[Rate]:
     if not declined:
         return rates
 
-    reasons = dict(
-        (
-            await session.execute(
-                select(RouteOffer.decline_reason, func.count())
-                .where(
-                    RouteOffer.offered_at >= since,
-                    RouteOffer.status == "declined",
-                    RouteOffer.decline_reason.is_not(None),
-                )
-                .group_by(RouteOffer.decline_reason)
+    reason_rows = (
+        await session.execute(
+            select(RouteOffer.decline_reason, func.count())
+            .where(
+                RouteOffer.offered_at >= since,
+                RouteOffer.status == "declined",
+                RouteOffer.decline_reason.is_not(None),
             )
-        ).all()
-    )
+            .group_by(RouteOffer.decline_reason)
+        )
+    ).all()
+    # The query excludes a null reason; the guard only tells the type checker so.
+    reasons: dict[str, int] = {
+        reason: count for reason, count in reason_rows if reason is not None
+    }
     given = sum(reasons.values())
     if not given:
         rates.append(
