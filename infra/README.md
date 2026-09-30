@@ -60,9 +60,16 @@ infra/
    include and a site-verification `TXT`. Add three CNAMEs in the Cloudflare
    zone, entering `api` / `ops` / `portal` rather than the full hostname, since
    Cloudflare appends the zone itself. Then request an ACM certificate in
-   `us-east-1` for the three names and add an HTTPS listener to
-   `infra/aws/alb.tf` using it - not automated here because the ARN cannot
-   exist before the domain does.
+   `us-east-1` for the three names and apply it:
+   ```bash
+   terraform apply -var certificate_arn=arn:aws:acm:us-east-1:...
+   ```
+   That one variable creates the HTTPS listener, moves all three host rules
+   onto it, and turns `:80` into a 301. **No file needs editing** - this used
+   to say "add an HTTPS listener to `infra/aws/alb.tf`", which meant writing
+   Terraform against a live stack at the exact moment it is half-built and
+   nothing works yet. The certificate still cannot be requested here, because
+   the ARN cannot exist before the domain does.
 
    > **Grey cloud, not orange.** Cloudflare defaults a new CNAME to *Proxied*,
    > and the apex and `www` already are, so it looks like the house style. Set
@@ -181,6 +188,9 @@ still exists in ECR (`ecr.tf`'s repos are `IMMUTABLE`).
 - **The CloudWatch alarm in `logs.tf` notifies nobody yet** - no SNS
   topic/on-call tool exists to wire it to. The alarm firing is real; where
   it pages is a real decision (which on-call tool), not an infra gap.
-- **HTTPS isn't wired up** - needs a real, owned domain first (step 3
-  above), which this repo doesn't have registered anywhere Terraform
-  could see it.
+- **HTTPS is wired up but unarmed.** The listener, the redirect and the rule
+  switching all exist and are validated; what is missing is a certificate ARN
+  to put in `var.certificate_arn`, which needs the domain proved first (step 3
+  above). The DNS itself stays at Cloudflare and outside Terraform's sight on
+  purpose - moving it to Route 53 would take the company's `MX` records down
+  with it.

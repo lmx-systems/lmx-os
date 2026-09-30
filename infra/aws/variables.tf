@@ -90,3 +90,21 @@ variable "static_site_memory" {
   type    = number
   default = 512
 }
+
+variable "certificate_arn" {
+  type        = string
+  default     = ""
+  description = <<-EOT
+    ACM certificate covering api./ops./portal. Empty until one exists, which is
+    the state of a first apply: a certificate cannot be requested for a domain
+    nobody owns, so this cannot be provisioned here.
+
+    Empty, the ALB serves HTTP on :80 and routes by host header - enough to
+    prove the stack came up against the ALB's own DNS name. Set, an HTTPS
+    listener appears, every host rule moves to it, and :80 becomes a 301.
+
+    Must be issued in this stack's region (var.aws_region). An ALB cannot use a
+    certificate from another region, and the failure is an apply-time error
+    rather than anything subtler.
+  EOT
+}
