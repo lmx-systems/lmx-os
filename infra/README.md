@@ -53,14 +53,32 @@ infra/
    (`latest`), which doesn't exist in ECR yet. That's expected; the first
    real deploy (step 4) is what actually gives them something to run.
 
-3. **Point a real domain at it.** `terraform output alb_dns_name` gives
-   the ALB's DNS name - create `CNAME`/`ALIAS` records for
-   `api.lmxit.com`, `ops.lmxit.com`, `portal.lmxit.com` pointing at it
-   (wherever the domain is actually registered - this is an
-   account/ownership step, not something Terraform can do without
-   already owning the domain in Route 53). Then request an ACM
-   certificate for those names and add an HTTPS listener to
-   `infra/aws/alb.tf` using it - not automated here for the same reason.
+3. **Point the domain at it.** `terraform output alb_dns_name` gives the ALB's
+   DNS name. `lmxit.com`'s DNS is at **Cloudflare** (`keyla`/`maciej.
+   ns.cloudflare.com`); the registrar is Squarespace, which needs nothing, and
+   Google holds only Workspace **email** - `MX` at `aspmx.l.google.com`, an SPF
+   include and a site-verification `TXT`. Add three CNAMEs in the Cloudflare
+   zone, entering `api` / `ops` / `portal` rather than the full hostname, since
+   Cloudflare appends the zone itself. Then request an ACM certificate in
+   `us-east-1` for the three names and add an HTTPS listener to
+   `infra/aws/alb.tf` using it - not automated here because the ARN cannot
+   exist before the domain does.
+
+   > **Grey cloud, not orange.** Cloudflare defaults a new CNAME to *Proxied*,
+   > and the apex and `www` already are, so it looks like the house style. Set
+   > all three - and the ACM validation records - to **DNS only**. Proxied,
+   > Cloudflare answers with its own IPs and terminates TLS itself: ACM
+   > validation then never completes, and fails by sitting on "Pending
+   > validation" indefinitely rather than erroring. If Cloudflare's SSL mode is
+   > *Flexible* you also get an infinite redirect loop against an ALB that
+   > redirects to HTTPS. The proxy can be turned on deliberately later, with
+   > SSL mode **Full (strict)**, once the certificate exists.
+
+   > **Do not move DNS to Route 53 to let Terraform manage it.** That means
+   > repointing the nameservers, and every record not recreated in Route 53
+   > first stops existing when it propagates - including the `MX`. Company
+   > email goes down and stays down until somebody notices. Three subdomains
+   > are not worth that.
 
    > **This step is not optional-later, it is a prerequisite for anything
    > working.** The ALB ships with an HTTP:80 listener only, while the
@@ -91,11 +109,51 @@ infra/
      --launch-type FARGATE --network-configuration '...' \
      --overrides '{"containerOverrides":[{"name":"app","command":["alembic","upgrade","head"]}]}'
    ```
-   (Fill in the real `--network-configuration` from `terraform output` -
-   the exact subnet/security-group IDs. This is a one-off `run-task`, not
-   part of the standing service.)
+   The two values it needs are outputs, as of the `ecs_task_subnet_ids` /
+   `app_security_group_id` change - they were not, and this instruction could
+   not be followed as written:
+   ```bash
+   SUBNETS=$(terraform output -json ecs_task_subnet_ids | jq -r 'join(",")')
+   SG=$(terraform output -raw app_security_group_id)
 
-6. **Fill in real third-party credentials** once each account exists
+   aws ecs run-task --cluster lmx-prod-cluster --task-definition lmx-prod-app \
+     --launch-type FARGATE \
+     --network-configuration \
+       "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}" \
+     --overrides '{"containerOverrides":[{"name":"app","command":["alembic","upgrade","head"]}]}'
+   ```
+
+   > **`assignPublicIp=ENABLED` is not optional.** There is no NAT Gateway -
+   > `vpc.tf` argues for that tradeoff - so tasks sit in public subnets with
+   > public IPs and a security group that accepts nothing inbound. Omit the
+   > flag and the task cannot reach ECR to pull its own image, and fails with a
+   > timeout that reads like a networking fault rather than a missing argument.
+
+6. **Create the first ops user.** Nothing else in this runbook mentions it and
+   the deployment is unusable without it: there is no self-service signup for
+   internal staff by design (`docs/ROADMAP.md` S1), so on a fresh stack **no
+   account exists and nobody can log in to `ops.lmxit.com` at all** - a failure
+   indistinguishable from a wrong password. Same one-off `run-task` shape:
+   ```bash
+   aws ecs run-task --cluster lmx-prod-cluster --task-definition lmx-prod-app \
+     --launch-type FARGATE \
+     --network-configuration \
+       "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}" \
+     --overrides '{"containerOverrides":[{"name":"app","command":[
+        "python","-m","scripts.create_ops_user",
+        "--email","you@lmxit.com","--password","<a long one>",
+        "--name","Your Name","--role","admin"]}]}'
+   ```
+   Re-runnable: for an existing email it resets the password and reactivates
+   the account rather than erroring, so it doubles as a password reset.
+   Omitting `--role` on a re-run leaves the existing role alone, so a reset
+   never silently demotes an admin.
+
+   Then create a hub from the console. A hub is the root of everything -
+   clients, drivers, routes and closures all hang off one, and public client
+   signup is refused outright when none exists.
+
+7. **Fill in real third-party credentials** once each account exists
    (`docs/ROADMAP.md` B4/B5, E1): `aws secretsmanager put-secret-value
    --secret-id $(terraform output -raw secrets_manager_secret_arn) ...`
    with the updated JSON blob. `secrets.tf`'s `ignore_changes` means a
