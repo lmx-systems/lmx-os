@@ -215,7 +215,10 @@ async def _deliveries_by_driver_day(
     counts: dict[tuple[uuid.UUID, date], int] = defaultdict(int)
     for route_id, completed_at, _stop_id in rows:
         driver_id = drivers.get(route_id)
-        if driver_id is None:
+        # The query filters `completed_at IS NOT NULL`, and SQLAlchemy 2.1 types the
+        # column as declared, so the guard says so. Reachable only since `drivers` got
+        # a real type - as `dict[Never, Never]` it made this line dead to the checker.
+        if driver_id is None or completed_at is None:
             continue
         counts[(driver_id, completed_at.date())] += 1
     return counts
