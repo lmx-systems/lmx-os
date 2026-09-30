@@ -90,7 +90,8 @@ async def generate_invoice(
             f"No delivered, priced orders for client {client_id} between {period_start} and {period_end}"
         )
 
-    gross_cents = sum(o.fee_cents for o in billable)
+    # `billable` holds only priced orders; the filter just says so to the type checker.
+    gross_cents = sum(o.fee_cents for o in billable if o.fee_cents is not None)
 
     # SLA-breach credits (docs/ROADMAP.md W3). Before this a delivery three hours late
     # billed identically to one on time - the contractual credit existed on paper and
@@ -161,7 +162,23 @@ async def invoice_line_items(session: AsyncSession, invoice: Invoice) -> list[tu
     shop_ids = {o.shop_id for o in orders}
     shops_result = await session.execute(select(Shop).where(Shop.id.in_(shop_ids)))
     shop_names = {s.id: s.name for s in shops_result.scalars().all()}
-    return [(order, shop_names.get(order.shop_id)) for order in orders]
+    return [
+        (order, shop_names.get(order.shop_id) if order.shop_id is not None else None)
+        for order in orders
+    ]
+
+
+def _invoiced_fee(order: Order) -> int:
+    """An invoiced order's fee, which `generate_invoice` guarantees.
+
+    Only priced orders are ever given an `invoice_id` (see `billable` there), and
+    nothing reprices an order after intake. A None here is a broken invariant, and
+    it should say so - not surface as a validation error on a client's invoice, and
+    never be defaulted to a $0 line, which would under-bill without a trace.
+    """
+    if order.fee_cents is None:
+        raise RuntimeError(f"order {order.id} is on invoice {order.invoice_id} without a fee")
+    return order.fee_cents
 
 
 def _summary_view(invoice: Invoice, order_count: int) -> InvoiceSummaryView:
@@ -203,7 +220,7 @@ async def invoice_detail_view(session: AsyncSession, invoice: Invoice) -> Invoic
                 shop_name=shop_name,
                 sla_tier=order.sla_tier,
                 delivered_at=order.delivered_at.isoformat() if order.delivered_at else None,
-                fee_cents=order.fee_cents,
+                fee_cents=_invoiced_fee(order),
                 fee_breakdown=order.fee_breakdown,
             )
             for order, shop_name in items

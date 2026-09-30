@@ -1,5 +1,5 @@
 {
-  "total": 50,
+  "total": 47,
   "files": {
     "app/api/admin_routes.py": 1,
     "app/api/public_api_routes.py": 1,
@@ -9,7 +9,6 @@
     "app/billing/credits.py": 1,
     "app/billing/invoice_pdf.py": 1,
     "app/billing/rates.py": 1,
-    "app/billing/service.py": 3,
     "app/client_auth/password_reset.py": 1,
     "app/events/bus.py": 3,
     "app/experiment/arms.py": 1,
