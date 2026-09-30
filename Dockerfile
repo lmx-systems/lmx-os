@@ -6,8 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv/app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# The lock, so the image runs the set CI tested rather than whatever is newest on
+# the day it is built. See the header of requirements.txt.
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
 COPY app ./app
 COPY migrations ./migrations
