@@ -16,7 +16,7 @@ from ml.m1.challenger import (
     feature_vector,
     is_available,
 )
-from ml.m1.evaluate import Evaluation, Score, run
+from ml.m1.evaluate import Comparison, Evaluation, paired_difference, run
 from ml.m1.features import build, shrunk_history
 from ml.real.export import DetailStop
 
@@ -143,22 +143,34 @@ class TestTheGate:
         assert ships is False
         assert reasons == ["no challenger was scored"]
 
-    def test_a_win_inside_the_noise_is_named_as_one(self):
-        """Gate 4's point. On the real export three of the challenger's four
-        wins sit inside the baseline's interval, and the verdict should say
-        which instead of reading every point estimate as a result."""
-        def score(model, population, pinball, interval):
-            return Score(model=model, population=population, n=40, pinball=pinball,
-                         coverage=0.9, receivers=10, pinball_interval=interval)
+    def test_a_win_the_data_cannot_show_does_not_ship(self):
+        """Decided 30 September 2026: beating the baseline means an advantage
+        the data can show - the paired interval clear of zero - on every
+        population. On the real export, three of the challenger's four point
+        wins were not."""
+        evaluation = Evaluation(cut_day="2026-06-01", comparisons=[
+            Comparison("warm/p50", -0.03, (-0.20, 0.15)),
+            Comparison("cold/p90", -0.40, (-0.60, -0.20)),
+        ])
+        assert evaluation.challenger_verdict() == (False, ["warm/p50"])
 
-        evaluation = Evaluation(cut_day="2026-06-01", scores=[
-            score("sklearn-gbm-q50", "warm/p50", 1.00, (0.8, 1.2)),
-            score("shrunk-quantile", "warm/p50", 1.05, (0.9, 1.3)),
-            score("sklearn-gbm-q90", "cold/p90", 0.80, (0.7, 0.9)),
-            score("shrunk-quantile", "cold/p90", 1.30, (1.1, 1.5)),
+    def test_a_win_shown_everywhere_ships(self):
+        evaluation = Evaluation(cut_day="2026-06-01", comparisons=[
+            Comparison("warm/p50", -0.10, (-0.20, -0.01)),
+            Comparison("cold/p90", -0.40, (-0.60, -0.20)),
         ])
         assert evaluation.challenger_verdict() == (True, [])
-        assert evaluation.inside_the_noise() == ["warm/p50"]
+
+    def test_a_tie_or_a_missing_interval_is_not_a_win(self):
+        assert not Comparison("warm/p90", -0.05, (-0.10, 0.0)).shown
+        assert not Comparison("warm/p90", -0.05, None).shown
+
+    @needs_sklearn
+    def test_every_population_gets_a_paired_comparison(self):
+        evaluation = run(_stops(), with_challenger=True)
+        assert {c.population for c in evaluation.comparisons} == {
+            "warm/p50", "warm/p90", "cold/p50", "cold/p90"
+        }
 
     def test_the_harness_still_runs_with_no_ml_stack(self):
         """The reason the rest of ml/m1/ is standard library."""
@@ -190,3 +202,34 @@ class TestTheGate:
             pytest.skip("scikit-learn is installed here, so nothing is blocked")
         evaluation = run(_stops(), with_challenger=True)
         assert any("no challenger was scored" in note for note in evaluation.notes)
+
+
+
+class TestThePairedDifference:
+    """Challenger minus baseline, dock by dock. Whole docks are resampled, so
+    a win that lives at one dock is not mistaken for a win."""
+
+    def test_identical_predictions_differ_by_nothing(self):
+        rows = build(_stops())
+        same = [1.0] * len(rows)
+        assert paired_difference(rows, same, same, 0.5, seed="t") == (0.0, (0.0, 0.0))
+
+    def test_better_at_every_dock_is_shown(self):
+        rows = build(_stops())
+        truth = [r.dwell_min for r in rows]
+        difference, interval = paired_difference(
+            rows, truth, [t + 2.0 for t in truth], 0.5, seed="t"
+        )
+        assert difference < 0
+        assert Comparison("x", difference, interval).shown
+
+    def test_better_at_one_dock_only_is_not_shown(self):
+        """The resamples that leave that dock out find no difference at all."""
+        rows = build(_stops())
+        target = rows[0].receiver_id
+        truth = [r.dwell_min for r in rows]
+        challenger = [t if r.receiver_id == target else t + 1.0 for r, t in zip(rows, truth)]
+        baseline = [t + 3.0 if r.receiver_id == target else t + 1.0 for r, t in zip(rows, truth)]
+        difference, interval = paired_difference(rows, challenger, baseline, 0.5, seed="t")
+        assert difference < 0
+        assert not Comparison("x", difference, interval).shown

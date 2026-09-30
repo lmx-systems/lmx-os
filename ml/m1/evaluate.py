@@ -28,7 +28,9 @@ says so instead of leaving a reader to guess.
 
 **Release rule, from `MODEL_AND_DATA_BRIEF.md` rule (3):** beat the baseline on
 both populations or ship the baseline. Not "on average", and not "on the
-headline split".
+headline split" - and *beat* means shown: the challenger-minus-baseline
+difference, paired by dock, has a 95% interval clear of zero on every
+population. A point estimate is not enough on fourteen cold docks.
 
 **The calibration slice is carved out of training, twice over.** Once
 chronologically for the warm promise, once by held-out receivers for the cold
@@ -86,6 +88,27 @@ class Score:
 
 
 @dataclass
+class Comparison:
+    """Challenger minus baseline pinball on one population, paired by dock.
+
+    Negative means the challenger is better. Paired because both models are
+    scored on the same stops at the same docks: the question is whether one
+    beats the other dock by dock, and two separate intervals answer a weaker
+    one - they can overlap while a paired difference is clear of zero.
+    """
+
+    population: str
+    difference: float
+    # 95%, resampling docks. None with fewer than two docks.
+    interval: tuple[float, float] | None
+
+    @property
+    def shown(self) -> bool:
+        """The challenger's advantage holds outside the noise."""
+        return self.interval is not None and self.interval[1] < 0
+
+
+@dataclass
 class Promise:
     """A p90 before and after conformal calibration, with what it cost."""
 
@@ -115,69 +138,32 @@ class Evaluation:
     notes: list[str] = field(default_factory=list)
     # The shrinkage `k` the training days chose, per quantile.
     prior_strength: dict[str, float] = field(default_factory=dict)
+    # Challenger against baseline, one per population, when a challenger ran.
+    comparisons: list[Comparison] = field(default_factory=list)
 
     def challenger_verdict(self) -> tuple[bool, list[str]]:
-        """`PRD-5`: beats the baseline on both populations, or ships the baseline.
+        """`PRD-5`: the challenger ships only where its advantage is shown,
+        and it must be shown on every population.
 
-        Both, and at every quantile. Not on average, and not on the headline
-        split - `MODEL_AND_DATA_BRIEF.md` rule (3) exists because the p90 model
-        covered 66.5% of cold-start cases after promising 90%, and an average
-        across warm and cold would have hidden exactly that.
+        Every population and every quantile, never on average - `MODEL_AND_DATA_BRIEF.md`
+        rule (3) exists because the p90 model covered 66.5% of cold-start
+        cases after promising 90%, and an average across warm and cold would
+        have hidden exactly that.
 
-        Returns (ships, populations it lost on). An empty loss list with no
-        challenger scored is not a pass: nothing was tested.
+        *Shown* means the 95% interval of challenger-minus-baseline pinball,
+        paired by dock, lies entirely below zero (decided 30 September 2026).
+        Rule (3) says beat the baseline; on fourteen cold docks a point estimate
+        "beats" by luck often enough that a win has to be one the data can show.
+        On the real export the challenger won all four on point estimates, and
+        switching off any one gate fix turned warm/p90 back into a loss.
+
+        Returns (ships, populations where the win is not shown). An empty list
+        with no challenger scored is not a pass: nothing was tested.
         """
-        challenger_scores = [
-            s for s in self.scores if s.model.startswith("sklearn-")
-        ]
-        if not challenger_scores:
+        if not self.comparisons:
             return False, ["no challenger was scored"]
-        lost = []
-        for score in challenger_scores:
-            baseline = next(
-                (
-                    s for s in self.scores
-                    if s.population == score.population
-                    and s.model == "shrunk-quantile"
-                ),
-                None,
-            )
-            if baseline is None or score.pinball >= baseline.pinball:
-                lost.append(score.population)
-        return not lost, sorted(lost)
-
-    def inside_the_noise(self) -> list[str]:
-        """Populations where the challenger's 95% interval overlaps the baseline's.
-
-        A conservative reading - two overlapping intervals can still hide a
-        real paired difference - but it is the honest one for a report: a win
-        these intervals do not clear has not been shown to be a win. On the real
-        export it is three of the four, and switching off any one of the gate
-        fixes turns warm/p90 back into a loss.
-        """
-        tied = []
-        for score in self.scores:
-            if not score.model.startswith("sklearn-"):
-                continue
-            baseline = next(
-                (
-                    s for s in self.scores
-                    if s.population == score.population
-                    and s.model == "shrunk-quantile"
-                ),
-                None,
-            )
-            if (
-                baseline is None
-                or score.pinball_interval is None
-                or baseline.pinball_interval is None
-            ):
-                continue
-            low, high = score.pinball_interval
-            baseline_low, baseline_high = baseline.pinball_interval
-            if low <= baseline_high and baseline_low <= high:
-                tied.append(score.population)
-        return sorted(tied)
+        not_shown = sorted(c.population for c in self.comparisons if not c.shown)
+        return not not_shown, not_shown
 
     def baseline_wins(self) -> list[str]:
         """Populations where the shrunk baseline did not beat the constant."""
@@ -270,14 +256,57 @@ def _dock_intervals(
     return _percentile_interval(losses), _percentile_interval(kept)
 
 
-def _score(model, rows: list[DwellRow], q: float, population: str) -> Score:
-    predicted = model.predict(rows)
+def paired_difference(
+    rows: list[DwellRow],
+    challenger: list[float],
+    baseline: list[float],
+    q: float,
+    *,
+    seed: str,
+    resamples: int = BOOTSTRAP_RESAMPLES,
+) -> tuple[float, tuple[float, float] | None]:
+    """Challenger minus baseline pinball, with a 95% interval over docks.
+
+    Each dock contributes its own stops' loss difference, and whole docks are
+    resampled - the same unit as the score intervals, for the same reason.
+    Returns (difference, interval); the interval is None with fewer than two
+    docks.
+    """
+    per_dock: dict[str, list[float]] = {}
+    for row, c, b in zip(rows, challenger, baseline):
+        cell = per_dock.setdefault(row.receiver_id, [0.0, 0.0])
+        cell[0] += pinball_loss([row.dwell_min], [c], q) - pinball_loss(
+            [row.dwell_min], [b], q
+        )
+        cell[1] += 1.0
+    docks = [per_dock[k] for k in sorted(per_dock)]
+    if not docks:
+        return 0.0, None
+    difference = round(sum(d[0] for d in docks) / sum(d[1] for d in docks), 4)
+    if len(docks) < 2:
+        return difference, None
+
+    rng = random.Random(seed)
+    draws: list[float] = []
+    for _ in range(resamples):
+        total = count = 0.0
+        for _ in range(len(docks)):
+            cell = docks[rng.randrange(len(docks))]
+            total += cell[0]
+            count += cell[1]
+        draws.append(total / count)
+    return difference, _percentile_interval(draws)
+
+
+def _score(
+    name: str, rows: list[DwellRow], predicted: list[float], q: float, population: str
+) -> Score:
     actual = [r.dwell_min for r in rows]
     pinball_interval, coverage_interval = _dock_intervals(
-        rows, predicted, q, seed=f"{population}|{model.name}"
+        rows, predicted, q, seed=f"{population}|{name}"
     )
     return Score(
-        model=model.name,
+        model=name,
         population=population,
         n=len(rows),
         pinball=round(pinball_loss(actual, predicted, q), 4),
@@ -368,16 +397,29 @@ def run(stops: list[DetailStop], *, with_challenger: bool = False) -> Evaluation
         shrunk = ShrunkQuantileBaseline(q=q, prior_strength=k).fit(train)
         flat = GlobalQuantile(q=q).fit(train)
         models: list = [shrunk, flat]
+        challenger = None
         if challenger_available:
             from ml.m1.challenger import GradientBoostedQuantile
 
-            models.append(GradientBoostedQuantile(q=q, prior_strength=k).fit(train))
+            challenger = GradientBoostedQuantile(q=q, prior_strength=k).fit(train)
+            models.append(challenger)
         for population, subset in (("warm", warm), ("cold", cold)):
             if not subset:
                 continue
+            name = f"{population}/{label}"
+            predicted = {model.name: model.predict(subset) for model in models}
             for model in models:
-                score = _score(model, subset, q, f"{population}/{label}")
-                evaluation.scores.append(score)
+                evaluation.scores.append(
+                    _score(model.name, subset, predicted[model.name], q, name)
+                )
+            if challenger is not None:
+                difference, interval = paired_difference(
+                    subset, predicted[challenger.name], predicted[shrunk.name], q,
+                    seed=f"{name}|paired",
+                )
+                evaluation.comparisons.append(
+                    Comparison(population=name, difference=difference, interval=interval)
+                )
 
     promise_k = evaluation.prior_strength["p90"]
 
@@ -445,23 +487,18 @@ def run(stops: list[DetailStop], *, with_challenger: bool = False) -> Evaluation
         )
 
     if with_challenger and challenger_available:
-        ships, lost_on = evaluation.challenger_verdict()
+        ships, not_shown = evaluation.challenger_verdict()
+        shown = sorted(c.population for c in evaluation.comparisons if c.shown)
         if ships:
             verdict = (
-                "PRD-5: the challenger beats the baseline on every population - it "
-                "may ship"
+                "PRD-5: the challenger's advantage is shown on every population, "
+                "paired by dock - it may ship"
             )
-            tied = evaluation.inside_the_noise()
-            if tied:
-                verdict += (
-                    ". But its interval overlaps the baseline's on "
-                    + ", ".join(tied)
-                    + ": those wins are point estimates, and rule (3) as written "
-                    "does not ask for more"
-                )
         else:
             verdict = (
-                "PRD-5: the challenger lost on " + ", ".join(lost_on)
+                "PRD-5: the challenger's advantage is not shown on "
+                + ", ".join(not_shown)
+                + (f" (it is on {', '.join(shown)})" if shown else "")
                 + " - ship the baseline"
             )
         evaluation.notes.append(verdict)

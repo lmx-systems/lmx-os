@@ -74,6 +74,15 @@ def main() -> int:
             f"{score.coverage:9.3f}  {interval(score.coverage_interval, 3)}"
         )
 
+    if evaluation.comparisons:
+        print("\n  challenger minus baseline pinball, paired by dock (negative: challenger better):")
+        for comparison in sorted(evaluation.comparisons, key=lambda c: c.population):
+            print(
+                f"    {comparison.population:12}{comparison.difference:+8.3f}  "
+                f"{interval(comparison.interval, 3):18}"
+                f"{'shown' if comparison.shown else 'not shown'}"
+            )
+
     print("\n  the p90 promise, before and after conformal calibration:")
     for promise in evaluation.promises:
         print(
