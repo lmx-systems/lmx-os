@@ -20,7 +20,25 @@ env:
 
 jobs:
   deploy:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # The `vars.AWS_DEPLOY_ROLE_ARN != ''` clause is the difference between a
+    # skipped job and a red one. No AWS account exists yet, so every merge to
+    # main fired this, failed at the credentials step, and posted a failure -
+    # fourteen of them by the time anybody counted.
+    #
+    # That matters more than tidiness. A branch whose checks are permanently
+    # part-red teaches everyone to read red as normal, and this repository has
+    # already paid for that lesson once: `ci.yml`'s test step was incapable of
+    # failing for weeks and nobody noticed, because nobody was reading the
+    # ticks. A deploy that cannot work should be skipped, and red should mean
+    # something is wrong.
+    #
+    # Nothing to remember later: setting the repository variable (step 7 of
+    # infra/README.md) is what switches this on, and that is the same act that
+    # makes deploying possible at all.
+    if: >-
+      ${{ vars.AWS_DEPLOY_ROLE_ARN != ''
+      && (github.event_name == 'workflow_dispatch'
+      || github.event.workflow_run.conclusion == 'success') }}
     runs-on: ubuntu-latest
 
     steps:
