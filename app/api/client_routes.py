@@ -70,7 +70,7 @@ from app.legal.documents import (
 )
 from app.models.client_sla_term import ClientSlaTerm
 from app.models.delivery_rating import RECIPIENT, DeliveryRating
-from app.models.order import Order, OrderStatus
+from app.models.order import Order, OrderStatus, SLATier
 from app.models.stop import Stop, StopOrder
 from app.sla.commitment import delivery_commitment, terms_for_client
 from app.models.return_item import ReturnItem
@@ -391,9 +391,16 @@ async def _annotate_commitments(
 
     # The promise that carries money, computed by the same function billing credits
     # against (app/sla/commitment.py).
-    commitment = delivery_commitment(order, terms.get(order.sla_tier))
+    commitment = delivery_commitment(
+        order,
+        # `SLATier(...)` because the attribute is a plain str until the row is
+        # reloaded - ingestion assigns the string - whatever its annotation says.
+        terms.get(SLATier(order.sla_tier).value) if order.sla_tier is not None else None,
+    )
     view.promised_delivery_by = (
-        commitment.promised_delivery_by.isoformat() if commitment.exists else None
+        commitment.promised_delivery_by.isoformat()
+        if commitment.promised_delivery_by is not None
+        else None
     )
 
     # The live route's arrival when there is one, the pre-route straight-line estimate
@@ -750,7 +757,9 @@ async def flag_shop_returns_ready(
     if shop is None or str(shop.client_id) != client.client_id:
         raise HTTPException(status_code=404, detail="Shop not found")
 
-    company = await session.get(Client, uuid.UUID(client.client_id))
+    # `get_one`: `get_current_client` has already found this user, and a
+    # user's client is a non-null foreign key, so a missing row is corruption.
+    company = await session.get_one(Client, uuid.UUID(client.client_id))
     item = ReturnItem(
         hub_id=company.hub_id, shop_id=shop.id, origin_order_id=None,
         manifest=body.manifest, status="ready_for_pickup",
@@ -989,6 +998,7 @@ async def submit_orders_batch(
             )
             continue
 
+        tier, collect_by = _classified(order)
         results.append(
             ClientOrderBatchRowResult(
                 index=index,
@@ -997,8 +1007,8 @@ async def submit_orders_batch(
                     order_id=str(order.id),
                     reference=reference,
                     status=order.status.value,
-                    sla_tier=order.sla_tier,
-                    collect_by=order.hold_deadline,
+                    sla_tier=tier,
+                    collect_by=collect_by,
                     estimated_delivery_by=await _estimate_delivery_by(session, order),
                     fee_cents=order.fee_cents,
                     dispatchable=order.delivery_lat is not None and order.delivery_lng is not None,
@@ -1114,16 +1124,32 @@ async def submit_order(
     # through the portal waits for somebody else's event.
     await dispatch_event_bus.publish(str(client_row.hub_id), "order_held")
 
+    tier, collect_by = _classified(order)
     return ClientOrderResult(
         order_id=str(order.id),
         reference=reference,
         status=order.status.value,
-        sla_tier=order.sla_tier,
-        collect_by=order.hold_deadline,
+        sla_tier=tier,
+        collect_by=collect_by,
         estimated_delivery_by=await _estimate_delivery_by(session, order),
         fee_cents=order.fee_cents,
         dispatchable=order.delivery_lat is not None and order.delivery_lng is not None,
     )
+
+
+def _classified(order: Order) -> tuple[str, datetime]:
+    """A portal order's tier and collect-by time, which ingestion always sets.
+
+    Portal orders are LMX-owned, so ingestion classifies every one before this point
+    (`app/ingestion/service.py`). Both columns are nullable only because EXTERNAL
+    orders exist. A None here is a broken invariant, and it should say so rather than
+    surface as a validation error from the response model.
+    """
+    if order.sla_tier is None or order.hold_deadline is None:
+        raise RuntimeError(f"order {order.id} reached the portal response unclassified")
+    # `SLATier(...)`, not `.value`: straight after ingestion the attribute holds the
+    # plain string ingestion assigned, and only a reload turns it into the enum.
+    return SLATier(order.sla_tier).value, order.hold_deadline
 
 
 async def _estimate_delivery_by(session: AsyncSession, order: Order) -> datetime | None:
@@ -1515,7 +1541,7 @@ async def upload_order_manifest(
     # way to classify an order is exactly what §1.1 forbids - and the sort at
     # the end puts the file back in its own order, so a dispatcher still reads
     # results against the lines they uploaded.
-    by_deadline: dict[str, list] = {}
+    by_deadline: dict[DeadlineChoice, list] = {}
     for row in parsed.rows:
         by_deadline.setdefault(row.deadline or deadline, []).append(row)
 
