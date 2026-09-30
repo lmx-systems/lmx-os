@@ -241,8 +241,10 @@ async def prune_declined_applications(
                 )
             )
         )
-        for model, column in _CLIENT_OWNED:
-            await session.execute(delete(model).where(column == client.id))
+        # Own names rather than reusing the blocker loop's `model`: the tables differ,
+        # and one variable typed as both is how a delete gets pointed at the wrong one.
+        for owned_model, owned_column in _CLIENT_OWNED:
+            await session.execute(delete(owned_model).where(owned_column == client.id))
         await session.delete(client)
         deleted += 1
 
