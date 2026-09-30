@@ -234,7 +234,7 @@ def _item(kind: str, order: Order, now: datetime, *, detail: str) -> Exception_:
         order_id=order.id,
         client_id=order.client_id,
         external_ref=order.external_order_ref,
-        sla_tier=order.sla_tier.value if hasattr(order.sla_tier, "value") else order.sla_tier,
+        sla_tier=order.sla_tier.value if order.sla_tier is not None else None,
         minutes_waiting=round(_minutes_since(reference, now), 1),
         promised_at=order.promised_at,
         detail=detail,

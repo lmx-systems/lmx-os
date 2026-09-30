@@ -131,8 +131,10 @@ async def assess_credits(
                 delivered_at=order.delivered_at,
                 minutes_late=minutes_late,
                 amount_cents=amount,
+                # The term's tier, a plain string. Formatting the order's tier gave
+                # "SLATier.T2 delivered ..." - an enum's str(), on a client's invoice.
                 reason=(
-                    f"{order.sla_tier} delivered {minutes_late} min late "
+                    f"{term.sla_tier} delivered {minutes_late} min late "
                     f"({term.credit_percent}% credit)"
                 ),
             )

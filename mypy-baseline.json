@@ -1,5 +1,5 @@
 {
-  "total": 81,
+  "total": 80,
   "files": {
     "app/api/admin_routes.py": 1,
     "app/api/public_api_routes.py": 1,
@@ -28,7 +28,6 @@
     "app/optimizer/fallback.py": 1,
     "app/record/cost.py": 5,
     "app/reporting/csv_export.py": 3,
-    "app/reporting/exceptions.py": 1,
     "app/reporting/operations.py": 9,
     "app/shadow/divergence.py": 3,
     "app/shadow/scheduler.py": 1,
