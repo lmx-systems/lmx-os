@@ -1,5 +1,5 @@
 {
-  "total": 80,
+  "total": 70,
   "files": {
     "app/api/admin_routes.py": 1,
     "app/api/public_api_routes.py": 1,
@@ -11,10 +11,8 @@
     "app/billing/rates.py": 1,
     "app/billing/service.py": 3,
     "app/client_auth/password_reset.py": 1,
-    "app/delivery/eta.py": 5,
     "app/events/bus.py": 3,
     "app/experiment/arms.py": 1,
-    "app/fleet_state/manager.py": 5,
     "app/geocoding/cache.py": 4,
     "app/gig_platform/accept_gate.py": 1,
     "app/gig_platform/density.py": 4,
