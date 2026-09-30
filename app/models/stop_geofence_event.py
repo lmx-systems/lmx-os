@@ -27,10 +27,10 @@ delivered more than once. `(stop_id, kind, occurred_at)` is UNIQUE: a replay is
 a conflict the database refuses rather than a second arrival that doubles a
 dwell sample.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -49,7 +49,7 @@ class StopGeofenceEvent(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ),
     )
 
-    stop_id: Mapped[UUID] = mapped_column(
+    stop_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("stops.id"), nullable=False, index=True
     )
 

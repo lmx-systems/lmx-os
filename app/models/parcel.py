@@ -15,10 +15,10 @@ either way, so the printer-vs-scan-existing hardware decision stays
 deferred and reversible - it only changes where the value comes from, not
 this model.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -37,8 +37,8 @@ class Parcel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Denormalized from the order for a simple per-hub unique constraint and
     # a single-column scan lookup (barcode -> parcel within the hub).
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
-    order_id: Mapped[UUID] = mapped_column(ForeignKey("orders.id"), nullable=False, index=True)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
+    order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id"), nullable=False, index=True)
     barcode: Mapped[str] = mapped_column(String(128), nullable=False)
     # When this parcel was scanned at pickup. Null = not yet collected;
     # "3 of 5 collected" is a count of non-null scanned_at across an order's

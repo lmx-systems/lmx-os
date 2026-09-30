@@ -15,6 +15,7 @@ directly, that is the bug this docstring exists to prevent.
 """
 import uuid
 from datetime import datetime, timezone
+from typing import Literal, overload
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +51,18 @@ _WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _MIN_SAMPLES_FOR_P90 = 10
 
 
+@overload
+async def profile_for(
+    session: AsyncSession, location: Location, *, create: Literal[True]
+) -> ReceiverProfile: ...
+
+
+@overload
+async def profile_for(
+    session: AsyncSession, location: Location, *, create: Literal[False] = False
+) -> ReceiverProfile | None: ...
+
+
 async def profile_for(
     session: AsyncSession, location: Location, *, create: bool = False
 ) -> ReceiverProfile | None:
@@ -58,6 +71,14 @@ async def profile_for(
     An absorbed dock is not a place, so asking for its profile must return the
     surviving dock's - otherwise a merge would quietly orphan everything we knew
     about the door.
+
+    **`create=True` cannot return None, and the overloads above say so.** That
+    is not a typing nicety: every writer in this module calls it that way and
+    then sets a field on the result, so a single `-> ReceiverProfile | None`
+    signature made twenty call sites look like unguarded None-dereferences to
+    a reader and to mypy, and buried the real ones. The guarantee was always
+    there - `create` is the branch that returns a freshly added row - it just
+    was not written down.
     """
     dock = await canonical_location(session, location)
     existing = await session.scalar(

@@ -1,6 +1,6 @@
 """A driver assigned to a hub."""
+import uuid
 from sqlalchemy import ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -25,7 +25,7 @@ VEHICLE_TYPES = ("car", "van", "bike")
 class Driver(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "drivers"
 
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     phone: Mapped[str] = mapped_column(String(32), nullable=False)
     vehicle_capacity_units: Mapped[int] = mapped_column(default=1, nullable=False)

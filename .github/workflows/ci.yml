@@ -61,8 +61,17 @@ jobs:
       - name: Lint (ruff)
         run: ruff check app tests
 
-      - name: Type check (mypy)
-        run: mypy app || true  # advisory only until Phase 1 models settle
+      # Was `mypy app || true` - "advisory only until Phase 1 models settle".
+      # Phase 1 has not settled, and the honest cost of that was 197 findings
+      # nobody could act on, among which exactly one was a live defect
+      # (`delivery/resolution.py` using an unguarded `session.get` result).
+      #
+      # Still not demanding zero: most of what remains is an invariant the type
+      # cannot express, a redis-py stub artifact, or SQLAlchemy's own UUID
+      # column type. Held at a per-file baseline instead, which can shrink and
+      # cannot grow - the same bargain the five invariant tests make.
+      - name: Type check (mypy, held at baseline)
+        run: python -m scripts.mypy_baseline
 
       # `set -o pipefail` is the whole point of this line, and its absence made
       # every CI run since this step was written incapable of failing. A bash

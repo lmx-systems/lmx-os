@@ -20,10 +20,10 @@ payment mode the order object could not express - `PayerType` had no COD value, 
 driver could flag a COD dispute on an order that was never COD. This table and
 `Order.payer_type = 'cash_on_delivery'` are the other half of that.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -43,19 +43,19 @@ OUTCOMES = (OUTCOME_COLLECTED, OUTCOME_DISPUTED)
 class CodCollection(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "cod_collections"
 
-    order_id: Mapped[UUID] = mapped_column(
+    order_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("orders.id"), nullable=False, index=True
     )
     # The stop it happened at, so a commingled dropoff's collections are separable.
-    stop_id: Mapped[UUID] = mapped_column(ForeignKey("stops.id"), nullable=False)
+    stop_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("stops.id"), nullable=False)
     # Who had the cash. The custody trail, and the reason this isn't a stop column.
-    driver_id: Mapped[UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
+    driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
     # Denormalised so the dispute report can group by account without joining through
     # orders on every row - and so a report stays right if an order is later reassigned.
-    client_id: Mapped[UUID | None] = mapped_column(
+    client_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("clients.id"), nullable=True, index=True
     )
-    shop_id: Mapped[UUID | None] = mapped_column(
+    shop_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("shop_profiles.id"), nullable=True, index=True
     )
 

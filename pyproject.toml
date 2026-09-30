@@ -45,3 +45,76 @@ testpaths = ["tests"]
 markers = [
     "integration: requires real Postgres + Redis (auto-skips if unreachable, see tests/integration/conftest.py)",
 ]
+
+# ---------------------------------------------------------------------------
+# mypy
+# ---------------------------------------------------------------------------
+#
+# **197 errors is not 197 problems, and that was the problem.** mypy ran with
+# no configuration at all against a SQLAlchemy + Pydantic codebase, which is
+# the worst case for default-mode false positives, and `ci.yml` made it
+# advisory with `|| true`. A number nobody can act on is a number nobody reads.
+#
+# Sampling the highest-risk categories - the ones that mean "this raises at
+# runtime if the value is None" - found four kinds of finding and only one
+# real defect:
+#
+#   * `record/cost.py`'s arithmetic on `datetime | None`: the invariant is
+#     real (`source is None` is set exactly when arrive or depart is None) and
+#     lives in construction logic the type cannot express. False positive.
+#   * `password_reset.py` returning `bytes | str | None`: `decode_responses=
+#     True` is set in `redis_client.py`. A redis-py stub artifact.
+#   * `sqlalchemy.sql.sqltypes.UUID` used to index a `dict[uuid.UUID, ...]`:
+#     a known SQLAlchemy typing wart, not a bug.
+#   * `delivery/resolution.py` using an unguarded `session.get` result. Real.
+#
+# So the goal here is not zero. It is **a number that means something**, held
+# at a baseline that cannot grow - the same bargain the five invariant tests
+# make, where an entry is a debt with a name on it rather than a silence.
+#
+# **197 -> 111 so far, and the two big wins were both one unwritten fact:**
+#
+#   * 42 of 43 model files annotated `Mapped[UUID]` with SQLAlchemy's dialect
+#     type instead of `uuid.UUID`, so every id read as a type object rather
+#     than a value. 93 annotations, -48 errors, provably schema-neutral.
+#   * `profile_for(create=True)` cannot return None and did not say so. One
+#     `@overload`, -22 errors, and `identity/profile.py` went to zero.
+#
+# **What is left is the genuinely hard tail**, and it does not reduce by
+# cleverness:
+#
+#   * ~9 from redis-py's `bytes | str` replies. `decode_responses=True` makes
+#     them `str`, but `redis.Redis` is not generic in the installed version -
+#     tried `redis.Redis[str]` and it is a `type-arg` error - so closing these
+#     means a typed wrapper or nine casts, which is more machinery than the
+#     bug it prevents.
+#   * `record/cost.py`'s `StopTiming`, where `source is not None` guarantees
+#     both timestamps are set. Expressing that needs a second dataclass for
+#     complete timings, which is a change to REC-2's data flow and wants its
+#     own decision rather than being swept into a cleanup.
+#   * A long tail of real optionality - `float | None`, `SLATier | None`,
+#     `Order | None` - each needing a judgement at its own call site about
+#     whether the None is possible and what should happen if it is.
+[tool.mypy]
+python_version = "3.11"
+files = ["app"]
+# Everything below this line is off by default in mypy's default mode. Turning
+# these three on is what makes the check worth running at all: they catch a
+# function whose annotations disagree with its body, which is the class of
+# error that actually bites.
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+# Deliberately NOT enabled yet: `disallow_untyped_defs`, `strict_optional`
+# tightening beyond the default, and `disallow_any_generics`. Each would add
+# hundreds of findings to a baseline nobody has worked through, which is how
+# this ended up ignored the first time.
+pretty = true
+
+# Three libraries that ship no stubs and no py.typed marker. Not a code
+# problem and not fixable by us - `types-*` packages do not exist for any of
+# them. Named individually rather than with a blanket
+# `ignore_missing_imports` so a NEW untyped dependency still shows up.
+[[tool.mypy.overrides]]
+module = ["geopy.*", "reportlab.*", "boto3.*", "botocore.*"]
+ignore_missing_imports = true

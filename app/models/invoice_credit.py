@@ -13,10 +13,10 @@ with, which is what a credit has to be.
 Stored at generation time and never recomputed. If a client's terms change next quarter,
 last quarter's statement must not quietly change with them.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -26,10 +26,10 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 class InvoiceCredit(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "invoice_credits"
 
-    invoice_id: Mapped[UUID] = mapped_column(
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("invoices.id"), nullable=False, index=True
     )
-    order_id: Mapped[UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
+    order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
     sla_tier: Mapped[str] = mapped_column(String(16), nullable=False)
 
     # Positive. Subtracted at the invoice level rather than stored negative, so nothing

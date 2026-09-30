@@ -24,6 +24,7 @@ optimizer is retuned next month, last month's recorded decisions must not quietl
 with it - the same reasoning as `InvoiceCredit` storing what was promised rather than
 recomputing it.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String
@@ -39,7 +40,7 @@ class ShadowDecision(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     __tablename__ = "shadow_decisions"
 
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
 
     # When the decision was made, not when the row was written. The scorecard windows
     # on this, and `created_at` would drift from it if a write were ever retried.
@@ -85,16 +86,16 @@ class ShadowOrderDecision(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     __tablename__ = "shadow_order_decisions"
 
-    shadow_decision_id: Mapped[UUID] = mapped_column(
+    shadow_decision_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("shadow_decisions.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     # Not a FK to orders.id on purpose: a shadow decision is a record of a moment, and
     # it must survive the order being deleted under a retention policy (R3) rather than
     # taking the evidence with it.
-    order_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
 
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
     planned_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
@@ -106,7 +107,7 @@ class ShadowOrderDecision(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     #                "we tried and failed to place it" are different decisions.
     decision: Mapped[str] = mapped_column(String(16), nullable=False)
 
-    driver_id: Mapped[UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    driver_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     # Position in that driver's planned route. Lets a divergence be graded rather than
     # just counted - the same driver in a different order is a smaller disagreement

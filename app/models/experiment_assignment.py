@@ -28,6 +28,7 @@ holding the row, so `EXP-3`'s integrity monitor can verify the arm rather than
 trust it - and a re-roll becomes visible, because the recomputed value would no
 longer match.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, Integer, String
@@ -60,9 +61,9 @@ class ExperimentAssignment(Base, UUIDPrimaryKeyMixin):
     # No foreign keys, for the reason 0051 and 0053 already record: an
     # assignment is evidence about a moment, and it must stay readable if the
     # order or the client is ever purged.
-    hub_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    client_id: Mapped[UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
-    order_id: Mapped[UUID] = mapped_column(
+    hub_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    client_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    order_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, unique=True, index=True
     )
 

@@ -32,8 +32,8 @@ over-normalizing silently fuses two real places that differ by a house number,
 and nothing downstream can detect it. A duplicate is visible; a bad merge is
 not. Per §2.2(c) the founding set is merged by a person for exactly this reason.
 """
+import uuid
 from sqlalchemy import Float, ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -74,7 +74,7 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     #
     # Deleting the absorbed row would undo the merge on the next import, which is
     # how de-duplication efforts usually fail.
-    merged_into_id: Mapped[UUID | None] = mapped_column(
+    merged_into_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("locations.id"), nullable=True, index=True
     )
 

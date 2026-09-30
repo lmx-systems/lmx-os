@@ -17,10 +17,10 @@ Lifecycle: expected -> collected -> returned_to_shop. `not_ready` when the
 core wasn't available to collect (feeds the reschedule workflow);
 `cancelled` if it's called off.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -30,15 +30,15 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 class ReturnItem(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "return_items"
 
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
     # The forward delivery this core came off - keeps the deposit/exchange
     # traceable back to the order that generated it (W1's "links to its
     # originating delivery"). Nullable (slice 2): a *standalone* return a
     # shop flags for pickup - cores it accumulated rather than handed back
     # at a specific delivery - has no single originating order.
-    origin_order_id: Mapped[UUID | None] = mapped_column(ForeignKey("orders.id"), nullable=True, index=True)
+    origin_order_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("orders.id"), nullable=True, index=True)
     # Where the core goes back to - the originating order's shop.
-    shop_id: Mapped[UUID] = mapped_column(ForeignKey("shop_profiles.id"), nullable=False)
+    shop_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("shop_profiles.id"), nullable=False)
     # What's being returned - free text for v1 ("core: alternator"); a
     # structured line-item manifest can replace this without a schema change
     # if per-item audit becomes a requirement.

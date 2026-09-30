@@ -31,10 +31,10 @@ prevent.
 delivered more than once. The unique constraint makes a replay a conflict the
 database refuses rather than a second arrival that invents a turnaround.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -57,10 +57,10 @@ class HubGeofenceEvent(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ),
     )
 
-    hub_id: Mapped[UUID] = mapped_column(
+    hub_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("hubs.id"), nullable=False, index=True
     )
-    driver_id: Mapped[UUID] = mapped_column(
+    driver_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("drivers.id"), nullable=False, index=True
     )
 

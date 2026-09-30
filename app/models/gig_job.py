@@ -27,11 +27,12 @@ G2, manual entry) on purpose - see app/gig_platform/service.py. Building the
 store before the intake keeps that decision swappable rather than
 architectural.
 """
+import uuid
 from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -97,11 +98,11 @@ class GigJob(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         Index("ix_gig_jobs_hub_offered", "hub_id", "offered_at"),
     )
 
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
 
     # Null while a job is still `offered` and nobody has committed to it.
     # Set on acceptance, and for a pinned job it is then immovable.
-    driver_id: Mapped[UUID | None] = mapped_column(ForeignKey("drivers.id"), nullable=True)
+    driver_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("drivers.id"), nullable=True)
 
     source_platform: Mapped[str] = mapped_column(String(24), nullable=False)
     intake_source: Mapped[str] = mapped_column(String(24), nullable=False, default="manual")

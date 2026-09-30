@@ -10,10 +10,10 @@ A closure is a *local calendar day* in the hub's own timezone
 should turn a UTC instant into "is this hub closed right now". One row per
 closed day per hub.
 """
+import uuid
 from datetime import date
 
 from sqlalchemy import Date, ForeignKey, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -26,7 +26,7 @@ class HubClosure(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         UniqueConstraint("hub_id", "closure_date", name="uq_hub_closure_hub_date"),
     )
 
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False, index=True)
     closure_date: Mapped[date] = mapped_column(Date, nullable=False)
     # Optional free-text ("Thanksgiving", "Snow day") - operational context
     # for whoever reviews the calendar, not used by any decision logic.

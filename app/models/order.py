@@ -2,11 +2,12 @@
 An order ingested from a client's POS/DMS. This is the row the Dynamic SLA
 Engine classifies (T1/T2/T3) and the Batch-Hold Queue clusters.
 """
+import uuid
 import enum
 from datetime import datetime
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -66,7 +67,7 @@ class OrderStatus(str, enum.Enum):
 class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "orders"
 
-    hub_id: Mapped[UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
+    hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
     # Both nullable as of the LMX Link contract (migration 0028). A path with no
     # client relationship at all has no client_id, and an order captured before
     # its pickup address has been resolved to a Shop has no shop_id yet.
@@ -76,8 +77,8 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # explicitly - see app/api/client_routes.py and app/billing/service.py,
     # which both already compare against a specific client_id and are therefore
     # safe. A query that omits the filter would leak across the boundary.
-    client_id: Mapped[UUID | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
-    shop_id: Mapped[UUID | None] = mapped_column(ForeignKey("shop_profiles.id"), nullable=True)
+    client_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("clients.id"), nullable=True)
+    shop_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("shop_profiles.id"), nullable=True)
 
     external_order_ref: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     source_system: Mapped[str] = mapped_column(String(32), nullable=False)  # epicor | mam | asa | flat_file
@@ -274,7 +275,7 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Null for every order priced before 0045, and for any order the client had no
     # configured rate for. Null here never means "free" - `fee_cents` carries that
     # distinction and is null too.
-    rate_version_id: Mapped[UUID | None] = mapped_column(
+    rate_version_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("client_rates.id"), nullable=True
     )
 
@@ -297,7 +298,7 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # statement for a period - null means "not yet billed," which is what
     # keeps a later invoice run from double-billing an order that was
     # already included in an earlier one (docs/ROADMAP.md C3).
-    invoice_id: Mapped[UUID | None] = mapped_column(
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("invoices.id"), nullable=True, index=True
     )
 

@@ -7,10 +7,10 @@ looked up on every request - revocation is a Redis denylist check
 (app/driver_auth/dependencies.py), this table is just the driver-facing
 "which devices am I signed in on" record plus the un-revoke-on-re-OTP path.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -21,7 +21,7 @@ class DriverDevice(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "driver_devices"
     __table_args__ = (UniqueConstraint("driver_id", "device_id", name="uq_driver_devices_driver_device"),)
 
-    driver_id: Mapped[UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
+    driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
     # Client-generated stable per-install id (a UUID generated once and
     # persisted in the app's SecureStore) - not an OS advertising id.
     device_id: Mapped[str] = mapped_column(String(128), nullable=False)

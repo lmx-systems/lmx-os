@@ -25,6 +25,7 @@ fact, and refusing to record it would bias the measurement towards exactly the
 deliveries the system handled - which is the population whose performance is
 being claimed.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, String
@@ -83,18 +84,18 @@ class OutcomeEntry(Base, UUIDPrimaryKeyMixin):
 
     __tablename__ = "outcome_ledger"
 
-    hub_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    hub_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
 
     # The key. Nullable because not every outcome descends from a decision we
     # recorded - see the module docstring. No foreign key, for the same reason
     # 0051 dropped its own: an outcome must stay readable if its decision is
     # ever purged, and evidence that vanishes with its subject is not evidence.
-    decision_snapshot_id: Mapped[UUID | None] = mapped_column(
+    decision_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
     )
 
     subject_type: Mapped[str] = mapped_column(String(8), nullable=False)
-    subject_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    subject_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
 
     kind: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
 
@@ -116,4 +117,4 @@ class OutcomeEntry(Base, UUIDPrimaryKeyMixin):
     # A correction. The superseded entry stays exactly as written; this is how
     # the record says "we later learned better" without pretending it always
     # knew.
-    supersedes: Mapped[UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    supersedes: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

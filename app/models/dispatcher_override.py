@@ -32,6 +32,7 @@ a labelled disagreement, because there is nothing to disagree with, and
 manufacture labels out of the queue's silence, and they would be
 indistinguishable from real ones by the time anyone trained on them.
 """
+import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, String, Text
@@ -105,8 +106,8 @@ class DispatcherOverride(Base, UUIDPrimaryKeyMixin):
 
     __tablename__ = "dispatcher_overrides"
 
-    hub_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    order_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    hub_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
     overridden_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
@@ -124,7 +125,7 @@ class DispatcherOverride(Base, UUIDPrimaryKeyMixin):
     system_action: Mapped[str | None] = mapped_column(String(16), nullable=True)
     system_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     system_decision_known: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    cited_snapshot_id: Mapped[UUID | None] = mapped_column(
+    cited_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
 
