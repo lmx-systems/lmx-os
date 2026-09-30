@@ -150,11 +150,10 @@ async def stream_client_orders_csv(client_id: uuid.UUID) -> AsyncIterator[str]:
 
         terms = await terms_for_client(session, client_id)
 
-        shops = dict(
-            (
-                await session.execute(select(Shop.id, Shop.name).where(Shop.client_id == client_id))
-            ).all()
-        )
+        shop_rows = (
+            await session.execute(select(Shop.id, Shop.name).where(Shop.client_id == client_id))
+        ).all()
+        shops: dict[uuid.UUID, str] = {shop_id: name for shop_id, name in shop_rows}
 
         # When we actually collected, from the pickup stop - the same source the portal's
         # order views read, so an export and a screen cannot disagree. Newest pickup per
@@ -173,7 +172,10 @@ async def stream_client_orders_csv(client_id: uuid.UUID) -> AsyncIterator[str]:
                 .order_by(StopOrder.order_id, Stop.created_at.desc())
             )
         ).all():
-            collected.setdefault(order_id, completed_at)
+            # The query filters `completed_at IS NOT NULL`; SQLAlchemy 2.1 types the
+            # column as declared, so the guard says so.
+            if completed_at is not None:
+                collected.setdefault(order_id, completed_at)
 
         ratings = {
             row.order_id: row
@@ -197,11 +199,13 @@ async def stream_client_orders_csv(client_id: uuid.UUID) -> AsyncIterator[str]:
             .execution_options(yield_per=500)
         )
         async for order in result.scalars():
-            commitment = delivery_commitment(order, terms.get(order.sla_tier))
+            commitment = delivery_commitment(
+                order, terms.get(order.sla_tier.value) if order.sla_tier is not None else None
+            )
             writer.writerow(
                 _row(
                     order,
-                    shops.get(order.shop_id),
+                    shops.get(order.shop_id) if order.shop_id is not None else None,
                     ratings.get(order.id),
                     commitment.promised_delivery_by,
                     collected.get(order.id),
