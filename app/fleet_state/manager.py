@@ -19,6 +19,8 @@ Key layout (all scoped per hub so a hub outage/reset can't affect others):
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import structlog
 
 from app.redis_client import get_client, timed_operation
@@ -37,6 +39,26 @@ def _location_key(hub_id: str, driver_id: str) -> str:
 
 def _available_set_key(hub_id: str) -> str:
     return f"fleet:{hub_id}:available_drivers"
+
+
+def _text(value: bytes | str) -> str:
+    """A Redis reply as text.
+
+    The client is built with `decode_responses=True` (`app/redis_client.py`), so at
+    runtime this is already a str; the stubs say `bytes | str` because they cannot
+    know that. Decoding rather than casting means the manager reads the same under
+    either setting - tested with a client that returns bytes.
+    """
+    return value.decode() if isinstance(value, bytes) else value
+
+
+def _fields(reply: Mapping[bytes | str, bytes | str]) -> dict[str, str]:
+    """A hash reply with text field names as well as text values.
+
+    The names matter as much as the values: from a client that does not decode,
+    `data["status"]` is a KeyError, because the field came back as `b"status"`.
+    """
+    return {_text(name): _text(value) for name, value in reply.items()}
 
 
 def _all_drivers_set_key(hub_id: str) -> str:
@@ -70,7 +92,7 @@ class FleetStateManager:
 
     async def get_driver_state(self, hub_id: str, driver_id: str) -> DriverState | None:
         async with timed_operation("fleet.get_driver_state"):
-            data = await self._redis.hgetall(_state_key(hub_id, driver_id))
+            data = _fields(await self._redis.hgetall(_state_key(hub_id, driver_id)))
         if not data:
             return None
         return DriverState(
@@ -95,7 +117,7 @@ class FleetStateManager:
 
     async def get_driver_location(self, hub_id: str, driver_id: str) -> DriverLocation | None:
         async with timed_operation("fleet.get_driver_location"):
-            data = await self._redis.hgetall(_location_key(hub_id, driver_id))
+            data = _fields(await self._redis.hgetall(_location_key(hub_id, driver_id)))
         if not data:
             return None
         return DriverLocation(
@@ -112,7 +134,7 @@ class FleetStateManager:
         """
         async with timed_operation("fleet.get_available_driver_ids"):
             members = await self._redis.smembers(_available_set_key(hub_id))
-        return list(members)
+        return [_text(member) for member in members]
 
     async def get_fleet_snapshot(self, hub_id: str) -> list[DriverState]:
         """
@@ -129,7 +151,7 @@ class FleetStateManager:
         """Every driver ever upserted for this hub, regardless of current status."""
         async with timed_operation("fleet.get_all_driver_ids"):
             members = await self._redis.smembers(_all_drivers_set_key(hub_id))
-        return list(members)
+        return [_text(member) for member in members]
 
     async def get_fleet_overview(self, hub_id: str) -> list[DriverState]:
         """
@@ -151,7 +173,8 @@ class FleetStateManager:
             results = await pipe.execute()
 
         states: list[DriverState] = []
-        for driver_id, data in zip(driver_ids, results, strict=True):
+        for driver_id, reply in zip(driver_ids, results, strict=True):
+            data = _fields(reply)
             if not data:
                 continue
             states.append(

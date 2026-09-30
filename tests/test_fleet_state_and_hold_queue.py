@@ -192,3 +192,27 @@ async def test_a_row_written_before_these_fields_existed_still_reads(fake_redis)
     assert restored.order_id == "o-legacy"
     assert restored.shop_name == ""
     assert restored.delivery_lat is None
+
+
+@pytest.mark.asyncio
+async def test_the_manager_reads_the_same_from_a_client_that_returns_bytes(monkeypatch):
+    """The app's client decodes (`decode_responses=True`), but the stubs cannot know
+    that, so every reply is typed `bytes | str`. `_text` decodes rather than casting,
+    so a client built without decoding reads identically - including driver ids,
+    which would otherwise come back as bytes and build keys like `...:b'd1'`."""
+    client = fakeredis_aioredis.FakeRedis(decode_responses=False)
+    monkeypatch.setattr(fleet_state_manager_module, "get_client", lambda: client)
+    manager = FleetStateManager()
+    state = DriverState(
+        driver_id="d1", hub_id="hub-1", status="available", capacity_units=10, load_units=2
+    )
+    await manager.upsert_driver_state(state)
+    location = DriverLocation(
+        driver_id="d1", lat=34.05, lng=-118.25, recorded_at="2026-09-30T19:00:00+00:00"
+    )
+    await manager.update_driver_location(location, "hub-1")
+
+    assert await manager.get_driver_state("hub-1", "d1") == state
+    assert await manager.get_driver_location("hub-1", "d1") == location
+    assert await manager.get_available_driver_ids("hub-1") == ["d1"]
+    assert await manager.get_fleet_snapshot("hub-1") == [state]

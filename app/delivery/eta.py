@@ -154,7 +154,8 @@ async def _points(session: AsyncSession, route_id: uuid.UUID) -> list[_Point]:
             if shop is not None:
                 lat, lng = shop.lat, shop.lng
         else:
-            order = orders_by_id.get(orders_by_stop.get(stop.id))
+            order_id = orders_by_stop.get(stop.id)
+            order = orders_by_id.get(order_id) if order_id is not None else None
             if order is not None and order.delivery_lat is not None and order.delivery_lng is not None:
                 lat, lng = float(order.delivery_lat), float(order.delivery_lng)
         points.append(
@@ -206,7 +207,11 @@ async def _anchor(
     if ping is not None:
         candidates.append((ping.lat, ping.lng, ping.recorded_at))
     if last_reached is not None:
-        candidates.append((last_reached.lat, last_reached.lng, last_reached.observed_at))
+        # `reached` holds only located, observed points, so none of these is None -
+        # spelled out because the type checker cannot see through `located`.
+        seen_lat, seen_lng, seen_at = last_reached.lat, last_reached.lng, last_reached.observed_at
+        if seen_lat is not None and seen_lng is not None and seen_at is not None:
+            candidates.append((seen_lat, seen_lng, seen_at))
 
     if candidates:
         return max(candidates, key=lambda c: c[2])
@@ -254,14 +259,16 @@ async def refresh_route_etas(
     for point in points:
         if point.reached:
             continue
-        if not point.located:
+        point_lat, point_lng = point.lat, point.lng
+        # `point.located`, spelled out so the coordinates below are known to exist.
+        if point_lat is None or point_lng is None:
             # This stop and everything after it. Recorded once with the sequence, so a
             # missing address is diagnosable rather than just an absent number.
             stalled = f"stop_{point.sequence}_unlocated"
             break
 
         cursor = cursor + timedelta(
-            minutes=minutes_for_miles(miles_between(lat, lng, point.lat, point.lng))
+            minutes=minutes_for_miles(miles_between(lat, lng, point_lat, point_lng))
         )
         stop = await session.get(Stop, point.stop_id)
         if stop is not None:
@@ -274,7 +281,7 @@ async def refresh_route_etas(
         # Time on the ground before the next leg starts. The ETA itself is arrival, so
         # the dwell is added after it rather than before.
         cursor = cursor + timedelta(minutes=PLACEHOLDER_STOP_SERVICE_MINUTES)
-        lat, lng = point.lat, point.lng
+        lat, lng = point_lat, point_lng
 
     if stalled:
         logger.info("route_eta_incomplete", route_id=str(route_id), reason=stalled, written=written)
