@@ -151,9 +151,14 @@ def _why_these_addresses_might_match(
     customer who writes addresses consistently, makes these useful again, and
     deleting them would mean rediscovering them later.
     """
+    # `source.geocoded and target.geocoded`, spelled out so the arithmetic below
+    # is known to have all four coordinates - the type checker cannot see through
+    # the property.
     if (
-        source.geocoded
-        and target.geocoded
+        source.lat is not None
+        and source.lng is not None
+        and target.lat is not None
+        and target.lng is not None
         and abs(source.lat - target.lat) < COORDINATE_EPSILON
         and abs(source.lng - target.lng) < COORDINATE_EPSILON
     ):
