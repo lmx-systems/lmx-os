@@ -324,6 +324,22 @@ async def test_a_late_delivery_is_credited(db_session, real_redis_client):
     assert "120 min late" in breach.reason
 
 
+async def test_a_credit_names_the_tier_in_plain_words(db_session, real_redis_client):
+    """The reason is written onto the client's invoice. Invoicing reads orders back from
+    the database, where the tier is the enum, and formatting the enum gave
+    "SLATier.T2 delivered 120 min late" - so the order is reloaded here, as it would be."""
+    hub_id, client_id, shop_id = await _seed(db_session)
+    await _term(db_session, client_id, delivery_target_minutes=60, credit_percent=25)
+    order = await _delivered_order(
+        db_session, hub_id, client_id, shop_id, fee_cents=1_800, requested_minutes_ago=180
+    )
+    await db_session.refresh(order)
+
+    assessment = await assess_credits(db_session, client_id=client_id, orders=[order])
+
+    assert assessment.breaches[0].reason == "T2 delivered 120 min late (25% credit)"
+
+
 async def test_an_on_time_delivery_is_not_credited(db_session, real_redis_client):
     hub_id, client_id, shop_id = await _seed(db_session)
     await _term(db_session, client_id, delivery_target_minutes=180)

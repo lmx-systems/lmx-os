@@ -70,7 +70,7 @@ from app.legal.documents import (
 )
 from app.models.client_sla_term import ClientSlaTerm
 from app.models.delivery_rating import RECIPIENT, DeliveryRating
-from app.models.order import Order, OrderStatus, SLATier
+from app.models.order import Order, OrderStatus
 from app.models.stop import Stop, StopOrder
 from app.sla.commitment import delivery_commitment, terms_for_client
 from app.models.return_item import ReturnItem
@@ -392,10 +392,7 @@ async def _annotate_commitments(
     # The promise that carries money, computed by the same function billing credits
     # against (app/sla/commitment.py).
     commitment = delivery_commitment(
-        order,
-        # `SLATier(...)` because the attribute is a plain str until the row is
-        # reloaded - ingestion assigns the string - whatever its annotation says.
-        terms.get(SLATier(order.sla_tier).value) if order.sla_tier is not None else None,
+        order, terms.get(order.sla_tier.value) if order.sla_tier is not None else None
     )
     view.promised_delivery_by = (
         commitment.promised_delivery_by.isoformat()
@@ -1147,9 +1144,7 @@ def _classified(order: Order) -> tuple[str, datetime]:
     """
     if order.sla_tier is None or order.hold_deadline is None:
         raise RuntimeError(f"order {order.id} reached the portal response unclassified")
-    # `SLATier(...)`, not `.value`: straight after ingestion the attribute holds the
-    # plain string ingestion assigned, and only a reload turns it into the enum.
-    return SLATier(order.sla_tier).value, order.hold_deadline
+    return order.sla_tier.value, order.hold_deadline
 
 
 async def _estimate_delivery_by(session: AsyncSession, order: Order) -> datetime | None:

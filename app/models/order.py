@@ -8,7 +8,7 @@ from datetime import datetime
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.db import Base
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
@@ -318,3 +318,17 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     intake_mode: Mapped[str] = mapped_column(
         String(16), nullable=False, default=INTAKE_LIVE, server_default=INTAKE_LIVE
     )
+
+    @validates("sla_tier")
+    def _sla_tier_is_the_enum(self, key: str, value: SLATier | str | None) -> SLATier | None:
+        """A plain string becomes the enum when it is assigned, not only when the row is
+        reloaded - so the attribute is what its annotation says, whoever set it.
+
+        Ingestion assigns the classifier's string, and until a reload the attribute
+        held it. Code that trusted the annotation and called `.value` failed 42 tests
+        (#124); code that did not worked around it with `hasattr`; and a credit reason
+        formatted from a *loaded* order read "SLATier.T2 delivered ... late" on the
+        client's invoice. An unknown string now raises here, at the assignment,
+        rather than wherever the tier is next read.
+        """
+        return None if value is None else SLATier(value)
