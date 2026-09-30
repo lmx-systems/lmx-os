@@ -32,6 +32,8 @@ from dataclasses import dataclass
 
 import structlog
 
+from app.schemas.client_order import DeadlineChoice
+
 logger = structlog.get_logger(__name__)
 
 # A manifest is a day's worth of deliveries, not a data migration. The cap is here
@@ -121,7 +123,7 @@ _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
 # rather than `now` to match the Epicor adapter, where PriorityCode RUSH
 # classifies T1 - two intake paths that disagree about what RUSH means would be
 # worse than neither supporting it.
-_DEADLINE_WORDS: dict[str, str] = {
+_DEADLINE_WORDS: dict[str, DeadlineChoice] = {
     "now": "now",
     "asap": "now",
     "hot": "now",
@@ -147,7 +149,7 @@ _DEADLINE_WORDS: dict[str, str] = {
 }
 
 
-def parse_deadline_word(value: str | None) -> str | None:
+def parse_deadline_word(value: str | None) -> DeadlineChoice | None:
     """A priority cell as a DeadlineChoice, or None when the cell is empty.
 
     Raises `ValueError` on a word we do not know, which the caller turns into a
@@ -182,7 +184,7 @@ class ParsedRow:
     drop_contact_phone: str | None = None
     #: None when the file says nothing, in which case the upload's own deadline
     #: applies. A row that names its own urgency overrides it.
-    deadline: str | None = None
+    deadline: DeadlineChoice | None = None
 
 
 @dataclass(frozen=True)
