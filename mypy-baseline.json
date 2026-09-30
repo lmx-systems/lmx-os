@@ -1,5 +1,5 @@
 {
-  "total": 55,
+  "total": 50,
   "files": {
     "app/api/admin_routes.py": 1,
     "app/api/public_api_routes.py": 1,
@@ -20,7 +20,6 @@
     "app/identity/dock_log.py": 4,
     "app/identity/dock_survey.py": 1,
     "app/ingestion/service.py": 2,
-    "app/legal/retention.py": 5,
     "app/logging_config.py": 1,
     "app/optimizer/fallback.py": 1,
     "app/record/cost.py": 5,
