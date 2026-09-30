@@ -37,7 +37,7 @@ from __future__ import annotations
 import csv
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.identity.node_class import infer_node_class
@@ -89,6 +89,35 @@ def _timestamp(raw: str | None) -> datetime | None:
     return None
 
 
+def _stop_arrival(manifest: str | None, clock: str | None) -> datetime | None:
+    """When this stop was reached: the manifest's date, at the stop's own clock.
+
+    The reduced detail file's `arrived` column is the manifest's start. Every
+    stop on a manifest carries the same value, and the stop's own time is in
+    `arrived_clock`, to the minute. Read alone, `arrived` puts every stop on a
+    route at the same instant: `minutes_into_route` was zero on every row and
+    `hour` was the hour the driver left, so two of M1's features carried
+    nothing - and no test noticed, because no fixture had a clock.
+
+    Without a usable clock the manifest time stands, which is coarse but not
+    wrong about the day. A clock more than twelve hours before the manifest
+    start is read as after midnight rather than as the morning before.
+    """
+    start = _timestamp(manifest)
+    text = (clock or "").strip()
+    if start is None or not text:
+        return start
+    for layout in ("%I:%M %p", "%I:%M:%S %p", "%H:%M", "%H:%M:%S"):
+        try:
+            at = datetime.combine(start.date(), datetime.strptime(text, layout).time())
+        except ValueError:
+            continue
+        if start - at > timedelta(hours=12):
+            at += timedelta(days=1)
+        return at
+    return start
+
+
 @dataclass(frozen=True)
 class TimingStop:
     """One stop from the whole-book export. Dwell here is unreliable."""
@@ -134,6 +163,8 @@ class DetailStop:
     route_id: str
     driver_id: str
     stop_seq: int | None
+    # The stop's own arrival, to the minute - not the manifest start that the
+    # reduced file's `arrived` column holds. See `_stop_arrival`.
     arrived: datetime | None
     dwell_sec: float | None
     travel_sec: float | None
@@ -241,7 +272,7 @@ def load_detail(path: str | Path) -> tuple[list[DetailStop], Coverage]:
             route_id=(row.get("route_id") or "").strip(),
             driver_id=(row.get("driver_id") or "").strip(),
             stop_seq=int(float(row["stop_seq"])) if _number(row.get("stop_seq")) is not None else None,
-            arrived=_timestamp(row.get("arrived")),
+            arrived=_stop_arrival(row.get("arrived"), row.get("arrived_clock")),
             dwell_sec=_number(row.get("dwell_sec")),
             travel_sec=_number(row.get("travel_sec")),
             revenue=_number(row.get("revenue")),

@@ -27,7 +27,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ml.m1.evaluate import run  # noqa: E402
-from ml.m1.features import build  # noqa: E402
 from ml.real import load_detail, usable_dwell  # noqa: E402
 
 DEFAULT_DETAIL = Path("lmx-dwell/out/stops_detail.csv")
@@ -50,20 +49,29 @@ def main() -> int:
         return 1
 
     stops, _ = load_detail(args.detail)
-    rows = build(stops)
+    usable = usable_dwell(stops)
     print(
-        f"{len(rows)} usable stops of {len(stops)} across "
-        f"{len({r.receiver_id for r in rows})} receivers, "
-        f"{len({s.driver_id for s in usable_dwell(stops)})} driver(s)"
+        f"{len(usable)} usable stops of {len(stops)} across "
+        f"{len({s.receiver_id for s in usable})} receivers, "
+        f"{len({s.driver_id for s in usable})} driver(s)"
     )
 
-    evaluation = run(rows, with_challenger=args.challenger)
-    print(f"chronological cut at {evaluation.cut_day}\n")
-    print(f"  {'population':12}{'model':22}{'n':>6}{'pinball':>10}{'coverage':>10}")
+    evaluation = run(stops, with_challenger=args.challenger)
+    chosen = ", ".join(f"{label} k={k:g}" for label, k in evaluation.prior_strength.items())
+    print(f"chronological cut at {evaluation.cut_day}; shrinkage chosen on training days: {chosen}\n")
+
+    def interval(pair: tuple[float, float] | None, digits: int) -> str:
+        return f"[{pair[0]:.{digits}f}, {pair[1]:.{digits}f}]" if pair else "n/a"
+
+    print(
+        f"  {'population':12}{'model':22}{'docks':>6}{'n':>6}"
+        f"{'pinball':>10}  {'95% interval':18}{'coverage':>9}  95% interval"
+    )
     for score in sorted(evaluation.scores, key=lambda s: (s.population, s.model)):
         print(
-            f"  {score.population:12}{score.model:22}{score.n:6}"
-            f"{score.pinball:10.4f}{score.coverage:10.3f}"
+            f"  {score.population:12}{score.model:22}{score.receivers:6}{score.n:6}"
+            f"{score.pinball:10.4f}  {interval(score.pinball_interval, 3):18}"
+            f"{score.coverage:9.3f}  {interval(score.coverage_interval, 3)}"
         )
 
     print("\n  the p90 promise, before and after conformal calibration:")
