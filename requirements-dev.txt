@@ -7,7 +7,20 @@ pytest-cov>=5.0.0
 # drifted from what developers saw, turning the gate red on rules no local
 # run surfaced. Bump deliberately, re-running `ruff check app tests` first.
 ruff==0.15.22
-mypy>=1.10.0
+# Pinned exactly for the reason stated four lines above, which this line did
+# not follow and should have. The mypy baseline gate went red on its first CI
+# run in two files that were clean locally - `job_offer_notifications.py` and
+# `settle/basis.py` - because CI resolved a different mypy and different
+# library stubs than a venv created months earlier. Same failure as the ruff
+# one, same cause, three lines below the comment describing it.
+#
+# Both findings turned out to be real, so nothing was lost this time. The next
+# drift might be noise, and a gate that goes red with no code change is how a
+# gate stops being believed.
+#
+# Bump deliberately, re-running `python -m scripts.mypy_baseline` first and
+# reading the diff before re-recording.
+mypy==2.3.0
 fakeredis>=2.23.2
 # Reading back the PDFs app/settle/pdf.py writes, so a test can assert what a
 # customer would actually see on the page rather than that some bytes were

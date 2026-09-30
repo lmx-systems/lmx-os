@@ -101,6 +101,10 @@ infra/
    - Push to `main` - `.github/workflows/deploy.yml` builds, pushes, and
      deploys all three images automatically once CI passes.
 
+   Until that variable is set the deploy job **skips** rather than failing.
+   It used to run and fail on every merge, which is how a branch ends up
+   permanently part-red and everybody stops reading the ticks.
+
 5. **Run the first migration** (this stack deliberately doesn't run
    migrations automatically on every task start - see `ecs.tf`'s comment
    on why):
