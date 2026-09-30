@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -120,8 +121,30 @@ def validate_answers(body: object) -> int:
     return answered
 
 
+class SurveySubmission(Protocol):
+    """What `stage_submission` reads from a public survey, by name.
+
+    Structural on purpose, so this layer does not depend on the public API's
+    request schema: `app/schemas/dock_log.py`'s `DockLogSubmissionBody` satisfies
+    it without being named. The answers are read against `ANSWER_VOCABULARIES`
+    by `validate_answers`, which is why they are not listed here.
+    """
+
+    @property
+    def business_name(self) -> str: ...
+
+    @property
+    def submitted_address(self) -> str | None: ...
+
+    @property
+    def lat(self) -> float | None: ...
+
+    @property
+    def lng(self) -> float | None: ...
+
+
 async def stage_submission(
-    session: AsyncSession, body: object, *, submitted_from_ip: str | None
+    session: AsyncSession, body: SurveySubmission, *, submitted_from_ip: str | None
 ) -> DockLogSubmission:
     """Record a public survey. Writes to the staging table and nothing else.
 
