@@ -110,6 +110,13 @@ Note also that `receiver_id` counts **accounts, not physical docks.** Resolving 
 
 **One data-quality flag while we are here.** `minutes_into_route` reaches a maximum of 107,827 minutes — about 75 days — which is not a route. Route grouping needs a look before any model trains on it.
 
+**Where the promoted harness stands (30 September 2026).** This section describes `lmx-dwell/`, and is still true of it. `ml/m1/` is a different pipeline reading a different file, and there the facts are measured rather than inherited:
+
+- **(a) does not hold.** `node_class` is inferred at load by `IDN-3` (`ml/real/export.py`): 104 of the second-precision file's 142 receivers carry a class and 38 are `unknown`.
+- **(b) does not hold.** `pieces` and `revenue` are read, 96% populated and 63% non-zero. `weight` is populated on every row and always zero.
+- **(d) does not hold.** `ml/m1/` trains on the second-precision file, where 8 of 1,451 stops are zero and the median is about two minutes.
+- **The 75-day route does not occur there; its opposite did.** That file's `arrived` column is the manifest's start, so every stop on a manifest carried the same time and `minutes_into_route` was zero on every row. The loader now reads the stop's own `arrived_clock`, and routes are keyed on route and service day, so the whole-book file cannot produce the 75-day route either.
+
 ---
 
 ## 4. `M1b` and `M2` — design intent only

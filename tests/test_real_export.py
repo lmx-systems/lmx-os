@@ -6,6 +6,7 @@ real files are gitignored because this repository is public. A test that needed
 the design partner's book would also be a test that only ran on one laptop.
 """
 import csv
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -227,3 +228,55 @@ class TestTripCost:
         result = by_route_size(compute(stops, rate_per_hour=45.0))
         assert result["usable"] is False
         assert "REC-5" in result["reason"]
+
+
+class TestEachStopArrivesAtItsOwnTime:
+    """The reduced detail file's `arrived` is the manifest's start - every stop
+    on a manifest carries the same value - and the stop's own time is in
+    `arrived_clock`. Reading only the first put every stop on a route at one
+    instant: M1's `minutes_into_route` was zero on every row of the real export,
+    and `hour` was the hour the driver left."""
+
+    @staticmethod
+    def _arrivals(tmp_path, *pairs):
+        rows = [
+            {
+                "receiver_id": f"{300 + index}/0",
+                "receiver_name": "Springfield Auto Repair",
+                "route_id": "Manifest #7002",
+                "driver_id": "D9",
+                "stop_seq": index + 1,
+                "arrived": manifest,
+                "arrived_clock": clock,
+                "dwell_sec": 120,
+            }
+            for index, (manifest, clock) in enumerate(pairs)
+        ]
+        path = _write(tmp_path / "clock.csv", DETAIL_COLUMNS + ["arrived_clock"], rows)
+        return [stop.arrived for stop in load_detail(path)[0]]
+
+    def test_the_stop_clock_replaces_the_manifest_start(self, tmp_path):
+        assert self._arrivals(
+            tmp_path,
+            ("2026-05-04 08:07:00", "8:23 AM"),
+            ("2026-05-04 08:07:00", "1:41 PM"),
+        ) == [datetime(2026, 5, 4, 8, 23), datetime(2026, 5, 4, 13, 41)]
+
+    def test_without_a_clock_the_manifest_time_stands(self, tmp_path):
+        """Coarse, but not wrong about the day - and the fixtures above, which
+        have no clock column at all, load exactly as they did."""
+        assert self._arrivals(
+            tmp_path,
+            ("2026-05-04 08:07:00", ""),
+            ("2026-05-04 08:07:00", "not a time"),
+        ) == [datetime(2026, 5, 4, 8, 7)] * 2
+
+    def test_a_clock_long_before_the_start_is_after_midnight(self, tmp_path):
+        assert self._arrivals(
+            tmp_path, ("2026-05-04 18:00:00", "12:30 AM")
+        ) == [datetime(2026, 5, 5, 0, 30)]
+
+    def test_a_few_minutes_of_skew_is_not_a_new_day(self, tmp_path):
+        assert self._arrivals(
+            tmp_path, ("2026-05-04 08:07:00", "8:05 AM")
+        ) == [datetime(2026, 5, 4, 8, 5)]

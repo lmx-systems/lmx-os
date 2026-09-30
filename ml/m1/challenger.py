@@ -43,7 +43,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.identity.node_class import NODE_CLASSES
-from ml.m1.features import DwellRow
+from ml.m1.baseline import PRIOR_STRENGTH
+from ml.m1.features import DwellRow, shrunk_history
 
 # The library the brief actually specifies, and why it is not what runs here.
 INTENDED_LIBRARY = "lightgbm"
@@ -62,7 +63,7 @@ def is_available() -> bool:
     return True
 
 
-def feature_vector(row: DwellRow) -> list[float]:
+def feature_vector(row: DwellRow, prior_strength: float = PRIOR_STRENGTH) -> list[float]:
     """The design matrix, one row.
 
     `receiver_id` is absent on purpose rather than by omission: scikit-learn has
@@ -71,9 +72,15 @@ def feature_vector(row: DwellRow) -> list[float]:
     The dock enters through its history instead - which is the same signal the
     shrinkage baseline uses, and the reason this challenger is handicapped
     against the one the brief specifies.
+
+    That history is shrunk toward the dock's location type before the tree sees
+    it (the brief's gate 3). Raw, three visits spoke as loudly as three hundred,
+    and a tree splitting on a thin dock's mean was splitting on noise. The count
+    stays in as its own column, so the model can still learn how far to trust it.
     """
-    prior_mean = row.recv_prior_mean if row.recv_prior_mean is not None else -1.0
-    prior_p90 = row.recv_prior_p90 if row.recv_prior_p90 is not None else -1.0
+    shrunk_mean, shrunk_p90 = shrunk_history(row, prior_strength)
+    prior_mean = shrunk_mean if shrunk_mean is not None else -1.0
+    prior_p90 = shrunk_p90 if shrunk_p90 is not None else -1.0
     gap = row.recv_days_since_last if row.recv_days_since_last is not None else -1.0
     return [
         float(row.hour),
@@ -109,6 +116,9 @@ class GradientBoostedQuantile:
     # reason; this is the scikit-learn spelling of that decision.
     min_samples_leaf: int = 40
     random_state: int = 17
+    # The harness passes the `k` it estimated for this quantile, so the history
+    # this model reads is shrunk exactly as hard as the baseline it must beat.
+    prior_strength: float = PRIOR_STRENGTH
     model: object = field(default=None, repr=False)
 
     @property
@@ -128,7 +138,10 @@ class GradientBoostedQuantile:
             learning_rate=self.learning_rate,
             min_samples_leaf=self.min_samples_leaf,
             random_state=self.random_state,
-        ).fit([feature_vector(r) for r in rows], [r.dwell_min for r in rows])
+        ).fit(
+            [feature_vector(r, self.prior_strength) for r in rows],
+            [r.dwell_min for r in rows],
+        )
         return self
 
     def predict(self, rows: list[DwellRow]) -> list[float]:
@@ -138,5 +151,5 @@ class GradientBoostedQuantile:
         # one. Clamping here rather than in the metric so the number that gets
         # scored is the number that would be promised.
         return [max(0.0, float(v)) for v in self.model.predict(
-            [feature_vector(r) for r in rows]
+            [feature_vector(r, self.prior_strength) for r in rows]
         )]

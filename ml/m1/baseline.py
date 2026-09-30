@@ -18,17 +18,21 @@ belongs in the schema from commit one because retrofitting it is painful.
 
 `k = 10` is inherited from the analysis project. `DATA_NEED_BRIEF.md` §4.1
 flags it as contested - an inherited "~30 per dock" figure sits in the same
-documents with no derivation, and one of the two is wrong. Kept at 10 so the
-promoted code is the code that produced the recorded result, with the
-disagreement noted rather than quietly resolved.
+documents with no derivation, and one of the two is wrong. It stays the default
+for anyone fitting the baseline directly, but the harness no longer uses it:
+`estimate_prior_strength` asks the data (the brief's gate 3), which settles the
+disagreement instead of recording it.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ml.m1.features import DwellRow
+from ml.m1.features import DwellRow, time_split
 
 PRIOR_STRENGTH = 10.0
+# Wide on purpose. Where the answer lands against the edge is itself a finding:
+# at the top, docks are telling the model little beyond their location type.
+PRIOR_STRENGTH_GRID = (1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0)
 
 
 def quantile(values: list[float], q: float) -> float:
@@ -84,6 +88,36 @@ class ShrunkQuantileBaseline:
             weight = n / (n + self.prior_strength)
             out.append(weight * own + (1 - weight) * prior)
         return out
+
+
+def estimate_prior_strength(
+    rows: list[DwellRow],
+    q: float,
+    grid: tuple[float, ...] = PRIOR_STRENGTH_GRID,
+) -> float:
+    """Choose `k` from the data instead of inheriting it.
+
+    Fit on the earlier four-fifths of the history given, score every candidate
+    on the most recent fifth, keep the best. Chronological for the same reason
+    the harness is: `k` is going to be used on days the model has not seen.
+    Pass training rows only - choosing `k` on the test set would be the leak
+    `ml/m2/gates.py` warns cannot be seen in a score.
+
+    Falls back to `PRIOR_STRENGTH` when there is too little history to hold any
+    back, and breaks ties toward the smaller `k`, the one that trusts docks more.
+    """
+    if not rows:
+        return PRIOR_STRENGTH
+    fit_rows, check_rows, _ = time_split(rows, 0.2)
+    if not fit_rows or not check_rows:
+        return PRIOR_STRENGTH
+    actual = [r.dwell_min for r in check_rows]
+
+    def loss(k: float) -> float:
+        model = ShrunkQuantileBaseline(q=q, prior_strength=k).fit(fit_rows)
+        return pinball_loss(actual, model.predict(check_rows), q)
+
+    return min(grid, key=lambda k: (loss(k), k))
 
 
 class GlobalQuantile:
