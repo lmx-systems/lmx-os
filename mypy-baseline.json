@@ -1,9 +1,8 @@
 {
-  "total": 111,
+  "total": 89,
   "files": {
     "app/api/admin_routes.py": 1,
     "app/api/client_routes.py": 8,
-    "app/api/driver_routes.py": 22,
     "app/api/public_api_routes.py": 1,
     "app/baseline/columns.py": 2,
     "app/baseline/metrics.py": 2,

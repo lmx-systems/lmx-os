@@ -1233,7 +1233,11 @@ async def _get_owned_offer(
 
 
 async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteView:
-    route = await session.get(Route, route_id)
+    # `get_one`, not `get`: every caller passes a route that exists - one it
+    # just wrote, or a stop's non-null foreign key. A missing row here is
+    # corruption, and it should say so at the lookup rather than surface later
+    # as an AttributeError on `route.driver_id`.
+    route = await session.get_one(Route, route_id)
 
     stops_result = await session.execute(select(Stop).where(Stop.route_id == route_id).order_by(Stop.sequence))
     stop_rows = list(stops_result.scalars().all())
@@ -1553,7 +1557,7 @@ async def _pay_out_gig_delivery(
 
     amount_cents = 0
     for order in orders:
-        shop = shops_by_id.get(order.shop_id)
+        shop = shops_by_id.get(order.shop_id) if order.shop_id is not None else None
         if shop is None or order.delivery_lat is None or order.delivery_lng is None:
             continue
         amount_cents += estimate_delivery_pay_cents(
@@ -2000,7 +2004,9 @@ async def collect_cod(
         )
 
     for obligation in obligations:
-        order = await session.get(Order, uuid.UUID(obligation.order_id))
+        # An obligation's order is a foreign key, so `get_one`: a missing row
+        # is corruption, not a customer who will not pay.
+        order = await session.get_one(Order, uuid.UUID(obligation.order_id))
         try:
             await record_collection(
                 session,
@@ -2048,7 +2054,7 @@ async def raise_cod_dispute(
 
     disputes = []
     for obligation in obligations:
-        order = await session.get(Order, uuid.UUID(obligation.order_id))
+        order = await session.get_one(Order, uuid.UUID(obligation.order_id))
         try:
             dispute = await record_dispute(
                 session,
@@ -2195,7 +2201,7 @@ async def collect_return(
         if already:
             collected = already
         else:
-            order = await session.get(Order, order_ids[0])
+            order = await session.get_one(Order, order_ids[0])
             adhoc = ReturnItem(
                 hub_id=order.hub_id, origin_order_id=order.id, shop_id=order.shop_id,
                 manifest=body.manifest, status="collected", collected_at=now,
@@ -2497,7 +2503,7 @@ async def complete_stop(
     )
     route_finished = remaining_result.scalar_one() == 0
     if route_finished:
-        route = await session.get(Route, stop.route_id)
+        route = await session.get_one(Route, stop.route_id)
         route.status = "completed"
 
     # The strongest re-estimation point on a route: the driver is leaving a known place
@@ -2643,7 +2649,7 @@ async def flag_stop_issue(
         .where(Stop.route_id == stop.route_id, Stop.status.notin_(_TERMINAL_STOP_STATUSES))
     )
     if remaining_result.scalar_one() == 0:
-        route = await session.get(Route, stop.route_id)
+        route = await session.get_one(Route, stop.route_id)
         route.status = "completed"
     else:
         # A flagged stop is finished too, so the next one is promoted and the driver is
@@ -3000,7 +3006,9 @@ async def list_my_trips(
         .where(Stop.route_id.in_([r.id for r in routes]))
         .group_by(Stop.route_id)
     )
-    stop_counts = dict(stop_counts_result.all())
+    stop_counts: dict[uuid.UUID, int] = {
+        route_id: count for route_id, count in stop_counts_result.all()
+    }
 
     return [
         TripSummaryView(
@@ -3173,13 +3181,12 @@ async def _build_stops_from_plan(
             continue
 
         is_hot_shot = order_id in hot_shot_ids
-        can_commingle = (
+        if (
             open_pickup is not None
             and not is_hot_shot
             and open_pickup_shop == order.shop_id
             and not any(o in hot_shot_ids for o in await _orders_on_stop(session, open_pickup))
-        )
-        if can_commingle:
+        ):
             session.add(StopOrder(stop_id=open_pickup.id, order_id=order_id))
             open_pickup.parcel_count += (
                 await _parcel_count_for_orders(session, [order_id])
@@ -3236,6 +3243,16 @@ async def _build_stops_unplanned(
     orders_by_shop: dict[uuid.UUID, list[uuid.UUID]] = {}
     hot_shot_order_ids: list[uuid.UUID] = []
     for order in orders_by_id.values():
+        if order.shop_id is None:
+            # Ingestion resolves every pickup to a Shop, and
+            # `app/ingestion/service.py::_resolve_or_create_shop` explains why the pipeline depends on it. An
+            # order without one has no pickup location. Grouped under `None`,
+            # it became a pickup rendered at 0,0 with no name - a stop the
+            # driver cannot find - and merged every such order into one.
+            raise HTTPException(
+                status_code=409,
+                detail=f"Order {order.id} has no pickup location, so it cannot be routed",
+            )
         if order.sla_tier == SLATier.HOT_SHOT:
             hot_shot_order_ids.append(order.id)
         else:
