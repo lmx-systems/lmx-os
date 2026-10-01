@@ -1,5 +1,5 @@
 {
-  "total": 44,
+  "total": 40,
   "files": {
     "app/api/admin_routes.py": 1,
     "app/api/public_api_routes.py": 1,
@@ -16,7 +16,6 @@
     "app/gig_platform/accept_gate.py": 1,
     "app/gig_platform/density.py": 4,
     "app/gig_platform/service.py": 1,
-    "app/identity/dock_log.py": 4,
     "app/identity/dock_survey.py": 1,
     "app/ingestion/service.py": 2,
     "app/logging_config.py": 1,
