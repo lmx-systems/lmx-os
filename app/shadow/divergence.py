@@ -55,6 +55,7 @@ an order the other would not have.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -336,7 +337,7 @@ async def compute_divergence(
     return report
 
 
-def _intervals(cycles: list[ShadowDecision]) -> list[float]:
+def _intervals(cycles: Sequence[ShadowDecision]) -> list[float]:
     """Gaps between consecutive cycles, in seconds."""
     times = sorted(c.planned_at for c in cycles)
     return [
@@ -363,7 +364,7 @@ def _percentile(values: list[float], q: float) -> float | None:
 
 
 def _plan_shape(
-    report: DivergenceReport, cycles: list[ShadowDecision]
+    report: DivergenceReport, cycles: Sequence[ShadowDecision]
 ) -> list[Measurement | Rate]:
     """The metrics that are comparisons of decisions rather than of outcomes.
 
@@ -517,12 +518,17 @@ def render(report: DivergenceReport) -> str:
         )
 
     lines.append("\n  decision comparisons")
-    gaps = [
-        m
+    # By type and by value, not by name alone: the note divides a median, and a
+    # metric of this name that ever arrived as a Rate, or without a median, would
+    # have taken the whole report down with it.
+    cycle_medians = [
+        m.median
         for m in report.metrics
-        if m.name == "interval between shadow cycles" and not m.not_measured
+        if isinstance(m, Measurement)
+        and m.name == "interval between shadow cycles"
+        and m.median is not None
     ]
-    if gaps and any(
+    if cycle_medians and any(
         m.name == "dispatch lead over the operation" and not m.not_measured
         for m in report.metrics
     ):
@@ -533,7 +539,7 @@ def render(report: DivergenceReport) -> str:
         # would have produced.
         lines.append(
             f"    NOTE: the lead below understates LMX OS by roughly "
-            f"{gaps[0].median / 2:.0f}s - half the cycle interval - because the "
+            f"{cycle_medians[0] / 2:.0f}s - half the cycle interval - because the "
             "cycle only looks that often. It cannot show a win smaller than that."
         )
     for metric in report.metrics:

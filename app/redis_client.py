@@ -27,6 +27,17 @@ _pool: redis.ConnectionPool | None = None
 SLOW_READ_THRESHOLD_MS = 50
 
 
+def as_text(value: bytes | str) -> str:
+    """A Redis reply as text.
+
+    `get_client` builds the client with `decode_responses=True`, so at runtime this
+    is already a str; the stubs say `bytes | str` because they cannot know that.
+    Decoding rather than casting keeps every caller right under either setting -
+    tested with a client that returns bytes in tests/test_fleet_state_and_hold_queue.py.
+    """
+    return value.decode() if isinstance(value, bytes) else value
+
+
 def get_pool() -> redis.ConnectionPool:
     global _pool
     if _pool is None:
