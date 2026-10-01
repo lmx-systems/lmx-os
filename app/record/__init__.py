@@ -26,7 +26,6 @@ from app.record.cost import (
     OrderCost,
     driver_day_cost,
     record_costs_for_period,
-    record_driver_day_cost,
 )
 from app.record.decisions import (
     canonical_inputs_hash,
@@ -93,7 +92,6 @@ __all__ = [
     "record_costs_for_period",
     "record_outcome",
     "driver_day_cost",
-    "record_driver_day_cost",
     "replay_inputs",
     "resolve_flag",
     "supersede_outcome",

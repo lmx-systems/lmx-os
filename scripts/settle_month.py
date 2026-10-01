@@ -5,7 +5,7 @@
     python scripts/settle_month.py --hub <uuid> --client <uuid> --month 2026-08 --pdf out.pdf
 
 Three switches that did not exist, in the order the work actually happens.
-`record_driver_day_cost` and `build_statement` both had no caller anywhere -
+The cost writer and `build_statement` both had no caller anywhere -
 tested, finished-looking, and never run - so nothing in this system had ever
 computed what a drop cost or produced a statement.
 

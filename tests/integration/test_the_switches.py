@@ -191,8 +191,8 @@ class TestTheCostingSwitch:
         )
 
     async def test_it_writes_a_cost_per_drop(self, db_session):
-        """`record_driver_day_cost` had no caller anywhere, so nothing in this
-        system had ever computed what a drop cost."""
+        """Before this switch nothing in this system had ever computed what a
+        drop cost: the per-day writer was tested, and had no caller."""
         hub = await _hub(db_session)
         _driver, orders = await self._driver_day(db_session, hub)
         summary = await record_costs_for_period(
