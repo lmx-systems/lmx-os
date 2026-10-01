@@ -133,6 +133,14 @@ class FallbackRouteOptimizationClient(RouteOptimizationClient):
             return self.fallback_engine_name
         return _engine_used.get() or self._primary.engine_name
 
+    @engine_name.setter
+    def engine_name(self, value: str) -> None:
+        # The base declares `engine_name: str` writeable because simple clients and
+        # test doubles assign it. This one is computed per cycle from a ContextVar,
+        # so there is nothing to set - and silently accepting a value would hide
+        # a caller that thinks it can override what served the cycle.
+        raise AttributeError("engine_name is computed per cycle and cannot be set")
+
     @property
     def breaker_is_open(self) -> bool:
         if self._breaker_opened_at is None:

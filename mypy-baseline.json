@@ -1,16 +1,6 @@
 {
-  "total": 17,
+  "total": 5,
   "files": {
-    "app/baseline/columns.py": 2,
-    "app/baseline/metrics.py": 2,
-    "app/batch_queue/store.py": 1,
-    "app/experiment/arms.py": 1,
-    "app/gig_platform/accept_gate.py": 1,
-    "app/gig_platform/service.py": 1,
-    "app/identity/dock_survey.py": 1,
-    "app/logging_config.py": 1,
-    "app/optimizer/fallback.py": 1,
-    "app/record/cost.py": 5,
-    "app/shadow/scheduler.py": 1
+    "app/record/cost.py": 5
   }
 }

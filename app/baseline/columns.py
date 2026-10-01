@@ -187,13 +187,13 @@ def resolve(
                 f"--map {canonical}=... is not a field of the {label}. "
                 f"Known fields: {', '.join(sorted(known))}"
             )
-        header = by_normalized.get(normalize(requested))
-        if header is None:
+        found = by_normalized.get(normalize(requested))
+        if found is None:
             raise ColumnMappingError(
                 f"--map {canonical}={requested!r} names a column the {label} does not "
                 f"have. Present: {', '.join(repr(h) for h in headers)}"
             )
-        mapping[canonical] = header
+        mapping[canonical] = found
 
     auto: set[str] = set()
     for canonical in known:
@@ -201,9 +201,9 @@ def resolve(
             continue
         # Exact canonical spelling wins, then the synonym table, in listed order.
         for candidate in (canonical, *SYNONYMS.get(canonical, ())):
-            header = by_normalized.get(normalize(candidate))
-            if header is not None and header not in mapping.values():
-                mapping[canonical] = header
+            found = by_normalized.get(normalize(candidate))
+            if found is not None and found not in mapping.values():
+                mapping[canonical] = found
                 auto.add(canonical)
                 break
 

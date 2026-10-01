@@ -130,7 +130,9 @@ async def dock_needs_survey(
         return False
 
     profile = await profile_for(session, location, create=False)
-    if profile is None or not profile.is_surveyed:
+    if profile is None or not profile.is_surveyed or profile.surveyed_at is None:
+        # `is_surveyed` already requires `surveyed_at`; the last clause restates it
+        # for the comparison below.
         return True
 
     at = now or datetime.now(timezone.utc)

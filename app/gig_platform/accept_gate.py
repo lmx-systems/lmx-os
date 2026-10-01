@@ -158,7 +158,8 @@ def evaluate_offer(
     # hard stop: a missed window lands on the driver's own platform standing,
     # so an offer that endangers a commitment is refused regardless of pay.
     conflict = _first_broken_commitment(
-        offer=offer, committed=committed, now=now, arrival=arrival, leg_minutes=leg_minutes
+        offer=offer, committed=committed, now=now, arrival=arrival, leg_minutes=leg_minutes,
+        dropoff=(float(offer.dropoff_lat), float(offer.dropoff_lng)),
     )
     if conflict is not None:
         return AcceptVerdict(
@@ -234,6 +235,7 @@ def _first_broken_commitment(
     now: datetime,
     arrival: datetime,
     leg_minutes: float,
+    dropoff: tuple[float, float],
 ) -> str | None:
     """The first already-promised window this offer would endanger.
 
@@ -254,7 +256,7 @@ def _first_broken_commitment(
             continue
 
         travel = _arrival_minutes(
-            float(offer.dropoff_lat), float(offer.dropoff_lng),
+            dropoff[0], dropoff[1],
             float(job.pickup_lat), float(job.pickup_lng),
         )
         if completion + timedelta(minutes=travel) > job.pickup_window_close:

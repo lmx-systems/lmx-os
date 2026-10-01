@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.gig_job import GigJob
-from app.schemas.gig import GigJobIntake, GigJobView
+from app.schemas.gig import GigJobIntake, GigJobStatus, GigJobView
 
 # Which transitions are real. A job can be declined or cancelled from any
 # non-terminal state, but forward progress is strictly ordered - you cannot
@@ -170,7 +170,7 @@ async def record_job(
     return job
 
 
-async def transition(session: AsyncSession, job: GigJob, new_status: str) -> GigJob:
+async def transition(session: AsyncSession, job: GigJob, new_status: GigJobStatus) -> GigJob:
     """Move a job along its lifecycle, refusing steps that aren't real.
 
     Idempotent on a repeated identical status: a driver double-tapping

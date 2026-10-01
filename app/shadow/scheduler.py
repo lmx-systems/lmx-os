@@ -51,7 +51,7 @@ from app.config import settings
 from app.db import session_scope
 from app.hub_calendar import is_hub_closed_on
 from app.models.hub import Hub
-from app.redis_client import get_client
+from app.redis_client import as_text, get_client
 from app.shadow.recorder import record_shadow_cycle
 
 logger = structlog.get_logger(__name__)
@@ -164,7 +164,7 @@ class ShadowScheduler:
         now = datetime.now(timezone.utc)
         if last:
             try:
-                elapsed = (now - datetime.fromisoformat(last)).total_seconds()
+                elapsed = (now - datetime.fromisoformat(as_text(last))).total_seconds()
             except ValueError:
                 elapsed = None
             if elapsed is not None and elapsed < self.cadence_seconds:
