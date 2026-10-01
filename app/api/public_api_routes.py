@@ -178,11 +178,16 @@ async def _existing_order(
 
 
 def _result(order: Order, *, duplicate: bool) -> ApiOrderResult:
+    if order.sla_tier is None:
+        # Ingestion gives every order a tier - classified when LMX owns the promise,
+        # a default when someone else does - so this is a broken invariant, and it
+        # should say so rather than surface as a validation error in the response.
+        raise RuntimeError(f"order {order.id} reached the public API response without a tier")
     return ApiOrderResult(
         order_id=str(order.id),
         your_order_ref=order.source_order_ref or "",
         status=order.status.value,
-        sla_tier=order.sla_tier,
+        sla_tier=order.sla_tier.value,
         collect_by=order.hold_deadline,
         promised_at=order.promised_at,
         duplicate=duplicate,

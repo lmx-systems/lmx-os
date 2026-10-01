@@ -1,24 +1,16 @@
 {
-  "total": 26,
+  "total": 17,
   "files": {
-    "app/api/admin_routes.py": 1,
-    "app/api/public_api_routes.py": 1,
     "app/baseline/columns.py": 2,
     "app/baseline/metrics.py": 2,
     "app/batch_queue/store.py": 1,
-    "app/billing/credits.py": 1,
-    "app/billing/invoice_pdf.py": 1,
-    "app/billing/rates.py": 1,
-    "app/client_auth/password_reset.py": 1,
     "app/experiment/arms.py": 1,
     "app/gig_platform/accept_gate.py": 1,
     "app/gig_platform/service.py": 1,
     "app/identity/dock_survey.py": 1,
-    "app/ingestion/service.py": 2,
     "app/logging_config.py": 1,
     "app/optimizer/fallback.py": 1,
     "app/record/cost.py": 5,
-    "app/shadow/scheduler.py": 1,
-    "app/webhooks/url_safety.py": 1
+    "app/shadow/scheduler.py": 1
   }
 }

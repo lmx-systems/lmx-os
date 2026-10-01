@@ -148,7 +148,9 @@ def distance_between(
     drop_lng: float | None,
 ) -> float | None:
     """Straight-line miles, or None if either end is unknown."""
-    if None in (origin_lat, origin_lng, drop_lat, drop_lng):
+    # One check per coordinate rather than `None in (...)`: the same test, but one
+    # the type checker can follow into the arithmetic below.
+    if origin_lat is None or origin_lng is None or drop_lat is None or drop_lng is None:
         return None
     return miles_between(
         float(origin_lat), float(origin_lng), float(drop_lat), float(drop_lng)

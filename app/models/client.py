@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.schemas.signup import SignupStatus
 
 
 class Client(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -40,7 +41,9 @@ class Client(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # deliberately absent ("a B2B onboarding relationship, not self-serve
     # SaaS"). The approval gate is what preserves that posture: signup is open,
     # but nobody dispatches a van until LMX says so.
-    signup_status: Mapped[str] = mapped_column(
+    # Typed as the three values the signup flow uses, so an assignment of anything
+    # else fails the type check rather than the response model that later reads it.
+    signup_status: Mapped[SignupStatus] = mapped_column(
         String(16), nullable=False, server_default="active"
     )
     # Which terms version they accepted, and when. A checkbox is not the
