@@ -15,6 +15,7 @@ from sqlalchemy import select
 from app.experiment.exclusions import exclude_receiver
 from app.models.client import Client
 from app.models.driver import Driver
+from app.models.driver_shift_event import DriverShiftEvent
 from app.models.experiment_assignment import (
     ARM_CONTROL,
     ARM_TREATMENT,
@@ -26,7 +27,7 @@ from app.models.order import Order, OrderStatus
 from app.models.outcome_entry import KIND_COST, SUBJECT_ORDER, OutcomeEntry
 from app.models.route import Route
 from app.models.stop import Stop, StopOrder
-from app.record.cost import RATE_FROM_DRIVER, RATE_PLACEHOLDER
+from app.record.cost import RATE_FROM_DRIVER, RATE_PLACEHOLDER, record_costs_for_period
 from app.record.abstention import record_arm_abstention
 from app.record.outcomes import record_outcome
 from app.experiment.arms import _draw, block_size
@@ -120,6 +121,47 @@ async def _book(
                 values={"loaded_cents": cents_for(index), "rate_source": rate_source},
             )
     return control_ids, treatment_ids
+
+
+async def _delivered_on(db_session, hub, client, *, at: datetime, timed: bool = True) -> Order:
+    """One assigned order, delivered at `at` by a driver on shift around it,
+    with both taps recorded - everything costing needs, and nothing more.
+    `timed=False` drops the arrival tap, the case completion leaves."""
+    driver = Driver(
+        hub_id=hub.id, name="Driver", phone=f"+1512555{uuid.uuid4().hex[:4]}",
+        hourly_rate_cents=3_000,
+    )
+    order = Order(
+        hub_id=hub.id, external_order_ref=f"PO-{uuid.uuid4().hex[:8]}",
+        source_system="flat_file", raw_payload={}, sla_tier="T2",
+        status=OrderStatus.delivered, requested_at=at - timedelta(hours=3),
+    )
+    db_session.add_all([driver, order])
+    await db_session.flush()
+    for kind, when in (("available", at - timedelta(hours=1)), ("off_shift", at + timedelta(hours=1))):
+        db_session.add(
+            DriverShiftEvent(driver_id=driver.id, hub_id=hub.id, event_type=kind, occurred_at=when)
+        )
+    db_session.add(
+        ExperimentAssignment(
+            hub_id=hub.id, client_id=client.id, order_id=order.id,
+            experiment=EXPERIMENT_CONTROL_ARM, arm=ARM_TREATMENT,
+            assigned_at=at - timedelta(hours=2), salt="s", control_fraction=0.10,
+            draw=0.5, contracted_at=START,
+        )
+    )
+    route = Route(hub_id=hub.id, driver_id=driver.id, status="completed")
+    db_session.add(route)
+    await db_session.flush()
+    stop = Stop(
+        route_id=route.id, sequence=1, stop_type="dropoff", parcel_count=1,
+        arrived_at=at if timed else None, completed_at=at + timedelta(minutes=10),
+    )
+    db_session.add(stop)
+    await db_session.flush()
+    db_session.add(StopOrder(stop_id=stop.id, order_id=order.id))
+    await db_session.flush()
+    return order
 
 
 async def _statement(db_session, hub, client, **kwargs) -> SavingsStatement:
@@ -288,6 +330,46 @@ class TestItCarriesItsBasis:
         statement = await _statement(db_session, hub, client)
         assert statement.cost_per_drop_cents is None
         assert "could be costed" in render_statement(statement)
+        # No one at the hub was on shift, so this time the hours are the reason.
+        assert "hours on shift" in statement.no_cost_reason
+
+    async def test_with_hours_on_record_it_does_not_blame_the_hours(self, db_session):
+        """The old sentence said shift hours were missing whatever the cause.
+        Here they are recorded and the arrival is what is missing."""
+        hub = await _hub(db_session)
+        client = await _client(db_session, hub)
+        await _delivered_on(db_session, hub, client, at=MID + timedelta(hours=9), timed=False)
+        await record_costs_for_period(db_session, hub_id=hub.id, since=START, until=END)
+
+        statement = await _statement(db_session, hub, client)
+
+        assert statement.costed_drops == 0
+        assert statement.no_cost_reason is not None
+        assert "arrived" in statement.no_cost_reason
+        assert "hours" not in statement.no_cost_reason
+        assert statement.no_cost_reason in render_statement(statement)
+
+    async def test_when_it_cannot_see_why_it_says_only_that_nothing_is_costed(self, db_session):
+        """Hours and both taps on record, and costing never run for the period.
+        Nothing the statement can see is missing, so it names no cause."""
+        hub = await _hub(db_session)
+        client = await _client(db_session, hub)
+        await _delivered_on(db_session, hub, client, at=MID + timedelta(hours=9))
+
+        statement = await _statement(db_session, hub, client)
+
+        assert statement.no_cost_reason == (
+            "None of them has been costed yet, so there is no average to show."
+        )
+
+    async def test_with_no_deliveries_it_explains_no_costing(self, db_session):
+        hub = await _hub(db_session)
+        client = await _client(db_session, hub)
+        statement = await _statement(db_session, hub, client)
+        text = render_statement(statement)
+        assert statement.drops == 0
+        assert statement.no_cost_reason is None
+        assert "costed" not in text.split("The comparison")[0]
 
     async def test_a_superseded_cost_is_read_at_its_correction(self, db_session):
         """REC-3 keeps both so the correction can be seen, not so both can be
@@ -328,6 +410,25 @@ class TestItCarriesItsBasis:
         )
         assert statement.drops == 0
         assert statement.costed_drops == 0
+
+    @pytest.mark.parametrize(
+        "delivered_at",
+        [START + timedelta(hours=9), MID + timedelta(hours=9), END - timedelta(hours=15)],
+        ids=["first-day", "mid-period", "last-day"],
+    )
+    async def test_every_day_of_the_period_is_costed(self, db_session, delivered_at):
+        """Costing stamps a day's cost at the end of the day it covers, so the
+        last day of a period is stamped exactly at `period_end` - the one
+        instant a half-open window leaves out."""
+        hub = await _hub(db_session)
+        client = await _client(db_session, hub)
+        await _delivered_on(db_session, hub, client, at=delivered_at)
+        await record_costs_for_period(db_session, hub_id=hub.id, since=START, until=END)
+
+        statement = await _statement(db_session, hub, client)
+
+        assert statement.drops == 1
+        assert statement.costed_drops == 1
 
     async def test_deliveries_with_no_arrival_are_said_beside_the_average(self, db_session):
         """Their driver time sits in other deliveries' costs, which changes what
