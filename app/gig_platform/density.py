@@ -58,20 +58,21 @@ def _sequenced_job_ids(jobs: list[GigJob]) -> set[uuid.UUID]:
     with no overlap. Those are sequential work, not a pairing, and counting
     them would inflate exactly the number this module exists to keep honest.
     """
-    by_driver: dict[uuid.UUID, list[GigJob]] = defaultdict(list)
+    # Each driver's possession windows, taken only from jobs that have both ends -
+    # narrowed here, once, rather than re-read from the job where the type checker
+    # can no longer see that the filter ran.
+    windows: dict[uuid.UUID, list[tuple[uuid.UUID, datetime, datetime]]] = defaultdict(list)
     for job in jobs:
         if job.driver_id and job.accepted_at and job.delivered_at:
-            by_driver[job.driver_id].append(job)
+            windows[job.driver_id].append((job.id, job.accepted_at, job.delivered_at))
 
     sequenced: set[uuid.UUID] = set()
-    for driver_jobs in by_driver.values():
-        for i, job in enumerate(driver_jobs):
-            for other in driver_jobs[i + 1 :]:
-                if _overlaps(
-                    job.accepted_at, job.delivered_at, other.accepted_at, other.delivered_at
-                ):
-                    sequenced.add(job.id)
-                    sequenced.add(other.id)
+    for driver_windows in windows.values():
+        for i, (job_id, start, end) in enumerate(driver_windows):
+            for other_id, other_start, other_end in driver_windows[i + 1 :]:
+                if _overlaps(start, end, other_start, other_end):
+                    sequenced.add(job_id)
+                    sequenced.add(other_id)
     return sequenced
 
 
