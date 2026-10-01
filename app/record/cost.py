@@ -432,9 +432,21 @@ async def record_costs_for_period(
 ) -> dict:
     """Cost every driver-day in a window, writing each drop's share to the ledger.
 
-    The switch `record_driver_day_cost` was missing. It had no caller anywhere,
-    so nothing in this system ever computed what a drop cost - the function
-    existed, was tested, and was never run.
+    The only writer of costs. Before it, nothing in this system had ever
+    computed what a drop cost: a per-driver-day writer existed, was tested, and
+    was never run.
+
+    **Into the ledger rather than onto `Order.cost_actuals_cents`, deliberately.**
+    The boundary note in `tests/test_architecture_boundaries.py` puts it plainly:
+    *"a record the deciding code could read back and act on would stop being a
+    record."* A cost on the order is a field dispatch can read; a cost in the
+    ledger is evidence. A caller that needs it on the order - billing, say - can
+    copy it, and that is their decision to own rather than this layer's to make.
+
+    The values written are the whole basis, not just the number: the rate, where
+    the rate came from, which timing source, how many orders shared the stop,
+    and the notes. An entry saying `1_247` and nothing else would be unarguable
+    with, and `REC-3` exists so outcomes can be argued with.
 
     **Idempotent by default.** The ledger is append-only, so a second run would
     write a second live cost for the same order and nothing downstream could
@@ -538,58 +550,3 @@ def _days_in(since: datetime, until: datetime) -> list:
         out.append((cursor, cursor + timedelta(days=1)))
         cursor += timedelta(days=1)
     return out
-
-
-async def record_driver_day_cost(
-    session: AsyncSession,
-    *,
-    hub_id,
-    driver_id,
-    since: datetime,
-    until: datetime,
-    occurred_at: datetime | None = None,
-) -> list:
-    """Write each order's cost into the outcome ledger (`REC-3`).
-
-    Into the ledger rather than onto `Order.cost_actuals_cents`, deliberately.
-    The boundary note in `tests/test_architecture_boundaries.py` puts it plainly:
-    *"a record the deciding code could read back and act on would stop being a
-    record."* A cost on the order is a field dispatch can read; a cost in the
-    ledger is evidence. A caller that needs it on the order - billing, say - can
-    copy it, and that is their decision to own rather than this layer's to make.
-
-    The values written are the whole basis, not just the number: the rate, where
-    the rate came from, which timing source, how many orders shared the stop,
-    and the notes. An entry saying `1_247` and nothing else would be unarguable
-    with, and `REC-3` exists so outcomes can be argued with.
-    """
-    cost = await driver_day_cost(session, driver_id=driver_id, since=since, until=until)
-    if not cost.orders:
-        return []
-    entries = []
-    for order in cost.orders:
-        entries.append(
-            await record_outcome(
-                session,
-                hub_id=hub_id,
-                subject_type=SUBJECT_ORDER,
-                subject_id=order.order_id,
-                kind=KIND_COST,
-                occurred_at=occurred_at or until,
-                values={
-                    "loaded_cents": order.loaded_cents,
-                    "own_cents": order.own_cents,
-                    "stop_seconds": round(order.stop_seconds, 1),
-                    "travel_seconds": round(order.travel_seconds, 1),
-                    "overhead_seconds": round(order.overhead_seconds, 1),
-                    "rate_cents_per_hour": order.rate_cents_per_hour,
-                    "rate_source": order.rate_source,
-                    "shared_with": order.shared_with,
-                    "timing_source": cost.timing_source,
-                    "driver_id": str(cost.driver_id),
-                    "window": [cost.window_start.isoformat(), cost.window_end.isoformat()],
-                    "notes": cost.notes,
-                },
-            )
-        )
-    return entries

@@ -68,8 +68,10 @@ from any path an order passes through.
   replays it.
 - `STL-2`'s `require_agreed` is called by nothing, including
   `scripts/sign_basis.py`. Nothing refuses an unsigned basis.
-- `record_driver_day_cost` is named only inside a docstring — in
-  `scripts/settle_month.py`'s own note about orphaned modules.
+- ~~`record_driver_day_cost` is named only inside a docstring — in
+  `scripts/settle_month.py`'s own note about orphaned modules.~~ **Deleted** —
+  `record_costs_for_period` superseded it, and a second call would have written
+  a second live cost.
 
 ### Two of them are mine, from this week
 

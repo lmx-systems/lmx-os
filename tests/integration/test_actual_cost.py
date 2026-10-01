@@ -26,7 +26,7 @@ from app.record.cost import (
     SOURCE_GEOFENCE,
     SOURCE_TAPS,
     driver_day_cost,
-    record_driver_day_cost,
+    record_costs_for_period,
     stop_timings,
 )
 from app.record.outcomes import outcomes_for
@@ -107,6 +107,15 @@ async def _route(db_session, hub, driver, plan):
             db_session.add(StopOrder(stop_id=stop.id, order_id=order.id))
     await db_session.flush()
     return route
+
+
+async def _record_the_day(db_session, hub) -> dict:
+    """Cost DAY's whole date through the ledger's one writer, the way
+    `scripts/settle_month.py` does - a driver-day is the unit it writes in."""
+    start = DAY.replace(hour=0)
+    return await record_costs_for_period(
+        db_session, hub_id=hub.id, since=start, until=start + timedelta(days=1)
+    )
 
 
 async def _day_cost(db_session, driver):
@@ -398,11 +407,8 @@ class TestItLandsInTheLedger:
         order = await _order(db_session, hub)
         await _route(db_session, hub, driver, [(0, 10, [order]), (20, 30, [order])])
 
-        entries = await record_driver_day_cost(
-            db_session, hub_id=hub.id, driver_id=driver.id,
-            since=DAY - timedelta(hours=1), until=DAY + timedelta(hours=8),
-        )
-        assert entries
+        summary = await _record_the_day(db_session, hub)
+        assert summary["costed"] == 1
         assert order.cost_actuals_cents is None
 
         recorded = await outcomes_for(db_session, subject_id=order.id)
@@ -417,10 +423,7 @@ class TestItLandsInTheLedger:
         await _on_duty(db_session, hub, driver, DAY, DAY + timedelta(hours=1))
         order = await _order(db_session, hub)
         await _route(db_session, hub, driver, [(0, 10, [order])])
-        await record_driver_day_cost(
-            db_session, hub_id=hub.id, driver_id=driver.id,
-            since=DAY - timedelta(hours=1), until=DAY + timedelta(hours=8),
-        )
+        await _record_the_day(db_session, hub)
 
         entry = [
             e for e in await outcomes_for(db_session, subject_id=order.id)
@@ -434,12 +437,23 @@ class TestItLandsInTheLedger:
         assert entry.values["rate_source"] == RATE_FROM_DRIVER
 
     async def test_recording_an_untimed_route_writes_nothing(self, db_session):
+        """On duty, an order on the route, and no stop timed: there is a wage
+        and nothing to divide it by, so nothing is written."""
         hub = await _hub(db_session)
         driver = await _driver(db_session, hub)
+        await _on_duty(db_session, hub, driver, DAY, DAY + timedelta(hours=1))
+        order = await _order(db_session, hub)
         route = Route(hub_id=hub.id, driver_id=driver.id, status="planned")
         db_session.add(route)
         await db_session.flush()
-        assert await record_driver_day_cost(
-            db_session, hub_id=hub.id, driver_id=driver.id,
-            since=DAY, until=DAY + timedelta(hours=8),
-        ) == []
+        stop = Stop(route_id=route.id, sequence=1, stop_type="dropoff", parcel_count=1)
+        db_session.add(stop)
+        await db_session.flush()
+        db_session.add(StopOrder(stop_id=stop.id, order_id=order.id))
+        await db_session.flush()
+
+        summary = await _record_the_day(db_session, hub)
+
+        assert summary["costed"] == 0
+        recorded = await outcomes_for(db_session, subject_id=order.id)
+        assert [e for e in recorded if e.kind == KIND_COST] == []

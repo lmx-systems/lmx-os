@@ -211,23 +211,31 @@ dev-world seed script and nothing else. It is now reported in
 
 `tests/test_no_new_orphans.py` fails when a public function in `app/` is
 reachable from nothing, and a second test fails when an allowlisted entry stops
-being an orphan — so the list below cannot rot. Fifteen entries, each a stated
+being an orphan — so the list below cannot rot. Eighteen entries, each a stated
 hold rather than an oversight.
 
 | Item | What | Why it is held |
 |---|---|---|
 | `REC-1` | `replay_inputs` | The log is written; nothing in the product replays it |
-| `REC-2` | `consequence_label`, `record_driver_day_cost` | No per-order reader; the second is superseded |
+| `REC-2` | `consequence_label` | No per-order reader |
 | `REC-3` | `current_outcome`, `supersede_outcome` | A correction path with no operator surface |
 | `IDN-2` | `propose_merge`, `merge_locations` | Auto-merge is gated behind confirming the founding set (§2.2c) |
 | `IDN-4` | `set_receiving_hours` | **Stated, by the receiver.** A driver's guess at a dock's hours is exactly the soft label `IDN-4` separates by source, so it stays here until a dispatcher or the client portal asks. `set_access` and `set_autonomy_fit` came off this list when `DRV-7` gave them a writer |
 | `EXP-1` | `arm_for_order` | Inert until a client contracts an arm |
 | `ING-3` | `backfill_orders` | No order-level history exists to import |
+| `ING-4` | `parse_customer_timing`, `accounts_in` | Read a historical export; the identity seed they serve is a one-off |
+| `PRD-1` | `load_activity`, `load_invoices`, `compute`, `render_text`, `render_json` | The baseline analysis of an export, run offline rather than on a live path |
+| `CON-2` | `overrides_for_order` | The console reads overrides through `explain_order` instead |
 | `CON-3` | `labelled_overrides` | The training-set export has no reader yet |
 
 `require_agreed` was on this list and is not any more: `scripts/settle_month.py`
 now refuses to write a statement PDF on a basis that is unsigned or no longer
 reproduces, and `--draft` marks the page instead of bypassing the check.
+
+`record_driver_day_cost` was on this list and is not any more, because it is
+gone. `record_costs_for_period` superseded it, and it was not idempotent - a
+second call wrote a second live cost into an append-only ledger - so it was
+deleted rather than wired.
 
 ---
 
