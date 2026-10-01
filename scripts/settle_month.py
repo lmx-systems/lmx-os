@@ -31,12 +31,14 @@ import argparse
 import asyncio
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.db import AsyncSessionLocal  # noqa: E402
+from app.hub_calendar import hub_month  # noqa: E402
+from app.models.hub import Hub  # noqa: E402
 from app.experiment.integrity import render as render_integrity  # noqa: E402
 from app.record.cost import record_costs_for_period  # noqa: E402
 from app.settle.basis import (  # noqa: E402
@@ -50,18 +52,23 @@ from app.settle.pdf import render_statement_pdf  # noqa: E402
 from app.settle.statement import build_statement, render_statement  # noqa: E402
 
 
-def _month_bounds(month: str) -> tuple[datetime, datetime]:
-    start = datetime.strptime(month, "%Y-%m").replace(tzinfo=timezone.utc)
-    following = (start + timedelta(days=32)).replace(day=1)
-    return start, following
+def _month_bounds(month: str, hub: Hub) -> tuple[datetime, datetime]:
+    """The month on the hub's own clock. In UTC, a Los Angeles month ran from
+    5pm on the last day of the one before, and costing cut it into UTC days."""
+    first = datetime.strptime(month, "%Y-%m")
+    return hub_month(hub, first.year, first.month)
 
 
 async def _run(
     hub: str, client: str, month: str, pdf: Path | None, recompute: bool,
     issue_basis: bool, allow_draft: bool,
 ) -> int:
-    since, until = _month_bounds(month)
     async with AsyncSessionLocal() as session:
+        hub_row = await session.get(Hub, uuid.UUID(hub))
+        if hub_row is None:
+            print(f"No hub {hub}.", file=sys.stderr)
+            return 2
+        since, until = _month_bounds(month, hub_row)
         print(f"Costing {since:%B %Y} for hub {hub}")
         summary = await record_costs_for_period(
             session, hub_id=uuid.UUID(hub), since=since, until=until,
