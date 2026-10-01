@@ -23,7 +23,7 @@ from collections.abc import Mapping
 
 import structlog
 
-from app.redis_client import get_client, timed_operation
+from app.redis_client import as_text, get_client, timed_operation
 from app.schemas.fleet import DriverLocation, DriverState
 
 logger = structlog.get_logger(__name__)
@@ -41,24 +41,13 @@ def _available_set_key(hub_id: str) -> str:
     return f"fleet:{hub_id}:available_drivers"
 
 
-def _text(value: bytes | str) -> str:
-    """A Redis reply as text.
-
-    The client is built with `decode_responses=True` (`app/redis_client.py`), so at
-    runtime this is already a str; the stubs say `bytes | str` because they cannot
-    know that. Decoding rather than casting means the manager reads the same under
-    either setting - tested with a client that returns bytes.
-    """
-    return value.decode() if isinstance(value, bytes) else value
-
-
 def _fields(reply: Mapping[bytes | str, bytes | str]) -> dict[str, str]:
     """A hash reply with text field names as well as text values.
 
     The names matter as much as the values: from a client that does not decode,
     `data["status"]` is a KeyError, because the field came back as `b"status"`.
     """
-    return {_text(name): _text(value) for name, value in reply.items()}
+    return {as_text(name): as_text(value) for name, value in reply.items()}
 
 
 def _all_drivers_set_key(hub_id: str) -> str:
@@ -134,7 +123,7 @@ class FleetStateManager:
         """
         async with timed_operation("fleet.get_available_driver_ids"):
             members = await self._redis.smembers(_available_set_key(hub_id))
-        return [_text(member) for member in members]
+        return [as_text(member) for member in members]
 
     async def get_fleet_snapshot(self, hub_id: str) -> list[DriverState]:
         """
@@ -151,7 +140,7 @@ class FleetStateManager:
         """Every driver ever upserted for this hub, regardless of current status."""
         async with timed_operation("fleet.get_all_driver_ids"):
             members = await self._redis.smembers(_all_drivers_set_key(hub_id))
-        return [_text(member) for member in members]
+        return [as_text(member) for member in members]
 
     async def get_fleet_overview(self, hub_id: str) -> list[DriverState]:
         """

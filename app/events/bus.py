@@ -42,7 +42,7 @@ from collections.abc import Awaitable, Callable
 
 import structlog
 
-from app.redis_client import get_client
+from app.redis_client import as_text, get_client
 
 logger = structlog.get_logger(__name__)
 
@@ -97,7 +97,7 @@ class HubEventBus:
 
     async def _poll_once(self) -> None:
         redis = get_client()
-        dirty_hub_ids = await redis.smembers(DIRTY_HUBS_KEY)
+        dirty_hub_ids = [as_text(hub_id) for hub_id in await redis.smembers(DIRTY_HUBS_KEY)]
         for hub_id in dirty_hub_ids:
             if hub_id in self._local_running:
                 continue  # this process already has a task running for it
