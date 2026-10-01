@@ -77,6 +77,12 @@ async def _run(
                 "no hourly rate recorded. Those figures are arithmetic on an "
                 "invented number - see scripts/set_driver_rate.py."
             )
+        if summary["untimed_stops"]:
+            print(
+                f"  NOTE: {summary['untimed_stops']} stop(s) were completed with no "
+                "timing - no arrival from a tap or a crossing - so their time sits in "
+                "other drops' costs. The statement says so beside its average."
+            )
 
         statement = await build_statement(
             session, hub_id=uuid.UUID(hub), client_id=uuid.UUID(client),
