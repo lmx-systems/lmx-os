@@ -94,6 +94,12 @@ RATE_PLACEHOLDER = "placeholder"
 class StopTiming:
     """When a stop began and ended, and how we know.
 
+    Only a stop with both ends has one. A stop missing either cannot be placed
+    in a window, given a dwell, or start the next leg, so `stop_timings` leaves
+    it out rather than handing it on with `None` times for every reader to
+    check again. This type used to carry them, with `source is None` as the only
+    flag, and nothing could verify that a reader had looked at it.
+
     Geofence beats taps, the same precedence `IDN-4`'s profile uses and for the
     same reason: a crossing is machine-generated and a tap is a person
     remembering. The source travels with the number because a route timed from
@@ -102,14 +108,12 @@ class StopTiming:
 
     stop_id: object
     sequence: int
-    arrived_at: datetime | None
-    departed_at: datetime | None
-    source: str | None
+    arrived_at: datetime
+    departed_at: datetime
+    source: str
 
     @property
     def dwell_seconds(self) -> float:
-        if self.arrived_at is None or self.departed_at is None:
-            return 0.0
         return max((self.departed_at - self.arrived_at).total_seconds(), 0.0)
 
 
@@ -147,8 +151,8 @@ class DriverDayCost:
     """What one driver's paid window cost, and each drop's share of it."""
 
     driver_id: object
-    window_start: datetime | None
-    window_end: datetime | None
+    window_start: datetime
+    window_end: datetime
     paid_seconds: float
     attributed_seconds: float
     rate_cents_per_hour: int
@@ -188,7 +192,11 @@ class DriverDayCost:
 
 
 async def stop_timings(session: AsyncSession, stops: list[Stop]) -> list[StopTiming]:
-    """Arrive and depart per stop, crossings preferred over taps."""
+    """Arrive and depart per timed stop, crossings preferred over taps.
+
+    A stop with neither both crossings nor both taps has no timing, and is left
+    out of the list rather than included with a missing end.
+    """
     if not stops:
         return []
     crossings = list(
@@ -198,8 +206,8 @@ async def stop_timings(session: AsyncSession, stops: list[Stop]) -> list[StopTim
             .order_by(StopGeofenceEvent.occurred_at)
         )
     )
-    entered: dict = {}
-    exited: dict = {}
+    entered: dict[object, datetime] = {}
+    exited: dict[object, datetime] = {}
     for event in crossings:
         if event.kind == KIND_ENTER:
             entered.setdefault(event.stop_id, event.occurred_at)
@@ -214,7 +222,7 @@ async def stop_timings(session: AsyncSession, stops: list[Stop]) -> list[StopTim
         if arrive is None or depart is None:
             arrive, depart, source = stop.arrived_at, stop.completed_at, SOURCE_TAPS
         if arrive is None or depart is None:
-            source = None
+            continue
         timings.append(
             StopTiming(
                 stop_id=stop.id,
@@ -227,7 +235,7 @@ async def stop_timings(session: AsyncSession, stops: list[Stop]) -> list[StopTim
     # Ordered by when they actually happened, not by sequence within a route -
     # a driver-day can hold several routes, and the leg into a stop is the gap
     # since whatever they last left, whichever route it belonged to.
-    return sorted(timings, key=lambda t: (t.arrived_at is None, t.arrived_at))
+    return sorted(timings, key=lambda t: t.arrived_at)
 
 
 async def driver_day_cost(
@@ -277,9 +285,7 @@ async def driver_day_cost(
         )
     )
     timings = [
-        t
-        for t in await stop_timings(session, stops)
-        if t.source is not None and since <= t.arrived_at < until
+        t for t in await stop_timings(session, stops) if since <= t.arrived_at < until
     ]
     if not timings:
         cost.notes.append(
@@ -314,7 +320,7 @@ async def driver_day_cost(
     # property that makes these numbers usable in aggregate: that the loaded
     # costs sum back to the wage bill.
     own: dict = {}
-    previous_departure = None
+    previous_departure: datetime | None = None
     for timing in timings:
         travel = 0.0
         if previous_departure is not None:

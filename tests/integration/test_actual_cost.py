@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select
 
 from app.models.driver import Driver
 from app.models.driver_shift_event import DriverShiftEvent
@@ -26,6 +27,7 @@ from app.record.cost import (
     SOURCE_TAPS,
     driver_day_cost,
     record_driver_day_cost,
+    stop_timings,
 )
 from app.record.outcomes import outcomes_for
 
@@ -240,6 +242,34 @@ class TestWhereTheNumbersCameFrom:
         cost = await _day_cost(db_session, driver)
         assert cost.timing_source == "mixed"
         assert any("driver taps" in note for note in cost.notes)
+
+    async def test_a_stop_timed_at_one_end_has_no_timing(self, db_session):
+        """Half a timing is no timing. An arrival with no departure cannot be
+        placed in a window, given a dwell, or start the next leg, so the stop is
+        left out rather than handed on with a missing end."""
+        hub = await _hub(db_session)
+        driver = await _driver(db_session, hub)
+        order = await _order(db_session, hub)
+        route = await _route(db_session, hub, driver, [(0, 10, [order])])
+        tapped_in_only = Stop(
+            route_id=route.id, sequence=2, stop_type="dropoff", parcel_count=1,
+            arrived_at=DAY + timedelta(minutes=20),
+        )
+        crossed_in_only = Stop(route_id=route.id, sequence=3, stop_type="dropoff", parcel_count=1)
+        db_session.add_all([tapped_in_only, crossed_in_only])
+        await db_session.flush()
+        entered = DAY + timedelta(minutes=40)
+        db_session.add(
+            StopGeofenceEvent(stop_id=crossed_in_only.id, kind=KIND_ENTER, occurred_at=entered,
+                              recorded_at=entered, accuracy_m=12.0)
+        )
+        await db_session.flush()
+
+        stops = list(await db_session.scalars(select(Stop).where(Stop.route_id == route.id)))
+        timings = await stop_timings(db_session, stops)
+
+        assert [t.sequence for t in timings] == [1]
+        assert timings[0].source == SOURCE_GEOFENCE
 
     async def test_a_placeholder_wage_is_impossible_to_quote_unknowingly(self, db_session):
         """A cost computed from an invented wage is a fiction. Not refused - that
