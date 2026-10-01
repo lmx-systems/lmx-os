@@ -37,6 +37,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
+from app.schemas.gig import GigJobStatus
 
 # Where the job came from. Plain strings rather than a Postgres enum, same
 # as ReturnItem.status and Order.source_system: adding a fourth platform
@@ -144,7 +145,7 @@ class GigJob(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     distance_miles: Mapped[Decimal | None] = mapped_column(Numeric(7, 2), nullable=True)
 
     assignment_scope: Mapped[str] = mapped_column(String(24), nullable=False, default="pinned_to_driver")
-    status: Mapped[str] = mapped_column(String(24), nullable=False, default="offered")
+    status: Mapped[GigJobStatus] = mapped_column(String(24), nullable=False, default="offered")
 
     # When the platform surfaced the offer, as distinct from when we recorded
     # it. The gap between this and pickup_window_open is the open question of

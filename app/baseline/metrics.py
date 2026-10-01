@@ -283,7 +283,11 @@ def _add_on_time(baseline: Baseline, arows: list[ActivityRow]) -> None:
             )
         )
         return
-    on_time = sum(1 for r in comparable if r.completed_at <= r.promised_at)
+    # `comparable` holds only rows with a promise; the `is not None` restates it
+    # where the type checker can see it.
+    on_time = sum(
+        1 for r in comparable if r.promised_at is not None and r.completed_at <= r.promised_at
+    )
     baseline.metrics.append(
         Metric(
             "on_time_rate",

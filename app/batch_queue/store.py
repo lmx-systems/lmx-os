@@ -14,7 +14,7 @@ import json
 from datetime import datetime
 
 from app.batch_queue.queue import HeldOrder
-from app.redis_client import get_client, timed_operation
+from app.redis_client import as_text, get_client, timed_operation
 
 
 def _queue_key(hub_id: str) -> str:
@@ -72,7 +72,7 @@ class HoldQueueStore:
     async def get_all(self, hub_id: str) -> list[HeldOrder]:
         async with timed_operation("holdqueue.get_all"):
             raw = await self._redis.hgetall(_queue_key(hub_id))
-        return [_deserialize(v) for v in raw.values()]
+        return [_deserialize(as_text(v)) for v in raw.values()]
 
     async def depth(self, hub_id: str) -> int:
         """How many orders are waiting, without reading them.

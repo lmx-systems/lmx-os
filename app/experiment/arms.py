@@ -217,7 +217,10 @@ async def assign_arm(
     the arm would quietly bias the split towards whichever arm the retry
     happened to land in.
     """
-    if not control_arm_is_live(client):
+    # `control_arm_is_live` requires the fraction; it is read once here, narrowed,
+    # so the draw below is known to have one.
+    fraction = client.control_arm_fraction
+    if not control_arm_is_live(client) or fraction is None:
         raise ArmNotContractedError(
             f"client {client.id} has no contracted control arm. Record "
             "control_arm_contracted_at and a fraction between "
@@ -252,7 +255,7 @@ async def assign_arm(
             "outside the exclusion. It takes no part in the measurement."
         )
 
-    size = block_size(client.control_arm_fraction)
+    size = block_size(fraction)
     # Serialise the count for this dock. Two intakes racing would both read the
     # same position and could both land on the chosen one, putting two control
     # orders in a block that guarantees one - which is the single promise EXP-2
@@ -291,7 +294,7 @@ async def assign_arm(
         arm=arm,
         assigned_at=now or datetime.now(timezone.utc),
         salt=f"{EXPERIMENT_CONTROL_ARM}:{client.id}",
-        control_fraction=client.control_arm_fraction,
+        control_fraction=fraction,
         draw=draw,
         contracted_at=client.control_arm_contracted_at,
         receiver_key=stratum,

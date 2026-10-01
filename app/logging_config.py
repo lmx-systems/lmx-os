@@ -20,6 +20,7 @@ import sys
 
 import sentry_sdk
 import structlog
+from structlog.typing import Processor
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 
@@ -63,7 +64,7 @@ def configure_logging() -> None:
             integrations=[StarletteIntegration(), FastApiIntegration()],
         )
 
-    shared_processors = [
+    shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
