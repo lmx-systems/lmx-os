@@ -65,7 +65,7 @@ from app.models.experiment_assignment import (
     ExperimentAssignment,
 )
 from app.models.outcome_entry import KIND_COST, OutcomeEntry
-from app.record.cost import RATE_PLACEHOLDER
+from app.record.cost import RATE_PLACEHOLDER, find_untimed_deliveries
 
 # Below this many costed drops in an arm, no interval is produced at all.
 # Cost per drop is right-skewed - one long route with a slow dock stretches the
@@ -134,6 +134,9 @@ class SavingsStatement:
     comparison: ArmComparison | None
     comparison_unavailable: str | None
     exclusions: ExclusionImpact | None = None
+    # Deliveries made at a stop with no timing. Their driver time sits in other
+    # deliveries' costs, so the count is said beside the average it changes.
+    untimed_deliveries: int = 0
     caveats: list[str] = field(default_factory=list)
     # `EXP-3`'s verdict on the window. Kept whole so an operator can read what
     # actually failed; the customer-facing text says only that something did.
@@ -158,6 +161,32 @@ class SavingsStatement:
         return (
             "The measurement does not yet show a saving: the range still "
             "includes no difference at all."
+        )
+
+    @property
+    def untimed_disclosure(self) -> str | None:
+        """Said beside the average, because it changes what the average means.
+
+        Worded to stay true on a day where nothing was timed at all: there the
+        time is in no delivery's cost, and the statement must not claim it is.
+        It names its base because it follows "we were able to cost N of them",
+        and these are counted among all the deliveries, not only the costed.
+        """
+        if not self.untimed_deliveries:
+            return None
+        if self.untimed_deliveries == 1:
+            return (
+                f"One of the {self.drops} deliveries has no recorded arrival time, "
+                "so its own driver time "
+                "could not be measured. Where it shared a day with deliveries we did "
+                "cost, that time is counted in theirs, and so in the average."
+            )
+        return (
+            f"{self.untimed_deliveries} of the {self.drops} deliveries have no "
+            "recorded arrival time, so "
+            "their own driver time could not be measured. Where they shared a day "
+            "with deliveries we did cost, that time is counted in theirs, and so in "
+            "the average."
         )
 
 
@@ -287,6 +316,9 @@ async def build_statement(
     statement.costed_drops = len(costed)
     if costed:
         statement.cost_per_drop_cents = sum(costed) / len(costed)
+    statement.untimed_deliveries = len(
+        await find_untimed_deliveries(session, [a.order_id for a in assignments])
+    )
 
     if placeholder_rates:
         statement.caveats.append(
@@ -372,6 +404,8 @@ def render_statement(statement: SavingsStatement) -> str:
             f"  We were able to cost {statement.costed_drops} of them, at an "
             f"average of {_money(statement.cost_per_drop_cents)} per delivery."
         )
+        if statement.untimed_disclosure:
+            lines.append(f"  {statement.untimed_disclosure}")
     else:
         lines.append(
             "  None of them could be costed: costing needs the driver's shift "

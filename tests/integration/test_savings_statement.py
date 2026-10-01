@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from app.experiment.exclusions import exclude_receiver
 from app.models.client import Client
+from app.models.driver import Driver
 from app.models.experiment_assignment import (
     ARM_CONTROL,
     ARM_TREATMENT,
@@ -21,7 +22,10 @@ from app.models.experiment_assignment import (
     ExperimentAssignment,
 )
 from app.models.hub import Hub
+from app.models.order import Order, OrderStatus
 from app.models.outcome_entry import KIND_COST, SUBJECT_ORDER, OutcomeEntry
+from app.models.route import Route
+from app.models.stop import Stop, StopOrder
 from app.record.cost import RATE_FROM_DRIVER, RATE_PLACEHOLDER
 from app.record.abstention import record_arm_abstention
 from app.record.outcomes import record_outcome
@@ -324,6 +328,50 @@ class TestItCarriesItsBasis:
         )
         assert statement.drops == 0
         assert statement.costed_drops == 0
+
+    async def test_deliveries_with_no_arrival_are_said_beside_the_average(self, db_session):
+        """Their driver time sits in other deliveries' costs, which changes what
+        the average means - so the count goes next to the average, not under
+        "How to read this" where a reader may never get to it."""
+        hub = await _hub(db_session)
+        client = await _client(db_session, hub)
+        control_ids, _ = await _book(
+            db_session, hub, client, docks=35,
+            control_cents=lambda i: 1000 + i, treatment_cents=lambda i: 700 + i,
+        )
+        driver = Driver(hub_id=hub.id, name="Driver", phone=f"+1512555{uuid.uuid4().hex[:4]}")
+        order = Order(
+            id=control_ids[0], hub_id=hub.id, external_order_ref=f"PO-{uuid.uuid4().hex[:8]}",
+            source_system="flat_file", raw_payload={}, sla_tier="T2",
+            status=OrderStatus.delivered, requested_at=MID,
+        )
+        db_session.add_all([driver, order])
+        await db_session.flush()
+        route = Route(hub_id=hub.id, driver_id=driver.id, status="completed")
+        db_session.add(route)
+        await db_session.flush()
+        stop = Stop(
+            route_id=route.id, sequence=1, stop_type="dropoff", parcel_count=1,
+            completed_at=MID,
+        )
+        db_session.add(stop)
+        await db_session.flush()
+        db_session.add(StopOrder(stop_id=stop.id, order_id=order.id))
+        await db_session.flush()
+
+        statement = await _statement(db_session, hub, client)
+        text = render_statement(statement)
+
+        assert statement.untimed_deliveries == 1
+        disclosure = statement.untimed_disclosure
+        assert disclosure is not None
+        assert disclosure.startswith(
+            f"One of the {statement.drops} deliveries has no recorded arrival time"
+        )
+        assert (
+            text.index("What we delivered") < text.index(disclosure)
+            < text.index("The comparison")
+        )
 
 
 class TestItReadsWithoutACall:

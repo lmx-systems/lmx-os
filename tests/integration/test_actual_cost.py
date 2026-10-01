@@ -271,6 +271,39 @@ class TestWhereTheNumbersCameFrom:
         assert [t.sequence for t in timings] == [1]
         assert timings[0].source == SOURCE_GEOFENCE
 
+    async def test_a_completed_stop_with_no_timing_is_counted_and_said(self, db_session):
+        """Completing a stop does not record an arrival, so a driver who skips
+        "arrive" where the geofence missed a crossing leaves one. B's time lands
+        in C's leg - which no figure shows - so the day says how many there were.
+        A stop that never happened is not one of them."""
+        hub = await _hub(db_session)
+        driver = await _driver(db_session, hub)
+        await _on_duty(
+            db_session, hub, driver, DAY - timedelta(minutes=30), DAY + timedelta(hours=2)
+        )
+        a, b, c = [await _order(db_session, hub) for _ in range(3)]
+        route = await _route(db_session, hub, driver, [(0, 10, [a]), (40, 50, [c])])
+        completed_untimed = Stop(
+            route_id=route.id, sequence=3, stop_type="dropoff", parcel_count=1,
+            completed_at=DAY + timedelta(minutes=30),
+        )
+        never_happened = Stop(route_id=route.id, sequence=4, stop_type="dropoff", parcel_count=1)
+        db_session.add_all([completed_untimed, never_happened])
+        await db_session.flush()
+        db_session.add(StopOrder(stop_id=completed_untimed.id, order_id=b.id))
+        await db_session.flush()
+
+        cost = await _day_cost(db_session, driver)
+
+        assert cost.untimed_stops == 1
+        assert cost.summary()["untimed_stops"] == 1
+        assert any("have no timing" in note for note in cost.notes)
+        # Counted, not costed: no figure moves, and the day still sums to the wage.
+        assert {o.order_id for o in cost.orders} == {a.id, c.id}
+        assert sum(o.loaded_cents for o in cost.orders) == pytest.approx(
+            cost.total_cents, abs=3
+        )
+
     async def test_a_placeholder_wage_is_impossible_to_quote_unknowingly(self, db_session):
         """A cost computed from an invented wage is a fiction. Not refused - that
         would make this unusable on today's data - but it cannot be read without

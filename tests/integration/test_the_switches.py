@@ -245,8 +245,48 @@ class TestTheCostingSwitch:
         )
         assert summary == {
             "driver_days": 0, "costed": 0, "skipped_already_costed": 0,
-            "superseded": 0, "placeholder_rate_days": 0,
+            "superseded": 0, "placeholder_rate_days": 0, "untimed_stops": 0,
         }
+
+    async def test_it_counts_stops_it_could_not_time_even_on_days_it_could_not_cost(
+        self, db_session
+    ):
+        """The second driver's day has nothing costable - its one stop has no
+        timing - and is skipped. Its untimed stop is still counted, because that
+        stop is the reason the day had nothing to cost."""
+        hub = await _hub(db_session)
+        costed_driver, _orders = await self._driver_day(db_session, hub)
+        idle_driver = Driver(
+            hub_id=hub.id, name="Driver", phone=f"+1512555{uuid.uuid4().hex[:4]}",
+            hourly_rate_cents=3000,
+        )
+        db_session.add(idle_driver)
+        await db_session.flush()
+        for kind, when in (("available", DAY), ("off_shift", DAY + timedelta(hours=4))):
+            db_session.add(
+                DriverShiftEvent(
+                    driver_id=idle_driver.id, hub_id=hub.id, event_type=kind, occurred_at=when
+                )
+            )
+        for driver in (costed_driver, idle_driver):
+            route = Route(hub_id=hub.id, driver_id=driver.id, status="completed")
+            db_session.add(route)
+            await db_session.flush()
+            db_session.add(
+                Stop(
+                    route_id=route.id, sequence=9, stop_type="dropoff", parcel_count=1,
+                    completed_at=DAY + timedelta(hours=2),
+                )
+            )
+        await db_session.flush()
+
+        summary = await record_costs_for_period(
+            db_session, hub_id=hub.id, since=SINCE, until=UNTIL
+        )
+
+        assert summary["untimed_stops"] == 2
+        assert summary["driver_days"] == 1
+        assert summary["costed"] == 2
 
 
 class TestTheWholeChain:

@@ -253,6 +253,8 @@ def render_statement_pdf(
             f" We were able to cost {how_many}, at an average of "
             f"{_money(statement.cost_per_drop_cents)} per delivery."
         )
+        if statement.untimed_disclosure:
+            delivered += f" {statement.untimed_disclosure}"
     else:
         delivered += (
             " None of them could be costed: costing needs the driver's shift hours, "

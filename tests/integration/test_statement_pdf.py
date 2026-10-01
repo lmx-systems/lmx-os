@@ -230,3 +230,14 @@ class TestTheScriptRefuses:
         # The override must exist and must be explicit. Without it the only way
         # to produce an internal draft is to sign a basis you have not agreed.
         assert "--draft" in text
+
+
+class TestTheAverageCarriesWhatItHolds:
+    def test_deliveries_with_no_arrival_are_said_beside_the_average(self):
+        text = " ".join(_text(render_statement_pdf(_statement(untimed_deliveries=3))).split())
+        assert "3 of the 400 deliveries have no recorded arrival time" in text
+        assert text.index("per delivery.") < text.index("no recorded arrival time")
+
+    def test_nothing_is_said_when_every_delivery_was_timed(self):
+        text = " ".join(_text(render_statement_pdf(_statement())).split())
+        assert "no recorded arrival time" not in text

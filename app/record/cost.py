@@ -66,6 +66,16 @@ make this unusable on the data we have today - but every result carries
 `rate_source`, and an aggregate that mixes real and placeholder rates says so.
 Nobody should be able to quote one of these without meeting the word
 `placeholder`.
+
+## A stop with no timing is counted, not costed
+
+Completing a stop does not record an arrival, so a driver who skips "arrive"
+where the geofence missed a crossing leaves a stop with no timing. It happened,
+and its time did not vanish: it lands in the next timed stop's leg, or in
+overhead if none followed. The day still sums to the wage; what is wrong is how
+it divides between drops. Filling the gap in would be inventing a number, so it
+is counted instead - on the driver-day, in the period summary, and beside the
+statement's average - the same rule the placeholder wage follows.
 """
 from __future__ import annotations
 
@@ -158,6 +168,7 @@ class DriverDayCost:
     rate_cents_per_hour: int
     rate_source: str
     timing_source: str | None
+    untimed_stops: int = 0
     orders: list[OrderCost] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -187,6 +198,7 @@ class DriverDayCost:
             "rate_cents_per_hour": self.rate_cents_per_hour,
             "rate_source": self.rate_source,
             "timing_source": self.timing_source,
+            "untimed_stops": self.untimed_stops,
             "notes": list(self.notes),
         }
 
@@ -238,6 +250,30 @@ async def stop_timings(session: AsyncSession, stops: list[Stop]) -> list[StopTim
     return sorted(timings, key=lambda t: t.arrived_at)
 
 
+async def find_untimed_deliveries(session: AsyncSession, order_ids: list) -> set:
+    """Which of these orders were delivered at a stop with no timing.
+
+    `driver_day_cost` counts untimed stops; this is the same fact in the unit a
+    customer reads. A delivery whose drop was completed with no arrival had its
+    own time go unmeasured, and that time sits in other deliveries' costs.
+    """
+    if not order_ids:
+        return set()
+    rows = list(
+        await session.execute(
+            select(StopOrder.order_id, Stop)
+            .join(Stop, Stop.id == StopOrder.stop_id)
+            .where(
+                StopOrder.order_id.in_(order_ids),
+                Stop.stop_type == "dropoff",
+                Stop.completed_at.is_not(None),
+            )
+        )
+    )
+    timed = {t.stop_id for t in await stop_timings(session, [stop for _, stop in rows])}
+    return {order_id for order_id, stop in rows if stop.id not in timed}
+
+
 async def driver_day_cost(
     session: AsyncSession, *, driver_id, since: datetime, until: datetime
 ) -> DriverDayCost:
@@ -284,9 +320,21 @@ async def driver_day_cost(
             .order_by(Stop.sequence)
         )
     )
-    timings = [
-        t for t in await stop_timings(session, stops) if since <= t.arrived_at < until
-    ]
+    all_timings = await stop_timings(session, stops)
+    timings = [t for t in all_timings if since <= t.arrived_at < until]
+    timed = {t.stop_id for t in all_timings}
+    cost.untimed_stops = sum(
+        1
+        for s in stops
+        if s.id not in timed and s.completed_at is not None and since <= s.completed_at < until
+    )
+    if cost.untimed_stops:
+        cost.notes.append(
+            f"{cost.untimed_stops} stop(s) completed in this window have no timing - "
+            "no arrival from a tap or a crossing - so their time is counted in the "
+            "next timed stop's leg, or in overhead if none followed. The day's total "
+            "is right; its split between drops is not"
+        )
     if not timings:
         cost.notes.append(
             "the driver was on duty and no stop in this window has both an "
@@ -408,12 +456,16 @@ async def record_costs_for_period(
         "skipped_already_costed": 0,
         "superseded": 0,
         "placeholder_rate_days": 0,
+        "untimed_stops": 0,
     }
     for driver_id in drivers:
         for day_start, day_end in days:
             cost = await driver_day_cost(
                 session, driver_id=driver_id, since=day_start, until=day_end
             )
+            # Counted before the skip: a day with nothing costable can still have
+            # had stops completed with no timing, and those are what it lacked.
+            summary["untimed_stops"] += cost.untimed_stops
             if not cost.orders:
                 continue
             summary["driver_days"] += 1
