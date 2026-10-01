@@ -59,12 +59,13 @@ edit; `requirements.lock` and `requirements-dev.lock` are what CI, the Docker im
 venv install. After changing a requirement, regenerate both locks and commit them together:
 
 ```bash
-uv pip compile requirements.txt --universal --python-version 3.11 -o requirements.lock
-uv pip compile requirements-dev.txt --universal --python-version 3.11 -o requirements-dev.lock
+uv pip compile requirements.txt --universal --python-version 3.11 --generate-hashes -o requirements.lock
+uv pip compile requirements-dev.txt --universal --python-version 3.11 --generate-hashes -o requirements-dev.lock
 ```
 
+The locks carry hashes, so pip refuses any package whose bytes do not match what was locked.
 `tests/test_dependency_lock.py` fails if a requirement is missing from its lock, pinned to a
-version its floor excludes, or pinned differently in the two locks.
+version its floor excludes, pinned differently in the two locks, or left without a hash.
 
 Each front end runs the same way, in its own terminal:
 
