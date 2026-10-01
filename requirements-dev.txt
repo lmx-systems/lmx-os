@@ -1,3 +1,9 @@
+# Floors, edited by hand - but not what gets installed. CI, the Docker image and
+# local venvs install requirements-dev.lock, compiled from this file. Before the lock existed,
+# every CI run took whatever was newest that day, and on 30 Sep 2026 it was a
+# SQLAlchemy minor ahead of every developer's venv (#127). After any change here:
+#   uv pip compile requirements-dev.txt --universal --python-version 3.11 -o requirements-dev.lock
+# tests/test_dependency_lock.py fails if this file and the lock disagree.
 -r requirements.txt
 pytest>=8.2.0
 pytest-asyncio>=0.23.6

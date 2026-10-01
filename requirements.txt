@@ -1,3 +1,9 @@
+# Floors, edited by hand - but not what gets installed. CI, the Docker image and
+# local venvs install requirements.lock, compiled from this file. Before the lock existed,
+# every CI run took whatever was newest that day, and on 30 Sep 2026 it was a
+# SQLAlchemy minor ahead of every developer's venv (#127). After any change here:
+#   uv pip compile requirements.txt --universal --python-version 3.11 -o requirements.lock
+# tests/test_dependency_lock.py fails if this file and the lock disagree.
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
 # The `[asyncio]` extra is greenlet, and it is not decoration: every session in
