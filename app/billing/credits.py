@@ -94,7 +94,7 @@ async def assess_credits(
         if order.delivered_at is None or order.fee_cents is None:
             continue
 
-        term = terms.get(order.sla_tier)
+        term = terms.get(order.sla_tier.value) if order.sla_tier is not None else None
         # Rule 2 lives in app/sla/commitment.py now, not here. The client-facing views
         # show the same figure from the same function, which is the only way the number
         # on a statement and the number on a screen cannot drift apart - a customer owed

@@ -53,7 +53,7 @@ def _tier_label(tier: str | None) -> str:
     return "Hot Shot" if tier == "HOT_SHOT" else tier
 
 
-def _summarize_lines(invoice: InvoiceDetailView) -> list[tuple[str, int, int, int]]:
+def _summarize_lines(invoice: InvoiceDetailView) -> list[tuple[str | None, int, int, int]]:
     """Group the per-order line items into (tier, rate_per_drop, count,
     subtotal) rows. Grouped by rate as well as tier so a mid-period rate
     change shows as two honest lines instead of one wrong average - same

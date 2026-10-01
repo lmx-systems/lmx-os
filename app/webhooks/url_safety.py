@@ -61,7 +61,16 @@ def _resolve(hostname: str, port: int) -> set[str]:
     private-address check untestable except via literal IPs.
     """
     resolved = socket.getaddrinfo(hostname, port, proto=socket.IPPROTO_TCP)
-    return {info[4][0] for info in resolved}
+    addresses: set[str] = set()
+    for info in resolved:
+        address = info[4][0]
+        if not isinstance(address, str):
+            # A TCP lookup only yields IP strings; anything else is a socket family
+            # this guard cannot check, and an address that cannot be checked is not
+            # one to POST a customer's data to. Fail closed rather than drop it.
+            raise UnsafeWebhookUrl("The URL must point at a public address we can reach")
+        addresses.add(address)
+    return addresses
 
 
 def _is_public(address: str) -> bool:

@@ -38,7 +38,7 @@ import secrets
 
 import structlog
 
-from app.redis_client import get_client, timed_operation
+from app.redis_client import as_text, get_client, timed_operation
 
 logger = structlog.get_logger(__name__)
 
@@ -110,7 +110,7 @@ class PasswordResetStore:
         """
         async with timed_operation("client_auth.password_reset_consume"):
             value = await self._redis.getdel(_token_key(token))
-        return value if value else None
+        return as_text(value) if value else None
 
     async def invalidate_all_for_user(self, client_user_id: str) -> None:
         """No-op today, and deliberately shaped rather than silently absent.

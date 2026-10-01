@@ -33,7 +33,7 @@ from app.identity import link_shop_to_dock, receiver_key_for
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.record.abstention import record_arm_abstention
-from app.models.order import INTAKE_BACKFILL, INTAKE_LIVE, INTAKE_MODES, Order, OrderStatus
+from app.models.order import INTAKE_BACKFILL, INTAKE_LIVE, INTAKE_MODES, Order, OrderStatus, SLATier
 from app.models.parcel import Parcel
 from app.models.return_item import ReturnItem
 from app.models.rules import ActiveRule
@@ -611,10 +611,15 @@ async def ingest_lmx_order(
         # EXTERNAL: somebody else promised the customer a window, so we enforce
         # it rather than reclassifying. The window IS the deadline.
         sla_tier = lmx.sla_tier or _DEFAULT_EXTERNAL_TIER
+        if lmx.delivery_window_end is None:
+            # `LMXOrder._external_commitment_needs_a_window` refuses an EXTERNAL order
+            # without one. Restated here because the hold queue serialises this
+            # deadline (`hold_deadline.isoformat()`) and has to be able to rely on it.
+            raise ValueError("an EXTERNAL order reached intake without delivery_window_end")
         hold_deadline = lmx.delivery_window_end
         reason = "external commitment - window accepted as given, not classified"
 
-    order.sla_tier = sla_tier
+    order.sla_tier = SLATier(sla_tier)
     order.hold_deadline = hold_deadline
     # No client relationship means nothing to bill against. Skipped rather than
     # logged as a missing rate, which would be misleading - there is no rate to
