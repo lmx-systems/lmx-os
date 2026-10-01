@@ -1,4 +1,5 @@
-"""Every requirement is locked, the lock allows it, and the two locks agree.
+"""Every requirement is locked, the lock allows it, the two locks agree, and every pin
+is hashed.
 
 CI, the Docker image and local venvs install the lock files, not the floors in
 `requirements*.txt`. Before the locks existed every CI run took whatever was
@@ -78,3 +79,23 @@ def test_the_image_runs_what_ci_tested():
     }
     assert not disagree, f"the locks disagree (runtime, dev): {disagree}"
     assert set(runtime) <= set(dev), "the runtime lock has packages the dev lock does not"
+
+
+@pytest.mark.parametrize("lock", [lock for _, lock in PAIRS])
+def test_every_pin_carries_a_hash(lock):
+    """With hashes, pip refuses a package whose bytes differ from what was locked.
+
+    Verified by corrupting every hash for one package in a copy of the lock: pip
+    exited 1 with "THESE PACKAGES DO NOT MATCH THE HASHES" and installed nothing.
+    The protection lasts only while every pin keeps its hashes, and a lock
+    regenerated without `--generate-hashes` would quietly drop them all.
+    """
+    text = (ROOT / lock).read_text()
+    blocks = re.split(r"\n(?=[A-Za-z0-9])", text)
+    unhashed = [
+        block.split()[0]
+        for block in blocks
+        if _PIN.match(block) and "--hash=sha256:" not in block
+    ]
+    assert not unhashed, f"{lock} has pins without hashes: {unhashed}"
+
