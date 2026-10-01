@@ -64,7 +64,9 @@ from app.models.experiment_assignment import (
     EXPERIMENT_CONTROL_ARM,
     ExperimentAssignment,
 )
+from app.models.driver_shift_event import DriverShiftEvent
 from app.models.outcome_entry import KIND_COST, OutcomeEntry
+from app.payroll.hours import ON_DUTY_STATUSES
 from app.record.cost import RATE_PLACEHOLDER, find_untimed_deliveries
 
 # Below this many costed drops in an arm, no interval is produced at all.
@@ -137,6 +139,9 @@ class SavingsStatement:
     # Deliveries made at a stop with no timing. Their driver time sits in other
     # deliveries' costs, so the count is said beside the average it changes.
     untimed_deliveries: int = 0
+    # Whether anyone at the hub was on shift in the period. Defaults to True so a
+    # statement never blames missing hours unless it looked and found none.
+    shift_hours_recorded: bool = True
     caveats: list[str] = field(default_factory=list)
     # `EXP-3`'s verdict on the window. Kept whole so an operator can read what
     # actually failed; the customer-facing text says only that something did.
@@ -162,6 +167,38 @@ class SavingsStatement:
             "The measurement does not yet show a saving: the range still "
             "includes no difference at all."
         )
+
+    @property
+    def no_cost_reason(self) -> str | None:
+        """Why nothing was costed, saying only what the statement can see.
+
+        It used to blame missing shift hours whatever the cause. That was true
+        only when they were missing: deliveries with no recorded arrival, or
+        ones costing had not reached, printed the same sentence.
+        """
+        if self.cost_per_drop_cents is not None or not self.drops:
+            return None
+        if not self.shift_hours_recorded:
+            return (
+                "None of them could be costed: costing needs the driver's hours on "
+                "shift, and none are recorded for this period."
+            )
+        if self.untimed_deliveries >= self.drops:
+            return (
+                "None of them could be costed: costing needs the time each delivery "
+                "arrived, and none of them has one recorded."
+            )
+        if self.untimed_deliveries:
+            some = (
+                f"One of the {self.drops} has"
+                if self.untimed_deliveries == 1
+                else f"{self.untimed_deliveries} of the {self.drops} have"
+            )
+            return (
+                f"None of them could be costed. {some} no recorded arrival time, "
+                "which costing needs; the rest have not been costed yet."
+            )
+        return "None of them has been costed yet, so there is no average to show."
 
     @property
     def untimed_disclosure(self) -> str | None:
@@ -319,6 +356,19 @@ async def build_statement(
     statement.untimed_deliveries = len(
         await find_untimed_deliveries(session, [a.order_id for a in assignments])
     )
+    statement.shift_hours_recorded = (
+        await session.scalar(
+            select(DriverShiftEvent.id)
+            .where(
+                DriverShiftEvent.hub_id == hub_id,
+                DriverShiftEvent.event_type.in_(ON_DUTY_STATUSES),
+                DriverShiftEvent.occurred_at >= period_start,
+                DriverShiftEvent.occurred_at < period_end,
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
     if placeholder_rates:
         statement.caveats.append(
@@ -406,11 +456,8 @@ def render_statement(statement: SavingsStatement) -> str:
         )
         if statement.untimed_disclosure:
             lines.append(f"  {statement.untimed_disclosure}")
-    else:
-        lines.append(
-            "  None of them could be costed: costing needs the driver's shift "
-            "hours, and those are not recorded for this period."
-        )
+    elif statement.no_cost_reason:
+        lines.append(f"  {statement.no_cost_reason}")
 
     lines.extend(["", "The comparison"])
     if statement.comparison is not None:

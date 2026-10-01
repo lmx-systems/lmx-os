@@ -498,7 +498,12 @@ async def record_costs_for_period(
                     subject_type=SUBJECT_ORDER,
                     subject_id=order.order_id,
                     kind=KIND_COST,
-                    occurred_at=day_end,
+                    # The start of the day it covers, so the day sits inside any
+                    # half-open window that holds it. Stamped at the day's end,
+                    # a month's last day landed exactly on the statement's
+                    # `period_end` and every statement left it out - while the
+                    # day before the month landed on `period_start` and counted.
+                    occurred_at=day_start,
                     supersedes=previous.id if previous is not None else None,
                     values={
                         "loaded_cents": order.loaded_cents,

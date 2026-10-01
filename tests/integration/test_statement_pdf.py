@@ -115,10 +115,12 @@ class TestItDegradesRatherThanFails:
         assert "has not been switched on" in _text(pdf)
 
     def test_a_statement_with_nothing_costed_says_so(self):
-        pdf = render_statement_pdf(
-            _statement(None, unavailable="not on", cost_per_drop_cents=None, costed_drops=0)
+        statement = _statement(
+            None, unavailable="not on", cost_per_drop_cents=None, costed_drops=0
         )
-        assert "could be costed" in _text(pdf)
+        text = " ".join(_text(render_statement_pdf(statement)).split())
+        assert statement.no_cost_reason is not None
+        assert statement.no_cost_reason in text
 
 
 class TestTheDocumentItself:

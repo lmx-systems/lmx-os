@@ -255,11 +255,8 @@ def render_statement_pdf(
         )
         if statement.untimed_disclosure:
             delivered += f" {statement.untimed_disclosure}"
-    else:
-        delivered += (
-            " None of them could be costed: costing needs the driver's shift hours, "
-            "and those are not recorded for this period."
-        )
+    elif statement.no_cost_reason:
+        delivered += f" {statement.no_cost_reason}"
     elements.append(Paragraph(delivered, styles["body"]))
 
     elements.append(Paragraph("The comparison", styles["heading"]))
