@@ -34,6 +34,24 @@ async def _lookup(session: AsyncSession, normalized: str) -> GeocodedAddress | N
     return result.scalar_one_or_none()
 
 
+def _result_from(row: GeocodedAddress) -> GeocodeResult | None:
+    """A cached row as a result, or None when it holds a remembered failure.
+
+    `row.resolved`, spelled out so the coordinates handed on are known to exist.
+    The type checker cannot see through the property, and `GeocodeResult` is a
+    frozen dataclass that would carry a None into distance arithmetic without a
+    word - the same arithmetic whose 0,0 fallback `resolve_address` warns about.
+    """
+    if row.lat is None or row.lng is None:
+        return None
+    return GeocodeResult(
+        lat=row.lat,
+        lng=row.lng,
+        display_name=row.display_name or "",
+        provider=row.provider or "cache",
+    )
+
+
 async def resolve_address(
     session: AsyncSession, address: str, *, geocoder: BaseGeocoder
 ) -> GeocodeResult | None:
@@ -62,12 +80,7 @@ async def resolve_address(
             # shouldn't burn the request budget three times.
             logger.info("geocode_cache_hit_unresolved", normalized=normalized)
             return None
-        return GeocodeResult(
-            lat=cached.lat,
-            lng=cached.lng,
-            display_name=cached.display_name or "",
-            provider=cached.provider or "cache",
-        )
+        return _result_from(cached)
 
     try:
         result = await geocoder.geocode(address)
@@ -109,12 +122,7 @@ async def resolve_address(
         await session.rollback()
         existing = await _lookup(session, normalized)
         if existing is not None and existing.resolved:
-            return GeocodeResult(
-                lat=existing.lat,
-                lng=existing.lng,
-                display_name=existing.display_name or "",
-                provider=existing.provider or "cache",
-            )
+            return _result_from(existing)
         return result
 
     return result
