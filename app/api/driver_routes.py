@@ -836,6 +836,12 @@ async def update_my_availability(
         )
     )
 
+    # The driver row's status is what GET /me reports, and the app decides online
+    # or offline from that at launch. This wrote Redis and the shift log but never
+    # the row, so every relaunch read the column's default, off_shift: the app
+    # showed offline and stopped reporting position until the driver noticed.
+    row.status = body.status
+
     # Durable history of this transition, independent of the Redis fleet
     # state above (which only ever holds the current status) - see
     # app/models/driver_shift_event.py for why this exists.
