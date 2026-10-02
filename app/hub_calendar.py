@@ -10,7 +10,7 @@ Learning Loop's nightly scheduler (skip the nightly job on a closed day).
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -18,6 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.hub import Hub
 from app.models.hub_closure import HubClosure
+
+
+def hub_zone(hub: Hub | None) -> tzinfo:
+    """The clock a hub keeps, or UTC's for a hub that cannot be found."""
+    return ZoneInfo(hub.timezone) if hub is not None else timezone.utc
 
 
 def hub_local_date(hub: Hub, at: datetime) -> date:
@@ -31,7 +36,7 @@ def hub_local_date(hub: Hub, at: datetime) -> date:
 def hub_day_bounds(hub: Hub, day: date) -> tuple[datetime, datetime]:
     """The instants a local calendar day begins and ends at, in UTC."""
     tz = ZoneInfo(hub.timezone)
-    return _midnight(day, tz), _midnight(day + timedelta(days=1), tz)
+    return midnight(day, tz), midnight(day + timedelta(days=1), tz)
 
 
 def hub_days(hub: Hub, since: datetime, until: datetime) -> list[tuple[datetime, datetime]]:
@@ -46,8 +51,8 @@ def hub_days(hub: Hub, since: datetime, until: datetime) -> list[tuple[datetime,
     tz = ZoneInfo(hub.timezone)
     day = since.astimezone(tz).date()
     days = []
-    while (start := _midnight(day, tz)) < until:
-        days.append((start, _midnight(day + timedelta(days=1), tz)))
+    while (start := midnight(day, tz)) < until:
+        days.append((start, midnight(day + timedelta(days=1), tz)))
         day += timedelta(days=1)
     return days
 
@@ -56,10 +61,10 @@ def hub_month(hub: Hub, year: int, month: int) -> tuple[datetime, datetime]:
     """The instants a calendar month begins and ends at on the hub's own clock."""
     tz = ZoneInfo(hub.timezone)
     following = date(year + month // 12, month % 12 + 1, 1)
-    return _midnight(date(year, month, 1), tz), _midnight(following, tz)
+    return midnight(date(year, month, 1), tz), midnight(following, tz)
 
 
-def _midnight(day: date, tz: ZoneInfo) -> datetime:
+def midnight(day: date, tz: tzinfo) -> datetime:
     """The instant `day` begins on `tz`'s clock, expressed in UTC.
 
     UTC because Python subtracts two datetimes that share a tzinfo by their wall

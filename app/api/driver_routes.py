@@ -67,6 +67,7 @@ from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
+from app.hub_calendar import hub_zone
 from app.models.hub import Hub
 from app.models.hub_geofence_event import HubGeofenceEvent
 from app.models.stop_geofence_event import StopGeofenceEvent
@@ -2963,7 +2964,9 @@ async def get_my_earnings(
     is_placeholder = row.hourly_rate_cents is None and row.employment_type != "gig"
 
     now = datetime.now(timezone.utc)
-    start, end = payroll_hours.pay_period_bounds(row.employment_type, now)
+    # The driver's hub's clock, so "this period" starts at its midnight.
+    clock = hub_zone(await session.get(Hub, row.hub_id))
+    start, end = payroll_hours.pay_period_bounds(row.employment_type, now, clock)
     clipped_end = min(end, now)
 
     regular_hours, overtime_hours, estimated_pay_cents = await payroll_hours.hours_and_pay_for_period(
@@ -2977,8 +2980,8 @@ async def get_my_earnings(
     )
 
     return EarningsView(
-        period_start=start.date(),
-        period_end=(end - timedelta(days=1)).date(),
+        period_start=start.astimezone(clock).date(),
+        period_end=(end.astimezone(clock) - timedelta(days=1)).date(),
         hours_worked=round(regular_hours + overtime_hours, 2),
         overtime_hours=round(overtime_hours, 2),
         hourly_rate_cents=0 if row.employment_type == "gig" else rate_cents,
