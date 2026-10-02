@@ -12,6 +12,7 @@ this into a batching claim if the definition slipped.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -169,10 +170,10 @@ async def test_jobs_per_driver_per_day_uses_days_actually_worked(db_session):
     counting calendar days they never worked."""
     hub_id, (driver_id,) = await _seed_hub(db_session)
     # Anchored to a fixed hour, not just NOW-3d. The two jobs below are meant to
-    # land on the SAME calendar day two hours apart, and NOW-relative arithmetic
-    # silently breaks that when the suite runs within two hours of UTC midnight -
-    # `day_one + 2h` rolls into the next date and the driver looks like they
-    # worked three days instead of two. Cost a real debugging detour once.
+    # land on the SAME hub day two hours apart: 09:00 UTC is 1 or 2am at the
+    # default Los Angeles hub. NOW-relative arithmetic once rolled them into two
+    # days and cost a real debugging detour - when the report itself cut days at
+    # UTC midnight, which is the bug the test below now pins.
     day_one = (NOW - timedelta(days=3)).replace(hour=9, minute=0, second=0, microsecond=0)
     db_session.add_all(
         [
@@ -189,6 +190,31 @@ async def test_jobs_per_driver_per_day_uses_days_actually_worked(db_session):
     # Three jobs over two worked days, not over the fourteen-day window.
     report = await get_gig_density(str(hub_id), days=14, session=db_session, _admin=None)
     assert report.jobs_per_driver_per_day == 1.5
+
+
+async def test_a_day_worked_through_utc_midnight_is_one_day(db_session):
+    """UTC midnight is 5pm at a Los Angeles hub. Cut there, a driver taking a job
+    at 3pm and another at 6pm worked two days, and the fleet's jobs per
+    driver-day halved."""
+    hub_id, (driver_id,) = await _seed_hub(db_session)
+    (await db_session.get(Hub, hub_id)).timezone = "America/Los_Angeles"
+    local = ZoneInfo("America/Los_Angeles")
+    three_pm = (NOW - timedelta(days=3)).astimezone(local).replace(
+        hour=15, minute=0, second=0, microsecond=0
+    )
+    six_pm = three_pm + timedelta(hours=3)
+    db_session.add_all(
+        [
+            _job(hub_id, driver_id, status="delivered", offered=three_pm,
+                 accepted=three_pm, delivered=three_pm + timedelta(minutes=30)),
+            _job(hub_id, driver_id, status="delivered", offered=six_pm,
+                 accepted=six_pm, delivered=six_pm + timedelta(minutes=30)),
+        ]
+    )
+    await db_session.commit()
+
+    report = await get_gig_density(str(hub_id), days=14, session=db_session, _admin=None)
+    assert report.jobs_per_driver_per_day == 2.0
 
 
 async def test_the_pilot_baseline_travels_with_every_report(db_session):

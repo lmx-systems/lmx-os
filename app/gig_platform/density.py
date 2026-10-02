@@ -27,7 +27,9 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.hub_calendar import hub_local_date
 from app.models.gig_job import GigJob
+from app.models.hub import Hub
 from app.schemas.gig import GigDensityReport
 
 # Rich's two-week Austin pilot, carried here so every report renders against
@@ -105,11 +107,16 @@ async def hub_density_report(
     # Days a driver was actually working, summed across drivers. Using
     # calendar days in the window instead would understate throughput for
     # part-time drivers, which is most of them.
+    # Read on the hub's clock. UTC midnight is 4 or 5pm in Los Angeles, so a
+    # driver working through it counted as two days and the fleet's jobs per
+    # driver-day came out low - the bug this file's test once worked around.
+    hub = await session.get(Hub, uuid.UUID(hub_id))
     driver_days: set[tuple[uuid.UUID, str]] = set()
     for job in committed:
         if job.driver_id:
             stamp = job.accepted_at or job.offered_at or job.created_at
-            driver_days.add((job.driver_id, stamp.date().isoformat()))
+            day = hub_local_date(hub, stamp) if hub is not None else stamp.date()
+            driver_days.add((job.driver_id, day.isoformat()))
 
     sequenced = _sequenced_job_ids(delivered)
     # Denominator is only jobs we can actually judge - a delivered job
