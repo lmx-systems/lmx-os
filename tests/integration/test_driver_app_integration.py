@@ -342,21 +342,42 @@ async def test_complete_stop_is_idempotent_on_retry(db_session, real_redis_clien
     assert second == first
 
 
-async def test_complete_stop_replay_with_different_payload_keeps_original(db_session, real_redis_client):
+async def test_a_pickup_completes_the_way_the_app_sends_it(db_session, real_redis_client):
+    """The app confirms a collection with `method="photo"` and no photo - there is
+    nothing to photograph at a counter. The proof-of-delivery rule refused that on
+    every pickup, and a dropoff waits on its pickup, so no delivery could be
+    completed from the app. A pickup's evidence is the scan, and it records no
+    proof of delivery."""
     hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
     authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
 
     await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
     await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
-    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo", photo_url=POD_PHOTO), driver=authed, session=db_session)
+    view = await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
 
-    # First write wins - a replay with a different payload must not silently
-    # overwrite already-committed proof-of-delivery. StopView doesn't
-    # surface pod_method, so check the row directly.
-    await complete_stop(pickup.stop_id, CompleteStopBody(method="signature"), driver=authed, session=db_session)
+    assert view.status == "completed"
     db_session.expire_all()
     pickup_row = await db_session.get(Stop, uuid.UUID(pickup.stop_id))
-    assert pickup_row.pod_method == "photo"
+    assert (pickup_row.pod_method, pickup_row.pod_photo_url, pickup_row.pod_photo_urls) == (None, None, None)
+
+
+async def test_complete_stop_replay_with_different_payload_keeps_original(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
+    await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
+    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo"), driver=authed, session=db_session)
+    await arrive_at_stop(dropoff.stop_id, driver=authed, session=db_session)
+    await complete_stop(dropoff.stop_id, CompleteStopBody(method="photo", photo_url=POD_PHOTO), driver=authed, session=db_session)
+
+    # First write wins - a replay with a different payload must not silently
+    # overwrite already-committed proof-of-delivery. That is a dropoff's proof; a
+    # pickup records none. StopView doesn't surface pod_method, so check the row.
+    await complete_stop(dropoff.stop_id, CompleteStopBody(method="signature"), driver=authed, session=db_session)
+    db_session.expire_all()
+    dropoff_row = await db_session.get(Stop, uuid.UUID(dropoff.stop_id))
+    assert dropoff_row.pod_method == "photo"
 
 
 async def test_complete_stop_still_rejects_a_failed_stop(db_session, real_redis_client):

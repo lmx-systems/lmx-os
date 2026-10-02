@@ -2342,8 +2342,11 @@ async def complete_stop(
         # differing payload is logged for observability but never persisted
         # - this endpoint's idempotency exists to make blind retries of an
         # identical request safe, not to let a second call silently amend
-        # already-committed proof-of-delivery.
-        if (body.method, body.photo_url, body.signature_url, body.pin, body.left_at) != (
+        # already-committed proof-of-delivery. A pickup records no proof (below),
+        # so there is nothing to compare.
+        if stop.stop_type == "dropoff" and (
+            body.method, body.photo_url, body.signature_url, body.pin, body.left_at
+        ) != (
             stop.pod_method,
             stop.pod_photo_url,
             stop.pod_signature_url,
@@ -2431,32 +2434,44 @@ async def complete_stop(
         except CodNotSettled as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    required = await resolve_stop_proof(session, stop.id)
-    try:
-        assert_proof_satisfied(
-            required,
-            method=body.method,
-            photo_urls=body.all_photo_urls,
-            signature_url=body.signature_url,
-            # A verified PIN satisfies a signature requirement - both answer "the
-            # right person received this", and the PIN is the stronger of the two
-            # because it is checked against what we issued.
-            pin_verified=body.method == "pin",
-        )
-    except ProofNotSatisfied as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # Proof of delivery is proof of a delivery. The orders' requirements describe
+    # what the receiver has to give - a photo at the door, a signature, a PIN - and
+    # a counter handing parts over is not that. A pickup's evidence is the scan
+    # above: every parcel counted aboard. Applied to pickups, this refused every
+    # collection the driver app confirmed (it sends `method="photo"` and no photo,
+    # because there is nothing to photograph), and a dropoff waits on its pickup,
+    # so no delivery could be completed from the app at all.
+    if stop.stop_type == "dropoff":
+        required = await resolve_stop_proof(session, stop.id)
+        try:
+            assert_proof_satisfied(
+                required,
+                method=body.method,
+                photo_urls=body.all_photo_urls,
+                signature_url=body.signature_url,
+                # A verified PIN satisfies a signature requirement - both answer "the
+                # right person received this", and the PIN is the stronger of the two
+                # because it is checked against what we issued.
+                pin_verified=body.method == "pin",
+            )
+        except ProofNotSatisfied as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     now = datetime.now(timezone.utc)
     stop.status = "completed"
     stop.completed_at = now
-    stop.pod_method = body.method
-    stop.pod_photo_url = body.photo_url
-    stop.pod_signature_url = body.signature_url
-    # Every photo captured, not just the first. A stop that required four and stored
-    # one would leave us unable to produce the evidence we just insisted on.
-    stop.pod_photo_urls = body.all_photo_urls
-    stop.pod_pin = body.pin
-    stop.pod_left_at = body.left_at
+    # Proof fields on a dropoff only. Recording `pod_method="photo"` on a pickup
+    # with no photo is the "proof that proves nothing" app/delivery/proof.py was
+    # written to stop.
+    if stop.stop_type == "dropoff":
+        stop.pod_method = body.method
+        stop.pod_photo_url = body.photo_url
+        stop.pod_signature_url = body.signature_url
+        # Every photo captured, not just the first. A stop that required four and
+        # stored one would leave us unable to produce the evidence we just insisted on.
+        stop.pod_photo_urls = body.all_photo_urls
+        stop.pod_pin = body.pin
+        stop.pod_left_at = body.left_at
 
     # Every stop's orders, regardless of type - the dropoff branch below
     # needs them for the Order.status update, and the vehicle-load
