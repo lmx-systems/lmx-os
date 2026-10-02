@@ -39,7 +39,10 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.hub_calendar import hub_day_bounds, hub_local_date
 from app.identity.profile import profile_for
+from app.models.driver import Driver
+from app.models.hub import Hub
 from app.models.location import Location
 from app.models.order import Order
 from app.models.receiver_profile import ReceiverProfile
@@ -87,9 +90,23 @@ async def surveys_recorded_today(
 
     Counted from `surveyed_at`/`surveyed_by_driver_id` rather than from a
     separate tally, so the cap cannot drift from the thing it is capping.
+
+    The service date is the driver's hub's, and `on` is read on its clock. It
+    used to be UTC's, which ends at 4 or 5pm in Los Angeles: the cap reset
+    mid-shift, and a driver could meet it twice in one working day.
     """
-    day = on or datetime.now(timezone.utc).date()
-    start = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+    driver = await session.get(Driver, driver_id)
+    hub = await session.get(Hub, driver.hub_id) if driver is not None else None
+    if hub is not None:
+        start, end = hub_day_bounds(
+            hub, on or hub_local_date(hub, datetime.now(timezone.utc))
+        )
+    else:
+        # No hub to read a clock from, so UTC's day, as before.
+        start = datetime.combine(
+            on or datetime.now(timezone.utc).date(), datetime.min.time(), tzinfo=timezone.utc
+        )
+        end = start + timedelta(days=1)
     return int(
         await session.scalar(
             select(func.count())
@@ -97,7 +114,7 @@ async def surveys_recorded_today(
             .where(
                 ReceiverProfile.surveyed_by_driver_id == driver_id,
                 ReceiverProfile.surveyed_at >= start,
-                ReceiverProfile.surveyed_at < start + timedelta(days=1),
+                ReceiverProfile.surveyed_at < end,
             )
         )
         or 0
