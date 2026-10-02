@@ -22,7 +22,7 @@ import argparse
 import asyncio
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -33,16 +33,26 @@ from app.billing.reconciliation import (  # noqa: E402
     render,
 )
 from app.db import AsyncSessionLocal  # noqa: E402
+from app.hub_calendar import hub_month  # noqa: E402
+from app.models.client import Client  # noqa: E402
+from app.models.hub import Hub  # noqa: E402
 
 
-def _month_bounds(month: str) -> tuple[datetime, datetime]:
-    start = datetime.strptime(month, "%Y-%m").replace(tzinfo=timezone.utc)
-    return start, (start + timedelta(days=32)).replace(day=1)
+def _month_bounds(month: str, hub: Hub) -> tuple[datetime, datetime]:
+    """The month on the hub's clock, the one invoices and statements use.
+    tests/test_month_bounds_agree.py holds the scripts that cut a month to it."""
+    first = datetime.strptime(month, "%Y-%m")
+    return hub_month(hub, first.year, first.month)
 
 
 async def _run(client: str, month: str, verbose: bool) -> int:
-    since, until = _month_bounds(month)
     async with AsyncSessionLocal() as session:
+        client_row = await session.get(Client, uuid.UUID(client))
+        hub = await session.get(Hub, client_row.hub_id) if client_row is not None else None
+        if hub is None:
+            print(f"No client {client}, or no hub for it.", file=sys.stderr)
+            return 2
+        since, until = _month_bounds(month, hub)
         report = await reconcile_period(
             session, client_id=uuid.UUID(client), since=since, until=until
         )

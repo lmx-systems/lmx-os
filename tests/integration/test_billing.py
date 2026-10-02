@@ -5,6 +5,7 @@ tests/integration/test_client_portal_integration.py.
 """
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import HTTPException
@@ -75,6 +76,34 @@ async def test_generate_invoice_excludes_orders_outside_the_period(db_session):
     invoice = await generate_invoice(db_session, client_id, date(2026, 6, 1), date(2026, 7, 1))
 
     assert invoice.total_cents == 1_800  # only INSIDE - period_end is exclusive
+
+
+async def test_an_evening_delivery_is_billed_in_the_hubs_month(db_session):
+    """6pm Pacific on 30 September is 1am UTC on 1 October. Read as UTC
+    midnights, September's invoice left it for October and took the evening of
+    31 August instead - while the savings statement, on the hub's month,
+    counted each in the month it happened."""
+    client_id, shop_id, hub_id = await _seed_client_with_shop(db_session)
+    (await db_session.get(Hub, hub_id)).timezone = "America/Los_Angeles"
+    la = ZoneInfo("America/Los_Angeles")
+
+    def delivered(when: datetime, ref: str, fee_cents: int) -> Order:
+        return Order(
+            hub_id=hub_id, client_id=client_id, shop_id=shop_id,
+            external_order_ref=ref, source_system="flat_file", raw_payload={},
+            sla_tier="T2", status=OrderStatus.delivered, requested_at=when,
+            fee_cents=fee_cents, updated_at=when, delivered_at=when,
+        )
+
+    db_session.add_all([
+        delivered(datetime(2026, 9, 30, 18, tzinfo=la), "SEPT-30-EVENING", 1_000),
+        delivered(datetime(2026, 8, 31, 18, tzinfo=la), "AUG-31-EVENING", 7_000),
+    ])
+    await db_session.commit()
+
+    invoice = await generate_invoice(db_session, client_id, date(2026, 9, 1), date(2026, 10, 1))
+
+    assert invoice.total_cents == 1_000
 
 
 async def test_generate_invoice_excludes_unpriced_orders(db_session):

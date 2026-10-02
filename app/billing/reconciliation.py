@@ -43,6 +43,9 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.hub_calendar import hub_zone
+from app.models.client import Client
+from app.models.hub import Hub
 from app.models.invoice import Invoice
 from app.models.order import Order, OrderStatus
 
@@ -196,13 +199,19 @@ async def _billed_without_ingest(
 async def invoiced_total_cents(
     session: AsyncSession, *, client_id, since: datetime, until: datetime
 ) -> int:
-    """What the invoices for this window actually charged."""
+    """What the invoices for this window actually charged.
+
+    An invoice's period is a pair of the hub's dates, so the window's bounds
+    are read as dates on the hub's clock too.
+    """
+    client = await session.get(Client, client_id)
+    clock = hub_zone(await session.get(Hub, client.hub_id) if client is not None else None)
     return int(
         await session.scalar(
             select(func.coalesce(func.sum(Invoice.total_cents), 0)).where(
                 Invoice.client_id == client_id,
-                Invoice.period_start >= since.date(),
-                Invoice.period_start < until.date(),
+                Invoice.period_start >= since.astimezone(clock).date(),
+                Invoice.period_start < until.astimezone(clock).date(),
             )
         )
         or 0
