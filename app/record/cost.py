@@ -80,12 +80,14 @@ statement's average - the same rule the placeholder wage follows.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.hub_calendar import hub_days
 from app.models.driver import Driver
+from app.models.hub import Hub
 from app.models.outcome_entry import KIND_COST, SUBJECT_ORDER, OutcomeEntry
 from app.models.route import Route
 from app.models.stop import Stop, StopOrder
@@ -458,7 +460,15 @@ async def record_costs_for_period(
     input changed - a driver's rate was finally recorded, a geofence event
     arrived late - not to paper over a double run.
     """
-    days = _days_in(since, until)
+    hub = await session.get(Hub, hub_id)
+    if hub is None:
+        raise ValueError(f"no hub {hub_id}")
+    # Whole days on the hub's own clock, so a driver-day is the unit the wage is
+    # paid in. Windowing on anything else splits one paid day across two
+    # costings, each with its own overhead - which UTC days did: UTC midnight is
+    # 4 or 5pm in Los Angeles, so every evening shift was costed as two
+    # driver-days, and the first stop after it had no leg in.
+    days = hub_days(hub, since, until)
     drivers = list(
         await session.scalars(select(Driver.id).where(Driver.hub_id == hub_id))
     )
@@ -541,17 +551,3 @@ async def _live_costs_for(session: AsyncSession, order_ids: list) -> dict:
     )
     superseded = {e.supersedes for e in entries if e.supersedes is not None}
     return {e.subject_id: e for e in entries if e.id not in superseded}
-
-
-def _days_in(since: datetime, until: datetime) -> list:
-    """Whole days, so a driver-day is the unit the wage is paid in.
-
-    Windowing on anything else would split one paid day across two costings and
-    attribute each half its own overhead.
-    """
-    out = []
-    cursor = since.replace(hour=0, minute=0, second=0, microsecond=0)
-    while cursor < until:
-        out.append((cursor, cursor + timedelta(days=1)))
-        cursor += timedelta(days=1)
-    return out

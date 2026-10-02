@@ -10,7 +10,7 @@ Learning Loop's nightly scheduler (skip the nightly job on a closed day).
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -26,6 +26,41 @@ def hub_local_date(hub: Hub, at: datetime) -> date:
     different calendar days, and a closure is a local day - so 'closed
     today' is the hub's wall clock, not UTC's."""
     return at.astimezone(ZoneInfo(hub.timezone)).date()
+
+
+def hub_days(hub: Hub, since: datetime, until: datetime) -> list[tuple[datetime, datetime]]:
+    """The hub's local calendar days that overlap [since, until), each as the
+    two midnights that bound it.
+
+    The wall clock's day, not UTC's. UTC midnight is 4 or 5pm in Los Angeles,
+    so a day cut in UTC splits every evening in two. Across a clock change a
+    day is 23 or 25 hours long, which is how long it is on the wall the wage is
+    paid by.
+    """
+    tz = ZoneInfo(hub.timezone)
+    day = since.astimezone(tz).date()
+    days = []
+    while (start := _midnight(day, tz)) < until:
+        days.append((start, _midnight(day + timedelta(days=1), tz)))
+        day += timedelta(days=1)
+    return days
+
+
+def hub_month(hub: Hub, year: int, month: int) -> tuple[datetime, datetime]:
+    """The instants a calendar month begins and ends at on the hub's own clock."""
+    tz = ZoneInfo(hub.timezone)
+    following = date(year + month // 12, month % 12 + 1, 1)
+    return _midnight(date(year, month, 1), tz), _midnight(following, tz)
+
+
+def _midnight(day: date, tz: ZoneInfo) -> datetime:
+    """The instant `day` begins on `tz`'s clock, expressed in UTC.
+
+    UTC because Python subtracts two datetimes that share a tzinfo by their wall
+    clocks: a 25-hour day bounded in local time measures as 24, and a driver
+    on duty across it would be paid for an hour less than they worked.
+    """
+    return datetime.combine(day, time.min, tzinfo=tz).astimezone(timezone.utc)
 
 
 async def is_hub_closed_on(session: AsyncSession, hub_id: str, on_date: date) -> bool:

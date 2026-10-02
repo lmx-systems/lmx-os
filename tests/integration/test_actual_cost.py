@@ -397,6 +397,37 @@ class TestWhereTheNumbersCameFrom:
         assert cost.rate_source == RATE_PLACEHOLDER
 
 
+class TestTheDayIsTheHubs:
+    async def test_an_evening_past_utc_midnight_is_one_driver_day(self, db_session):
+        """UTC midnight is 5pm at this hub. Cut there, this evening was two
+        driver-days and B, the first stop after five, had no leg in. It is one
+        day, and B's leg is the eighty minutes since A."""
+        hub = Hub(id=uuid.uuid4(), name="Hub", lat=34.05, lng=-118.24,
+                  timezone="America/Los_Angeles")
+        db_session.add(hub)
+        await db_session.flush()
+        driver = await _driver(db_session, hub)
+        four_pm = datetime(2026, 9, 17, 23, 0, tzinfo=timezone.utc)
+        await _on_duty(
+            db_session, hub, driver, four_pm - timedelta(hours=1), four_pm + timedelta(hours=3)
+        )
+        a = await _order(db_session, hub)
+        b = await _order(db_session, hub)
+        at = int((four_pm - DAY).total_seconds() // 60)  # `_route` counts minutes from DAY
+        await _route(db_session, hub, driver, [(at, at + 10, [a]), (at + 90, at + 100, [b])])
+
+        # Bounded in UTC, the way settle_month.py used to bound a month.
+        since = datetime(2026, 9, 17, tzinfo=timezone.utc)
+        summary = await record_costs_for_period(
+            db_session, hub_id=hub.id, since=since, until=since + timedelta(days=2)
+        )
+
+        assert summary["driver_days"] == 1
+        recorded = await outcomes_for(db_session, subject_id=b.id)
+        (entry,) = [e for e in recorded if e.kind == KIND_COST]
+        assert entry.values["travel_seconds"] == 80 * 60
+
+
 class TestItLandsInTheLedger:
     async def test_the_cost_is_an_outcome_not_a_field_on_the_order(self, db_session):
         """`a record the deciding code could read back and act on would stop
