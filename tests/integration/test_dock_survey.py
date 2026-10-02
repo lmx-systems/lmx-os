@@ -15,7 +15,7 @@ fail at write time — it fails months later as a class the model has one exampl
 of, indistinguishable from noise.
 """
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -27,6 +27,7 @@ from app.identity.dock_survey import (
     MAX_SURVEYS_PER_SHIFT,
     RESURVEY_AFTER_DAYS,
     dock_needs_survey,
+    surveys_recorded_today,
 )
 from app.identity.profile import profile_for
 from app.models.client import Client
@@ -192,6 +193,34 @@ class TestWhenToAsk:
         await db_session.commit()
 
         assert await dock_needs_survey(db_session, stop, driver) is True
+
+    async def test_the_cap_is_counted_over_the_hubs_day(self, db_session):
+        """UTC's day ended at 5pm at this hub, so the cap reset mid-shift and a
+        driver could meet it twice in one working day. Surveys at 3pm and 6pm
+        Pacific are the same day's."""
+        hub, _client, _shop, driver, _ = await _world(db_session)
+        (await db_session.get(Hub, hub)).timezone = "America/Los_Angeles"
+        three_pm = datetime(2026, 9, 16, 22, 0, tzinfo=timezone.utc)
+        for when in (three_pm, three_pm + timedelta(hours=3)):
+            other = Location(
+                normalized_address=f"other{uuid.uuid4().hex[:8]}",
+                address="somewhere else",
+                lat=30.2,
+                lng=-97.7,
+            )
+            db_session.add(other)
+            await db_session.commit()
+            db_session.add(
+                ReceiverProfile(
+                    location_id=other.id,
+                    landing_surface="paved_lot",
+                    surveyed_at=when,
+                    surveyed_by_driver_id=driver,
+                )
+            )
+            await db_session.commit()
+
+        assert await surveys_recorded_today(db_session, driver, on=date(2026, 9, 16)) == 2
 
     async def test_the_per_shift_cap_stops_asking(self, db_session):
         # A first week at a new customer would otherwise turn every stop into

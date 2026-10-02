@@ -28,6 +28,12 @@ def hub_local_date(hub: Hub, at: datetime) -> date:
     return at.astimezone(ZoneInfo(hub.timezone)).date()
 
 
+def hub_day_bounds(hub: Hub, day: date) -> tuple[datetime, datetime]:
+    """The instants a local calendar day begins and ends at, in UTC."""
+    tz = ZoneInfo(hub.timezone)
+    return _midnight(day, tz), _midnight(day + timedelta(days=1), tz)
+
+
 def hub_days(hub: Hub, since: datetime, until: datetime) -> list[tuple[datetime, datetime]]:
     """The hub's local calendar days that overlap [since, until), each as the
     two midnights that bound it.
