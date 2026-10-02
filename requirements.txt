@@ -33,3 +33,10 @@ sse-starlette>=2.1.0
 sentry-sdk[fastapi]>=2.0.0
 prometheus-client>=0.20.0
 reportlab>=4.1.0
+# AWS: Secrets Manager, read when the config loads whenever SECRETS_MANAGER_SECRET_ID
+# is set (app/secrets_provider.py), and S3 for photos and documents
+# (app/storage/). Both import it inside a function, so nothing failed until the
+# ECS task set that variable - and then the API, the migration task and every
+# script would have stopped with ModuleNotFoundError. It was imported by the code
+# and declared nowhere; tests/test_runtime_imports_are_locked.py now fails on that.
+boto3>=1.34.0
