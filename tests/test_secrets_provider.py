@@ -1,9 +1,9 @@
 """
 app/secrets_provider.py - the extension point for a real vault
-(docs/ROADMAP.md S2). boto3 isn't an installed dependency (deliberately -
-see that module's docstring), so AWSSecretsManagerProvider is tested by
-injecting a fake module into sys.modules rather than mocking an import
-that doesn't exist yet.
+(docs/ROADMAP.md S2). Most of these inject a fake boto3 into sys.modules,
+which isolates the provider's logic but cannot notice whether boto3 is
+installed at all - and it wasn't, until infra/aws chose this provider. The
+last test drives the real client, stubbed at the wire.
 """
 import os
 import sys
@@ -68,3 +68,29 @@ def test_aws_secrets_manager_provider_parses_the_json_secret(monkeypatch):
     assert secrets == {"DRIVER_JWT_SECRET": "real-secret-value"}
     fake_boto3.client.assert_called_once_with("secretsmanager", region_name="us-east-1")
     fake_client.get_secret_value.assert_called_once_with(SecretId="my-secret")
+
+
+def test_the_real_boto3_client_reads_the_secret(monkeypatch):
+    """The fakes above pass whether or not boto3 is installed, which is how the
+    API came to be one ModuleNotFoundError from not starting on ECS. This runs
+    the provider against the real client, stubbed at the wire."""
+    import boto3
+    from botocore.stub import Stubber
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    secret_id = "arn:aws:secretsmanager:us-east-1:000000000000:secret:lmx"
+    client = boto3.client("secretsmanager", region_name="us-east-1")
+    stubber = Stubber(client)
+    stubber.add_response(
+        "get_secret_value",
+        {"SecretString": '{"DATABASE_URL": "postgresql+asyncpg://db/lmx"}'},
+        {"SecretId": secret_id},
+    )
+    monkeypatch.setattr(boto3, "client", lambda *args, **kwargs: client)
+
+    with stubber:
+        secrets = AWSSecretsManagerProvider(secret_id=secret_id, region_name="us-east-1").get_all_secrets()
+
+    assert secrets == {"DATABASE_URL": "postgresql+asyncpg://db/lmx"}
+    stubber.assert_no_pending_responses()

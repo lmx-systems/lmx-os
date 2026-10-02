@@ -14,10 +14,12 @@ calls out to at request time).
   - AWSSecretsManagerProvider is a real implementation, unexercised
     without a real AWS account/secret configured - same status as this
     codebase's other "implemented, not yet verified live" clients (e.g.
-    app/optimizer/google_routes_client.py). boto3 is imported lazily and
-    deliberately NOT added to requirements.txt - it's a real dependency
-    only once this specific provider is actually chosen and configured,
-    not before; `pip install boto3` first if that day comes.
+    app/optimizer/google_routes_client.py). boto3 is imported lazily, and
+    was left out of requirements.txt until this provider was chosen.
+    infra/aws chose it - ecs.tf sets SECRETS_MANAGER_SECRET_ID - while boto3
+    stayed undeclared, which would have stopped the API at startup on the
+    first deploy. It is declared now, and tests/test_runtime_imports_are_locked.py
+    fails if an import in app/ is ever missing from the image's lock again.
 
 load_secrets_into_environment() runs at the very top of app/config.py,
 before Settings is even defined - so if a real vault IS configured
