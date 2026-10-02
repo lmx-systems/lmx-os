@@ -8,6 +8,7 @@ codebase.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -33,7 +34,10 @@ async def test_run_payroll_submits_previous_period_hours_for_a_w2_driver(db_sess
     await db_session.commit()
 
     now = datetime.now(timezone.utc)
-    prev_start, _prev_end = payroll_hours.previous_pay_period_bounds("w2", now)
+    # The hub keeps the model default, Los Angeles time; payroll reads its clock.
+    prev_start, _prev_end = payroll_hours.previous_pay_period_bounds(
+        "w2", now, ZoneInfo("America/Los_Angeles")
+    )
     online_at = prev_start + timedelta(hours=9)
     db_session.add_all(
         [
@@ -87,7 +91,10 @@ async def test_run_payroll_skips_a_gig_driver_entirely(db_session, real_redis_cl
     await db_session.commit()
 
     now = datetime.now(timezone.utc)
-    prev_start, _prev_end = payroll_hours.previous_pay_period_bounds("gig", now)
+    # The hub keeps the model default, Los Angeles time; payroll reads its clock.
+    prev_start, _prev_end = payroll_hours.previous_pay_period_bounds(
+        "gig", now, ZoneInfo("America/Los_Angeles")
+    )
     online_at = prev_start + timedelta(hours=9)
     db_session.add_all(
         [

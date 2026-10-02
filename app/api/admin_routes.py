@@ -54,6 +54,7 @@ from app.models.driver_document import (
     REVIEW_VERIFIED,
     DriverDocument,
 )
+from app.hub_calendar import hub_zone
 from app.models.hub import US_STATE_CODES, Hub
 from app.payroll.overtime_rules import overtime_rule_for_state
 from app.models.hub_closure import HubClosure
@@ -514,7 +515,9 @@ async def run_payroll_for_hub(
             # not the hourly Rippling rail this endpoint submits to.
             continue
 
-        start, end = payroll_hours.previous_pay_period_bounds(driver.employment_type, now)
+        # The driver's hub's clock, so the period is the one its dates say.
+        clock = hub_zone(await session.get(Hub, driver.hub_id))
+        start, end = payroll_hours.previous_pay_period_bounds(driver.employment_type, now, clock)
         rate_cents = driver.hourly_rate_cents or payroll_hours.PLACEHOLDER_HOURLY_RATE_CENTS
         regular_hours, overtime_hours, estimated_pay_cents = await payroll_hours.hours_and_pay_for_period(
             session,
@@ -528,11 +531,11 @@ async def run_payroll_for_hub(
         if regular_hours == 0.0 and overtime_hours == 0.0:
             continue  # nothing to submit for a driver who wasn't on duty at all last period
 
-        period_end_inclusive = (end - timedelta(days=1)).date()
+        period_end_inclusive = (end.astimezone(clock) - timedelta(days=1)).date()
         reference = await provider.submit_hours(
             driver_id=str(driver.id),
             driver_name=driver.name,
-            period_start=start.date(),
+            period_start=start.astimezone(clock).date(),
             period_end=period_end_inclusive,
             hours_worked=round(regular_hours + overtime_hours, 2),
             rate_cents=rate_cents,
@@ -542,7 +545,7 @@ async def run_payroll_for_hub(
                 driver_id=str(driver.id),
                 driver_name=driver.name,
                 employment_type=driver.employment_type,
-                period_start=start.date().isoformat(),
+                period_start=start.astimezone(clock).date().isoformat(),
                 period_end=period_end_inclusive.isoformat(),
                 hours_worked=round(regular_hours, 2),
                 overtime_hours=round(overtime_hours, 2),

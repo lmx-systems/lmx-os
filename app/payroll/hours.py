@@ -8,11 +8,12 @@ never drift on what "hours worked" means.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta, timezone, tzinfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.hub_calendar import hub_zone, midnight
 from app.models.driver_shift_event import DriverShiftEvent
 from app.models.gig_payout import GigPayout
 from app.models.hub import Hub
@@ -39,44 +40,58 @@ PLACEHOLDER_HOURLY_RATE_CENTS = 1_800  # $18.00/hr
 ON_DUTY_STATUSES = {"available", "en_route", "offered"}
 
 
-def week_bounds(now: datetime) -> tuple[datetime, datetime]:
-    start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-    return start, start + timedelta(days=7)
+def week_bounds(now: datetime, tz: tzinfo) -> tuple[datetime, datetime]:
+    """The Monday-to-Monday week holding `now`, on the clock `tz` keeps.
+
+    Callers pass the hub's. Cut in UTC, a Los Angeles workweek began at 4 or
+    5pm on a Sunday, so a Sunday evening shift was split across two weeks'
+    overtime thresholds. Returned as UTC instants, like `hub_calendar`'s.
+    """
+    today = now.astimezone(tz).date()
+    monday = today - timedelta(days=today.weekday())
+    return midnight(monday, tz), midnight(monday + timedelta(days=7), tz)
 
 
-def month_bounds(now: datetime) -> tuple[datetime, datetime]:
-    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    next_start = start.replace(year=start.year + 1, month=1) if start.month == 12 else start.replace(month=start.month + 1)
-    return start, next_start
+def month_bounds(now: datetime, tz: tzinfo) -> tuple[datetime, datetime]:
+    """The calendar month holding `now`, on the clock `tz` keeps."""
+    first = now.astimezone(tz).date().replace(day=1)
+    following = date(first.year + first.month // 12, first.month % 12 + 1, 1)
+    return midnight(first, tz), midnight(following, tz)
 
 
-def pay_period_bounds(employment_type: str, now: datetime) -> tuple[datetime, datetime]:
+def pay_period_bounds(employment_type: str, now: datetime, tz: tzinfo) -> tuple[datetime, datetime]:
     """The *current*, still-accumulating pay period as of `now`. w2 drivers
     are paid monthly, 1099 contractors weekly (Sourabh's stated cadence).
     gig falls back to weekly too, pending Phase 3's real per-delivery
     pricing model - there's no gig-specific earnings source to compute
     from yet."""
     if employment_type == "w2":
-        return month_bounds(now)
-    return week_bounds(now)
+        return month_bounds(now, tz)
+    return week_bounds(now, tz)
 
 
-def previous_pay_period_bounds(employment_type: str, now: datetime) -> tuple[datetime, datetime]:
+def previous_pay_period_bounds(employment_type: str, now: datetime, tz: tzinfo) -> tuple[datetime, datetime]:
     """The most recently *completed* pay period as of `now` - a payroll run
     pays for a period that has already ended, not the one still in
     progress (pay_period_bounds above)."""
-    current_start, _ = pay_period_bounds(employment_type, now)
-    return pay_period_bounds(employment_type, current_start - timedelta(days=1))
+    current_start, _ = pay_period_bounds(employment_type, now, tz)
+    # A minute before the current period rather than a day: across a clock
+    # change a local day is 23 or 25 hours, and a fixed 24 back from midnight
+    # can land a day further than it means to.
+    return pay_period_bounds(employment_type, current_start - timedelta(minutes=1), tz)
 
 
-def _calendar_weeks_overlapping(start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
-    """Monday-aligned calendar workweeks overlapping [start, end) - federal
-    OT is computed per fixed 7-day workweek, not per pay period."""
-    cursor = (start - timedelta(days=start.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+def _calendar_weeks_overlapping(
+    start: datetime, end: datetime, tz: tzinfo
+) -> list[tuple[datetime, datetime]]:
+    """Monday-aligned calendar workweeks overlapping [start, end), on `tz`'s
+    clock - federal OT is computed per fixed 7-day workweek, not per pay
+    period."""
     weeks = []
-    while cursor < end:
-        weeks.append((cursor, cursor + timedelta(days=7)))
-        cursor += timedelta(days=7)
+    week_start, week_end = week_bounds(start, tz)
+    while week_start < end:
+        weeks.append((week_start, week_end))
+        week_start, week_end = week_end, week_bounds(week_end, tz)[1]
     return weeks
 
 
@@ -93,6 +108,10 @@ async def _on_duty_spans(
     (sums span durations) and daily_hours_worked_from_shift_events (splits
     them across day boundaries) so the two can never drift on what counts
     as "on duty"."""
+    # In UTC before any span is built from them. Python subtracts two datetimes
+    # that share a tzinfo by wall clock, so a window bounded in local time
+    # would measure a 25-hour day on duty as 24.
+    start, end = start.astimezone(timezone.utc), end.astimezone(timezone.utc)
     result = await session.execute(
         select(DriverShiftEvent)
         .where(DriverShiftEvent.driver_id == uuid.UUID(driver_id), DriverShiftEvent.occurred_at < end)
@@ -135,7 +154,7 @@ async def hours_worked_from_shift_events(
 
 
 async def daily_hours_worked_from_shift_events(
-    session: AsyncSession, driver_id: str, start: datetime, end: datetime
+    session: AsyncSession, driver_id: str, start: datetime, end: datetime, tz: tzinfo
 ) -> dict[date, float]:
     """Same on-duty reconstruction as hours_worked_from_shift_events, but
     bucketed per calendar day instead of summed - the mechanism a
@@ -146,15 +165,16 @@ async def daily_hours_worked_from_shift_events(
     hours" - nothing in this codebase computed per-day totals before this
     existed. A span that crosses midnight is split at the boundary, so
     e.g. a 10pm-2am span attributes 2 hours to the first day and 2 to the
-    next, not 4 to either."""
+    next, not 4 to either. Midnight is `tz`'s - the hub's - because a daily
+    rule's day is the one the driver worked, not UTC's."""
     spans = await _on_duty_spans(session, driver_id, start, end)
     daily: dict[date, float] = {}
     for span_start, span_end in spans:
         cursor = span_start
         while cursor < span_end:
-            next_midnight = datetime.combine(cursor.date() + timedelta(days=1), time.min, tzinfo=cursor.tzinfo)
-            day_end = min(next_midnight, span_end)
-            daily[cursor.date()] = daily.get(cursor.date(), 0.0) + (day_end - cursor).total_seconds() / 3600
+            day = cursor.astimezone(tz).date()
+            day_end = min(midnight(day + timedelta(days=1), tz), span_end)
+            daily[day] = daily.get(day, 0.0) + (day_end - cursor).total_seconds() / 3600
             cursor = day_end
     return daily
 
@@ -163,7 +183,7 @@ async def hours_and_overtime(
     session: AsyncSession, driver_id: str, hub_id: str, start: datetime, end: datetime
 ) -> tuple[float, float]:
     """Regular + overtime hours within [start, end), bucketed into
-    Monday-Sunday workweeks and evaluated against whichever OvertimeRule
+    Monday-Sunday workweeks on the hub's clock and evaluated against whichever OvertimeRule
     applies to the driver's hub (app/payroll/overtime_rules.py) - the
     federal-only rule for every hub today, since no state-specific rule is
     registered yet (see docs/PAYROLL_STATE_OT_RESEARCH.md). Known
@@ -175,12 +195,15 @@ async def hours_and_overtime(
     cross-period OT, not this estimate."""
     hub = await session.get(Hub, uuid.UUID(hub_id))
     rule = overtime_rule_for_state(hub.state_code if hub else None)
+    clock = hub_zone(hub)
 
     total_regular = 0.0
     total_overtime = 0.0
-    for week_start, week_end in _calendar_weeks_overlapping(start, end):
+    for week_start, week_end in _calendar_weeks_overlapping(start, end, clock):
         clipped_start, clipped_end = max(week_start, start), min(week_end, end)
-        daily_hours = await daily_hours_worked_from_shift_events(session, driver_id, clipped_start, clipped_end)
+        daily_hours = await daily_hours_worked_from_shift_events(
+            session, driver_id, clipped_start, clipped_end, clock
+        )
         week_regular, week_overtime = rule.apply(daily_hours)
         total_regular += week_regular
         total_overtime += week_overtime

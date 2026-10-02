@@ -16,6 +16,7 @@ with a real Order.delivery_contact_phone attached.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from unittest.mock import patch
 from urllib.parse import urlencode
 
@@ -311,6 +312,22 @@ async def test_earnings_computes_hours_from_shift_events_not_route_span(db_sessi
     assert 2.9 <= earnings.hours_worked <= 3.1
     assert earnings.overtime_hours == 0.0
     assert earnings.estimated_pay_cents == round(earnings.hours_worked * payroll_hours.PLACEHOLDER_HOURLY_RATE_CENTS)
+
+
+async def test_earnings_period_is_dated_on_the_hubs_clock(db_session):
+    """A w2 driver's period is the hub's calendar month, from the 1st to the
+    last day on the hub's clock - the dates a driver reads are the hours they
+    cover. The hub keeps the model default, Los Angeles time."""
+    hub_id, driver_id = await _seed_driver_only(db_session)
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+    today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+
+    earnings = await get_my_earnings(driver=authed, session=db_session)
+
+    first = today.replace(day=1)
+    following = first.replace(year=first.year + first.month // 12, month=first.month % 12 + 1)
+    assert earnings.period_start == first
+    assert earnings.period_end == following - timedelta(days=1)
 
 
 async def test_earnings_excludes_shift_events_from_before_the_current_period(db_session):

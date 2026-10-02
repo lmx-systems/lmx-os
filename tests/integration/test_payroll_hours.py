@@ -7,6 +7,7 @@ regardless of what day the test suite happens to run on.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from unittest.mock import patch
 
 import pytest
@@ -19,13 +20,18 @@ from app.payroll.overtime_rules import OvertimeRule
 
 pytestmark = pytest.mark.integration
 
-# A fixed Monday, arbitrary but deterministic.
-MONDAY = datetime(2026, 6, 1, tzinfo=timezone.utc)
+# The test hub keeps Los Angeles time, and payroll's weeks are the hub's.
+LA = ZoneInfo("America/Los_Angeles")
+# A fixed Monday, arbitrary but deterministic - midnight on the hub's clock.
+MONDAY = datetime(2026, 6, 1, tzinfo=LA)
 
 
 async def _seed_driver(db_session):
     hub_id, driver_id = uuid.uuid4(), uuid.uuid4()
-    db_session.add(Hub(id=hub_id, name="Payroll Hours Test Hub", lat=34.05, lng=-118.25))
+    db_session.add(
+        Hub(id=hub_id, name="Payroll Hours Test Hub", lat=34.05, lng=-118.25,
+            timezone="America/Los_Angeles")
+    )
     await db_session.commit()
     db_session.add(Driver(id=driver_id, hub_id=hub_id, name="Pat H.", phone="+15555550301", vehicle_capacity_units=5))
     await db_session.commit()
@@ -33,28 +39,47 @@ async def _seed_driver(db_session):
 
 
 def test_month_bounds_handles_december_year_rollover():
-    start, end = payroll_hours.month_bounds(datetime(2026, 12, 15, tzinfo=timezone.utc))
-    assert start == datetime(2026, 12, 1, tzinfo=timezone.utc)
-    assert end == datetime(2027, 1, 1, tzinfo=timezone.utc)
+    start, end = payroll_hours.month_bounds(datetime(2026, 12, 15, tzinfo=timezone.utc), LA)
+    assert start == datetime(2026, 12, 1, tzinfo=LA)
+    assert end == datetime(2027, 1, 1, tzinfo=LA)
 
 
 def test_pay_period_bounds_is_monthly_for_w2_and_weekly_for_others():
     now = datetime(2026, 6, 17, 12, tzinfo=timezone.utc)
-    w2_start, w2_end = payroll_hours.pay_period_bounds("w2", now)
-    assert (w2_start, w2_end) == payroll_hours.month_bounds(now)
+    w2_start, w2_end = payroll_hours.pay_period_bounds("w2", now, LA)
+    assert (w2_start, w2_end) == payroll_hours.month_bounds(now, LA)
 
-    contractor_start, contractor_end = payroll_hours.pay_period_bounds("contractor_1099", now)
-    assert (contractor_start, contractor_end) == payroll_hours.week_bounds(now)
+    contractor_start, contractor_end = payroll_hours.pay_period_bounds("contractor_1099", now, LA)
+    assert (contractor_start, contractor_end) == payroll_hours.week_bounds(now, LA)
 
-    gig_start, gig_end = payroll_hours.pay_period_bounds("gig", now)
-    assert (gig_start, gig_end) == payroll_hours.week_bounds(now)
+    gig_start, gig_end = payroll_hours.pay_period_bounds("gig", now, LA)
+    assert (gig_start, gig_end) == payroll_hours.week_bounds(now, LA)
 
 
 def test_previous_pay_period_bounds_steps_back_one_full_period():
     now = datetime(2026, 6, 17, tzinfo=timezone.utc)  # mid-June
-    prev_start, prev_end = payroll_hours.previous_pay_period_bounds("w2", now)
-    assert prev_start == datetime(2026, 5, 1, tzinfo=timezone.utc)
-    assert prev_end == datetime(2026, 6, 1, tzinfo=timezone.utc)
+    prev_start, prev_end = payroll_hours.previous_pay_period_bounds("w2", now, LA)
+    assert prev_start == datetime(2026, 5, 1, tzinfo=LA)
+    assert prev_end == datetime(2026, 6, 1, tzinfo=LA)
+
+
+def test_a_week_starts_at_the_hubs_monday_midnight():
+    """1am UTC on a Monday is 6pm the Sunday before in Los Angeles - still the
+    previous week on the hub's clock, which is the one the driver worked."""
+    start, end = payroll_hours.week_bounds(datetime(2026, 6, 1, 1, tzinfo=timezone.utc), LA)
+    assert start == datetime(2026, 5, 25, tzinfo=LA)
+    assert end == datetime(2026, 6, 1, tzinfo=LA)
+
+
+def test_the_week_the_clocks_go_forward_is_167_hours():
+    """Monday midnight to Monday midnight on the hub's clock, across the spring
+    change. Stepping back a fixed day from the current week's start would land
+    on the Saturday; a minute back lands in the right week either way."""
+    start, end = payroll_hours.previous_pay_period_bounds(
+        "contractor_1099", datetime(2026, 3, 10, 12, tzinfo=timezone.utc), LA
+    )
+    assert start == datetime(2026, 3, 2, tzinfo=LA)
+    assert end - start == timedelta(hours=167)
 
 
 async def test_hours_worked_pairs_an_online_to_offline_span(db_session):
@@ -136,7 +161,7 @@ async def test_daily_hours_splits_a_span_that_crosses_midnight(db_session):
     await db_session.commit()
 
     daily = await payroll_hours.daily_hours_worked_from_shift_events(
-        db_session, str(driver_id), MONDAY, MONDAY + timedelta(days=7)
+        db_session, str(driver_id), MONDAY, MONDAY + timedelta(days=7), LA
     )
     # 10pm Monday -> 2am Tuesday: 2 hours land on each side of midnight,
     # not 4 hours attributed to either day.
@@ -178,6 +203,33 @@ async def test_hours_and_overtime_uses_the_hub_state_rule_when_one_is_registered
         )
     assert regular == 0.0
     assert overtime == pytest.approx(8.0)
+
+
+async def test_a_sunday_evening_shift_counts_toward_the_week_it_was_worked(db_session):
+    """38 hours from Monday plus Sunday 4pm-8pm is 42 hours in one of the hub's
+    workweeks: 40 regular and 2 overtime. Cut at UTC's Monday - 5pm on Sunday
+    here - that week saw 39, the next saw 3, and no overtime was paid at all.
+
+    Bounded in UTC, the way the payroll routes bound a period, because the old
+    cut took its weeks from whatever timezone its bounds arrived in."""
+    hub_id, driver_id = await _seed_driver(db_session)
+    sunday_4pm = MONDAY + timedelta(days=6, hours=16)
+    db_session.add_all(
+        [
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="available", occurred_at=MONDAY + timedelta(hours=1)),
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="off_shift", occurred_at=MONDAY + timedelta(hours=39)),
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="available", occurred_at=sunday_4pm),
+            DriverShiftEvent(driver_id=driver_id, hub_id=hub_id, event_type="off_shift", occurred_at=sunday_4pm + timedelta(hours=4)),
+        ]
+    )
+    await db_session.commit()
+
+    regular, overtime = await payroll_hours.hours_and_overtime(
+        db_session, str(driver_id), str(hub_id),
+        MONDAY.astimezone(timezone.utc), (MONDAY + timedelta(days=7)).astimezone(timezone.utc),
+    )
+    assert regular == pytest.approx(40.0)
+    assert overtime == pytest.approx(2.0)
 
 
 async def test_hours_and_overtime_applies_time_and_a_half_over_40_in_a_week(db_session):
