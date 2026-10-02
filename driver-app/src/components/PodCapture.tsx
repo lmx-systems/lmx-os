@@ -9,6 +9,7 @@ import { radius, spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
 import { Button } from './Button';
 import { TextField } from './TextField';
+import { proofReadiness } from '../utils/proofReadiness';
 
 const METHODS: PodMethod[] = ['photo', 'signature', 'pin'];
 
@@ -66,17 +67,15 @@ export function PodCapture({
 }: PodCaptureProps) {
   const colors = useThemeColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  // Mirrors app/delivery/proof.py so the button is disabled for the same reasons
-  // the server would refuse - a driver should not be able to tap Complete and get
-  // a 422 telling them to take another photo.
-  const photosRequired = Math.max(proof?.photo_count_required ?? 1, method === 'photo' ? 1 : 0);
-  const signatureRequired = proof?.signature_required ?? false;
-  const photosDone = photoUrls.length >= photosRequired;
-  const identityDone =
-    !signatureRequired || signatureUrl !== null || (method === 'pin' && pin.length >= 4);
-  const methodCarriesEvidence =
-    method === 'photo' ? photoUrls.length > 0 : method === 'signature' ? signatureUrl !== null : pin.length >= 4;
-  const canSubmit = methodCarriesEvidence && photosDone && identityDone;
+  // The same rules as app/delivery/proof.py, so Complete is enabled for exactly the
+  // reasons the server would accept - see utils/proofReadiness.ts.
+  const { photosRequired, signatureRequired, canSubmit } = proofReadiness({
+    proof,
+    method,
+    photoCount: photoUrls.length,
+    hasSignature: signatureUrl !== null,
+    pinLength: pin.length,
+  });
 
   const [modalOpen, setModalOpen] = useState(false);
   const [captureKind, setCaptureKind] = useState<'photo' | 'signature'>('photo');
