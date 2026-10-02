@@ -131,9 +131,9 @@ You need the ALB's DNS name (`terraform output alb_dns_name`) and the
 app tasks (`infra/aws/secrets.tf`).
 
 **All of this belongs in Terraform rather than the console.** Everything else about
-this deployment is IaC, and there are currently **no scheduling or canary resources
-in `infra/aws/` at all** — see the gap called out under "The three scheduled jobs"
-below. The console steps here are written so someone can stand alerting up on day
+this deployment is IaC. **The three scheduled jobs now are** - `infra/aws/schedules.tf`,
+armed with HTTPS (see "The three scheduled jobs" below). **The canary and the alarm's
+SNS topic still are not.** The console steps here are written so someone can stand alerting up on day
 one and so the intent is unambiguous when the Terraform gets written.
 
 ### 1. Confirm the endpoint answers
@@ -198,8 +198,9 @@ and wait. The check should go `503` and the alert should arrive. **Set it back.*
 
 ### 6. The three scheduled jobs
 
-**This is the actual gap in `infra/aws/`, not just a console step.** Three endpoints
-need to be called on a timer and nothing in the repo schedules any of them:
+**`infra/aws/schedules.tf` schedules these**, in the shape described below, once
+`var.certificate_arn` is set: an API destination must be https, so the sweeps arm
+with the HTTPS listener. Until then nothing calls them. Three endpoints:
 
 | Endpoint | Interval | Why it exists |
 |---|---|---|

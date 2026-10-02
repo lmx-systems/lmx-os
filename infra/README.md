@@ -170,6 +170,18 @@ infra/
    with the updated JSON blob. `secrets.tf`'s `ignore_changes` means a
    future `terraform apply` won't reset these back to placeholders.
 
+   **Then redeploy** (`aws ecs update-service --cluster lmx-prod-cluster
+   --service lmx-prod-app --force-new-deployment`). The app reads the secret
+   once, when its config loads, so a running task never sees a new value.
+
+   Three settings have no placeholder, because an empty value would fail to
+   parse and stop the app booting: `EXPO_PUSH_ENABLED` (true or false),
+   `SMTP_PORT` and `SMTP_USE_TLS`. Add them with the rest of the SMTP block
+   when a provider is chosen, and `GEOCODER_PROVIDER=google` once
+   `GOOGLE_MAPS_API_KEY` is in - the key alone switches nothing.
+   `INTERNAL_API_TOKEN` needs nothing: Terraform generates it, and the same
+   value reaches the scheduled sweeps in `schedules.tf`.
+
 ## Ongoing deploys
 
 Just `git push` to `main` once CI passes - `.github/workflows/deploy.yml`
@@ -197,4 +209,5 @@ still exists in ECR (`ecr.tf`'s repos are `IMMUTABLE`).
   to put in `var.certificate_arn`, which needs the domain proved first (step 3
   above). The DNS itself stays at Cloudflare and outside Terraform's sight on
   purpose - moving it to Route 53 would take the company's `MX` records down
-  with it.
+  with it. The three `/internal` sweeps in `schedules.tf` arm with it, because
+  an EventBridge API destination must be an https URL.
