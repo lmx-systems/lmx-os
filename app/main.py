@@ -109,10 +109,17 @@ app.add_middleware(OpsUserAuthMiddleware)
 # /client, /webhooks exemptions.
 app.add_middleware(GeneralRateLimitMiddleware)
 
+# Every method the console and portal send. They run on other origins than the
+# API (ops.lmxit.com and portal.lmxit.com calling api.lmxit.com, and :5173 to
+# :8000 locally), so anything that isn't a simple request is preceded by a
+# preflight, and Starlette answers a preflight for an unlisted method with 400.
+# This listed GET and POST only, which made every edit, toggle and delete in both
+# front ends fail in a browser while working from curl.
+# tests/test_cors_allows_what_the_front_ends_send.py derives the list from them.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.dashboard_cors_origin_list,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["*"],
     allow_credentials=False,  # no session/cookie auth exists yet - see docs/ARCHITECTURE.md
 )
