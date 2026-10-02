@@ -14,6 +14,13 @@ RUN pip install --no-cache-dir -r requirements.lock
 COPY app ./app
 COPY migrations ./migrations
 COPY demo ./demo
+# scripts/ because the runbook runs them in this image: infra/README.md creates
+# the first ops user with a one-off `aws ecs run-task` of this image running
+# `python -m scripts.create_ops_user`, and settlement, signing, enrolment and
+# driver rates are scripts by design. Without it a fresh stack had no way to
+# create a login. tests/test_image_ships_its_scripts.py holds the image to every
+# operational script's imports.
+COPY scripts ./scripts
 COPY alembic.ini .
 
 RUN useradd --system --create-home --shell /usr/sbin/nologin app \
