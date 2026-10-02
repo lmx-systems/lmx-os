@@ -33,6 +33,14 @@ resource "random_password" "ops_jwt_secret" {
   special = false
 }
 
+# The shared secret for /internal/*, which answers 404 without one
+# (app/api/internal_routes.py). The same value reaches the request through the
+# EventBridge connection in schedules.tf, so neither side is ever pasted by hand.
+resource "random_password" "internal_api_token" {
+  length  = 48
+  special = false
+}
+
 resource "aws_secretsmanager_secret" "app" {
   name                    = "${var.name_prefix}-app-secrets"
   recovery_window_in_days = 7 # not zero - a fat-fingered `terraform destroy` shouldn't be instantly unrecoverable
@@ -48,6 +56,11 @@ resource "aws_secretsmanager_secret_version" "app" {
     DRIVER_JWT_SECRET = random_password.driver_jwt_secret.result
     CLIENT_JWT_SECRET = random_password.client_jwt_secret.result
     OPS_JWT_SECRET    = random_password.ops_jwt_secret.result
+
+    # Generated, like the JWT secrets. `ignore_changes` below covers the whole
+    # JSON, so a key added here lands only on the first apply; on a stack that
+    # already exists, add it with put-secret-value instead.
+    INTERNAL_API_TOKEN = random_password.internal_api_token.result
 
     # Placeholders - fill these in via the AWS console or `aws
     # secretsmanager put-secret-value` once each real account exists
