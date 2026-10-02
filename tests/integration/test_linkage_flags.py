@@ -225,6 +225,52 @@ class TestRepeatVisits:
 
         assert await flag_repeat_visits(db_session, hub_id=hub.id, now=NOW) == 0
 
+    async def test_an_afternoon_and_an_evening_order_are_one_day(self, db_session):
+        """3pm and 6pm at a Los Angeles hub: one day on the wall, two in UTC,
+        whose midnight is 5pm here. Grouped in UTC, this was never flagged."""
+        hub, client = await _hub_and_client(db_session)
+        hub.timezone = "America/Los_Angeles"
+        shop = await _shop(db_session, client, account_ref="1234/5")
+        three_pm = datetime(2026, 9, 16, 22, 0, tzinfo=timezone.utc)
+        await _order(db_session, hub, client, shop, ref="PO-1", created=three_pm)
+        await _order(
+            db_session, hub, client, shop, ref="PO-2", created=three_pm + timedelta(hours=3)
+        )
+
+        raised = await flag_repeat_visits(
+            db_session, hub_id=hub.id, now=three_pm + timedelta(hours=4)
+        )
+
+        assert raised == 1
+        flag = (await db_session.scalars(select(LinkageFlag))).one()
+        assert flag.subjects["day"] == "2026-09-16"
+
+    async def test_an_evening_and_the_next_morning_are_two_days(self, db_session):
+        """6pm and 10am the next day share a UTC date. Grouped in UTC, they were
+        flagged as one day's repeat visit."""
+        hub, client = await _hub_and_client(db_session)
+        hub.timezone = "America/Los_Angeles"
+        shop = await _shop(db_session, client, account_ref="1234/5")
+        six_pm = datetime(2026, 9, 17, 1, 0, tzinfo=timezone.utc)
+        await _order(db_session, hub, client, shop, ref="PO-1", created=six_pm)
+        await _order(
+            db_session, hub, client, shop, ref="PO-2", created=six_pm + timedelta(hours=16)
+        )
+
+        assert await flag_repeat_visits(
+            db_session, hub_id=hub.id, now=six_pm + timedelta(hours=17)
+        ) == 0
+
+    async def test_the_nightly_job_passes_the_hub_as_a_string(self, db_session):
+        hub, client = await _hub_and_client(db_session)
+        shop = await _shop(db_session, client, account_ref="1234/5")
+        await _order(db_session, hub, client, shop, ref="PO-1", created=NOW)
+        await _order(db_session, hub, client, shop, ref="PO-2", created=NOW + timedelta(hours=3))
+
+        assert await flag_repeat_visits(
+            db_session, hub_id=str(hub.id), now=NOW + timedelta(hours=4)
+        ) == 1
+
 
 class TestTheQueue:
     async def test_running_twice_does_not_raise_the_same_question_twice(self, db_session):
