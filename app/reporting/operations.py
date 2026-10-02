@@ -41,11 +41,14 @@ import structlog
 from sqlalchemy import Float, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.hub_calendar import hub_local_date
+
 # The two flags that say the hold window was wrong in one direction or the other.
 # Imported from the learning loop rather than restated, so a rename lands in one place -
 # these strings are still that module's proposed convention pending E6's sign-off.
 from app.learning_loop.detection import HOLD_TOO_LONG_FLAG, HOLD_TOO_SHORT_FLAG
 from app.models.driver_shift_event import DriverShiftEvent
+from app.models.hub import Hub
 from app.models.order import Order, OrderStatus
 from app.models.route_offer import RouteOffer
 from app.models.stop import Stop, StopFlag
@@ -137,10 +140,14 @@ async def _on_duty_seconds_by_driver_day(
     deliveries by a few minutes and produce a DPH figure that looks spectacular. The
     honest denominator is a shift that finished.
 
-    Attributed to the day the interval *started*. A shift crossing midnight is rare in
-    this operation and splitting it would complicate every reader of this number for a
-    case that mostly does not happen; the choice is recorded here rather than hidden.
+    Attributed to the hub-local day the interval *started*. A shift crossing the hub's
+    midnight is rare in this operation and splitting it would complicate every reader of
+    this number for a case that mostly does not happen; the choice is recorded here
+    rather than hidden. It is the hub's midnight that is rare. This used to cut at UTC's,
+    which is 4 or 5pm in Los Angeles, so every evening's deliveries left their shift for
+    a day with no hours, and DPH came out low.
     """
+    hubs = await _hubs(session, hub_id)
     rows = (
         (
             await session.execute(
@@ -170,8 +177,20 @@ async def _on_duty_seconds_by_driver_day(
             seconds = (following.occurred_at - current.occurred_at).total_seconds()
             if seconds <= 0:
                 continue
-            totals[(driver_id, current.occurred_at.date())] += seconds
+            totals[(driver_id, _local_day(hubs, current.hub_id, current.occurred_at))] += seconds
     return totals
+
+
+async def _hubs(session: AsyncSession, hub_id: uuid.UUID | None) -> dict[uuid.UUID, Hub]:
+    """The hubs whose clocks a driver-day is read on - one, or all of them."""
+    query = select(Hub) if hub_id is None else select(Hub).where(Hub.id == hub_id)
+    return {hub.id: hub for hub in (await session.scalars(query)).all()}
+
+
+def _local_day(hubs: dict[uuid.UUID, Hub], hub_id: uuid.UUID, at: datetime) -> date:
+    """The day `at` falls on at its hub. UTC's only for a hub that cannot be found."""
+    hub = hubs.get(hub_id)
+    return hub_local_date(hub, at) if hub is not None else at.date()
 
 
 async def _deliveries_by_driver_day(
@@ -202,15 +221,19 @@ async def _deliveries_by_driver_day(
     route_ids = {r[0] for r in rows}
     driver_rows = (
         await session.execute(
-            select(Route.id, Route.driver_id).where(
+            select(Route.id, Route.driver_id, Route.hub_id).where(
                 Route.id.in_(route_ids),
                 *([Route.hub_id == hub_id] if hub_id is not None else []),
             )
         )
     ).all()
     drivers: dict[uuid.UUID, uuid.UUID] = {
-        route_id: driver_id for route_id, driver_id in driver_rows
+        route_id: driver_id for route_id, driver_id, _hub_id in driver_rows
     }
+    route_hubs: dict[uuid.UUID, uuid.UUID] = {
+        route_id: route_hub_id for route_id, _driver_id, route_hub_id in driver_rows
+    }
+    hubs = await _hubs(session, hub_id)
 
     counts: dict[tuple[uuid.UUID, date], int] = defaultdict(int)
     for route_id, completed_at, _stop_id in rows:
@@ -220,7 +243,7 @@ async def _deliveries_by_driver_day(
         # a real type - as `dict[Never, Never]` it made this line dead to the checker.
         if driver_id is None or completed_at is None:
             continue
-        counts[(driver_id, completed_at.date())] += 1
+        counts[(driver_id, _local_day(hubs, route_hubs[route_id], completed_at))] += 1
     return counts
 
 

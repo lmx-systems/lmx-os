@@ -175,6 +175,24 @@ async def test_deliveries_per_hour_is_computed_from_real_shifts(db_session):
     assert str(ASSUMED_DELIVERIES_PER_HOUR) in metric.target
 
 
+async def test_an_evening_shift_is_one_driver_day_on_the_hubs_clock(db_session):
+    """UTC midnight is 5pm at this hub. Cut there, the two deliveries after five left
+    this shift for a day with no hours, and the median came out at 0.5. Four
+    deliveries over a four-hour shift is 1.0."""
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    hub = await db_session.get(Hub, hub_id)
+    hub.timezone = "America/Los_Angeles"
+    await db_session.commit()
+    three_pm = datetime(2026, 8, 18, 22, 0, tzinfo=timezone.utc)
+    await _shift(db_session, driver_id, hub_id, start=three_pm, end=three_pm + timedelta(hours=4))
+    await _delivered_stops(db_session, hub_id, driver_id, count=2, at=three_pm + timedelta(hours=1))
+    await _delivered_stops(db_session, hub_id, driver_id, count=2, at=three_pm + timedelta(hours=3))
+
+    metric = _find(await build_operations_scorecard(db_session, now=NOW), "deliveries per hour")
+    assert metric.not_measured is None
+    assert metric.median == pytest.approx(1.0, abs=0.01)
+
+
 async def test_a_driver_still_on_shift_is_not_counted(db_session):
     """An unclosed interval is a driver working right now, not a completed shift.
 
