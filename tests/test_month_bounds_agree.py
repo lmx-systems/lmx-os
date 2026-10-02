@@ -3,7 +3,9 @@
 `settle_month.py` issues a statement's basis for a month, and `sign_basis.py`
 finds that basis again by its exact bounds. When settlement moved to the hub's
 month and signing stayed on UTC's, nothing could be signed - and an unsigned
-basis is one settle_month refuses to write a PDF on. This holds them together.
+basis is one settle_month refuses to write a PDF on. `reconcile_billing.py`
+checks the month's invoices, which are on the hub's month too. This holds the
+three together.
 """
 import importlib.util
 import pathlib
@@ -24,4 +26,6 @@ def _month_bounds(script: str):
 def test_signing_looks_for_the_month_settlement_issued():
     hub = Hub(name="Hub", lat=34.05, lng=-118.24, timezone="America/Los_Angeles")
     for month in ("2026-08", "2026-11", "2026-12"):
-        assert _month_bounds("sign_basis")(month, hub) == _month_bounds("settle_month")(month, hub)
+        settled = _month_bounds("settle_month")(month, hub)
+        assert _month_bounds("sign_basis")(month, hub) == settled
+        assert _month_bounds("reconcile_billing")(month, hub) == settled

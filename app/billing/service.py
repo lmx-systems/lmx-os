@@ -21,6 +21,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.credits import assess_credits
+from app.hub_calendar import hub_day_bounds
+from app.models.client import Client
+from app.models.hub import Hub
 from app.models.invoice import Invoice
 from app.models.invoice_credit import InvoiceCredit
 from app.models.order import INTAKE_LIVE, Order, OrderStatus
@@ -45,8 +48,18 @@ async def generate_invoice(
     """period_end is exclusive - a delivery that lands exactly on it belongs
     to the *next* statement, not this one, so consecutive periods never
     overlap or double-count a drop."""
-    period_start_dt = datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc)
-    period_end_dt = datetime.combine(period_end, datetime.min.time(), tzinfo=timezone.utc)
+    # The period's dates are the client's hub's. Read as UTC midnights, a
+    # September invoice ran from 5pm on 31 August Pacific: an evening delivery
+    # on the 30th was billed in October, while the savings statement - on the
+    # hub's month - counted it in September.
+    client = await session.get(Client, client_id)
+    hub = await session.get(Hub, client.hub_id) if client is not None else None
+    if hub is not None:
+        period_start_dt = hub_day_bounds(hub, period_start)[0]
+        period_end_dt = hub_day_bounds(hub, period_end)[0]
+    else:
+        period_start_dt = datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc)
+        period_end_dt = datetime.combine(period_end, datetime.min.time(), tzinfo=timezone.utc)
 
     # Filter on the real delivery timestamp (docs/ROADMAP.md I1) - this used
     # to proxy through updated_at (which any later mutation bumps), which is
