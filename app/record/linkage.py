@@ -13,13 +13,16 @@ the expensive mistake is the invisible one, and a system that silently
 cancelled a "duplicate" would make exactly that mistake.
 """
 import hashlib
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.hub_calendar import hub_local_date
 from app.identity.account_signals import parse_account_ref
+from app.models.hub import Hub
 from app.models.linkage_flag import (
     KIND_DUPLICATE_BRANCH,
     KIND_OPEN_RETURN,
@@ -220,10 +223,10 @@ async def flag_repeat_visits(
     visited twice in one day is the product not having worked, and worth a
     dispatcher's glance even when the answer is "that one was fine".
 
-    Grouped by calendar day in UTC, which is a simplification worth naming: a
-    hub whose shift crosses midnight will see one evening split across two
-    days. Fixing that needs the hub's own timezone, which `hub_calendar` knows
-    and this does not yet ask it for.
+    Grouped by the hub's own calendar day. It used to be UTC's, and UTC
+    midnight is 4 or 5pm in Los Angeles: an afternoon order and an evening
+    one to the same shop fell on different days and were never flagged, while
+    an evening order and the next morning's shared a date and were.
     """
     now = now or datetime.now(timezone.utc)
     orders = list(
@@ -236,9 +239,13 @@ async def flag_repeat_visits(
         )
     )
 
+    # The id arrives as a string from the nightly job and as a UUID from tests.
+    hub = await session.get(Hub, uuid.UUID(str(hub_id)))
+    if hub is None:
+        return 0
     by_day: dict[tuple, list] = {}
     for order in orders:
-        by_day.setdefault((order.shop_id, order.created_at.date()), []).append(order)
+        by_day.setdefault((order.shop_id, hub_local_date(hub, order.created_at)), []).append(order)
 
     raised = 0
     for (shop_id, day), group in by_day.items():
