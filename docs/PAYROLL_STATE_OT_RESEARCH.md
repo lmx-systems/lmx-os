@@ -5,6 +5,8 @@
 - Real on-duty hours reconstructed from the shift-event log
   (`app/payroll/hours.py`), federal FLSA overtime (1.5x past 40 hrs in a
   Monday-Sunday workweek) for `w2` drivers, monthly/weekly pay periods,
+  all on the hub's own clock (see "The workweek is on the hub's clock"
+  below),
   and a `PayrollProvider` interface (`app/payroll/`, Rippling once a real
   account exists).
 - A pluggable per-state overtime rule mechanism
@@ -98,6 +100,34 @@ isolated:
   every existing hub. Unset means "use the federal-only default,"
   identical to today's behavior.
 
+## The workweek is on the hub's clock (decided 2 October 2026)
+
+Pay periods, the overtime workweek and the per-day split used to be cut at
+UTC midnight, which is 4 or 5pm at a Los Angeles hub. A stub dated "1-30
+September" covered 5pm on 31 August to 5pm on 30 September, and the
+workweek began at 5pm on Sunday, so a Sunday-evening shift was split
+across two weeks' 40-hour thresholds. In the test for it, 38 hours from
+Monday plus a Sunday 4pm-8pm shift is 42 hours in one week, 40 regular
+and 2 overtime. On the UTC cut, the week saw 39 and the next week 3, so
+no overtime was paid.
+
+**Decided: payroll uses the hub's clock** (#150). A workweek starts at
+Monday midnight on the hub's clock, monthly and weekly pay periods start
+at the hub's midnight, and the per-day split a daily rule will need happens
+at the hub's midnight, so a "day" is the calendar day the driver worked.
+Nothing had been paid when this was decided, so there is no history on the
+UTC weeks to reconcile.
+
+**One thing to confirm, in the same consultation as step 2 below.**
+29 CFR 778.105 defines a workweek as a fixed and regularly recurring
+period of 168 hours, which may begin on any day and at any hour. A week
+running from Monday midnight to Monday midnight on a local clock is
+**167 hours across the spring clock change and 169 across the autumn
+one.** Both choices are mechanical to switch between. The alternative is
+a fixed 168-hour week anchored to one instant, which drifts an hour
+against the local clock for half the year. Which one LMX uses is a
+compliance call, not an engineering one.
+
 ## Known limitation not addressed by this pass
 
 Every rule researched above still applies a 1.5x multiplier, just at a
@@ -119,7 +149,9 @@ calculation.
 1. Decide which hubs need `Hub.state_code` populated, and populate it
    (a factual data-entry task, not a policy one).
 2. Get real employment-law guidance on which of those states' overtime
-   rules actually need to be turned on, and their precise terms.
+   rules actually need to be turned on, and their precise terms - and
+   confirm the workweek definition above, including the two weeks a year
+   it is 167 or 169 hours.
 3. Only then: implement the specific `OvertimeRule` subclass(es) against
    verified statute text, register them in `STATE_OVERTIME_RULES`, and -
    if double time is in scope - extend the return shape as noted above.
