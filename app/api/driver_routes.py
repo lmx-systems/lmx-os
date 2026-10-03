@@ -47,7 +47,7 @@ from app.messaging.shop_notifications import (
     notify_shop_en_route,
     notify_shop_picked_up,
 )
-from app.messaging.sms_client import get_sms_client
+from app.messaging.sms_client import get_sms_client, twilio_sms_configured
 from app.messaging.voice_client import get_voice_client
 from app.models.call import Call
 from app.models.driver import Driver
@@ -184,8 +184,20 @@ async def request_otp(body: RequestOtpBody, session: AsyncSession = Depends(get_
         # "Apply to drive" annotation (out of app scope).
         raise HTTPException(status_code=404, detail="No driver registered with this phone number")
 
+    in_development = settings.environment == "development"
+    if not twilio_sms_configured() and not in_development:
+        # Without SMS the only way out for the code is this response, and
+        # then anyone who knows a driver's number could sign in as them.
+        logger.warning("driver_sign_in_unavailable", reason="Twilio SMS is not configured")
+        raise HTTPException(
+            status_code=503,
+            detail="Sign-in codes can't be sent right now - let your dispatcher know",
+        )
+
     issued = await otp_store.issue(body.phone, skip_rate_limit_check=True)
-    return RequestOtpResult(ok=True, debug_code=None if issued.sent_via_sms else issued.code)
+    # Local development has no SMS provider, so it's the one place the code comes back.
+    debug_code = issued.code if in_development and not issued.sent_via_sms else None
+    return RequestOtpResult(ok=True, debug_code=debug_code)
 
 
 @router.post("/auth/verify-otp", response_model=AuthToken)

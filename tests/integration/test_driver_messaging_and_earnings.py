@@ -34,6 +34,7 @@ from app.api.driver_routes import (
     message_support,
 )
 from app.api.webhooks import _find_matching_thread, twilio_inbound_sms
+from app.config import settings
 from app.driver_auth.dependencies import AuthedDriver
 from app.messaging.twilio_signature import compute_signature
 from app.models.driver import Driver
@@ -48,6 +49,7 @@ from tests.integration.test_driver_app_integration import _accept_one_offer, _se
 pytestmark = pytest.mark.integration
 
 WEBHOOK_URL = "http://testserver/webhooks/twilio/inbound-sms"
+TEST_AUTH_TOKEN = "test-auth-token"
 
 
 def _fake_twilio_request(form_fields: dict, signature: str | None = None) -> Request:
@@ -72,6 +74,19 @@ def _fake_twilio_request(form_fields: dict, signature: str | None = None) -> Req
         "server": ("testserver", 80),
     }
     return Request(scope, receive)
+
+
+@pytest.fixture
+def twilio_signs_requests(monkeypatch):
+    """Configure the auth token, so a request signed with it is Twilio's."""
+    monkeypatch.setattr(settings, "twilio_auth_token", TEST_AUTH_TOKEN)
+    monkeypatch.setattr(settings, "twilio_webhook_base_url", None)
+
+
+def _signed_twilio_request(form_fields: dict) -> Request:
+    """What Twilio sends: the form, signed with the account's auth token."""
+    signature = compute_signature(TEST_AUTH_TOKEN, WEBHOOK_URL, form_fields)
+    return _fake_twilio_request(form_fields, signature=signature)
 
 
 async def _seed_driver_only(db_session):
@@ -185,7 +200,9 @@ async def test_support_messages_are_scoped_per_driver(db_session):
     assert [m.body for m in thread_1] == ["From driver 1"]
 
 
-async def test_inbound_webhook_matches_reply_to_most_recent_outbound_thread(db_session, real_redis_client):
+async def test_inbound_webhook_matches_reply_to_most_recent_outbound_thread(
+    db_session, real_redis_client, twilio_signs_requests
+):
     hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
     authed, _pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
 
@@ -193,7 +210,7 @@ async def test_inbound_webhook_matches_reply_to_most_recent_outbound_thread(db_s
 
     fields = {"From": order.delivery_contact_phone, "Body": "Thanks, I'll be here", "MessageSid": "SM_test_123"}
     await twilio_inbound_sms(
-        request=_fake_twilio_request(fields),
+        request=_signed_twilio_request(fields),
         From=fields["From"], Body=fields["Body"], MessageSid=fields["MessageSid"], session=db_session,
     )
 
@@ -202,20 +219,33 @@ async def test_inbound_webhook_matches_reply_to_most_recent_outbound_thread(db_s
     assert thread[-1].body == "Thanks, I'll be here"
 
 
-async def test_inbound_webhook_from_unknown_number_does_not_error(db_session):
+async def test_inbound_webhook_from_unknown_number_does_not_error(db_session, twilio_signs_requests):
     # No prior outbound message to this number anywhere - should log and
     # no-op, not raise, since Twilio doesn't retry cleanly on a 500.
     fields = {"From": "+19995551234", "Body": "???"}
     response = await twilio_inbound_sms(
-        request=_fake_twilio_request(fields), From=fields["From"], Body=fields["Body"], MessageSid=None, session=db_session
+        request=_signed_twilio_request(fields), From=fields["From"], Body=fields["Body"], MessageSid=None, session=db_session
     )
     assert response.status_code == 200
 
 
-async def test_inbound_webhook_skips_signature_check_when_twilio_not_configured(db_session):
-    """No TWILIO_AUTH_TOKEN configured (the default, and every test above
-    relies on this) - a request with no signature at all must still
-    succeed, same as production without a Twilio account provisioned yet."""
+async def test_inbound_webhook_refuses_every_request_when_twilio_is_not_configured(db_session):
+    """Without TWILIO_AUTH_TOKEN there is no signature to check, so nothing
+    tells Twilio apart from anyone who can reach the API. This used to
+    accept the request, in production too: anyone could write a "customer
+    reply" into a driver's thread."""
+    fields = {"From": "+19995551234", "Body": "no signature at all"}
+    with pytest.raises(HTTPException) as exc_info:
+        await twilio_inbound_sms(
+            request=_fake_twilio_request(fields, signature=None),
+            From=fields["From"], Body=fields["Body"], MessageSid=None, session=db_session,
+        )
+    assert exc_info.value.status_code == 403
+
+
+async def test_inbound_webhook_accepts_unsigned_requests_in_development(db_session, monkeypatch):
+    """Local development has no Twilio account to sign anything."""
+    monkeypatch.setattr(settings, "environment", "development")
     fields = {"From": "+19995551234", "Body": "no signature at all"}
     response = await twilio_inbound_sms(
         request=_fake_twilio_request(fields, signature=None),

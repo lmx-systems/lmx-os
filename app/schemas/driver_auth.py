@@ -7,10 +7,9 @@ class RequestOtpBody(BaseModel):
 
 class RequestOtpResult(BaseModel):
     ok: bool
-    # Only populated when no SMS provider is configured - see
-    # app/driver_auth/otp_store.py's docstring. Never set once Twilio is
-    # wired for real; a driver app build pointed at a prod-configured
-    # backend simply won't receive this field.
+    # Only ever set in local development with no SMS provider - see
+    # app/driver_auth/otp_store.py's docstring. Any other backend texts the
+    # code or refuses to issue one; it never returns it here.
     debug_code: str | None = None
 
 

@@ -154,10 +154,11 @@ This closed three real gaps, not just "add some endpoints":
   (`app/driver_auth/tokens.py`). Entirely separate from the ops-dashboard
   auth: driver routes are exempt from `OpsUserAuthMiddleware`
   (`app/ops_auth/middleware.py`'s `EXEMPT_PREFIXES`) since they have their
-  own real auth now. No Twilio SMS send is wired up — the OTP is returned
-  in the response (`debug_code`) when no SMS provider is configured, the
-  same "unconfigured third-party credential -> stub/dev mode" pattern the
-  Google Routes client already used.
+  own real auth now. The code is texted through Twilio. In local
+  development with no SMS provider it comes back in the response
+  (`debug_code`) instead. Anywhere else the response never carries it:
+  without Twilio, `request-otp` refuses with 503, because returning the
+  code would let anyone who knows a driver's number sign in as them.
 - **A job-offer/accept model.** Before this, `DispatchOptimizerService`
   decided an assignment and that was final — no accept/decline concept
   existed. Now every assignment also creates a `RouteOffer` row
@@ -411,9 +412,11 @@ swapping in the real thing is a contained change:
   used by driver app Phase 3's messaging) and will send for real once
   `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM_NUMBER` are set -
   but no account is provisioned yet, so every send currently goes through
-  `StubSmsClient` (logs, no real SMS). Same for driver OTP codes
-  (`app/driver_auth/otp_store.py`) - still shown on-screen (`debug_code`)
-  rather than texted. See `docs/NEXT_STEPS.md` item 16.
+  `StubSmsClient` (logs, no real SMS). Driver sign-in depends on it: until
+  Twilio is set, codes are shown on-screen (`debug_code`) in local
+  development only, and every other environment refuses sign-in with 503.
+  The Twilio webhooks likewise refuse every request outside development
+  until `TWILIO_AUTH_TOKEN` is set. See `docs/NEXT_STEPS.md` item 16.
 - **ADP/Gusto**: not wired in at all - no client code exists for either,
   since which provider LMX will use hasn't been decided yet (`docs/
   NEXT_STEPS.md` item 15). Driver app Phase 3's earnings screen is
