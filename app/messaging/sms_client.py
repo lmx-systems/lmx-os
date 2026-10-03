@@ -62,6 +62,15 @@ class StubSmsClient(SmsClient):
         return None
 
 
+def twilio_sms_configured() -> bool:
+    """Whether a text can actually be sent. Driver sign-in asks this before
+    issuing a code. It's the test get_sms_client applies below, which spells
+    it out so mypy narrows the credentials to str."""
+    return bool(
+        settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_from_number
+    )
+
+
 def get_sms_client() -> SmsClient:
     if settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_from_number:
         logger.info("sms_client_selected", engine="twilio")

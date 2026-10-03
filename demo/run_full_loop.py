@@ -14,9 +14,10 @@ calls and no database writes of its own. If this script passes, the same calls
 work from the driver app, because they are the same calls.
 
 **It needs no external service.** Without `GOOGLE_CLOUD_PROJECT_ID` the
-optimizer falls back to its nearest-neighbour stub, and without Twilio the OTP
-endpoint returns the code in its response. Both are deliberate
-unconfigured-to-stub paths, not test seams.
+optimizer falls back to its nearest-neighbour stub, and without Twilio a server
+in local development (what `.env` sets) returns the OTP in its response. Both
+are deliberate unconfigured-to-stub paths, not test seams. No other
+environment ever returns the OTP.
 
 What it does not demonstrate, and should not be described as demonstrating: a
 live routing solve (the stub does not model time), an SMS to a shop or a
@@ -210,6 +211,11 @@ def _ops_token(http: httpx.Client) -> str | None:
 
 def _sign_in_driver(http: httpx.Client) -> str:
     requested = http.post("/driver/auth/request-otp", json={"phone": DRIVER_PHONE})
+    if requested.status_code == 503:
+        raise DemoFailed(
+            "The server has no SMS provider and isn't in local development, so it "
+            "won't hand back the OTP. Run it with ENVIRONMENT=development, as .env does."
+        )
     requested.raise_for_status()
     code = requested.json().get("debug_code")
     if not code:

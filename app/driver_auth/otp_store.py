@@ -8,15 +8,13 @@ caps failed attempts so a stolen/guessed 4-digit code can't be brute-forced
 before it expires.
 
 Sends via the real app.messaging.sms_client.TwilioSmsClient once Twilio is
-configured; falls back to the existing pattern for unconfigured
-third-party creds (e.g. get_route_optimization_client's stub) otherwise -
-if Twilio isn't configured, the code is logged server-side and returned
-in the response body so the app is fully testable end-to-end without
-real SMS. This is loud in the response (debug_code) precisely so it's
-obvious this needs real Twilio wiring before going anywhere near
-production traffic - and unlike an earlier version of this module, that
-field is now only ever populated when a real send genuinely didn't
-happen, not unconditionally.
+configured. Without Twilio a code reaches nobody, except in local
+development: there it's logged here, and app/api/driver_routes.py's
+request_otp returns it in the response (debug_code), so the app can be
+signed into end to end without a phone. Anywhere else, handing the code
+back would let anyone who knows a driver's number sign in as them. So
+outside development request_otp refuses rather than issue a code it
+can't deliver, and this module never logs the code.
 """
 from __future__ import annotations
 
@@ -26,7 +24,7 @@ from dataclasses import dataclass
 import structlog
 
 from app.config import settings
-from app.messaging.sms_client import get_sms_client
+from app.messaging.sms_client import get_sms_client, twilio_sms_configured
 from app.redis_client import get_client, timed_operation
 
 logger = structlog.get_logger(__name__)
@@ -91,14 +89,15 @@ class OtpStore:
             pipe.expire(_key(phone), OTP_TTL_SECONDS)
             await pipe.execute()
 
-        sent_via_sms = bool(
-            settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_from_number
-        )
+        sent_via_sms = twilio_sms_configured()
         if sent_via_sms:
             await get_sms_client().send(phone, f"Your LMX driver login code is {code}")
             logger.info("driver_otp_sms_sent", phone=phone)
-        else:
+        elif settings.environment == "development":
             logger.info("driver_otp_issued_dev_mode", phone=phone, code=code)
+        else:
+            # Not the code: anyone who can read a deployed log could sign in with it.
+            logger.warning("driver_otp_not_sent", phone=phone, reason="Twilio SMS not configured")
         return OtpIssueResult(code=code, sent_via_sms=sent_via_sms)
 
     async def verify(self, phone: str, submitted_code: str) -> bool:

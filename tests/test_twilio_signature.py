@@ -49,9 +49,10 @@ def test_missing_or_empty_signature_is_invalid():
 
 
 def test_warns_when_unconfigured_outside_development():
-    """Security-review finding (S6): an unset TWILIO_AUTH_TOKEN in
-    production means /webhooks/twilio/inbound-sms accepts unsigned
-    requests from anyone - this must be loud at boot, not silent."""
+    """Security-review finding (S6): with no TWILIO_AUTH_TOKEN outside
+    development, the Twilio webhooks refuse every request. That's safe, but
+    inbound texts and masked calls stop working, so it must be loud at
+    boot, not silent."""
     with patch("app.api.webhooks.settings") as mock_settings, patch("app.api.webhooks.logger") as mock_logger:
         mock_settings.twilio_auth_token = None
         mock_settings.environment = "production"
