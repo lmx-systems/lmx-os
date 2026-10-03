@@ -210,6 +210,27 @@ async def test_going_online_works_once_documents_are_verified(db_session, real_r
     assert state.status == "available"
 
 
+async def test_the_profile_reports_the_duty_the_driver_chose(db_session, real_redis_client):
+    """The app decides online or offline from the profile at launch. The switch
+    wrote Redis and the shift log but never the driver row the profile reads, so
+    every relaunch showed offline and stopped position reports."""
+    hub_id, driver_id = await _seed_driver(db_session)
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+    await make_driver_compliant(db_session, driver_id)
+
+    await update_my_availability(
+        DriverAvailabilityUpdate(status="available"), driver=authed, session=db_session
+    )
+    db_session.expire_all()  # what a relaunch reads: the row, not this session's copy
+    assert (await get_my_profile(driver=authed, session=db_session)).status == "available"
+
+    await update_my_availability(
+        DriverAvailabilityUpdate(status="off_shift"), driver=authed, session=db_session
+    )
+    db_session.expire_all()
+    assert (await get_my_profile(driver=authed, session=db_session)).status == "off_shift"
+
+
 async def test_a_verified_document_that_has_since_expired_blocks_going_online(
     db_session, real_redis_client
 ):
