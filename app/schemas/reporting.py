@@ -221,7 +221,7 @@ class OverrideReasonOption(BaseModel):
 
 
 class LateOrderView(BaseModel):
-    """A late delivery nobody has judged yet (`REC-2`).
+    """A late delivery still inside its window that nobody has judged (`REC-2`).
 
     The worklist that makes the consequence label possible. Without it the only
     way to record what happened after a late delivery is to already know which
