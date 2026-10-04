@@ -55,8 +55,11 @@ from app.record.explain import latest_system_decision
 
 # What each action means as a status move, and what it may be applied to.
 #
-# Release takes an order out of the hold queue without waiting for the next
-# cycle; hold puts a released one back. Hold is deliberately not permitted from
+# Release sends an order without waiting for a cluster mate or its deadline;
+# hold hands a released one back to the queue's own rules. Both work through
+# the status: each cycle reads which held orders are `queued`
+# (app/optimizer/service.py), and the order stays in the Redis hold queue
+# either way until a cycle assigns it. Hold is deliberately not permitted from
 # `assigned`: a driver has an offer in front of them by then, and retracting it
 # is a different operation with a driver-facing consequence, not a queue
 # decision. Letting one button do both would make the quiet case - pulling an

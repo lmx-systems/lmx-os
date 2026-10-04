@@ -17,7 +17,15 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import func, select, text
+
+from app.batch_queue.queue import HeldOrder
+from app.batch_queue.store import HoldQueueStore
+from app.fleet_state.manager import FleetStateManager
+from app.optimizer.event_trigger import dispatch_event_bus
+from app.optimizer.google_routes_client import RouteOptimizationClient
+from app.optimizer.service import DispatchOptimizerService
+from app.schemas.fleet import DriverLocation, DriverState
 
 from app.models.dispatcher_override import (
     REASON_CODES,
@@ -51,6 +59,18 @@ OVERRODE_AT = ARRIVED + timedelta(minutes=20)
 USER = {"ops_user_id": "u-1", "ops_user_email": "dispatcher@lmxit.com"}
 
 
+@pytest.fixture(autouse=True)
+def published(monkeypatch):
+    """The cycles the endpoint asks for, caught here rather than sent to Redis."""
+    events = []
+
+    async def publish(hub_id, event_type):
+        events.append((hub_id, event_type))
+
+    monkeypatch.setattr(dispatch_event_bus, "publish", publish)
+    return events
+
+
 async def _hub(db_session) -> Hub:
     hub = Hub(id=uuid.uuid4(), name="Override Hub", lat=30.27, lng=-97.74)
     db_session.add(hub)
@@ -73,7 +93,15 @@ async def _order(db_session, hub, *, status=OrderStatus.held) -> Order:
     return order
 
 
-async def _system_held(db_session, hub, order, *, reason="no_cluster_mate_and_drivers_available"):
+async def _system_held(
+    db_session,
+    hub,
+    order,
+    *,
+    reason="no_cluster_mate_and_drivers_available",
+    action="hold",
+    at=DECIDED_AT,
+):
     """Record the queue deciding something about this order, the way a real
     cycle would - through `record_decision`, never by writing the JSON."""
     key = str(order.id)
@@ -81,7 +109,7 @@ async def _system_held(db_session, hub, order, *, reason="no_cluster_mate_and_dr
         db_session,
         CyclePlan(
             hub_id=str(hub.id),
-            planned_at=DECIDED_AT,
+            planned_at=at,
             hub_closed=False,
             held_order_count=1,
             released_order_ids=[],
@@ -106,7 +134,7 @@ async def _system_held(db_session, hub, order, *, reason="no_cluster_mate_and_dr
             assignments=[],
             unassigned_stop_ids=[],
             hold_decisions=[
-                HoldDecisionRecord(order_id=key, action="hold", reason=reason)
+                HoldDecisionRecord(order_id=key, action=action, reason=reason)
             ],
             engine="stub_nearest_neighbor",
             plan_duration_seconds=0.02,
@@ -647,3 +675,198 @@ class TestTheEndpoint:
         rows = await overrides_for_order(db_session, order_id=order.id)
         assert len(rows) == 1
         assert isinstance(rows[0], DispatcherOverride)
+
+
+# ---------------------------------------------------------------------------
+# The override takes effect
+# ---------------------------------------------------------------------------
+#
+# It didn't. The endpoint never committed, so the override and the order's new
+# status were rolled back as the response went out, while the dispatcher was
+# told it had happened. And had it committed, dispatch reads its working set
+# from the Redis hold queue, which the override never touched.
+
+
+async def _override_via_endpoint(db_session, order, action, reason_code="customer_called"):
+    from app.api.routes import override_order
+    from app.models.ops_user import VIEWER_ROLE
+    from app.ops_auth.dependencies import AuthedOpsUser
+    from app.schemas.reporting import OverrideRequest
+
+    return await override_order(
+        order_id=order.id,
+        body=OverrideRequest(action=action, reason_code=reason_code),
+        session=db_session,
+        ops=AuthedOpsUser(
+            ops_user_id="u1", email="v@example.com", name="Viewer", role=VIEWER_ROLE
+        ),
+    )
+
+
+class _NoAssignments(RouteOptimizationClient):
+    """A planner that assigns nothing, so a test reads only the hold decisions."""
+
+    engine_name = "spy"
+
+    async def optimize(self, drivers, stops):
+        return [], [stop.stop_id for stop in stops]
+
+
+async def _held_at_one_shop(db_session, hub, count=2):
+    """Orders queued for real - held in Postgres and in the Redis hold queue,
+    with an hour left on their deadlines - at one shop, so the queue holds
+    each one for the others."""
+    orders = [await _order(db_session, hub, status=OrderStatus.held) for _ in range(count)]
+    await db_session.commit()
+    now = datetime.now(timezone.utc)
+    for order in orders:
+        await HoldQueueStore().add(
+            str(hub.id),
+            HeldOrder(
+                order_id=str(order.id),
+                shop_lat=30.27,
+                shop_lng=-97.74,
+                sla_tier="T2",
+                hold_deadline=now + timedelta(hours=1),
+                held_since=now,
+            ),
+        )
+    return orders
+
+
+async def _a_driver_on_shift(hub):
+    fleet = FleetStateManager()
+    driver_id = str(uuid.uuid4())
+    await fleet.upsert_driver_state(
+        DriverState(driver_id=driver_id, hub_id=str(hub.id), status="available", capacity_units=5)
+    )
+    await fleet.update_driver_location(
+        DriverLocation(
+            driver_id=driver_id,
+            lat=30.26,
+            lng=-97.73,
+            recorded_at=datetime.now(timezone.utc).isoformat(),
+        ),
+        hub_id=str(hub.id),
+    )
+
+
+async def _decisions(hub):
+    plan = await DispatchOptimizerService(route_client=_NoAssignments()).plan_cycle(str(hub.id))
+    return plan, {d.order_id: (d.action, d.reason) for d in plan.hold_decisions}
+
+
+class TestTheOverrideIsSaved:
+    async def test_the_override_and_the_status_survive_the_request(self, db_session):
+        hub = await _hub(db_session)
+        order = await _order(db_session, hub)
+        await db_session.commit()
+        order_id = order.id
+
+        await _override_via_endpoint(db_session, order, "release")
+        # Whatever the endpoint left uncommitted goes now.
+        await db_session.rollback()
+
+        status = await db_session.scalar(select(Order.status).where(Order.id == order_id))
+        recorded = await db_session.scalar(
+            select(func.count())
+            .select_from(DispatcherOverride)
+            .where(DispatcherOverride.order_id == order_id)
+        )
+        assert status == OrderStatus.queued
+        assert recorded == 1
+
+    async def test_a_release_asks_for_a_cycle_at_once(self, db_session, published):
+        """So the customer who called isn't waiting on the next event or the
+        five-minute sweep."""
+        hub = await _hub(db_session)
+        order = await _order(db_session, hub)
+
+        await _override_via_endpoint(db_session, order, "release")
+
+        assert published == [(str(hub.id), "order_released")]
+
+    async def test_a_hold_does_not(self, db_session, published):
+        hub = await _hub(db_session)
+        order = await _order(db_session, hub, status=OrderStatus.queued)
+
+        await _override_via_endpoint(db_session, order, "hold", reason_code="hub_constraint")
+
+        assert published == []
+
+
+class TestDispatchActsOnIt:
+    async def test_the_next_cycle_releases_what_the_dispatcher_released(
+        self, db_session, real_redis_client
+    ):
+        hub = await _hub(db_session)
+        released, waiting = await _held_at_one_shop(db_session, hub)
+        await _a_driver_on_shift(hub)
+        _, before = await _decisions(hub)
+        assert before[str(released.id)] == ("keep_holding", "cluster_mate_found")
+
+        await _override_via_endpoint(db_session, released, "release")
+        plan, after = await _decisions(hub)
+
+        assert after[str(released.id)] == ("release", "dispatcher_released")
+        assert after[str(waiting.id)] == ("keep_holding", "cluster_mate_found")
+        assert plan.released_order_ids == [str(released.id)]
+
+    async def test_a_hold_hands_it_back_to_the_queues_own_rules(
+        self, db_session, real_redis_client
+    ):
+        hub = await _hub(db_session)
+        order, _mate = await _held_at_one_shop(db_session, hub)
+        await _a_driver_on_shift(hub)
+
+        await _override_via_endpoint(db_session, order, "release")
+        await _override_via_endpoint(db_session, order, "hold", reason_code="hub_constraint")
+        plan, after = await _decisions(hub)
+
+        assert after[str(order.id)] == ("keep_holding", "cluster_mate_found")
+        assert plan.released_order_ids == []
+
+
+class TestTheLabelIsTheQueuesOwnView:
+    async def test_a_hold_agreeing_with_the_queues_keep_holding_is_not_a_contradiction(
+        self, db_session
+    ):
+        """Real cycles record "keep_holding" where an override says "hold", and
+        both mean the order waits. Compared raw, every agreeing hold counted as
+        a disagreement."""
+        hub = await _hub(db_session)
+        order = await _order(db_session, hub, status=OrderStatus.queued)
+        await _system_held(
+            db_session, hub, order, action="keep_holding", reason="cluster_mate_found"
+        )
+
+        outcome = await apply_override(
+            db_session, order_id=order.id, action="hold",
+            reason_code="hub_constraint", **USER,
+        )
+
+        assert outcome.override.system_action == "keep_holding"
+        assert not outcome.contradicted_the_system
+
+    async def test_the_cycle_that_carried_out_a_release_is_not_cited(self, db_session):
+        """After a release, the next cycle records the queue following the
+        dispatcher. A hold after that reverses the dispatcher's own call, so
+        the label cites the last decision the queue made for itself."""
+        hub = await _hub(db_session)
+        order = await _order(db_session, hub, status=OrderStatus.queued)
+        judged = await _system_held(
+            db_session, hub, order, action="keep_holding", reason="cluster_mate_found"
+        )
+        await _system_held(
+            db_session, hub, order, action="release", reason="dispatcher_released",
+            at=DECIDED_AT + timedelta(minutes=5),
+        )
+
+        outcome = await apply_override(
+            db_session, order_id=order.id, action="hold",
+            reason_code="hub_constraint", **USER,
+        )
+
+        assert outcome.override.cited_snapshot_id == judged.id
+        assert outcome.override.system_reason == "cluster_mate_found"
+        assert not outcome.contradicted_the_system

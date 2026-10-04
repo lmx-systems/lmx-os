@@ -46,6 +46,42 @@ def test_question1_sla_deadline_always_releases():
     assert decision.reason == "sla_hold_deadline_reached"
 
 
+def test_question1a_a_dispatchers_release_beats_a_cluster_mate():
+    """The queue would hold this for the order next to it. A dispatcher
+    released it, for a reason the queue can't see, so it goes."""
+    order = make_held_order("o1", 34.05, -118.25)
+    mate = make_held_order("o2", 34.051, -118.25)
+    decision = evaluate_held_order(
+        order, [mate], available_driver_count=2, now=NOW, released_by_dispatcher=True
+    )
+    assert decision.action == "release"
+    assert decision.reason == "dispatcher_released"
+    assert decision.cluster_mate_ids == []
+
+
+def test_question1a_an_order_the_deadline_releases_anyway_keeps_the_queues_reason():
+    order = make_held_order("o1", 34.05, -118.25, deadline_minutes_from_now=-1)
+    decision = evaluate_held_order(
+        order, [], available_driver_count=2, now=NOW, released_by_dispatcher=True
+    )
+    assert decision.reason == "sla_hold_deadline_reached"
+
+
+def test_run_hold_cycle_releases_only_what_a_dispatcher_released():
+    released = make_held_order("a", 34.05, -118.25)
+    mate = make_held_order("b", 34.051, -118.25)
+    decisions = {
+        d.order_id: (d.action, d.reason)
+        for d in run_hold_cycle(
+            [released, mate], available_driver_count=2, now=NOW, released_by_dispatcher={"a"}
+        )
+    }
+    assert decisions == {
+        "a": ("release", "dispatcher_released"),
+        "b": ("keep_holding", "cluster_mate_found"),
+    }
+
+
 def test_question3_no_available_drivers_keeps_holding_even_without_cluster_mate():
     order = make_held_order("o1", 34.05, -118.25)
     decision = evaluate_held_order(order, [], available_driver_count=0, now=NOW)

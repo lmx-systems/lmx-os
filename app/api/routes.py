@@ -35,7 +35,12 @@ from app.optimizer.service import DispatchOptimizerService
 from app.reporting.lmx_link import build_scorecard
 from app.reporting.credit_exposure import DEFAULT_WINDOW_DAYS as CREDIT_WINDOW_DAYS
 from app.reporting.credit_exposure import build_credit_exposure
-from app.models.dispatcher_override import REASON_CODES, REASON_CODES_REQUIRING_NOTE, REASON_LABELS
+from app.models.dispatcher_override import (
+    ACTION_RELEASE,
+    REASON_CODES,
+    REASON_CODES_REQUIRING_NOTE,
+    REASON_LABELS,
+)
 from app.models.linkage_flag import LinkageFlag
 from app.models.location import Location
 from app.models.receiver_profile import ReceiverProfile
@@ -735,6 +740,14 @@ async def override_order(
 
     Refusals come back as 409 with a sentence a dispatcher can act on, not a 500.
     The common one is that the order moved since the screen was loaded.
+
+    **Committed here.** `apply_override` writes the override and the order's
+    new status in one transaction and leaves the commit to its caller, and
+    nothing commits a request's session on its own - so until this, every
+    override was rolled back as the response went out, and the dispatcher was
+    told it had happened. A release then asks for a cycle at once: dispatch
+    reads the release off the order's status (`plan_cycle`), and the customer
+    who called shouldn't wait for the next event or the five-minute sweep.
     """
     try:
         outcome = await apply_override(
@@ -748,8 +761,11 @@ async def override_order(
         )
     except OverrideRefused as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    await session.commit()
 
     override = outcome.override
+    if override.action == ACTION_RELEASE:
+        await dispatch_event_bus.publish(str(override.hub_id), "order_released")
     return OverrideView(
         id=override.id,
         order_id=override.order_id,

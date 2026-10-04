@@ -5,8 +5,10 @@ Held orders are small and short-lived (minutes, per SLA tier), so we keep
 the full working set in a single Redis hash per hub rather than round-
 tripping to Postgres on every hold-cycle tick. Postgres `orders.status`
 still reflects the current state (held/queued/etc.) for anything that
-needs the durable record, but the optimizer's per-cycle read path only
-ever talks to Redis.
+needs the durable record. The optimizer reads the working set from here,
+and reads one thing per cycle from Postgres: which of these orders a
+dispatcher released. That is the order's status, committed together with
+the override's reason, so it isn't copied into this hash.
 """
 from __future__ import annotations
 

@@ -94,6 +94,10 @@ REASON_LABELS: dict[str, str] = {
 # form of it a closed vocabulary alone cannot catch.
 REASON_CODES_REQUIRING_NOTE = (REASON_OTHER,)
 
+# The batch-hold queue's own word for an action, where it differs from an
+# override's (app/batch_queue/queue.py emits "release" and "keep_holding").
+_QUEUE_ACTION_AS_OVERRIDE = {"keep_holding": ACTION_HOLD}
+
 
 class DispatcherOverride(Base, UUIDPrimaryKeyMixin):
     """One human decision against the queue's, append-only.
@@ -150,5 +154,12 @@ class DispatcherOverride(Base, UUIDPrimaryKeyMixin):
         or they did not know - agrees with it and happened to get there first.
         Counting that as a correction would inflate the disagreement rate, which
         is the number anyone judging the queue will look at first.
+
+        The queue records "keep_holding" where an override says "hold", and
+        both mean the order waits. Compared raw, every hold that agreed with
+        the queue counted as a disagreement.
         """
-        return self.system_decision_known and self.system_action != self.action
+        if not self.system_decision_known or self.system_action is None:
+            return False
+        system_action = _QUEUE_ACTION_AS_OVERRIDE.get(self.system_action, self.system_action)
+        return system_action != self.action
