@@ -2,9 +2,11 @@
 Backs app/storage/photo_upload_client.py's S3PhotoUploadClient -
 PHOTO_UPLOAD_BUCKET (set in ecs.tf's task definition) points the app at
 this bucket, closing docs/ROADMAP.md A2/A3's real remaining gap. CORS is
-scoped to PUT only, since the driver app only ever uploads via a
-presigned URL that already carries the bucket/key/content-type - it
-never reads back from this bucket directly.
+scoped to PUT, for the driver app's presigned uploads. Nothing reads the
+bucket by its plain object URL - it is private - so every read is a GET
+link the API signs per response (readable_url in
+app/storage/photo_upload_client.py), opened by an <img> tag or a plain
+link, neither of which needs CORS.
 */
 
 resource "aws_s3_bucket" "photo_uploads" {

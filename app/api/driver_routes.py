@@ -155,7 +155,11 @@ from app.storage.document_upload_client import (
     UnsupportedDocumentType,
     create_document_upload,
 )
-from app.storage.photo_upload_client import generate_object_key, get_photo_upload_client
+from app.storage.photo_upload_client import (
+    generate_object_key,
+    get_photo_upload_client,
+    readable_url,
+)
 
 router = APIRouter(prefix="/driver", tags=["driver"])
 logger = structlog.get_logger(__name__)
@@ -651,7 +655,7 @@ def _document_view(doc: DriverDocument) -> DriverDocumentView:
         verified_expires_at=doc.verified_expires_at,
         review_status=doc.review_status,
         rejection_reason=doc.rejection_reason,
-        file_url=doc.file_url,
+        file_url=readable_url(doc.file_url),
         is_usable=doc.is_usable_on,
     )
 

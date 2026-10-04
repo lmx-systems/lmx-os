@@ -819,6 +819,24 @@ async def test_both_kinds_of_proof_survive_together(db_session, real_redis_clien
     assert view.pod_photo_url and view.pod_signature_url
 
 
+async def test_the_page_gets_proof_it_can_load(db_session, real_redis_client, photo_bucket):
+    """The bucket is private, so the object URLs stored at delivery opened for
+    nobody, the receiver included: the page drew broken images. The endpoint
+    signs both on the way out."""
+    hub_id, client_id, shop_id, driver_id = await _seed(db_session)
+    photo = photo_bucket + "pod/a/b/photo-c.jpg"
+    signature = photo_bucket + "pod/a/b/signature-c.png"
+    order = await _delivered_with_photo(
+        db_session, hub_id, client_id, shop_id, driver_id, photo, signature=signature
+    )
+
+    view = await track_delivery(order.tracking_token, _Request(), session=db_session)
+
+    for stored, served in ((photo, view.pod_photo_url), (signature, view.pod_signature_url)):
+        assert served.startswith(stored + "?")
+        assert "X-Amz-Signature=" in served
+
+
 async def test_an_undelivered_order_shows_no_signature(db_session, real_redis_client):
     hub_id, client_id, shop_id, driver_id = await _seed(db_session)
     order = await _order(db_session, hub_id, client_id, shop_id, status=OrderStatus.en_route_drop)

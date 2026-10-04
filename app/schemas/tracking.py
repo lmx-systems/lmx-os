@@ -67,6 +67,8 @@ class TrackingView(BaseModel):
     # captured, stored, and shown to no human anywhere. The recipient is who it
     # is for: a photo of their own doorstep, taken because they were sent
     # something, shown to the holder of a link scoped to that one delivery.
+    # On S3 it's a link signed per response that expires within the hour, so
+    # the page loads it straight away rather than keeping it.
     pod_photo_url: str | None = None
     # A signature is proof too, with the same history: written since the app got
     # a pad, rendered by nothing. A delivery signed for was proved to nobody.

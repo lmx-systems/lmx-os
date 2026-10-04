@@ -71,6 +71,7 @@ from app.schemas.tracking import (
 from app.tracking.rate_limit import TrackingRateLimiter, TrackingRateLimitExceeded
 from app.tracking.ratings import RatingNotAllowed, submit_rating
 from app.tracking.service import TrackingTokenInvalid, resolve_tracking
+from app.storage.photo_upload_client import readable_url
 from app.schemas.signup import (
     ClientSignupBody,
     ClientSignupResult,
@@ -451,8 +452,10 @@ async def track_delivery(
         destination_hint=view.destination_hint,
         estimated_arrival=view.estimated_arrival,
         delivered_at=view.delivered_at,
-        pod_photo_url=view.pod_photo_url,
-        pod_signature_url=view.pod_signature_url,
+        # Signed here, on the way out: the bucket is private, so the stored
+        # object URL opens for nobody.
+        pod_photo_url=readable_url(view.pod_photo_url),
+        pod_signature_url=readable_url(view.pod_signature_url),
         driver_position=(
             DriverPositionView(
                 lat=view.driver_position.lat,
