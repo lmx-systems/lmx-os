@@ -9,6 +9,7 @@ import pytest
 from fakeredis import aioredis as fakeredis_aioredis
 
 import app.driver_auth.otp_store as otp_store_module
+import app.messaging.sms_client as sms_client_module
 from app.driver_auth.otp_store import MAX_ISSUE_ATTEMPTS, MAX_VERIFY_ATTEMPTS, OtpRateLimitExceeded, OtpStore
 from app.driver_auth.tokens import (
     InvalidDriverToken,
@@ -152,6 +153,50 @@ async def test_issue_does_not_send_via_sms_when_twilio_is_unconfigured(fake_redi
     store = OtpStore()
     issued = await store.issue("+15555550100")
     assert issued.sent_via_sms is False
+
+
+@pytest.mark.parametrize("account_sid", ["AC-fake", None])
+@pytest.mark.parametrize("auth_token", ["fake-token", None])
+@pytest.mark.parametrize("from_number", ["+15555550001", None])
+def test_sign_in_and_the_sms_client_agree_on_whether_a_text_goes_out(
+    monkeypatch, account_sid, auth_token, from_number
+):
+    """request_otp refuses, or hands the code back, on twilio_sms_configured();
+    the text itself goes through get_sms_client(). If they disagreed, a
+    driver would wait for a code nobody sent."""
+    monkeypatch.setattr(sms_client_module.settings, "twilio_account_sid", account_sid)
+    monkeypatch.setattr(sms_client_module.settings, "twilio_auth_token", auth_token)
+    monkeypatch.setattr(sms_client_module.settings, "twilio_from_number", from_number)
+
+    client = sms_client_module.get_sms_client()
+
+    assert sms_client_module.twilio_sms_configured() == (client.engine_name == "twilio")
+
+
+@pytest.mark.asyncio
+async def test_issue_never_logs_the_code_outside_development(fake_redis, monkeypatch):
+    """A deployed log is read by more people than should be able to sign in
+    as a driver, and it used to carry every unsent code. The code is pinned
+    so the check can't match a digit run in the phone number by chance."""
+    monkeypatch.setattr(otp_store_module.secrets, "randbelow", lambda _: 4242)
+    with patch.object(otp_store_module, "logger") as mock_logger:
+        issued = await OtpStore().issue("+15555550100")
+
+    assert issued.code == "4242"
+    assert mock_logger.method_calls, "an unsent code is still worth a log line"
+    assert not any("4242" in str(call) for call in mock_logger.method_calls)
+
+
+@pytest.mark.asyncio
+async def test_issue_logs_the_code_in_development(fake_redis, monkeypatch):
+    """There the log is the developer's own terminal, and the code has no
+    other way to reach them."""
+    monkeypatch.setattr(otp_store_module.settings, "environment", "development")
+    monkeypatch.setattr(otp_store_module.secrets, "randbelow", lambda _: 4242)
+    with patch.object(otp_store_module, "logger") as mock_logger:
+        await OtpStore().issue("+15555550100")
+
+    assert any("4242" in str(call) for call in mock_logger.method_calls)
 
 
 def test_issue_and_decode_token_roundtrip():

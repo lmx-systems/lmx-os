@@ -22,20 +22,32 @@ from starlette.requests import Request
 
 from app.api.driver_routes import call_customer
 from app.api.webhooks import voice_connect, voice_status
+from app.config import settings
+from app.messaging.twilio_signature import compute_signature
 from app.models.call import Call
 from tests.integration.test_driver_app_integration import _accept_one_offer, _seed
 
 pytestmark = pytest.mark.integration
 
+TEST_AUTH_TOKEN = "test-auth-token"
 
-def _fake_twilio_request(path: str) -> Request:
+
+@pytest.fixture
+def twilio_signs_requests(monkeypatch):
+    """Configure the auth token, so a request signed with it is Twilio's."""
+    monkeypatch.setattr(settings, "twilio_auth_token", TEST_AUTH_TOKEN)
+    monkeypatch.setattr(settings, "twilio_webhook_base_url", None)
+
+
+def _fake_twilio_request(path: str, *, signed: bool = True) -> Request:
     """A minimal real Starlette Request whose .form()/.url the voice
-    webhooks can exercise - no signature header, matching the test
-    environment's unconfigured TWILIO_AUTH_TOKEN (_assert_valid_twilio_
-    signature returns immediately in that case, same as the inbound-sms
-    tests)."""
+    webhooks can exercise, signed the way Twilio signs it unless told not
+    to. The form is empty, so the signature covers the URL alone."""
     body = urlencode({}).encode()
     headers = [(b"content-type", b"application/x-www-form-urlencoded")]
+    if signed:
+        signature = compute_signature(TEST_AUTH_TOKEN, f"http://testserver{path}", {})
+        headers.append((b"x-twilio-signature", signature.encode()))
 
     async def receive():
         return {"type": "http.request", "body": body, "more_body": False}
@@ -78,7 +90,9 @@ async def test_call_customer_rejects_a_pickup_stop(db_session, real_redis_client
     assert exc_info.value.status_code == 409
 
 
-async def test_voice_connect_webhook_bridges_to_the_real_customer_number(db_session, real_redis_client):
+async def test_voice_connect_webhook_bridges_to_the_real_customer_number(
+    db_session, real_redis_client, twilio_signs_requests
+):
     hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
     authed, _pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
     view = await call_customer(dropoff.stop_id, driver=authed, session=db_session)
@@ -92,7 +106,28 @@ async def test_voice_connect_webhook_bridges_to_the_real_customer_number(db_sess
     assert result.scalar_one().status == "connected"
 
 
-async def test_voice_status_webhook_records_final_status_and_duration(db_session, real_redis_client):
+async def test_voice_connect_refuses_an_unsigned_request_and_keeps_the_number_masked(
+    db_session, real_redis_client
+):
+    """The TwiML this returns carries the customer's real number. With no
+    TWILIO_AUTH_TOKEN it used to answer anyone, so anyone holding a call id
+    could unmask the customer."""
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, _pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+    view = await call_customer(dropoff.stop_id, driver=authed, session=db_session)
+
+    request = _fake_twilio_request(f"/webhooks/twilio/voice-connect/{view.call_id}", signed=False)
+    with pytest.raises(HTTPException) as exc_info:
+        await voice_connect(view.call_id, request, session=db_session)
+    assert exc_info.value.status_code == 403
+
+    result = await db_session.execute(select(Call).where(Call.id == uuid.UUID(view.call_id)))
+    assert result.scalar_one().status == "initiated"
+
+
+async def test_voice_status_webhook_records_final_status_and_duration(
+    db_session, real_redis_client, twilio_signs_requests
+):
     hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
     authed, _pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
     view = await call_customer(dropoff.stop_id, driver=authed, session=db_session)

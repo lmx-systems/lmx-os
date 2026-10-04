@@ -33,6 +33,7 @@ from app.api.driver_routes import (
     verify_otp,
 )
 from app.driver_auth.otp_store import MAX_ISSUE_ATTEMPTS
+from app.config import settings
 from app.batch_queue.store import HoldQueueStore
 from app.batch_queue.queue import HeldOrder
 from app.driver_auth.dependencies import AuthedDriver
@@ -127,9 +128,13 @@ async def _seed(db_session):
 async def test_full_driver_app_core_loop(db_session, real_redis_client):
     hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
 
-    # 1. Phone + OTP login (screens 1a/1b).
-    otp_result = await request_otp(RequestOtpBody(phone="+15555550199"), session=db_session)
-    assert otp_result.debug_code is not None  # no Twilio configured in tests
+    # 1. Phone + OTP login (screens 1a/1b), the way local development signs
+    # in: no SMS provider, so the code comes back in the response. Anywhere
+    # else it's only ever texted - see test_sign_in_code_stays_on_the_server.py.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(settings, "environment", "development")
+        otp_result = await request_otp(RequestOtpBody(phone="+15555550199"), session=db_session)
+    assert otp_result.debug_code is not None
 
     token = await verify_otp(
         VerifyOtpBody(phone="+15555550199", code=otp_result.debug_code, device_id="test-device"),

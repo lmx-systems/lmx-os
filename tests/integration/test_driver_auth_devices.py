@@ -18,6 +18,7 @@ from app.api.driver_routes import (
     revoke_my_device,
     verify_otp,
 )
+from app.config import settings
 from app.driver_auth.dependencies import get_current_driver
 from app.driver_auth.tokens import decode_token
 from app.models.driver import Driver
@@ -38,7 +39,12 @@ async def _seed_driver(db_session):
 
 
 async def _sign_in(db_session, phone: str, device_id: str) -> str:
-    otp = await request_otp(RequestOtpBody(phone=phone), session=db_session)
+    # Signs in the way local development does: no SMS provider, so the code
+    # comes back in the response. Anywhere else it's only ever texted - see
+    # test_sign_in_code_stays_on_the_server.py.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(settings, "environment", "development")
+        otp = await request_otp(RequestOtpBody(phone=phone), session=db_session)
     token = await verify_otp(
         VerifyOtpBody(phone=phone, code=otp.debug_code, device_id=device_id, device_name="Test Phone"),
         session=db_session,

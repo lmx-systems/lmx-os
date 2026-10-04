@@ -151,7 +151,14 @@ def _webhook_url(request: Request) -> str:
 
 async def _assert_valid_twilio_signature(request: Request) -> None:
     if not settings.twilio_auth_token:
-        return
+        if settings.environment == "development":
+            return
+        # Without the token nothing tells Twilio apart from anyone else, and
+        # these routes are exempt from every other auth path.
+        logger.warning("twilio_webhook_unverifiable", path=request.url.path)
+        raise HTTPException(
+            status_code=403, detail="Twilio signature verification is not configured"
+        )
     form = await request.form()
     params = {key: str(value) for key, value in form.items()}
     signature = request.headers.get("X-Twilio-Signature")
@@ -161,25 +168,24 @@ async def _assert_valid_twilio_signature(request: Request) -> None:
 
 
 def warn_if_twilio_webhook_unauthenticated() -> None:
-    """Called once from app/main.py's lifespan (docs/ROADMAP.md S6). Unlike
-    the driver/client/ops JWT secrets, an unconfigured TWILIO_AUTH_TOKEN
-    doesn't just disable a feature - it means /webhooks/twilio/inbound-sms
-    (and, since masked voice calling landed, /webhooks/twilio/voice-connect
-    and /voice-status) accept *unsigned* POSTs from anyone (see
-    _assert_valid_twilio_signature above), since these endpoints are
-    exempted from every other auth path. A hard boot-refusal here would
-    break the documented "unconfigured third-party credential -> stub
-    mode" convention this whole codebase otherwise relies on (Twilio
-    sending is legitimately optional), so this is a loud warning, not an
-    assert - the operator needs to know these endpoints are wide open, not
-    be blocked from starting without Twilio."""
+    """Called once from app/main.py's lifespan (docs/ROADMAP.md S6).
+    /webhooks/twilio/inbound-sms, /voice-connect and /voice-status are
+    exempt from every other auth path, so the signature is all that stands
+    between them and anyone who can reach the API. Without TWILIO_AUTH_TOKEN
+    there is no signature to check, and outside development
+    _assert_valid_twilio_signature refuses every request: drivers stop
+    seeing customer replies and masked calls never connect. That is the
+    safe failure, but a quiet one, so it's announced here. A boot refusal
+    would break the "unconfigured third-party credential -> stub mode"
+    convention the rest of the codebase relies on (Twilio is legitimately
+    optional), so this warns rather than asserts."""
     if settings.environment != "development" and not settings.twilio_auth_token:
         logger.warning(
             "twilio_webhook_signature_verification_disabled",
             detail=(
                 "TWILIO_AUTH_TOKEN is not configured outside development - "
                 "/webhooks/twilio/inbound-sms, /voice-connect, and /voice-status "
-                "accept unsigned requests from anyone"
+                "refuse every request until it is"
             ),
         )
 
