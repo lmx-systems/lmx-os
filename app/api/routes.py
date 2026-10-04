@@ -556,12 +556,13 @@ async def late_orders(
     session: AsyncSession = Depends(get_db),
     _ops: AuthedOpsUser = Depends(get_current_ops_user),
 ) -> list[LateOrderView]:
-    """Late deliveries whose window has closed and that nobody has judged (`REC-2`).
+    """Late deliveries still inside their window that nobody has judged (`REC-2`).
 
     The worklist the consequence label depends on. Without it the only way to
     record what happened after a late delivery is to already know which ones
     were late - which nobody does fourteen days later, which is why the label
-    set was empty.
+    set was empty. An order is listed from its delivery until its window
+    closes, newest first, so it's there when the call about it comes in.
 
     "Late" comes from `REC-3`'s delivered outcome rather than being recomputed,
     so a delivery stays judged by the terms that applied to it even after the

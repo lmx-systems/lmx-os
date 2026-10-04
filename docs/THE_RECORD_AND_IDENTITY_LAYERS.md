@@ -78,6 +78,13 @@ Wired first, it would have labelled every late delivery as "nothing happened" â€
 false labels, in an append-only ledger, indistinguishable from true ones by the
 time anyone trained on them. `TestTheScheduleWouldHaveLied` pins that down.
 
+**A late delivery is on the list for its whole window,** from delivery until
+the window closes, so a consequence is recorded when somebody hears about it.
+It used to appear only once the window had closed, and that night's close then
+recorded it as silence: on screen for under a day, a fortnight after the
+delivery. Nobody can record a silence by hand, so listing an order early can't
+produce one that is really a not-yet.
+
 **Admin only where a decision rewrites shared state.** Confirming a merge moves
 every per-dock statistic. Recording a consequence, overriding a hold, and
 labelling a dock are all open to any ops session: the person who took the angry

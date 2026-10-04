@@ -206,32 +206,29 @@ async def consequence_label(session: AsyncSession, order: Order) -> int | None:
     return None
 
 
-async def late_orders_awaiting_judgement(
+async def _unjudged_late_orders(
     session: AsyncSession,
     *,
     hub_id,
-    window: timedelta = DEFAULT_CONSEQUENCE_WINDOW,
-    now: datetime | None = None,
+    delivered_after: datetime | None = None,
+    delivered_by: datetime | None = None,
 ) -> list[Order]:
-    """Late deliveries whose window has closed and that nobody has judged.
+    """Late deliveries with nothing recorded about them yet, newest first.
 
     "Late" comes from the REC-3 delivered outcome rather than recomputed here.
     That outcome stored the promise it was measured against, so a delivery
     stays judged by the terms that applied to it even after the client's SLA
     terms change - which they do.
     """
-    now = now or datetime.now(timezone.utc)
-    cutoff = now - window
+    conditions = [OutcomeEntry.hub_id == hub_id, OutcomeEntry.kind == KIND_DELIVERED]
+    if delivered_after is not None:
+        conditions.append(OutcomeEntry.occurred_at > delivered_after)
+    if delivered_by is not None:
+        conditions.append(OutcomeEntry.occurred_at <= delivered_by)
 
     late_ids = [
         entry.subject_id
-        for entry in await session.scalars(
-            select(OutcomeEntry).where(
-                OutcomeEntry.hub_id == hub_id,
-                OutcomeEntry.kind == KIND_DELIVERED,
-                OutcomeEntry.occurred_at <= cutoff,
-            )
-        )
+        for entry in await session.scalars(select(OutcomeEntry).where(*conditions))
         if entry.values.get("on_time") is False
     ]
     if not late_ids:
@@ -249,7 +246,35 @@ async def late_orders_awaiting_judgement(
     pending = [oid for oid in late_ids if oid not in judged]
     if not pending:
         return []
-    return list(await session.scalars(select(Order).where(Order.id.in_(pending))))
+    return list(
+        await session.scalars(
+            select(Order).where(Order.id.in_(pending)).order_by(Order.delivered_at.desc())
+        )
+    )
+
+
+async def late_orders_awaiting_judgement(
+    session: AsyncSession,
+    *,
+    hub_id,
+    window: timedelta = DEFAULT_CONSEQUENCE_WINDOW,
+    now: datetime | None = None,
+) -> list[Order]:
+    """Late deliveries still inside their window that nobody has judged.
+
+    The console's worklist. A consequence is recorded when somebody hears about
+    it - an escalation call comes in hours - so an order is listed from the
+    moment it is delivered until its window closes, and then
+    `close_consequence_windows` records silence for it if nothing was recorded.
+
+    It used to list orders only once their window had closed. The nightly close
+    then recorded them as silence the same night, so each was on screen for
+    under a day, a fortnight after the delivery. Listing an order early cannot
+    produce a premature silence: nobody can record one by hand, because
+    `record_consequence` takes only the six consequences.
+    """
+    now = now or datetime.now(timezone.utc)
+    return await _unjudged_late_orders(session, hub_id=hub_id, delivered_after=now - window)
 
 
 async def close_consequence_windows(
@@ -266,9 +291,7 @@ async def close_consequence_windows(
     twelve deliveries that were late and fine.
     """
     now = now or datetime.now(timezone.utc)
-    pending = await late_orders_awaiting_judgement(
-        session, hub_id=hub_id, window=window, now=now
-    )
+    pending = await _unjudged_late_orders(session, hub_id=hub_id, delivered_by=now - window)
     for order in pending:
         await record_silence(session, order, window=window, now=now)
     return len(pending)

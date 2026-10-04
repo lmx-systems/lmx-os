@@ -17,9 +17,10 @@ import type { ConsequenceOption, LateOrder, LinkageFlag } from '../lib/types'
  * a fourteen-day-old question in front of somebody deciding what to dispatch in
  * the next minute.
  *
- * Fetched on demand rather than polled on the dashboard tick: neither list
- * changes more than once a night, and polling them would be a request every few
- * seconds for data that moves daily.
+ * Fetched on demand rather than polled on the dashboard tick. The flags change
+ * once a night, and a late delivery stays on its list for two weeks, so loading
+ * when somebody opens the tab is enough; polling would be a request every few
+ * seconds for lists that barely move.
  */
 export function RecordLayerPanel({ hubId }: { hubId: string }) {
   const [late, setLate] = useState<LateOrder[] | null>(null)
@@ -62,7 +63,7 @@ export function RecordLayerPanel({ hubId }: { hubId: string }) {
 
       {nothingToDo && (
         <p className="py-4 text-center text-sm text-[var(--text-muted)]">
-          Nothing waiting. Late deliveries appear here once their two-week window closes.
+          Nothing to record. A late delivery appears here when it's delivered and stays for two weeks.
         </p>
       )}
 
@@ -72,9 +73,9 @@ export function RecordLayerPanel({ hubId }: { hubId: string }) {
             What happened after these ran late?
           </h3>
           <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
-            Recording &ldquo;nothing happened&rdquo; matters as much as recording a complaint — if
-            only the complaints are written down, everything we learn from this says late deliveries
-            always cause trouble.
+            Record a consequence when you hear about it. Two weeks after delivery, an order with
+            nothing recorded is closed as &ldquo;nothing happened&rdquo;, even if somebody did
+            complain.
           </p>
           <ul className="space-y-1.5">
             {late.map((order) => (
@@ -148,6 +149,7 @@ function LateOrderRow({
         </span>
         <span className="text-[11px] text-[var(--text-muted)]">
           {order.minutes_late !== null ? `${order.minutes_late} min late` : 'late'}
+          {order.delivered_at && ` · delivered ${new Date(order.delivered_at).toLocaleDateString()}`}
           {' · '}
           <span className="font-mono" title={order.order_id}>
             {truncateId(order.order_id)}

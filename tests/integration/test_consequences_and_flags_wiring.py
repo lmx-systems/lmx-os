@@ -45,6 +45,7 @@ pytestmark = pytest.mark.integration
 
 NOW = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
 LONG_AGO = NOW - DEFAULT_CONSEQUENCE_WINDOW - timedelta(days=1)
+RECENT = NOW - timedelta(days=1)
 
 OPS = AuthedOpsUser(
     ops_user_id="u1", email="dispatcher@lmxit.com", name="Dispatcher", role=VIEWER_ROLE
@@ -96,37 +97,55 @@ async def _late_delivery(db_session, hub, *, delivered_at=LONG_AGO, on_time=Fals
 
 
 class TestTheWorklistExists:
-    async def test_a_late_delivery_past_its_window_needs_judging(self, db_session):
+    async def test_a_late_delivery_is_on_the_list_for_its_whole_window(self, db_session):
+        """It used to appear only once its window had closed, and the nightly
+        close recorded it as silence that same night: on screen for under a day,
+        a fortnight after the delivery. A consequence is recorded when somebody
+        hears about it, so the order has to be listed while that can happen.
+
+        Listing it early can't produce a silence that is really a not-yet:
+        nobody can record a silence by hand, only the close can."""
         hub = await _hub(db_session)
-        order = await _late_delivery(db_session, hub)
+        order = await _late_delivery(db_session, hub, delivered_at=RECENT)
+        window_closes = RECENT + DEFAULT_CONSEQUENCE_WINDOW
 
-        pending = await late_orders_awaiting_judgement(db_session, hub_id=hub.id, now=NOW)
+        for now in (RECENT + timedelta(hours=1), window_closes - timedelta(hours=1)):
+            pending = await late_orders_awaiting_judgement(db_session, hub_id=hub.id, now=now)
+            assert [o.id for o in pending] == [order.id]
 
-        assert [o.id for o in pending] == [order.id]
+    async def test_once_its_window_closes_the_nightly_close_takes_it(self, db_session):
+        """Off the list and labelled silence, not left waiting in between."""
+        hub = await _hub(db_session)
+        await _late_delivery(db_session, hub, delivered_at=LONG_AGO)
+
+        assert await late_orders_awaiting_judgement(db_session, hub_id=hub.id, now=NOW) == []
+        assert await close_consequence_windows(db_session, hub_id=hub.id, now=NOW) == 1
 
     async def test_an_on_time_delivery_is_not_on_it(self, db_session):
         """A consequence is a consequence *of lateness*. Judging on-time
         deliveries would fill the label set with rows that say nothing about the
         thing being measured."""
         hub = await _hub(db_session)
-        await _late_delivery(db_session, hub, on_time=True)
+        await _late_delivery(db_session, hub, delivered_at=RECENT, on_time=True)
 
         assert await late_orders_awaiting_judgement(db_session, hub_id=hub.id, now=NOW) == []
 
-    async def test_a_recent_late_delivery_is_not_yet_due(self, db_session):
-        """Inside the window there is still time for something to happen. Asking
-        a dispatcher to judge it today produces a silence that is really a
-        not-yet."""
+    async def test_the_newest_delivery_comes_first(self, db_session):
+        """Two weeks of late orders, and a call is most likely about a recent one."""
         hub = await _hub(db_session)
-        await _late_delivery(db_session, hub, delivered_at=NOW - timedelta(days=1))
+        older = await _late_delivery(db_session, hub, delivered_at=NOW - timedelta(days=5))
+        newer = await _late_delivery(db_session, hub, delivered_at=RECENT)
 
-        assert await late_orders_awaiting_judgement(db_session, hub_id=hub.id, now=NOW) == []
+        pending = await late_orders_awaiting_judgement(db_session, hub_id=hub.id, now=NOW)
+
+        assert [o.id for o in pending] == [newer.id, older.id]
 
     async def test_the_endpoint_returns_it_with_how_late_it_was(self, db_session):
         from app.api.routes import late_orders
 
         hub = await _hub(db_session)
-        await _late_delivery(db_session, hub)
+        # The endpoint reads the real clock, so this delivery has to be recent by it.
+        await _late_delivery(db_session, hub, delivered_at=datetime.now(timezone.utc) - timedelta(days=1))
 
         view = await late_orders(hub_id=hub.id, session=db_session, _ops=OPS)
 
@@ -157,7 +176,7 @@ class TestADispatcherCanRecordWhatHappened:
         from app.api.routes import record_order_consequence
 
         hub = await _hub(db_session)
-        order = await _late_delivery(db_session, hub)
+        order = await _late_delivery(db_session, hub, delivered_at=RECENT)
         await record_order_consequence(
             order_id=order.id,
             body=ConsequenceRequest(kind=CONSEQUENCE_ESCALATION),

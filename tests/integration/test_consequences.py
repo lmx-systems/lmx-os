@@ -259,7 +259,10 @@ class TestReadiness:
         late = await _delivered(db_session, hub, client, late=True)
         await _delivered(db_session, hub, client, late=False)
 
-        pending = await late_orders_awaiting_judgement(db_session, hub_id=hub.id, now=NOW)
+        inside_the_window = PROMISED + timedelta(days=1)
+        pending = await late_orders_awaiting_judgement(
+            db_session, hub_id=hub.id, now=inside_the_window
+        )
 
         assert [o.id for o in pending] == [late.id]
 
