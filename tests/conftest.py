@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 from urllib.parse import quote
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -68,6 +70,35 @@ def _default_database_url() -> str:
 os.environ.setdefault("DATABASE_URL", _default_database_url())
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 os.environ.setdefault("ENVIRONMENT", "test")
+
+
+PHOTO_BUCKET = "lmx-photo-uploads"
+PHOTO_REGION = "us-east-1"
+
+
+@pytest.fixture
+def photo_bucket(monkeypatch, tmp_path) -> str:
+    """Photos and documents stored in a private S3 bucket, signed with fake keys.
+
+    Presigning is local arithmetic with no network call, so a real boto3 client
+    with fake keys produces exactly the links production would. Nothing from this
+    machine's own AWS setup is read. Returns the bucket's object URL prefix.
+    """
+    import boto3
+
+    from app.config import settings
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "fake-secret")
+    for name in ("AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_DEFAULT_PROFILE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "no-aws-config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "no-aws-credentials"))
+    # boto3 caches credentials on its default session; start a fresh one.
+    monkeypatch.setattr(boto3, "DEFAULT_SESSION", None)
+    monkeypatch.setattr(settings, "photo_upload_bucket", PHOTO_BUCKET)
+    monkeypatch.setattr(settings, "photo_upload_region", PHOTO_REGION)
+    return f"https://{PHOTO_BUCKET}.s3.{PHOTO_REGION}.amazonaws.com/"
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:

@@ -113,6 +113,34 @@ async def test_an_uploaded_document_appears_in_the_review_queue(db_session, real
     assert pending[0].file_url
 
 
+async def test_the_reviewer_gets_a_link_that_opens(db_session, real_redis_client, photo_bucket):
+    """The document sits in a private bucket, so the object URL stored at upload
+    opens for nobody: the reviewer was approving a licence they couldn't see.
+    The queue now hands out a signed link to the same object, and the record
+    keeps the plain one."""
+    hub_id, driver_id = await _seed(db_session)
+    admin = await _seed_reviewer(db_session)
+    await _upload(db_session, hub_id, driver_id, "license")
+    stored = (await _document(db_session, driver_id, "license")).file_url
+    assert stored.startswith(photo_bucket) and "?" not in stored
+
+    [pending] = await list_pending_driver_documents(session=db_session, _admin=admin)
+
+    assert pending.file_url.startswith(stored + "?")
+    assert "X-Amz-Signature=" in pending.file_url
+
+
+async def test_the_driver_gets_a_link_that_opens_too(db_session, real_redis_client, photo_bucket):
+    hub_id, driver_id = await _seed(db_session)
+    authed = await _upload(db_session, hub_id, driver_id, "license")
+    stored = (await _document(db_session, driver_id, "license")).file_url
+
+    [mine] = await list_my_documents(driver=authed, session=db_session)
+
+    assert mine.file_url.startswith(stored + "?")
+    assert "X-Amz-Signature=" in mine.file_url
+
+
 async def test_a_document_with_nothing_uploaded_is_not_queued(db_session, real_redis_client):
     """There is nothing to review, so listing it would put items in the queue a
     reviewer can only skip."""

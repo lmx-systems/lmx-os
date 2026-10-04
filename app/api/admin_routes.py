@@ -71,6 +71,7 @@ from app.models.shop import Shop
 from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user, require_admin
 from app.payroll import get_payroll_provider
 from app.redis_client import get_client as get_redis_client
+from app.storage.photo_upload_client import readable_url
 from app.schemas.admin import (
     AdminClientView,
     AdminDriverDeviceView,
@@ -1240,7 +1241,9 @@ async def list_pending_driver_documents(
             driver_name=driver_name,
             doc_type=doc.doc_type,
             claimed_expires_at=doc.claimed_expires_at,
-            file_url=doc.file_url,
+            # Signed for the reviewer: the bucket is private, so the stored
+            # object URL opens for nobody.
+            file_url=readable_url(doc.file_url),
             review_status=doc.review_status,
             uploaded_at=doc.updated_at,
         )

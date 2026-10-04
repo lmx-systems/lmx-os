@@ -16,11 +16,12 @@ rather than weaker: a presigned URL cannot check who is holding it.
 
 **The GET is not authenticated**, and that is deliberate and load-bearing. An
 `<img src>` in the ops console and on a recipient's tracking page cannot send an
-Authorization header, and S3's `final_url` is unauthenticated for exactly the
-same reason. The `uuid4` that `generate_object_key` puts in every filename is
-what stands in for access control. **That is a capability URL, not a permission
-check** - anyone holding the link can see the photo, on this backend and on S3
-alike. Whoever swaps in a signed-URL scheme should change both.
+Authorization header. The `uuid4` that `generate_object_key` puts in every
+filename is what stands in for access control. **That is a capability URL, not a
+permission check** - anyone holding the link can see the photo, for as long as
+the file exists. The S3 path no longer works that way: its links are signed per
+response and expire within the hour (`readable_url`). This backend keeps the
+weaker model only because it never leaves development.
 
 **The key is validated, not trusted.** It arrives in the URL path, so
 `..%2f..%2fetc%2fpasswd` is the obvious attack and a `startswith` check on the
@@ -133,7 +134,7 @@ async def fetch_media(key: str) -> FileResponse:
     """Serve one stored file.
 
     Unauthenticated by design - see the module docstring. The unguessable key is
-    the capability, exactly as it is on the S3 path.
+    the capability.
     """
     path = _resolved(key)
     if not path.is_file():
