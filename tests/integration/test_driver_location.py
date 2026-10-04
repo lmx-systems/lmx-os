@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from tests.integration.queue_helpers import let_the_hold_run_out
 from pydantic import ValidationError
 from sqlalchemy import select
 
@@ -258,8 +259,9 @@ async def test_optimizer_assigns_nothing_until_a_driver_reports_a_position(db_se
 
     service = DispatchOptimizerService()
 
-    # No position reported yet: the order is held and a driver is available,
-    # and still nothing can be assigned.
+    # No position reported yet: the order's hold has run out and a driver is
+    # available, and still nothing can be assigned.
+    await let_the_hold_run_out(hub_id)
     before = await service.run_cycle(str(hub_id))
     assert before.assignments == []
 

@@ -34,6 +34,7 @@ from app.api.driver_routes import (
 )
 from app.driver_auth.otp_store import MAX_ISSUE_ATTEMPTS
 from app.config import settings
+from tests.integration.queue_helpers import let_the_hold_run_out
 from app.batch_queue.store import HoldQueueStore
 from app.batch_queue.queue import HeldOrder
 from app.driver_auth.dependencies import AuthedDriver
@@ -162,6 +163,7 @@ async def test_full_driver_app_core_loop(db_session, real_redis_client):
 
     # 4. A Dispatch Optimizer cycle should create a job offer, not directly
     # hand the driver a route (docs/NEXT_STEPS.md item 12's accept/decline gap).
+    await let_the_hold_run_out(hub_id)
     result = await DispatchOptimizerService().run_cycle(str(hub_id))
     assert len(result.assignments) == 1
     assert result.assignments[0].driver_id == str(driver_id)
@@ -240,6 +242,7 @@ async def test_declined_offer_requeues_order_for_reassignment(db_session, real_r
     hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
     authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
+    await let_the_hold_run_out(hub_id)
     await DispatchOptimizerService().run_cycle(str(hub_id))
     offers = await list_my_offers(driver=authed, session=db_session)
     assert len(offers) == 1
@@ -286,6 +289,7 @@ async def _accept_one_offer(db_session, hub_id, driver_id):
     """Shared setup for the stop-state-machine tests below: go straight
     from a fresh seed to an accepted route with one pickup + one dropoff."""
     authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+    await let_the_hold_run_out(hub_id)
     await DispatchOptimizerService().run_cycle(str(hub_id))
     offers = await list_my_offers(driver=authed, session=db_session)
     route = await accept_offer(offers[0].offer_id, driver=authed, session=db_session)

@@ -48,22 +48,32 @@ from app.models.order import Order
 # on-demand explanation a table scan of the whole decision log.
 _DECISION_SCAN_LIMIT = 50
 
-# What the batch-hold queue's reasons mean, in a sentence a dispatcher can act
-# on. Keyed by the exact strings `app/batch_queue/queue.py` emits, so a reason
-# it stops producing stops appearing here rather than being silently reworded.
+# Why the batch-hold queue did what it did, as the half of a sentence a
+# dispatcher can act on. Keyed by the exact strings `app/batch_queue/queue.py`
+# emits, so a reason it stops producing stops appearing here rather than being
+# silently reworded.
+#
+# **Only the why.** Whether the order went or stayed comes from the action the
+# cycle recorded beside the reason (`_VERB`). It used to be written into each
+# sentence, and until October 2026 the sentences and the queue disagreed: the
+# sentences followed the design doc, the queue ran backwards (see queue.py's
+# docstring), and the conflict sentence matched neither. A dispatcher was told
+# "released" about an order the queue was still holding.
 _REASON_TEXT = {
-    "hot_shot_immediate_release": "released immediately - HOT_SHOT never waits for a cluster mate",
-    "sla_hold_deadline_reached": "released - the hold deadline arrived",
-    "dispatcher_released": "released - a dispatcher released it (see the override)",
-    "cluster_mate_found": "released - another order going the same way arrived",
+    "hot_shot_immediate_release": "HOT_SHOT never waits for a cluster mate",
+    "sla_hold_deadline_reached": "the hold deadline arrived",
+    "dispatcher_released": "a dispatcher released it (see the override)",
+    "cluster_mate_found": "batched with another order going the same way",
     "would_conflict_with_higher_priority_order": (
-        "released early - holding it risked a more urgent order's deadline"
+        "the only free driver is needed for a more urgent order due soon"
     ),
-    "no_available_drivers": "still held - no driver was on shift to dispatch to",
-    "no_cluster_mate_and_drivers_available": (
-        "still held - waiting for another order going the same way"
-    ),
+    "no_available_drivers": "no driver was on shift to dispatch to",
+    "waiting_for_cluster_mate": "waiting for another order going the same way",
 }
+
+# The recorded action, in words. The queue writes "keep_holding"; an override,
+# and decisions recorded by hand, say "hold".
+_VERB = {"release": "released", "keep_holding": "still held", "hold": "still held"}
 
 
 @dataclass(frozen=True)
@@ -101,20 +111,18 @@ class Explanation:
 
 def _describe(entry: dict) -> str:
     reason = entry.get("reason", "")
-    text = _REASON_TEXT.get(reason)
-    if text is None:
-        # An unmapped reason is printed raw rather than smoothed into prose. A
-        # reason this module has not been taught is still what the record says,
-        # and paraphrasing it would be the narration AGT-4 forbids.
+    why = _REASON_TEXT.get(reason)
+    verb = _VERB.get(entry.get("action", ""))
+    if why is None or verb is None:
+        # An unmapped reason or action is printed raw rather than smoothed into
+        # prose. What this module has not been taught is still what the record
+        # says, and paraphrasing it would be the narration AGT-4 forbids.
         action = entry.get("action", "decided")
         return f"{action} - {reason or 'no reason recorded'}"
     mates = entry.get("cluster_mate_ids") or []
-    if mates and reason in (
-        "cluster_mate_found",
-        "no_cluster_mate_and_drivers_available",
-    ):
-        return f"{text} ({len(mates)} candidate(s) nearby)"
-    return text
+    if mates and reason == "cluster_mate_found":
+        return f"{verb} - {why} ({len(mates)} candidate(s) nearby)"
+    return f"{verb} - {why}"
 
 
 @dataclass(frozen=True)

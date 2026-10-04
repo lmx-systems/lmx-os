@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from tests.integration.queue_helpers import let_the_hold_run_out
 from sqlalchemy import func, select
 
 from app.api.driver_routes import accept_offer, get_my_route, list_my_offers
@@ -313,6 +314,7 @@ async def test_an_adhoc_order_reaches_the_driver_at_real_coordinates(db_session,
         db_session, HoldQueueStore(), _order(hub_id, client_id), geocoder=FakeGeocoder()
     )
 
+    await let_the_hold_run_out(hub_id)
     result = await DispatchOptimizerService().run_cycle(str(hub_id))
     assert len(result.assignments) == 1, "an ad-hoc order must be dispatchable"
 

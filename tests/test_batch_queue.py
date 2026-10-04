@@ -46,13 +46,12 @@ def test_question1_sla_deadline_always_releases():
     assert decision.reason == "sla_hold_deadline_reached"
 
 
-def test_question1a_a_dispatchers_release_beats_a_cluster_mate():
-    """The queue would hold this for the order next to it. A dispatcher
-    released it, for a reason the queue can't see, so it goes."""
+def test_question1a_a_dispatchers_release_beats_waiting_for_a_partner():
+    """Alone, the queue would hold this for a partner. A dispatcher released
+    it, for a reason the queue can't see, so it goes."""
     order = make_held_order("o1", 34.05, -118.25)
-    mate = make_held_order("o2", 34.051, -118.25)
     decision = evaluate_held_order(
-        order, [mate], available_driver_count=2, now=NOW, released_by_dispatcher=True
+        order, [], available_driver_count=2, now=NOW, released_by_dispatcher=True
     )
     assert decision.action == "release"
     assert decision.reason == "dispatcher_released"
@@ -69,16 +68,16 @@ def test_question1a_an_order_the_deadline_releases_anyway_keeps_the_queues_reaso
 
 def test_run_hold_cycle_releases_only_what_a_dispatcher_released():
     released = make_held_order("a", 34.05, -118.25)
-    mate = make_held_order("b", 34.051, -118.25)
+    elsewhere = make_held_order("b", 40.0, -120.0)
     decisions = {
         d.order_id: (d.action, d.reason)
         for d in run_hold_cycle(
-            [released, mate], available_driver_count=2, now=NOW, released_by_dispatcher={"a"}
+            [released, elsewhere], available_driver_count=2, now=NOW, released_by_dispatcher={"a"}
         )
     }
     assert decisions == {
         "a": ("release", "dispatcher_released"),
-        "b": ("keep_holding", "cluster_mate_found"),
+        "b": ("keep_holding", "waiting_for_cluster_mate"),
     }
 
 
@@ -89,33 +88,73 @@ def test_question3_no_available_drivers_keeps_holding_even_without_cluster_mate(
     assert decision.reason == "no_available_drivers"
 
 
+def test_question2_a_cluster_is_released_together():
+    """Section 6: "Is there another held order within a configurable radius
+    that could be batched? If yes -> batch and dispatch together." This held
+    both until their deadline before October 2026."""
+    a = make_held_order("a", 34.05, -118.25)
+    b = make_held_order("b", 34.051, -118.25)
+    decisions = {
+        d.order_id: d for d in run_hold_cycle([a, b], available_driver_count=3, now=NOW)
+    }
+    for order_id, mate in (("a", "b"), ("b", "a")):
+        assert (decisions[order_id].action, decisions[order_id].reason) == (
+            "release",
+            "cluster_mate_found",
+        )
+        assert decisions[order_id].cluster_mate_ids == [mate]
+
+
+def test_a_lone_order_waits_for_a_partner():
+    """The hold the queue exists for. This used to dispatch it alone the moment
+    a driver was free, so a lone order never waited for a partner at all."""
+    order = make_held_order("o1", 34.05, -118.25)
+    far_order = make_held_order("o2", 40.0, -120.0)
+    decision = evaluate_held_order(order, [far_order], available_driver_count=3, now=NOW)
+    assert decision.action == "keep_holding"
+    assert decision.reason == "waiting_for_cluster_mate"
+
+
+def test_a_hot_shot_neighbour_is_not_a_partner():
+    """HOT_SHOT is never commingled, so releasing an order to batch with one
+    would only send it out early and alone."""
+    order = make_held_order("o1", 34.05, -118.25)
+    hot_shot = make_held_order("hs", 34.051, -118.25, sla_tier="HOT_SHOT")
+    decision = evaluate_held_order(order, [hot_shot], available_driver_count=3, now=NOW)
+    assert decision.action == "keep_holding"
+    assert decision.reason == "waiting_for_cluster_mate"
+
+
 def test_question4_conflict_with_imminent_higher_priority_order_keeps_holding():
-    # Only one driver available, and a T1 order elsewhere is about to hit
-    # its own hold_deadline - dispatching this T2 order now would strand it.
+    # One driver, and a T1 order elsewhere is about to hit its own hold
+    # deadline - sending this batch now would strand it.
     order = make_held_order("o1", 34.05, -118.25, sla_tier="T2", deadline_minutes_from_now=60)
+    mate = make_held_order("o1b", 34.051, -118.25, sla_tier="T2", deadline_minutes_from_now=60)
     urgent = make_held_order(
         "urgent", 40.0, -120.0, sla_tier="T1", deadline_minutes_from_now=5
     )  # far away - not a cluster-mate
-    decision = evaluate_held_order(order, [urgent], available_driver_count=1, now=NOW)
+    decision = evaluate_held_order(order, [mate, urgent], available_driver_count=1, now=NOW)
     assert decision.action == "keep_holding"
     assert decision.reason == "would_conflict_with_higher_priority_order"
 
 
 def test_question4_does_not_fire_when_drivers_have_spare_capacity():
     order = make_held_order("o1", 34.05, -118.25, sla_tier="T2", deadline_minutes_from_now=60)
+    mate = make_held_order("o1b", 34.051, -118.25, sla_tier="T2", deadline_minutes_from_now=60)
     urgent = make_held_order("urgent", 40.0, -120.0, sla_tier="T1", deadline_minutes_from_now=5)
-    # Two drivers available - sending this order doesn't cost the urgent one anything.
-    decision = evaluate_held_order(order, [urgent], available_driver_count=2, now=NOW)
+    # Two drivers available - sending this batch doesn't cost the urgent one anything.
+    decision = evaluate_held_order(order, [mate, urgent], available_driver_count=2, now=NOW)
     assert decision.action == "release"
-    assert decision.reason == "no_cluster_mate_and_drivers_available"
+    assert decision.reason == "cluster_mate_found"
 
 
 def test_question4_does_not_fire_for_a_less_urgent_order():
     order = make_held_order("o1", 34.05, -118.25, sla_tier="T1", deadline_minutes_from_now=60)
+    mate = make_held_order("o1b", 34.051, -118.25, sla_tier="T1", deadline_minutes_from_now=60)
     less_urgent = make_held_order("o2", 40.0, -120.0, sla_tier="T3", deadline_minutes_from_now=5)
-    decision = evaluate_held_order(order, [less_urgent], available_driver_count=1, now=NOW)
+    decision = evaluate_held_order(order, [mate, less_urgent], available_driver_count=1, now=NOW)
     assert decision.action == "release"
-    assert decision.reason == "no_cluster_mate_and_drivers_available"
+    assert decision.reason == "cluster_mate_found"
 
 
 def test_question4_ignores_a_cluster_mate_even_if_more_urgent():
@@ -124,25 +163,17 @@ def test_question4_ignores_a_cluster_mate_even_if_more_urgent():
     order = make_held_order("o1", 34.05, -118.25, sla_tier="T2", deadline_minutes_from_now=60)
     mate = make_held_order("o2", 34.051, -118.25, sla_tier="T1", deadline_minutes_from_now=5)
     decision = evaluate_held_order(order, [mate], available_driver_count=1, now=NOW)
-    assert decision.action == "keep_holding"
-    assert decision.reason == "cluster_mate_found"
-
-
-def test_question2_cluster_mate_keeps_holding():
-    order = make_held_order("o1", 34.05, -118.25)
-    mate = make_held_order("o2", 34.051, -118.25)
-    decision = evaluate_held_order(order, [mate], available_driver_count=3, now=NOW)
-    assert decision.action == "keep_holding"
-    assert decision.reason == "cluster_mate_found"
-    assert "o2" in decision.cluster_mate_ids
-
-
-def test_no_cluster_mate_and_drivers_available_releases():
-    order = make_held_order("o1", 34.05, -118.25)
-    far_order = make_held_order("o2", 40.0, -120.0)
-    decision = evaluate_held_order(order, [far_order], available_driver_count=3, now=NOW)
     assert decision.action == "release"
-    assert decision.reason == "no_cluster_mate_and_drivers_available"
+    assert decision.reason == "cluster_mate_found"
+
+
+def test_question4_only_guards_a_release():
+    """A lone order is held anyway, so its reason is the wait, not the conflict."""
+    order = make_held_order("o1", 34.05, -118.25, sla_tier="T2", deadline_minutes_from_now=60)
+    urgent = make_held_order("urgent", 40.0, -120.0, sla_tier="T1", deadline_minutes_from_now=5)
+    decision = evaluate_held_order(order, [urgent], available_driver_count=1, now=NOW)
+    assert decision.action == "keep_holding"
+    assert decision.reason == "waiting_for_cluster_mate"
 
 
 def test_run_hold_cycle_evaluates_every_order():
