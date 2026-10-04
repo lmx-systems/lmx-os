@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 import structlog
 from sqlalchemy import func, select, update
 
-from app.batch_queue.queue import run_hold_cycle
+from app.batch_queue.queue import HeldOrder, run_hold_cycle
 from app import metrics
 from app.batch_queue.store import HoldQueueStore
 from app.hub_calendar import is_hub_closed_at
@@ -48,6 +48,30 @@ from app.schemas.optimizer import (
 )
 
 logger = structlog.get_logger(__name__)
+
+
+async def _released_by_dispatcher(held_orders: list[HeldOrder]) -> set[str]:
+    """The held orders a dispatcher released (`app/record/overrides.py`).
+
+    Read from Postgres rather than copied into the Redis queue. The override
+    commits the order's status together with the reason for it, so the status
+    already is the record, and a copy in Redis would be a second write that can
+    fail on its own. `queued` means exactly this: nothing else writes it, and the
+    order stays in the hold queue until a cycle assigns it.
+    """
+    order_ids = []
+    for held in held_orders:
+        try:
+            order_ids.append(uuid.UUID(held.order_id))
+        except ValueError:
+            continue  # no order row could carry a status for it
+    if not order_ids:
+        return set()
+    async with session_scope() as session:
+        released = await session.scalars(
+            select(Order.id).where(Order.id.in_(order_ids), Order.status == OrderStatus.queued)
+        )
+        return {str(order_id) for order_id in released}
 
 
 class DispatchOptimizerService:
@@ -109,6 +133,7 @@ class DispatchOptimizerService:
             held_orders,
             available_driver_count=len(fleet_snapshot),
             now=now,
+            released_by_dispatcher=await _released_by_dispatcher(held_orders),
         )
         released_order_ids = {d.order_id for d in decisions if d.action == "release"}
         released_orders = [o for o in held_orders if o.order_id in released_order_ids]

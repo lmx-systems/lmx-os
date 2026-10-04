@@ -54,6 +54,7 @@ _DECISION_SCAN_LIMIT = 50
 _REASON_TEXT = {
     "hot_shot_immediate_release": "released immediately - HOT_SHOT never waits for a cluster mate",
     "sla_hold_deadline_reached": "released - the hold deadline arrived",
+    "dispatcher_released": "released - a dispatcher released it (see the override)",
     "cluster_mate_found": "released - another order going the same way arrived",
     "would_conflict_with_higher_priority_order": (
         "released early - holding it risked a more urgent order's deadline"
@@ -140,6 +141,11 @@ async def latest_system_decision(session: AsyncSession, *, order_id) -> SystemDe
     decided" has one definition. A second implementation would drift, and the
     two places it is read - the explanation a dispatcher sees and the label an
     override is recorded against - are precisely the two that must agree.
+
+    One difference, on purpose: a cycle that only carried out a dispatcher's
+    release is skipped here, because it is the dispatcher's decision rather
+    than the queue's. The explanation still lists it, as something that
+    happened.
     """
     order = await session.get(Order, order_id)
     if order is None:
@@ -159,7 +165,11 @@ async def latest_system_decision(session: AsyncSession, *, order_id) -> SystemDe
     )
     for snapshot in snapshots:
         for entry in snapshot.hold_decisions or []:
-            if entry.get("order_id") == key:
+            # A cycle that carried out a dispatcher's release was following the
+            # dispatcher, not judging the order, so it's skipped. Cited, it
+            # would label a later hold as disagreeing with the queue when it
+            # only reversed the dispatcher's own release.
+            if entry.get("order_id") == key and entry.get("reason") != "dispatcher_released":
                 return SystemDecision(
                     known=True,
                     action=entry.get("action"),

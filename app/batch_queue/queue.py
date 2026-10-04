@@ -36,6 +36,12 @@ The per-cycle questions, evaluated in order for every held order:
   1. (Question 1) Is this order past its SLA hold_deadline? -> if yes,
      force-release now, no matter what clustering looks like. SLA always
      wins.
+  1a. Did a dispatcher release it (app/record/overrides.py)? -> if yes,
+     release. Their reason is one the queue can't see - usually the customer
+     on the phone - so it outranks every rule below. Checked after the two
+     above only so that an order those would have released anyway records
+     the queue's own reason. Like HOT_SHOT, not one of the four canonical
+     questions.
   2. Is there currently no available driver at the hub at all? -> if yes,
      releasing wouldn't lead to a dispatch anyway, so keep holding
      regardless of clustering (avoids releasing into a queue with nothing
@@ -63,6 +69,7 @@ still be added to an already-active driver's route there.
 """
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -148,6 +155,7 @@ def evaluate_held_order(
     available_driver_count: int,
     now: datetime,
     cluster_radius_miles: float | None = None,
+    released_by_dispatcher: bool = False,
 ) -> BatchDecision:
     radius = cluster_radius_miles or settings.batch_hold_cluster_radius_miles
 
@@ -167,6 +175,17 @@ def evaluate_held_order(
             order_id=order.order_id,
             action="release",
             reason="sla_hold_deadline_reached",
+            cluster_mate_ids=[],
+        )
+
+    # 1a: a dispatcher released it - see the module docstring. With no driver
+    # on shift this still dispatches nothing, as a HOT_SHOT release doesn't; the
+    # order waits among the solver's unassigned stops for the next cycle.
+    if released_by_dispatcher:
+        return BatchDecision(
+            order_id=order.order_id,
+            action="release",
+            reason="dispatcher_released",
             cluster_mate_ids=[],
         )
 
@@ -219,8 +238,12 @@ def run_hold_cycle(
     available_driver_count: int,
     now: datetime | None = None,
     cluster_radius_miles: float | None = None,
+    released_by_dispatcher: Collection[str] = (),
 ) -> list[BatchDecision]:
-    """Evaluate every currently-held order for one dispatch cycle."""
+    """Evaluate every currently-held order for one dispatch cycle.
+
+    `released_by_dispatcher` is the ids of held orders a dispatcher released.
+    """
     reference_time = now or datetime.utcnow()
     return [
         evaluate_held_order(
@@ -229,6 +252,7 @@ def run_hold_cycle(
             available_driver_count=available_driver_count,
             now=reference_time,
             cluster_radius_miles=cluster_radius_miles,
+            released_by_dispatcher=order.order_id in released_by_dispatcher,
         )
         for order in held_orders
     ]
