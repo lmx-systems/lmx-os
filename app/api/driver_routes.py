@@ -74,6 +74,7 @@ from app.models.stop_geofence_event import StopGeofenceEvent
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.messaging.cod_notifications import ESCALATION_SENT, notify_shop_of_cod_dispute
 from app.messaging.tracking_notifications import notify_recipient_picked_up
+from app.orders.sinks import emit_status_change
 from app.orders.status_service import advance_orders
 from app.record.outcomes import record_delivery_outcomes
 from app.returns.service import return_views
@@ -923,6 +924,22 @@ async def _requeue_orders_from_offer(
         )
     orders_result = await session.execute(select(Order).where(Order.id.in_(order_ids))) if order_ids else None
     orders_by_id = {o.id: o for o in (orders_result.scalars().all() if orders_result else [])}
+
+    # The client was told ASSIGNED, so it's told the order is back. The UPDATE
+    # above bypasses advance_orders on purpose - the state machine has no
+    # assigned -> held, since only a decline or a lapse may make that move - so
+    # nothing else would emit it.
+    for requeued in orders_by_id.values():
+        await emit_status_change(
+            session=session,
+            order_id=str(requeued.id),
+            client_id=str(requeued.client_id) if requeued.client_id else None,
+            source_system=requeued.source_system,
+            source_order_ref=requeued.source_order_ref,
+            previous=OrderStatus.assigned,
+            current=OrderStatus.held,
+            occurred_at=now,
+        )
 
     for stop in stop_payload:
         order = orders_by_id.get(uuid.UUID(stop["order_id"]))
