@@ -7,6 +7,18 @@ interface OrderDetailProps {
   onBack: () => void
 }
 
+const PROOF_METHOD: Record<string, string> = {
+  photo: 'Photographed at drop-off',
+  signature: 'Signed for at drop-off',
+  pin: 'Confirmed with the PIN texted to the recipient',
+}
+
+// A `local-capture://` marker means nothing was stored (no bucket configured);
+// a browser can't load it, and a broken image reads as missing proof.
+function loadable(url: string | null): string | null {
+  return url && /^https?:\/\//i.test(url) ? url : null
+}
+
 export function OrderDetail({ order, onBack }: OrderDetailProps) {
   return (
     <div className="flex flex-col gap-4">
@@ -105,6 +117,42 @@ export function OrderDetail({ order, onBack }: OrderDetailProps) {
                 {order.rating.comment && (
                   <span className="mt-1 block italic">&ldquo;{order.rating.comment}&rdquo;</span>
                 )}
+              </dd>
+            </div>
+          )}
+          {/* How the drop-off was proved, for when their customer says it never came.
+              Shown only to the recipient, on the tracking page, until now. */}
+          {order.proof && (
+            <div className="col-span-2">
+              <dt className="text-xs text-[var(--text-muted)]">Proof of delivery</dt>
+              <dd className="mt-0.5 text-[var(--text-secondary)]">
+                {PROOF_METHOD[order.proof.method ?? ''] ?? 'Recorded'}
+                {order.proof.left_at && <> &middot; left at {order.proof.left_at}</>}
+                <div className="mt-2 flex flex-wrap gap-3">
+                  {order.proof.photo_urls.map(loadable).map(
+                    (url) =>
+                      url && (
+                        <a key={url} href={url} target="_blank" rel="noreferrer">
+                          <img
+                            src={url}
+                            alt="Photo taken at the delivery"
+                            loading="lazy"
+                            className="max-h-56 max-w-full rounded-[var(--radius)] border border-[var(--border)]"
+                          />
+                        </a>
+                      ),
+                  )}
+                  {loadable(order.proof.signature_url) && (
+                    <img
+                      src={loadable(order.proof.signature_url)!}
+                      alt="Signature captured at the delivery"
+                      loading="lazy"
+                      // White ground: a signature is dark ink on transparency, which
+                      // disappears entirely on a dark theme.
+                      className="max-h-32 max-w-full rounded-[var(--radius)] border border-[var(--border)] bg-white"
+                    />
+                  )}
+                </div>
               </dd>
             </div>
           )}
