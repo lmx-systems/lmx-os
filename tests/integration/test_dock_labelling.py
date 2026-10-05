@@ -173,17 +173,17 @@ class TestAPersonCanLabelIt:
             )
         assert exc.value.status_code == 404
 
-    async def test_any_ops_session_may_label(self):
+    async def test_a_dispatcher_may_label(self):
         """A dispatcher who has been to the door knows better than a regex over
         the account name. Making this admin-only would put the knowledge and the
-        permission in different people."""
+        permission in different people; a viewer, who only reads, isn't asked."""
         import inspect
 
         from app.api.routes import label_dock
-        from app.ops_auth.dependencies import get_current_ops_user
+        from app.ops_auth.dependencies import require_dispatcher
 
         dependency = inspect.signature(label_dock).parameters["_ops"].default
-        assert dependency.dependency is get_current_ops_user
+        assert dependency.dependency is require_dispatcher
 
 
 class TestTheOrderDecidesWhatGetsLabelled:

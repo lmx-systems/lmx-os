@@ -13,11 +13,11 @@ from starlette.responses import PlainTextResponse
 
 from app.api.ops_auth_routes import get_my_profile, login
 from app.client_auth.passwords import hash_password
-from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user, require_admin
+from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user, require_admin, require_dispatcher
 from app.ops_auth.login_rate_limit import MAX_LOGIN_ATTEMPTS
 from app.ops_auth.middleware import OpsUserAuthMiddleware
 from app.ops_auth.tokens import issue_token
-from app.models.ops_user import ADMIN_ROLE, VIEWER_ROLE, OpsUser
+from app.models.ops_user import ADMIN_ROLE, DISPATCHER_ROLE, VIEWER_ROLE, OpsUser
 from app.schemas.ops_auth import OpsLoginBody
 
 pytestmark = pytest.mark.integration
@@ -181,6 +181,26 @@ async def test_require_admin_rejects_a_viewer_user():
     viewer = AuthedOpsUser(ops_user_id="u2", email="v@example.com", name="Viewer", role=VIEWER_ROLE)
     with pytest.raises(HTTPException) as exc_info:
         await require_admin(ops_user=viewer)
+    assert exc_info.value.status_code == 403
+
+
+async def test_require_admin_rejects_a_dispatcher():
+    dispatcher = AuthedOpsUser(ops_user_id="u3", email="d@example.com", name="Desk", role=DISPATCHER_ROLE)
+    with pytest.raises(HTTPException) as exc_info:
+        await require_admin(ops_user=dispatcher)
+    assert exc_info.value.status_code == 403
+
+
+async def test_require_dispatcher_allows_a_dispatcher_and_an_admin():
+    for role in (DISPATCHER_ROLE, ADMIN_ROLE):
+        user = AuthedOpsUser(ops_user_id="u4", email="x@example.com", name="X", role=role)
+        assert await require_dispatcher(ops_user=user) is user
+
+
+async def test_require_dispatcher_rejects_a_viewer():
+    viewer = AuthedOpsUser(ops_user_id="u2", email="v@example.com", name="Viewer", role=VIEWER_ROLE)
+    with pytest.raises(HTTPException) as exc_info:
+        await require_dispatcher(ops_user=viewer)
     assert exc_info.value.status_code == 403
 
 

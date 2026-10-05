@@ -43,7 +43,7 @@ docker compose exec app alembic upgrade head
 | Ops dashboard | http://localhost:5173 — pick a hub from the dropdown |
 | Client portal | http://localhost:5174 — needs a client onboarded first, via the dashboard's "Onboard a new client" form or `POST /admin/clients` |
 
-Ops endpoints need a real account: `scripts/create_ops_user.py --role admin|viewer`.
+Ops endpoints need a real account: `scripts/create_ops_user.py --role admin|dispatcher|viewer`.
 
 ## Local development (without Docker)
 
@@ -130,7 +130,7 @@ app/
   reporting/      Scorecards and operational reports
   client_api/     Per-client API keys for external order submission
   client_auth/    Client portal accounts, sessions, password reset
-  ops_auth/       Internal ops accounts and roles (admin / viewer)
+  ops_auth/       Internal ops accounts and roles (admin / dispatcher / viewer)
   driver_auth/    Driver OTP and device-bound sessions
   storage/        Presigned uploads for proof-of-delivery media
   health/         Liveness checks that alerting probes read

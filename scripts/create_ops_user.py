@@ -17,6 +17,7 @@ viewer just because --role wasn't specified again.
 Usage:
     python -m scripts.create_ops_user --email you@lmxit.com --password "..." --name "Your Name"
     python -m scripts.create_ops_user --email viewer@lmxit.com --password "..." --name "Viewer" --role viewer
+    python -m scripts.create_ops_user --email desk@lmxit.com --password "..." --name "Desk" --role dispatcher
 
 Requires DATABASE_URL to point at the stack to create the user in
 (defaults in app/config.py match `docker compose up`'s port mappings).

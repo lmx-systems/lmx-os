@@ -646,17 +646,17 @@ class TestTheEndpoint:
             REASON_CODES_REQUIRING_NOTE
         )
 
-    async def test_it_is_open_to_any_ops_session_not_only_admins(self):
-        """A dispatcher on a viewer account who cannot release an order when the
-        customer calls cannot run a day. What makes that safe is the record, not
-        the role: every override is attributed and append-only."""
+    async def test_it_is_open_to_dispatchers_not_only_admins(self):
+        """A dispatcher who cannot release an order when the customer calls
+        cannot run a day. What makes that safe is the record, not the role:
+        every override is attributed and append-only. A viewer reads."""
         import inspect
 
         from app.api.routes import override_order
-        from app.ops_auth.dependencies import get_current_ops_user
+        from app.ops_auth.dependencies import require_dispatcher
 
         dependency = inspect.signature(override_order).parameters["ops"].default
-        assert dependency.dependency is get_current_ops_user
+        assert dependency.dependency is require_dispatcher
 
     async def test_the_row_is_still_written_by_the_endpoint_path(self, db_session):
         from app.api.routes import override_order

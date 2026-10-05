@@ -24,7 +24,7 @@ from fastapi import Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, session_scope
-from app.models.ops_user import ADMIN_ROLE, OpsUser
+from app.models.ops_user import ADMIN_ROLE, DISPATCH_ROLES, OpsUser
 from app.ops_auth.tokens import InvalidOpsToken, decode_token
 
 
@@ -75,11 +75,23 @@ async def get_current_ops_user(
 
 
 async def require_admin(ops_user: AuthedOpsUser = Depends(get_current_ops_user)) -> AuthedOpsUser:
-    """For the specific mutating endpoints a viewer shouldn't reach
-    (running an optimizer/learning-loop cycle, onboarding a client,
-    revoking a driver device) - OpsUserAuthMiddleware only ever checks
-    "is this a valid ops session," not which role it has, since role
-    matters only to a handful of specific routes, not the whole surface."""
+    """Every write that configures the hub rather than runs the day (see the
+    roles in app/models/ops_user.py). OpsUserAuthMiddleware only ever checks
+    "is this a valid ops session", not which role it has, so each write carries
+    its own tier: this, or `require_dispatcher` below. A write with neither is
+    open to a viewer, and tests/integration/test_ops_roles_gate_every_write.py
+    walks the schema so none is."""
     if ops_user.role != ADMIN_ROLE:
         raise HTTPException(status_code=403, detail="This action requires an admin ops role")
+    return ops_user
+
+
+async def require_dispatcher(ops_user: AuthedOpsUser = Depends(get_current_ops_user)) -> AuthedOpsUser:
+    """The day's order work: a dispatcher, or an admin, who can do everything.
+
+    A module-level function rather than a factory on purpose - tests pin which
+    guard a route carries by identity (`dependency.dependency is require_admin`),
+    which needs a stable object to compare against."""
+    if ops_user.role not in DISPATCH_ROLES:
+        raise HTTPException(status_code=403, detail="This action requires a dispatcher or admin ops role")
     return ops_user

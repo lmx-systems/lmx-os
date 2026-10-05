@@ -2,9 +2,10 @@
 Real per-account ops auth (docs/ROADMAP.md S1) - replaces the old shared
 X-API-Key stopgap (previously app/security.py's
 SharedSecretAuthMiddleware) with a Bearer JWT tied to a real OpsUser row,
-the same shape app/client_auth/ already uses for the client portal. Every
-ops user can still do everything any other ops user can - there's no
-role model yet, a real gap this doesn't attempt to close.
+the same shape app/client_auth/ already uses for the client portal. This
+middleware answers only "is this a valid ops session"; which of the three
+roles (app/models/ops_user.py) may make a given write is each route's own
+dependency, `require_admin` or `require_dispatcher`.
 """
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request

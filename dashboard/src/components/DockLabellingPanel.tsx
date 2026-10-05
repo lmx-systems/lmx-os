@@ -24,9 +24,9 @@ import type { ClassificationCoverage, UnlabelledDock } from '../lib/types'
  * appearing would split a group without anyone noticing.
  *
  * Renders nothing when the tail is empty, which is the state IDN-3 is trying to
- * reach.
+ * reach. A viewer sees the tail without the buttons.
  */
-export function DockLabellingPanel() {
+export function DockLabellingPanel({ canDispatch }: { canDispatch: boolean }) {
   const [docks, setDocks] = useState<UnlabelledDock[] | null>(null)
   const [coverage, setCoverage] = useState<ClassificationCoverage | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -113,18 +113,20 @@ export function DockLabellingPanel() {
                 also {dock.shop_names.slice(1).join(', ')}
               </p>
             )}
-            <div className="flex flex-wrap gap-1">
-              {NODE_CLASSES.map((klass) => (
-                <button
-                  key={klass.code}
-                  disabled={busy === dock.location_id}
-                  onClick={() => label(dock.location_id, klass.code)}
-                  className="rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40"
-                >
-                  {klass.label}
-                </button>
-              ))}
-            </div>
+            {canDispatch && (
+              <div className="flex flex-wrap gap-1">
+                {NODE_CLASSES.map((klass) => (
+                  <button
+                    key={klass.code}
+                    disabled={busy === dock.location_id}
+                    onClick={() => label(dock.location_id, klass.code)}
+                    className="rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                  >
+                    {klass.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </li>
         ))}
       </ul>

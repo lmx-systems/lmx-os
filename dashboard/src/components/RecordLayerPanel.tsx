@@ -22,7 +22,7 @@ import type { ConsequenceOption, LateOrder, LinkageFlag } from '../lib/types'
  * when somebody opens the tab is enough; polling would be a request every few
  * seconds for lists that barely move.
  */
-export function RecordLayerPanel({ hubId }: { hubId: string }) {
+export function RecordLayerPanel({ hubId, canDispatch }: { hubId: string; canDispatch: boolean }) {
   const [late, setLate] = useState<LateOrder[] | null>(null)
   const [flags, setFlags] = useState<LinkageFlag[] | null>(null)
   const [kinds, setKinds] = useState<ConsequenceOption[]>([])
@@ -73,13 +73,20 @@ export function RecordLayerPanel({ hubId }: { hubId: string }) {
             What happened after these ran late?
           </h3>
           <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
-            Record a consequence when you hear about it. Two weeks after delivery, an order with
-            nothing recorded is closed as &ldquo;nothing happened&rdquo;, even if somebody did
-            complain.
+            {canDispatch
+              ? 'Record a consequence when you hear about it. '
+              : 'A dispatcher records a consequence when one is heard about. '}
+            Two weeks after delivery, an order with nothing recorded is closed as &ldquo;nothing
+            happened&rdquo;, even if somebody did complain.
           </p>
           <ul className="space-y-1.5">
             {late.map((order) => (
-              <LateOrderRow key={order.order_id} order={order} kinds={kinds} onDone={load} />
+              <LateOrderRow
+                key={order.order_id}
+                order={order}
+                kinds={canDispatch ? kinds : []}
+                onDone={load}
+              />
             ))}
           </ul>
         </section>
@@ -102,15 +109,17 @@ export function RecordLayerPanel({ hubId }: { hubId: string }) {
                     {new Date(flag.detected_at).toLocaleDateString()}
                   </p>
                 </div>
-                <button
-                  onClick={async () => {
-                    await api.resolveLinkageFlag(flag.id)
-                    await load()
-                  }}
-                  className="flex-shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
-                >
-                  Looked at it
-                </button>
+                {canDispatch && (
+                  <button
+                    onClick={async () => {
+                      await api.resolveLinkageFlag(flag.id)
+                      await load()
+                    }}
+                    className="flex-shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+                  >
+                    Looked at it
+                  </button>
+                )}
               </li>
             ))}
           </ul>

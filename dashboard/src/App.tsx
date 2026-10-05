@@ -148,6 +148,12 @@ function App() {
     )
   }
 
+  // The two lines the server draws (app/ops_auth/dependencies.py): admins
+  // configure the hub, dispatchers do the day's order work, viewers read. A
+  // control a role would get a 403 from is never shown to it.
+  const isAdmin = opsProfile.role === 'admin'
+  const canDispatch = isAdmin || opsProfile.role === 'dispatcher'
+
   return (
     <div className="min-h-screen">
       <div className="mx-auto max-w-[1320px] px-7 py-5 pb-16">
@@ -167,7 +173,7 @@ function App() {
               hub.
             </p>
             <CreateHubPanel
-              isAdmin={opsProfile.role === 'admin'}
+              isAdmin={isAdmin}
               onCreated={(hub) => {
                 setHubsVersion((v) => v + 1)
                 setHubId(hub.id)
@@ -224,7 +230,7 @@ function App() {
                     <OrderLookupPanel
                       key={`lookup-${hubId}`}
                       hubId={hubId}
-                      isAdmin={opsProfile.role === 'admin'}
+                      canDispatch={canDispatch}
                       onToast={showToast}
                     />
                     <OrderPipeline summary={summary.data} error={summary.error} loading={summary.loading} />
@@ -238,7 +244,7 @@ function App() {
                       data={exceptions.data}
                       error={exceptions.error}
                       loading={exceptions.loading}
-                      isAdmin={opsProfile.role === 'admin'}
+                      canDispatch={canDispatch}
                       onResolved={() => {
                         exceptions.refetchNow()
                         // A redelivery is back in the hold queue.
@@ -251,7 +257,7 @@ function App() {
                       data={held.data}
                       error={held.error}
                       loading={held.loading}
-                      isAdmin={opsProfile.role === 'admin'}
+                      canDispatch={canDispatch}
                       onCancelled={() => {
                         held.refetchNow()
                         exceptions.refetchNow()
@@ -267,21 +273,21 @@ function App() {
                     or not. */}
                 {tab === 'record' && (
                   <>
-                    <RecordLayerPanel key={`record-${hubId}`} hubId={hubId} />
+                    <RecordLayerPanel key={`record-${hubId}`} hubId={hubId} canDispatch={canDispatch} />
                     {/* Not hub-scoped: the same physical dock can be reached
                         from two hubs and that pair is the most valuable merge
                         to catch (IDN-2). */}
-                    <MergeReviewPanel isAdmin={opsProfile.role === 'admin'} />
+                    <MergeReviewPanel isAdmin={isAdmin} />
                     {/* Also not hub-scoped: a dock is a physical place and its
                         class does not change with which hub serves it (IDN-3). */}
-                    <DockLabellingPanel />
+                    <DockLabellingPanel canDispatch={canDispatch} />
                     {/* Beside dock labelling because it is the same act on the
                         same rows - deciding what a dock is. This queue is why
                         dock_log_submissions exists as a separate table: a
                         stranger's answers never reach receiver_profiles, the
                         layer M5 trains on, without a person here matching them
                         to a dock (docs/ROADMAP.md DRV-7). */}
-                    <DockLogReviewPanel onToast={showToast} />
+                    <DockLogReviewPanel onToast={showToast} isAdmin={isAdmin} />
                     {/* Last, because it is the read-back rather than the work:
                         is the record being written at all (REC-1..REC-4). */}
                     <RecordHealthPanel key={`health-${hubId}`} hubId={hubId} />
@@ -291,16 +297,20 @@ function App() {
                         provider configured every dispute is un-escalated by
                         definition, so the count would never fall and a badge that
                         never falls is the "tab nobody opens" failure inverted. */}
-                    <CodDisputesPanel key={`cod-${hubId}`} hubId={hubId} />
+                    {/* Its list is a dispatcher's read on the server; a viewer
+                        would only see it fail to load. */}
+                    {canDispatch && <CodDisputesPanel key={`cod-${hubId}`} hubId={hubId} />}
                     {/* Recording work too, and the half of W1 that shipped
                         without a front end: a driver could never collect a core
                         and nobody could close one out. Hides itself when
                         nothing is outstanding. */}
-                    <ReturnsPanel
-                      key={`returns-${hubId}`}
-                      hubId={hubId}
-                      onToast={showToast}
-                    />
+                    {canDispatch && (
+                      <ReturnsPanel
+                        key={`returns-${hubId}`}
+                        hubId={hubId}
+                        onToast={showToast}
+                      />
+                    )}
                   </>
                 )}
               </div>
@@ -311,24 +321,30 @@ function App() {
                     disagree with each other. */}
                 <FleetMap key={`map-${hubId}`} data={fleet.data} error={fleet.error} loading={fleet.loading} />
                 <FleetRoster data={fleet.data} error={fleet.error} loading={fleet.loading} />
-                {opsProfile.role === 'admin' && (
+                {/* Forcing a dispatch cycle is the day's work, so a dispatcher
+                    may; running the nightly job by hand is an admin's, and the
+                    panel shows that card only to one. */}
+                {canDispatch && (
+                  <OperationsPanel
+                    key={hubId}
+                    hubId={hubId}
+                    isAdmin={isAdmin}
+                    onAfterRun={() => {
+                      fleet.refetchNow()
+                      held.refetchNow()
+                      summary.refetchNow()
+                      lastCycle.refetchNow()
+                    }}
+                    onToast={showToast}
+                  />
+                )}
+                {isAdmin && (
                   <>
-                    {/* Mutating actions (run-cycle, run-nightly-job, onboard
-                        a client) are admin-only on the backend
+                    {/* Configuring the hub (onboarding, rates, terms, rules,
+                        devices) is admin-only on the backend
                         (app/ops_auth/dependencies.py's require_admin) - a
-                        viewer never even sees the controls for actions
-                        they'd get a 403 from. */}
-                    <OperationsPanel
-                      key={hubId}
-                      hubId={hubId}
-                      onAfterRun={() => {
-                        fleet.refetchNow()
-                        held.refetchNow()
-                        summary.refetchNow()
-                        lastCycle.refetchNow()
-                      }}
-                      onToast={showToast}
-                    />
+                        dispatcher or viewer never sees the controls for
+                        actions they'd get a 403 from. */}
                     {/* Above the manual onboarding form on purpose: an applicant
                         who is already waiting should be approved, not
                         re-created by hand as a second client record. */}
@@ -374,7 +390,7 @@ function App() {
                     <HubSettingsPanel
                       key={`hub-${hubId}`}
                       hubId={hubId}
-                      isAdmin={opsProfile.role === 'admin'}
+                      isAdmin={isAdmin}
                       onToast={showToast}
                     />
                     {/* Beside the driver form, because it is the other half of
