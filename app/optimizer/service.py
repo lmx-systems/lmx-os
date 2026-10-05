@@ -167,9 +167,15 @@ class DispatchOptimizerService:
             available_driver_count=len(fleet_snapshot),
             now=now,
             released_by_dispatcher=await _released_by_dispatcher(held_orders),
+            driver_passing=await self._held_orders_a_driver_is_passing(hub_id, held_orders),
         )
         released_order_ids = {d.order_id for d in decisions if d.action == "release"}
         released_orders = [o for o in held_orders if o.order_id in released_order_ids]
+        # Question 3's releases go onto the passing driver's route, not to the
+        # idle-driver solver: they are left unassigned here, and run_cycle's
+        # live insertion places them. One that can't be placed after all stays
+        # held, as any unassigned stop does.
+        collected_on_the_way = {d.order_id for d in decisions if d.reason == "driver_passing"}
 
         stops = [
             StopCandidate(
@@ -211,10 +217,12 @@ class DispatchOptimizerService:
                 )
             )
 
-        if stops and drivers:
-            assignments, unassigned = await self._route_client.optimize(drivers, stops)
+        for_the_solver = [stop for stop in stops if stop.stop_id not in collected_on_the_way]
+        if for_the_solver and drivers:
+            assignments, unassigned = await self._route_client.optimize(drivers, for_the_solver)
         else:
-            assignments, unassigned = [], [s.stop_id for s in stops]
+            assignments, unassigned = [], [s.stop_id for s in for_the_solver]
+        unassigned = list(unassigned) + [s.stop_id for s in stops if s.stop_id in collected_on_the_way]
 
         return CyclePlan(
             hub_id=hub_id,
@@ -495,7 +503,6 @@ class DispatchOptimizerService:
         address and no live position - isn't "passing", and is left alone.
         """
         inserted: set[str] = set()
-        radius = settings.in_flight_insertion_radius_miles
 
         async with session_scope() as session:
             routes_result = await session.execute(
@@ -520,44 +527,9 @@ class DispatchOptimizerService:
                 if shop is None:
                     continue
 
-                candidate_weight = stops_by_id[order_id].weight_units
-                # A string either way: an enum when freshly loaded, a plain string
-                # on an un-refreshed instance (see app/delivery/resolution.py).
-                tier = str(getattr(order.sla_tier, "value", order.sla_tier) or "")
-                term = (
-                    (await terms_for_client(session, order.client_id)).get(tier)
-                    if order.client_id is not None and tier
-                    else None
+                best = await self._passing_route(
+                    session, hub_id, order, shop, stops_by_id[order_id].weight_units, active_routes
                 )
-                promise = delivery_commitment(order, term).promised_delivery_by
-                pickup_to_drop = minutes_for_miles(
-                    _miles(shop.lat, shop.lng, order.delivery_lat, order.delivery_lng) or 0.0
-                )
-
-                best: tuple[float, Route, datetime, datetime] | None = None
-                for route in active_routes:
-                    driver_state = await self._fleet_state.get_driver_state(hub_id, str(route.driver_id))
-                    if driver_state is None:
-                        continue
-                    remaining_capacity = max(driver_state.capacity_units - driver_state.load_units, 0.0)
-                    if remaining_capacity < candidate_weight:
-                        continue
-
-                    end = await self._route_end(session, hub_id, route)
-                    if end is None:
-                        continue
-                    end_lat, end_lng, free_at = end
-                    detour = _miles(end_lat, end_lng, shop.lat, shop.lng)
-                    if detour is None or detour > radius:
-                        continue
-                    at_pickup = free_at + timedelta(minutes=minutes_for_miles(detour))
-                    at_drop = at_pickup + timedelta(
-                        minutes=PLACEHOLDER_STOP_SERVICE_MINUTES + pickup_to_drop
-                    )
-                    if promise is not None and at_drop > promise:
-                        continue
-                    if best is None or detour < best[0]:
-                        best = (detour, route, at_pickup, at_drop)
 
                 if best is None:
                     logger.info(
@@ -630,6 +602,92 @@ class DispatchOptimizerService:
                 inserted.add(order_id)
 
         return inserted
+
+    async def _passing_route(
+        self, session, hub_id: str, order: Order, shop: Shop, weight: float, active_routes: list[Route]
+    ) -> tuple[float, Route, datetime, datetime] | None:
+        """The active route whose end passes nearest this order's pickup, with
+        room for it and time to make its promise: (detour miles, route, planned
+        arrival at the pickup, planned arrival at the drop). None when no route
+        is passing - the design doc's §6 third question, answered for one order.
+        """
+        radius = settings.in_flight_insertion_radius_miles
+        # A string either way: an enum when freshly loaded, a plain string on an
+        # un-refreshed instance (see app/delivery/resolution.py).
+        tier = str(getattr(order.sla_tier, "value", order.sla_tier) or "")
+        term = (
+            (await terms_for_client(session, order.client_id)).get(tier)
+            if order.client_id is not None and tier
+            else None
+        )
+        promise = delivery_commitment(order, term).promised_delivery_by
+        pickup_to_drop = minutes_for_miles(
+            _miles(shop.lat, shop.lng, order.delivery_lat, order.delivery_lng) or 0.0
+        )
+
+        best: tuple[float, Route, datetime, datetime] | None = None
+        for route in active_routes:
+            driver_state = await self._fleet_state.get_driver_state(hub_id, str(route.driver_id))
+            if driver_state is None:
+                continue
+            remaining_capacity = max(driver_state.capacity_units - driver_state.load_units, 0.0)
+            if remaining_capacity < weight:
+                continue
+
+            end = await self._route_end(session, hub_id, route)
+            if end is None:
+                continue
+            end_lat, end_lng, free_at = end
+            detour = _miles(end_lat, end_lng, shop.lat, shop.lng)
+            if detour is None or detour > radius:
+                continue
+            at_pickup = free_at + timedelta(minutes=minutes_for_miles(detour))
+            at_drop = at_pickup + timedelta(minutes=PLACEHOLDER_STOP_SERVICE_MINUTES + pickup_to_drop)
+            if promise is not None and at_drop > promise:
+                continue
+            if best is None or detour < best[0]:
+                best = (detour, route, at_pickup, at_drop)
+        return best
+
+    async def _held_orders_a_driver_is_passing(
+        self, hub_id: str, held_orders: list[HeldOrder]
+    ) -> set[str]:
+        """Which held orders a driver on an active route will pass with room and
+        time for (§6, question 3). The queue's rules are pure and know nothing
+        of routes, so this is worked out here and handed in.
+
+        HOT_SHOT and past-deadline orders are released by earlier questions
+        whatever this says, so they aren't looked up.
+        """
+        candidates = [
+            o for o in held_orders
+            if o.sla_tier != "HOT_SHOT" and o.hold_deadline > datetime.now(timezone.utc)
+        ]
+        if not candidates:
+            return set()
+        passing: set[str] = set()
+        async with session_scope() as session:
+            active_routes = list(
+                (
+                    await session.execute(
+                        select(Route).where(Route.hub_id == uuid.UUID(hub_id), Route.status == "active")
+                    )
+                ).scalars().all()
+            )
+            if not active_routes:
+                return passing
+            for held in candidates:
+                order = await session.get(Order, uuid.UUID(held.order_id))
+                if order is None or order.delivery_lat is None or order.delivery_lng is None:
+                    continue
+                shop = await session.get(Shop, order.shop_id)
+                if shop is None:
+                    continue
+                # Weight 1.0 per order, as the cycle's StopCandidate assumes
+                # (HeldOrder carries none).
+                if await self._passing_route(session, hub_id, order, shop, 1.0, active_routes):
+                    passing.add(held.order_id)
+        return passing
 
     async def _route_end(
         self, session, hub_id: str, route: Route

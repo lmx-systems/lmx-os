@@ -180,3 +180,50 @@ def test_run_hold_cycle_evaluates_every_order():
     orders = [make_held_order("o1", 34.05, -118.25), make_held_order("o2", 40.0, -120.0)]
     decisions = run_hold_cycle(orders, available_driver_count=2, now=NOW)
     assert {d.order_id for d in decisions} == {"o1", "o2"}
+
+
+def test_question3_a_passing_driver_collects_a_lone_order():
+    """Section 6: "Is a driver already heading in this direction? ... add it to
+    their route." Needs no idle driver: the driver is on a route."""
+    order = make_held_order("o1", 34.05, -118.25)
+    decision = evaluate_held_order(order, [], available_driver_count=0, now=NOW, driver_passing=True)
+    assert (decision.action, decision.reason) == ("release", "driver_passing")
+
+
+def test_question3_does_not_fire_for_a_driver_who_is_not_passing():
+    order = make_held_order("o1", 34.05, -118.25)
+    decision = evaluate_held_order(order, [], available_driver_count=0, now=NOW, driver_passing=False)
+    assert (decision.action, decision.reason) == ("keep_holding", "no_available_drivers")
+
+
+def test_question2_a_batch_with_an_idle_driver_beats_question3():
+    """The questions run in the spec's order: a cluster that can be dispatched
+    together is the better dispatch, and the passing driver is for the order
+    that has no partner."""
+    a = make_held_order("a", 34.05, -118.25)
+    b = make_held_order("b", 34.051, -118.25)
+    decision = evaluate_held_order(a, [b], available_driver_count=3, now=NOW, driver_passing=True)
+    assert (decision.action, decision.reason) == ("release", "cluster_mate_found")
+
+
+def test_question3_collects_a_clustered_order_when_no_idle_driver_can_take_the_batch():
+    a = make_held_order("a", 34.05, -118.25)
+    b = make_held_order("b", 34.051, -118.25)
+    decision = evaluate_held_order(a, [b], available_driver_count=0, now=NOW, driver_passing=True)
+    assert (decision.action, decision.reason) == ("release", "driver_passing")
+    assert decision.cluster_mate_ids == ["b"]
+
+
+def test_question3_keeps_the_earlier_questions_reasons():
+    hot = make_held_order("h", 34.05, -118.25, sla_tier="HOT_SHOT")
+    late = make_held_order("l", 34.05, -118.25, deadline_minutes_from_now=-1)
+    assert evaluate_held_order(hot, [], available_driver_count=0, now=NOW, driver_passing=True).reason == "hot_shot_immediate_release"
+    assert evaluate_held_order(late, [], available_driver_count=0, now=NOW, driver_passing=True).reason == "sla_hold_deadline_reached"
+
+
+def test_run_hold_cycle_releases_only_what_a_driver_is_passing():
+    a = make_held_order("a", 34.05, -118.25)
+    b = make_held_order("b", 40.0, -120.0)
+    decisions = {d.order_id: d for d in run_hold_cycle([a, b], available_driver_count=0, now=NOW, driver_passing={"a"})}
+    assert decisions["a"].reason == "driver_passing"
+    assert decisions["b"].reason == "no_available_drivers"
