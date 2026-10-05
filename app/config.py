@@ -353,6 +353,12 @@ class Settings(BaseSettings):
     # app/optimizer/service.py / app/models/route_offer.py).
     job_offer_ttl_seconds: int = 120
 
+    # How old a driver's last position can be before dispatch stops offering
+    # them work. The app reports every 30 seconds while it's open; a driver whose
+    # reports stopped has closed it, can't see an offer, and one sent to them
+    # would sit until they reopened the app.
+    driver_position_stale_after_seconds: int = 300
+
     # Client portal (Phase 8, see docs/ROADMAP.md) - password-based JWT for
     # per-user client_users logins (app/client_auth/, docs/ROADMAP.md C4).
     # Deliberately a separate secret from driver_jwt_secret: a client token
