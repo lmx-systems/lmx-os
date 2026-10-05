@@ -459,6 +459,24 @@ async def _hold_window_flag_rate(session: AsyncSession, since: datetime) -> Rate
             not_measured="no completed deliveries in the window",
         )
 
+    # Nothing raises these flags yet: the driver app has no control for them and
+    # nothing derives them. Until one has been recorded, a zero is the absence of
+    # an instrument, and it read as a perfect record. The first flag ever recorded
+    # makes this a measurement, and a zero after that means zero.
+    instrumented = (
+        await session.execute(
+            select(StopFlag.id)
+            .where(StopFlag.flag_type.in_((HOLD_TOO_SHORT_FLAG, HOLD_TOO_LONG_FLAG)))
+            .limit(1)
+        )
+    ).first()
+    if instrumented is None:
+        return Rate(
+            name="Orders flagged as held wrong",
+            target="lower is better",
+            not_measured="nothing has recorded a held-wrong flag yet, so a zero would mean nothing",
+        )
+
     flagged = (
         await session.execute(
             select(func.count())
