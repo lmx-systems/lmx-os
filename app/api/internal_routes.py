@@ -58,6 +58,7 @@ from app.health.checks import evaluate
 from app.webhooks.delivery import deliver_pending
 from app.learning_loop.service import run_nightly_job
 from app.models.hub import Hub
+from app.api.driver_routes import expire_lapsed_offers
 from app.optimizer.service import DispatchOptimizerService
 
 logger = structlog.get_logger(__name__)
@@ -104,6 +105,10 @@ async def run_dispatch_for_all_hubs(session: AsyncSession = Depends(get_db)) -> 
     One hub failing must not stop the others - a bad hub's data shouldn't strand
     every other hub's orders - so each is caught and reported.
     """
+    # First, so the cycles below can hand those orders to someone who's there.
+    expired = await expire_lapsed_offers(session)
+    await session.commit()
+
     results: dict[str, int | str] = {}
     for hub_id in await _active_hub_ids(session):
         try:
@@ -112,8 +117,8 @@ async def run_dispatch_for_all_hubs(session: AsyncSession = Depends(get_db)) -> 
         except Exception as exc:  # noqa: BLE001 - one hub must not stop the rest
             logger.exception("scheduled_dispatch_failed", hub_id=hub_id)
             results[hub_id] = f"error: {type(exc).__name__}"
-    logger.info("scheduled_dispatch_complete", hubs=len(results))
-    return {"hubs": results}
+    logger.info("scheduled_dispatch_complete", hubs=len(results), offers_expired=expired)
+    return {"hubs": results, "offers_expired": expired}
 
 
 @router.post("/learning-loop/run-all", dependencies=[Depends(require_internal_secret)])

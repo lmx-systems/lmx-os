@@ -50,6 +50,22 @@ from app.schemas.optimizer import (
 logger = structlog.get_logger(__name__)
 
 
+def _position_is_stale(recorded_at: str, now: datetime) -> bool:
+    """Whether a driver's last reported position is too old to dispatch to.
+
+    Still on duty in the fleet state but silent means the app was closed: the
+    driver can't see an offer, and one sent to them would sit until they opened
+    the app again, holding its orders. An unreadable timestamp counts as stale.
+    """
+    try:
+        reported = datetime.fromisoformat(recorded_at)
+    except ValueError:
+        return True
+    if reported.tzinfo is None:
+        reported = reported.replace(tzinfo=timezone.utc)
+    return now - reported > timedelta(seconds=settings.driver_position_stale_after_seconds)
+
+
 async def _released_by_dispatcher(held_orders: list[HeldOrder]) -> set[str]:
     """The held orders a dispatcher released (`app/record/overrides.py`).
 
@@ -165,7 +181,7 @@ class DispatchOptimizerService:
         drivers: list[DriverCandidate] = []
         for driver_state in fleet_snapshot:
             location = await self._fleet_state.get_driver_location(hub_id, driver_state.driver_id)
-            if location is None:
+            if location is None or _position_is_stale(location.recorded_at, now):
                 continue
             drivers.append(
                 DriverCandidate(

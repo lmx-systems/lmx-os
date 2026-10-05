@@ -977,6 +977,31 @@ async def _expire_if_lapsed(session: AsyncSession, offer: RouteOffer) -> bool:
     return True
 
 
+async def expire_lapsed_offers(session: AsyncSession) -> int:
+    """Expire every unanswered offer past its TTL, and put its orders back.
+
+    `_expire_if_lapsed` runs only when the driver's app asks about offers, so an
+    offer to a driver who had closed the app never lapsed: its orders stayed
+    assigned to someone who wasn't there until they opened it again. The
+    dispatch sweep calls this. Does not commit.
+    """
+    lapsed = list(
+        (
+            await session.execute(
+                select(RouteOffer).where(
+                    RouteOffer.status == "offered",
+                    RouteOffer.expires_at <= datetime.now(timezone.utc),
+                )
+            )
+        ).scalars()
+    )
+    expired = 0
+    for offer in lapsed:
+        if await _expire_if_lapsed(session, offer):
+            expired += 1
+    return expired
+
+
 async def _estimate_offer_pay_cents(session: AsyncSession, stop_payload: list[dict]) -> int:
     """Real per-delivery pay estimate for a gig-classified driver's offer
     (docs/ROADMAP.md A11) - each stop_payload entry's own lat/lng is the

@@ -116,7 +116,7 @@ async def test_an_inactive_hub_is_skipped(db_session, real_redis_client, configu
 
 async def test_no_hubs_is_not_an_error(db_session, real_redis_client, configured):
     """A fresh deployment has none, and the scheduler will still be calling."""
-    assert await run_dispatch_for_all_hubs(session=db_session) == {"hubs": {}}
+    assert await run_dispatch_for_all_hubs(session=db_session) == {"hubs": {}, "offers_expired": 0}
 
 
 async def test_one_failing_hub_does_not_stop_the_others(
