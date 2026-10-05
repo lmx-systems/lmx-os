@@ -71,6 +71,7 @@ from app.schemas.tracking import (
 from app.tracking.rate_limit import TrackingRateLimiter, TrackingRateLimitExceeded
 from app.tracking.ratings import RatingNotAllowed, submit_rating
 from app.tracking.service import TrackingTokenInvalid, resolve_tracking
+from app.tracking.service import TrackingView as ResolvedTracking
 from app.storage.photo_upload_client import readable_url
 from app.schemas.signup import (
     ClientSignupBody,
@@ -409,6 +410,42 @@ async def confirm_password_reset(
     )
 
 
+def _public_tracking_view(view: ResolvedTracking) -> TrackingView:
+    """What a tracking link shows, built in one place for the read and the rating.
+
+    The page swaps in the rating's reply as its new view. When that reply was
+    built separately it left the proof out, so the photo and signature vanished
+    from the page the moment the recipient rated.
+    """
+    return TrackingView(
+        status=view.status,
+        headline=view.headline,
+        detail=view.detail,
+        destination_hint=view.destination_hint,
+        estimated_arrival=view.estimated_arrival,
+        delivered_at=view.delivered_at,
+        # Signed here, on the way out: the bucket is private, so the stored
+        # object URL opens for nobody.
+        pod_photo_url=readable_url(view.pod_photo_url),
+        pod_signature_url=readable_url(view.pod_signature_url),
+        driver_position=(
+            DriverPositionView(
+                lat=view.driver_position.lat,
+                lng=view.driver_position.lng,
+                recorded_at=view.driver_position.recorded_at,
+            )
+            if view.driver_position is not None
+            else None
+        ),
+        rating=RecipientRatingView(
+            can_rate=view.rating.can_rate,
+            score=view.rating.score,
+            comment=view.rating.comment,
+        ),
+        is_live=view.is_live,
+    )
+
+
 @router.get("/track/{token}", response_model=TrackingView)
 async def track_delivery(
     token: str,
@@ -445,33 +482,7 @@ async def track_delivery(
             status_code=404, detail="We couldn't find that delivery"
         ) from None
 
-    return TrackingView(
-        status=view.status,
-        headline=view.headline,
-        detail=view.detail,
-        destination_hint=view.destination_hint,
-        estimated_arrival=view.estimated_arrival,
-        delivered_at=view.delivered_at,
-        # Signed here, on the way out: the bucket is private, so the stored
-        # object URL opens for nobody.
-        pod_photo_url=readable_url(view.pod_photo_url),
-        pod_signature_url=readable_url(view.pod_signature_url),
-        driver_position=(
-            DriverPositionView(
-                lat=view.driver_position.lat,
-                lng=view.driver_position.lng,
-                recorded_at=view.driver_position.recorded_at,
-            )
-            if view.driver_position is not None
-            else None
-        ),
-        rating=RecipientRatingView(
-            can_rate=view.rating.can_rate,
-            score=view.rating.score,
-            comment=view.rating.comment,
-        ),
-        is_live=view.is_live,
-    )
+    return _public_tracking_view(view)
 
 
 @router.post("/track/{token}/rating", response_model=TrackingView)
@@ -530,29 +541,7 @@ async def rate_delivery(
     # what was submitted - if anything normalised the comment, the page shows the
     # normalised version instead of quietly disagreeing with the database.
     view = await resolve_tracking(session, token)
-    return TrackingView(
-        status=view.status,
-        headline=view.headline,
-        detail=view.detail,
-        destination_hint=view.destination_hint,
-        estimated_arrival=view.estimated_arrival,
-        delivered_at=view.delivered_at,
-        driver_position=(
-            DriverPositionView(
-                lat=view.driver_position.lat,
-                lng=view.driver_position.lng,
-                recorded_at=view.driver_position.recorded_at,
-            )
-            if view.driver_position is not None
-            else None
-        ),
-        rating=RecipientRatingView(
-            can_rate=view.rating.can_rate,
-            score=view.rating.score,
-            comment=view.rating.comment,
-        ),
-        is_live=view.is_live,
-    )
+    return _public_tracking_view(view)
 
 
 @router.post("/dock-log", response_model=DockLogSubmissionResult, status_code=202)
