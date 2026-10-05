@@ -120,6 +120,23 @@ export function RecordLayerPanel({ hubId }: { hubId: string }) {
   )
 }
 
+// The one consequence with a cost to record (app/record/consequences.py).
+const CREDIT = 'credit_issued'
+
+// Today in the browser's own calendar, as a date input writes it.
+function localToday(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * One late delivery, and what happened after it.
+ *
+ * Picking a consequence asks when it happened and, for a credit, what it cost,
+ * before anything is recorded. One tap sent only the kind, so a call taken on
+ * Monday and recorded on Thursday was dated Thursday, and no credit had a cost -
+ * in an append-only label set, where a wrong row is never corrected.
+ */
 function LateOrderRow({
   order,
   kinds,
@@ -130,16 +147,51 @@ function LateOrderRow({
   onDone: () => void | Promise<void>
 }) {
   const [saving, setSaving] = useState(false)
+  const [choice, setChoice] = useState<ConsequenceOption | null>(null)
+  const [when, setWhen] = useState(localToday())
+  const [cost, setCost] = useState('')
+  const [note, setNote] = useState('')
+  const [failed, setFailed] = useState<string | null>(null)
 
-  async function record(kind: string) {
+  function choose(kind: ConsequenceOption) {
+    setChoice(kind)
+    setWhen(localToday())
+    setCost('')
+    setNote('')
+    setFailed(null)
+  }
+
+  const dollars = Number(cost)
+  const costProblem =
+    cost.trim() !== '' && (!Number.isFinite(dollars) || dollars < 0)
+      ? 'Enter the amount in dollars, like 45.00'
+      : null
+
+  async function record() {
+    if (!choice || costProblem) return
     setSaving(true)
+    setFailed(null)
     try {
-      await api.recordConsequence(order.order_id, { kind })
+      await api.recordConsequence(order.order_id, {
+        kind: choice.code,
+        // Today is left to the server's clock. An earlier day is sent as its
+        // midday, so the date can't slip across midnight on the way.
+        occurred_at: when === localToday() ? undefined : new Date(`${when}T12:00:00`).toISOString(),
+        amount_cents:
+          choice.code === CREDIT && cost.trim() !== '' ? Math.round(dollars * 100) : undefined,
+        detail: note.trim() || undefined,
+      })
+      setChoice(null)
       await onDone()
+    } catch (e) {
+      setFailed((e as Error).message)
     } finally {
       setSaving(false)
     }
   }
+
+  const field =
+    'rounded-md border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-[12px] text-[var(--text-primary)]'
 
   return (
     <li className="rounded-[var(--radius)] border border-[var(--border)] px-2.5 py-2">
@@ -156,18 +208,76 @@ function LateOrderRow({
           </span>
         </span>
       </div>
-      <div className="flex flex-wrap gap-1">
-        {kinds.map((kind) => (
-          <button
-            key={kind.code}
-            disabled={saving}
-            onClick={() => record(kind.code)}
-            className="rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40"
-          >
-            {kind.label}
-          </button>
-        ))}
-      </div>
+      {choice ? (
+        <div className="space-y-1.5 rounded-[var(--radius)] bg-[var(--surface-2)] p-2">
+          <p className="text-[12px] font-medium text-[var(--text-primary)]">{choice.label}</p>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-0.5 text-[11px] text-[var(--text-muted)]">
+              When
+              <input
+                type="date"
+                value={when}
+                max={localToday()}
+                onChange={(e) => setWhen(e.target.value || localToday())}
+                className={field}
+              />
+            </label>
+            {choice.code === CREDIT && (
+              <label className="flex flex-col gap-0.5 text-[11px] text-[var(--text-muted)]">
+                What it cost us ($)
+                <input
+                  inputMode="decimal"
+                  value={cost}
+                  placeholder="45.00"
+                  onChange={(e) => setCost(e.target.value)}
+                  className={`${field} w-24 text-right`}
+                />
+              </label>
+            )}
+            <label className="flex min-w-[10rem] flex-1 flex-col gap-0.5 text-[11px] text-[var(--text-muted)]">
+              Note (optional)
+              <input
+                value={note}
+                maxLength={500}
+                onChange={(e) => setNote(e.target.value)}
+                className={field}
+              />
+            </label>
+          </div>
+          {(costProblem || failed) && (
+            <p className="text-[11px] text-[var(--red)]">{costProblem ?? `Couldn't record: ${failed}`}</p>
+          )}
+          <div className="flex gap-1">
+            <button
+              disabled={saving || !!costProblem}
+              onClick={record}
+              className="rounded-md bg-[var(--accent)] px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-40"
+            >
+              {saving ? 'Recording…' : 'Record'}
+            </button>
+            <button
+              disabled={saving}
+              onClick={() => setChoice(null)}
+              className="text-[11px] text-[var(--text-muted)] underline"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-1">
+          {kinds.map((kind) => (
+            <button
+              key={kind.code}
+              disabled={saving}
+              onClick={() => choose(kind)}
+              className="rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40"
+            >
+              {kind.label}
+            </button>
+          ))}
+        </div>
+      )}
     </li>
   )
 }

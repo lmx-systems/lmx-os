@@ -183,7 +183,10 @@ export const api = {
 
   consequenceKinds: () => request<ConsequenceOption[]>('/operations/consequence-kinds'),
 
-  recordConsequence: (orderId: string, body: { kind: string; detail?: string }) =>
+  recordConsequence: (
+    orderId: string,
+    body: { kind: string; detail?: string; occurred_at?: string; amount_cents?: number },
+  ) =>
     request<{ outcome_id: string; consequence: string }>(`/orders/${orderId}/consequence`, {
       method: 'POST',
       body: JSON.stringify(body),

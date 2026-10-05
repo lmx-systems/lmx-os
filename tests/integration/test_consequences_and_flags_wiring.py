@@ -29,6 +29,7 @@ from app.models.order import Order, OrderStatus
 from app.models.outcome_entry import KIND_DELIVERED, SUBJECT_ORDER, OutcomeEntry
 from app.ops_auth.dependencies import AuthedOpsUser
 from app.record.consequences import (
+    CONSEQUENCE_CREDIT,
     CONSEQUENCE_ESCALATION,
     CONSEQUENCE_LABELS,
     CONSEQUENCES,
@@ -185,6 +186,92 @@ class TestADispatcherCanRecordWhatHappened:
         )
 
         assert await late_orders_awaiting_judgement(db_session, hub_id=hub.id, now=NOW) == []
+
+    async def _entry(self, db_session, order) -> OutcomeEntry:
+        return (
+            await db_session.execute(
+                select(OutcomeEntry).where(
+                    OutcomeEntry.subject_id == order.id, OutcomeEntry.kind == "disputed"
+                )
+            )
+        ).scalar_one()
+
+    async def test_a_consequence_heard_about_later_keeps_its_own_date(self, db_session):
+        """The console sent only the kind, so a call taken on Monday and recorded on
+        Thursday was dated Thursday - in a label set that a model learns timing from."""
+        from app.api.routes import record_order_consequence
+
+        hub = await _hub(db_session)
+        order = await _late_delivery(db_session, hub)
+        heard = datetime.now(timezone.utc) - timedelta(days=3)
+
+        await record_order_consequence(
+            order_id=order.id,
+            body=ConsequenceRequest(kind=CONSEQUENCE_ESCALATION, occurred_at=heard),
+            session=db_session,
+            _ops=OPS,
+        )
+
+        assert (await self._entry(db_session, order)).occurred_at == heard
+
+    async def test_a_credit_records_what_it_cost(self, db_session):
+        from app.api.routes import record_order_consequence
+
+        hub = await _hub(db_session)
+        order = await _late_delivery(db_session, hub)
+
+        await record_order_consequence(
+            order_id=order.id,
+            body=ConsequenceRequest(kind=CONSEQUENCE_CREDIT, amount_cents=4_500),
+            session=db_session,
+            _ops=OPS,
+        )
+
+        assert (await self._entry(db_session, order)).values["amount_cents"] == 4_500
+
+    async def test_a_consequence_dated_in_the_future_is_refused(self, db_session):
+        from fastapi import HTTPException
+
+        from app.api.routes import record_order_consequence
+
+        hub = await _hub(db_session)
+        order = await _late_delivery(db_session, hub)
+
+        with pytest.raises(HTTPException) as exc:
+            await record_order_consequence(
+                order_id=order.id,
+                body=ConsequenceRequest(
+                    kind=CONSEQUENCE_ESCALATION,
+                    occurred_at=datetime.now(timezone.utc) + timedelta(days=1),
+                ),
+                session=db_session,
+                _ops=OPS,
+            )
+        assert exc.value.status_code == 422
+
+    async def test_only_a_credit_has_an_amount(self, db_session):
+        """An amount on a phone call would be counted as money nobody spent."""
+        from fastapi import HTTPException
+
+        from app.api.routes import record_order_consequence
+
+        hub = await _hub(db_session)
+        order = await _late_delivery(db_session, hub)
+
+        with pytest.raises(HTTPException) as exc:
+            await record_order_consequence(
+                order_id=order.id,
+                body=ConsequenceRequest(kind=CONSEQUENCE_ESCALATION, amount_cents=4_500),
+                session=db_session,
+                _ops=OPS,
+            )
+        assert exc.value.status_code == 422
+
+    async def test_a_credit_cannot_cost_less_than_nothing(self, db_session):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ConsequenceRequest(kind=CONSEQUENCE_CREDIT, amount_cents=-100)
 
     async def test_an_invented_consequence_is_refused(self, db_session):
         from fastapi import HTTPException
