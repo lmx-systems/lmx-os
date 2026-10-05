@@ -2,13 +2,18 @@ import { useMemo, useState } from 'react'
 import { Card } from './ui/Card'
 import { Chip } from './ui/Chip'
 import { TierBadge } from './ui/Badge'
+import { api } from '../lib/api'
 import { truncateId } from '../lib/format'
-import type { ExceptionItem, ExceptionQueue } from '../lib/types'
+import type { ExceptionItem, ExceptionQueue, ResolutionAction } from '../lib/types'
 
 interface ExceptionsPanelProps {
   data: ExceptionQueue | null
   error: Error | null
   loading: boolean
+  // Resolving a failed delivery is admin-only on the server.
+  isAdmin: boolean
+  onResolved: () => void
+  onToast: (message: string) => void
 }
 
 /**
@@ -59,7 +64,14 @@ function waited(minutes: number): string {
   return rest ? `${hours}h ${rest}m` : `${hours}h`
 }
 
-export function ExceptionsPanel({ data, error, loading }: ExceptionsPanelProps) {
+export function ExceptionsPanel({
+  data,
+  error,
+  loading,
+  isAdmin,
+  onResolved,
+  onToast,
+}: ExceptionsPanelProps) {
   const [kind, setKind] = useState<(typeof KINDS)[number]>('all')
 
   const rows = useMemo(() => {
@@ -145,7 +157,12 @@ export function ExceptionsPanel({ data, error, loading }: ExceptionsPanelProps) 
                       </span>
                       {item.detail}
                     </td>
-                    <td className="py-2.5 text-[var(--text-secondary)]">{item.next_action}</td>
+                    <td className="py-2.5 text-[var(--text-secondary)]">
+                      {item.next_action}
+                      {isAdmin && item.kind === 'delivery_failed' && (
+                        <Resolve item={item} onResolved={onResolved} onToast={onToast} />
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -160,5 +177,94 @@ export function ExceptionsPanel({ data, error, loading }: ExceptionsPanelProps) 
         </>
       )}
     </Card>
+  )
+}
+
+const RESOLUTIONS: {
+  action: ResolutionAction
+  label: string
+  done: string
+  // Asked once more before it happens, because nothing reopens the order after.
+  confirm: string | null
+}[] = [
+  { action: 'redeliver', label: 'Redeliver', done: 'is back in the hold queue for another attempt', confirm: null },
+  {
+    action: 'return_to_shop',
+    label: 'Return to shop',
+    done: 'is going back to the shop',
+    confirm: 'Send the parts back to the shop? This closes the order.',
+  },
+  {
+    action: 'cancel',
+    label: 'Cancel order',
+    done: 'is cancelled',
+    confirm: "Cancel this order? It can't be reopened.",
+  },
+]
+
+/**
+ * What becomes of a failed delivery (docs/ROADMAP.md R5).
+ *
+ * The row told a dispatcher to "resolve it (retry, return to shop, or cancel)"
+ * and offered no way to, though the endpoint existed: a failed order sat here
+ * until somebody called the API by hand.
+ */
+function Resolve({
+  item,
+  onResolved,
+  onToast,
+}: {
+  item: ExceptionItem
+  onResolved: () => void
+  onToast: (message: string) => void
+}) {
+  const [confirming, setConfirming] = useState<(typeof RESOLUTIONS)[number] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState<string | null>(null)
+
+  async function resolve(choice: (typeof RESOLUTIONS)[number]) {
+    setBusy(true)
+    setFailed(null)
+    try {
+      await api.resolveOrder(item.order_id, choice.action)
+      onToast(`${item.external_ref || truncateId(item.order_id)} ${choice.done}.`)
+      onResolved()
+    } catch (e) {
+      setFailed((e as Error).message)
+    } finally {
+      setBusy(false)
+      setConfirming(null)
+    }
+  }
+
+  const button =
+    'rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40'
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+      {confirming ? (
+        <>
+          <span className="text-[11px] text-[var(--text-primary)]">{confirming.confirm}</span>
+          <button disabled={busy} onClick={() => resolve(confirming)} className={button}>
+            {busy ? 'Working…' : `Yes, ${confirming.label.toLowerCase()}`}
+          </button>
+          <button disabled={busy} onClick={() => setConfirming(null)} className={button}>
+            Keep it
+          </button>
+        </>
+      ) : (
+        RESOLUTIONS.map((choice) => (
+          <button
+            key={choice.action}
+            disabled={busy}
+            onClick={() => (choice.confirm ? setConfirming(choice) : resolve(choice))}
+            className={button}
+          >
+            {choice.label}
+          </button>
+        ))
+      )}
+      {failed && <span className="text-[11px] text-[var(--red)]">Couldn't resolve: {failed}</span>}
+    </div>
   )
 }

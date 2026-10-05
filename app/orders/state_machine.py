@@ -89,8 +89,11 @@ _FORWARD: dict[OrderStatus, tuple[OrderStatus, ...]] = {
     OrderStatus.picked_up: (OrderStatus.en_route_drop, OrderStatus.delivered),
     OrderStatus.en_route_drop: (OrderStatus.delivered,),
     # A failed order is not finished - R5's resolution decides whether it is
-    # redelivered (back to assigned), returned to the hub, or cancelled.
+    # redelivered, returned to the hub, or cancelled. A redelivery re-enters
+    # through the hold queue like a new order (app/delivery/resolution.py), so
+    # `held` is its next status; it wrote that directly, around this table.
     OrderStatus.delivery_failed: (
+        OrderStatus.held,
         OrderStatus.assigned,
         OrderStatus.queued,
         OrderStatus.returned,

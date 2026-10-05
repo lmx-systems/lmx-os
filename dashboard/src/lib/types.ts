@@ -363,6 +363,16 @@ export interface OverrideReasonOption {
  * here: an override of a decision nobody recorded contradicts nothing, and a
  * client doing the subtraction itself would read the missing side as a mismatch.
  */
+// What becomes of a failed delivery (docs/ROADMAP.md R5), and what resolving it did.
+export type ResolutionAction = 'redeliver' | 'return_to_shop' | 'cancel'
+
+export interface OrderResolutionResult {
+  order_id: string
+  status: string
+  delivery_attempts: number
+  action: ResolutionAction
+}
+
 export interface OverrideResult {
   id: string
   order_id: string

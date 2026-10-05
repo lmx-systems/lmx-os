@@ -233,6 +233,13 @@ function App() {
                       data={exceptions.data}
                       error={exceptions.error}
                       loading={exceptions.loading}
+                      isAdmin={opsProfile.role === 'admin'}
+                      onResolved={() => {
+                        exceptions.refetchNow()
+                        // A redelivery is back in the hold queue.
+                        held.refetchNow()
+                      }}
+                      onToast={showToast}
                     />
                     <HoldQueueTable key={hubId} data={held.data} error={held.error} loading={held.loading} />
                   </>
