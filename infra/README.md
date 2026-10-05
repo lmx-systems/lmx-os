@@ -160,7 +160,9 @@ infra/
    Omitting `--role` on a re-run leaves the existing role alone, so a reset
    never silently demotes an admin.
 
-   Then create a hub from the console. A hub is the root of everything -
+   Then create a hub from the console: signed in as that admin, with no hub
+   selected, the page shows a form for one (name, coordinates, time zone and
+   state). A hub is the root of everything -
    clients, drivers, routes and closures all hang off one, and public client
    signup is refused outright when none exists.
 

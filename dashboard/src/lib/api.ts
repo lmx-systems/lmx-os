@@ -12,6 +12,7 @@ import type {
   GigDensityReport,
   GigJob,
   HubClosure,
+  HubCreate,
   ReturnItem,
   DriverOnboardingBody,
   DriverOnboardingResult,
@@ -286,6 +287,14 @@ export const api = {
   // somebody wondering why a driver's overtime looks wrong should not need an
   // admin to find out.
   hubSettings: (hubId: string) => request<HubSettings>(`/admin/hubs/${hubId}`),
+
+  // Admin. The first hub needed an API call with an ops token until the console
+  // could make one - there was no other way in on a fresh deploy.
+  createHub: (body: HubCreate) =>
+    request<HubSettings>('/admin/hubs', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   // Admin. `Hub.state_code` selects a driver's overtime rule and was set by
   // nothing until this existed (docs/ROADMAP_AUDIT_2026-09.md).
