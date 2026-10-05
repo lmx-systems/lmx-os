@@ -85,6 +85,9 @@ export interface InvoiceSummaryView {
   period_start: string
   period_end: string
   generated_at: string
+  // What was charged, what was credited back, and what is owed.
+  gross_cents: number
+  credit_cents: number
   total_cents: number
   order_count: number
 }
@@ -98,8 +101,20 @@ export interface InvoiceLineItem {
   fee_cents: number
 }
 
+// One service-level credit, with the evidence for it, worst first.
+export interface InvoiceCreditLine {
+  order_id: string
+  sla_tier: string
+  amount_cents: number
+  reason: string
+  promised_by: string
+  delivered_at: string
+  minutes_late: number
+}
+
 export interface InvoiceDetailView extends InvoiceSummaryView {
   line_items: InvoiceLineItem[]
+  credits: InvoiceCreditLine[]
 }
 
 // Mirrors app/schemas/returns.py's ReturnItemView (docs/ROADMAP.md W1).
