@@ -102,7 +102,7 @@ does not buy a faster tier.
 | Status | Meaning |
 |---|---|
 | `401` | Key is missing, unknown, revoked, or your account isn't active. |
-| `422` | We couldn't resolve the pickup address, or a field is malformed. The message says which. |
+| `422` | We couldn't resolve the pickup or delivery address, or a field is malformed. The message says which. |
 | `429` | Over the per-key limit. Back off and retry. |
 
 **A `422` on an address is a refusal, not a hint.** We don't guess coordinates — a
