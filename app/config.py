@@ -41,6 +41,11 @@ class Settings(BaseSettings):
 
     # Batch-hold queue (Section 8): default clustering radius in miles.
     batch_hold_cluster_radius_miles: float = 0.8
+    # How near a driver's route has to pass a released order's pickup before the
+    # order is added to that route (the design doc's §6, third question: "a
+    # driver already heading in this direction"). The doc names no figure for
+    # this one, so it starts at the clustering radius above.
+    in_flight_insertion_radius_miles: float = 0.8
 
     # Dispatch optimizer cycle budget in seconds (Section 9 performance
     # target: <5s for a hub with up to 20 drivers / 100 open orders).

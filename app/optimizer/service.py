@@ -18,8 +18,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 
+from app.batch_queue.clustering import miles_between
 from app.batch_queue.queue import HeldOrder, run_hold_cycle
 from app import metrics
 from app.batch_queue.store import HoldQueueStore
@@ -34,11 +35,14 @@ from app.models.order import Order, OrderStatus
 from app.orders.status_service import advance_orders
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
+from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 from app.optimizer.google_routes_client import RouteOptimizationClient, get_route_optimization_client
 from app.optimizer.last_cycle_store import LastCycleStore
 from app.redis_client import get_client
 from app.schemas.fleet import DriverState
+from app.sla.commitment import delivery_commitment, terms_for_client
+from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES, minutes_for_miles
 from app.schemas.optimizer import (
     CyclePlan,
     DriverCandidate,
@@ -89,6 +93,18 @@ async def _released_by_dispatcher(held_orders: list[HeldOrder]) -> set[str]:
             select(Order.id).where(Order.id.in_(order_ids), Order.status == OrderStatus.queued)
         )
         return {str(order_id) for order_id in released}
+
+
+def _miles(a_lat, a_lng, b_lat, b_lng) -> float | None:
+    """Straight-line miles, or None when either end is unknown.
+
+    The same arithmetic billing prices a drop with, reached through the hold
+    queue's clustering rather than through billing: the optimizer is core and
+    billing is the edge (tests/test_architecture_boundaries.py).
+    """
+    if a_lat is None or a_lng is None or b_lat is None or b_lng is None:
+        return None
+    return miles_between(float(a_lat), float(a_lng), float(b_lat), float(b_lng))
 
 
 class DispatchOptimizerService:
@@ -468,8 +484,18 @@ class DispatchOptimizerService:
         complete_stop/flag_stop_issue maintain) rather than a stop count -
         a route with no fleet state on file (driver offline/unknown) is
         skipped defensively rather than assumed to have room.
+
+        **Only a driver who is passing** (design doc §6, third question). An
+        order goes onto the route whose remaining stops end nearest its pickup,
+        within `in_flight_insertion_radius_miles`, and only if the detour still
+        lands the order by its promise. Before this it went onto the first
+        route with room, wherever that driver was going: a van at the far end
+        of the hub picked up a two-mile detour, and the order's own promise was
+        never looked at. A route whose end can't be placed - no stop with an
+        address and no live position - isn't "passing", and is left alone.
         """
         inserted: set[str] = set()
+        radius = settings.in_flight_insertion_radius_miles
 
         async with session_scope() as session:
             routes_result = await session.execute(
@@ -490,9 +516,25 @@ class DispatchOptimizerService:
                     # this gap since a route is always built from a full
                     # offer payload with both sides already resolved.
                     continue
+                shop = await session.get(Shop, order.shop_id)
+                if shop is None:
+                    continue
 
                 candidate_weight = stops_by_id[order_id].weight_units
+                # A string either way: an enum when freshly loaded, a plain string
+                # on an un-refreshed instance (see app/delivery/resolution.py).
+                tier = str(getattr(order.sla_tier, "value", order.sla_tier) or "")
+                term = (
+                    (await terms_for_client(session, order.client_id)).get(tier)
+                    if order.client_id is not None and tier
+                    else None
+                )
+                promise = delivery_commitment(order, term).promised_delivery_by
+                pickup_to_drop = minutes_for_miles(
+                    _miles(shop.lat, shop.lng, order.delivery_lat, order.delivery_lng) or 0.0
+                )
 
+                best: tuple[float, Route, datetime, datetime] | None = None
                 for route in active_routes:
                     driver_state = await self._fleet_state.get_driver_state(hub_id, str(route.driver_id))
                     if driver_state is None:
@@ -501,62 +543,130 @@ class DispatchOptimizerService:
                     if remaining_capacity < candidate_weight:
                         continue
 
-                    next_sequence = (
-                        (await session.execute(select(func.max(Stop.sequence)).where(Stop.route_id == route.id))).scalar_one()
-                        or 0
-                    ) + 1
-
-                    pickup = Stop(
-                        route_id=route.id,
-                        shop_id=order.shop_id,
-                        sequence=next_sequence,
-                        stop_type="pickup",
-                        parcel_count=1,
+                    end = await self._route_end(session, hub_id, route)
+                    if end is None:
+                        continue
+                    end_lat, end_lng, free_at = end
+                    detour = _miles(end_lat, end_lng, shop.lat, shop.lng)
+                    if detour is None or detour > radius:
+                        continue
+                    at_pickup = free_at + timedelta(minutes=minutes_for_miles(detour))
+                    at_drop = at_pickup + timedelta(
+                        minutes=PLACEHOLDER_STOP_SERVICE_MINUTES + pickup_to_drop
                     )
-                    session.add(pickup)
-                    await session.flush()
-                    session.add(StopOrder(stop_id=pickup.id, order_id=order.id))
+                    if promise is not None and at_drop > promise:
+                        continue
+                    if best is None or detour < best[0]:
+                        best = (detour, route, at_pickup, at_drop)
 
-                    dropoff = Stop(
-                        route_id=route.id,
-                        shop_id=None,
-                        sequence=next_sequence + 1,
-                        stop_type="dropoff",
-                        parcel_count=1,
-                    )
-                    session.add(dropoff)
-                    await session.flush()
-                    session.add(StopOrder(stop_id=dropoff.id, order_id=order.id))
-
-                    route.plan_version += 1
-                    await session.execute(
-                        update(Order)
-                        .where(Order.id == order.id)
-                        .values(status=OrderStatus.assigned, assigned_at=datetime.now(timezone.utc))
-                    )
-                    await session.commit()
-
-                    event_payload = {
-                        "type": "route_updated",
-                        "route_id": str(route.id),
-                        "plan_version": route.plan_version,
-                        "change": "stop_added",
-                        "affected_stop_ids": [str(pickup.id), str(dropoff.id)],
-                        "message": "New stop added ahead on your route",
-                        "occurred_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                    await get_client().publish(f"driver_route_events:{route.driver_id}", json.dumps(event_payload))
-
+                if best is None:
                     logger.info(
-                        "route_stop_inserted_live",
+                        "route_stop_insertion_no_passing_driver",
                         hub_id=hub_id,
-                        route_id=str(route.id),
-                        driver_id=str(route.driver_id),
                         order_id=order_id,
-                        plan_version=route.plan_version,
+                        active_routes=len(active_routes),
                     )
+                    continue
+                detour_miles, route, at_pickup, at_drop = best
 
-                    inserted.add(order_id)
-                    break  # this order placed - move on to the next unassigned one
+                next_sequence = (
+                    (await session.execute(select(func.max(Stop.sequence)).where(Stop.route_id == route.id))).scalar_one()
+                    or 0
+                ) + 1
+
+                pickup = Stop(
+                    route_id=route.id,
+                    shop_id=order.shop_id,
+                    sequence=next_sequence,
+                    stop_type="pickup",
+                    parcel_count=1,
+                    planned_eta=at_pickup,
+                )
+                session.add(pickup)
+                await session.flush()
+                session.add(StopOrder(stop_id=pickup.id, order_id=order.id))
+
+                dropoff = Stop(
+                    route_id=route.id,
+                    shop_id=None,
+                    sequence=next_sequence + 1,
+                    stop_type="dropoff",
+                    parcel_count=1,
+                    planned_eta=at_drop,
+                )
+                session.add(dropoff)
+                await session.flush()
+                session.add(StopOrder(stop_id=dropoff.id, order_id=order.id))
+
+                route.plan_version += 1
+                # Through the state machine, as the cycle's own assignments are
+                # since #168: a plain UPDATE here meant a client never heard that
+                # an inserted order had been assigned.
+                for moved in await advance_orders(session, [order.id], OrderStatus.assigned):
+                    moved.assigned_at = datetime.now(timezone.utc)
+                await session.commit()
+
+                event_payload = {
+                    "type": "route_updated",
+                    "route_id": str(route.id),
+                    "plan_version": route.plan_version,
+                    "change": "stop_added",
+                    "affected_stop_ids": [str(pickup.id), str(dropoff.id)],
+                    "message": "New stop added ahead on your route",
+                    "occurred_at": datetime.now(timezone.utc).isoformat(),
+                }
+                await get_client().publish(f"driver_route_events:{route.driver_id}", json.dumps(event_payload))
+
+                logger.info(
+                    "route_stop_inserted_live",
+                    hub_id=hub_id,
+                    route_id=str(route.id),
+                    driver_id=str(route.driver_id),
+                    order_id=order_id,
+                    plan_version=route.plan_version,
+                    detour_miles=round(detour_miles, 2),
+                )
+
+                inserted.add(order_id)
 
         return inserted
+
+    async def _route_end(
+        self, session, hub_id: str, route: Route
+    ) -> tuple[float, float, datetime] | None:
+        """Where this route's driver will be when its last stop is done, and when.
+
+        The last stop by sequence: a pickup is at its shop, a drop-off at its
+        order's delivery address. Its `planned_eta` says when; a stop never
+        given one is taken as now, which understates the ETA rather than
+        inventing one. A stop with no address at all falls back to the driver's
+        live position, as of now. None when neither is known: a route whose end
+        can't be placed is not known to be passing anything.
+        """
+        last = (
+            await session.execute(
+                select(Stop).where(Stop.route_id == route.id).order_by(Stop.sequence.desc()).limit(1)
+            )
+        ).scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+        if last is not None:
+            free_at = last.planned_eta or now
+            if last.stop_type == "pickup" and last.shop_id is not None:
+                shop = await session.get(Shop, last.shop_id)
+                if shop is not None and shop.lat is not None and shop.lng is not None:
+                    return float(shop.lat), float(shop.lng), free_at
+            else:
+                drop = (
+                    await session.execute(
+                        select(Order.delivery_lat, Order.delivery_lng)
+                        .join(StopOrder, StopOrder.order_id == Order.id)
+                        .where(StopOrder.stop_id == last.id, Order.delivery_lat.is_not(None))
+                        .limit(1)
+                    )
+                ).first()
+                if drop is not None:
+                    return float(drop.delivery_lat), float(drop.delivery_lng), free_at
+        position = await self._fleet_state.get_driver_location(hub_id, str(route.driver_id))
+        if position is None:
+            return None
+        return position.lat, position.lng, now
