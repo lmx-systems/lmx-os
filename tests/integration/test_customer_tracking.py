@@ -24,7 +24,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.api.public_routes import track_delivery
+from app.api.public_routes import rate_delivery, track_delivery
 from app.config import settings
 from app.fleet_state.manager import FleetStateManager
 from app.models.client import Client
@@ -35,6 +35,7 @@ from app.models.route import Route
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 from app.schemas.fleet import DriverLocation
+from app.schemas.tracking import SubmitRatingBody
 from app.tracking.service import (
     TrackingTokenInvalid,
     ensure_tracking_token,
@@ -832,6 +833,27 @@ async def test_the_page_gets_proof_it_can_load(db_session, real_redis_client, ph
 
     view = await track_delivery(order.tracking_token, _Request(), session=db_session)
 
+    for stored, served in ((photo, view.pod_photo_url), (signature, view.pod_signature_url)):
+        assert served.startswith(stored + "?")
+        assert "X-Amz-Signature=" in served
+
+
+async def test_rating_keeps_the_proof_on_the_page(db_session, real_redis_client, photo_bucket):
+    """The page swaps in the rating's reply as its new view, and that reply left
+    the proof out: the photo and signature vanished the moment the recipient
+    rated."""
+    hub_id, client_id, shop_id, driver_id = await _seed(db_session)
+    photo = photo_bucket + "pod/a/b/photo-c.jpg"
+    signature = photo_bucket + "pod/a/b/signature-c.png"
+    order = await _delivered_with_photo(
+        db_session, hub_id, client_id, shop_id, driver_id, photo, signature=signature
+    )
+
+    view = await rate_delivery(
+        order.tracking_token, SubmitRatingBody(score=5), _Request(), session=db_session
+    )
+
+    assert view.rating.score == 5
     for stored, served in ((photo, view.pod_photo_url), (signature, view.pod_signature_url)):
         assert served.startswith(stored + "?")
         assert "X-Amz-Signature=" in served
