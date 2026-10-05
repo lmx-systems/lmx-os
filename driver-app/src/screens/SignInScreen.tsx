@@ -1,14 +1,17 @@
-import { useMemo, useState } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-import { api, ApiError } from '../api/client';
+import { api } from '../api/client';
+import { getApiBaseUrl } from '../api/serverUrl';
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TextField } from '../components/TextField';
 import type { AuthStackParamList } from '../navigation/types';
 import { spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
+import { signInFailure } from '../utils/signInFailure';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'SignIn'>;
 
@@ -21,6 +24,10 @@ export function SignInScreen({ navigation }: Props) {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Read again whenever the screen comes back into view, so an address changed
+  // on the Server screen shows here on return.
+  const [server, setServer] = useState(getApiBaseUrl());
+  useFocusEffect(useCallback(() => setServer(getApiBaseUrl()), []));
 
   async function handleContinue() {
     if (!phone.trim()) return;
@@ -30,7 +37,7 @@ export function SignInScreen({ navigation }: Props) {
       const result = await api.requestOtp(phone.trim());
       navigation.navigate('VerifyCode', { phone: phone.trim(), debugCode: result.debug_code });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
+      setError(signInFailure(err, server));
     } finally {
       setLoading(false);
     }
@@ -61,6 +68,19 @@ export function SignInScreen({ navigation }: Props) {
       <Text style={[styles.footerText, styles.centered, styles.footer]}>
         New driver? Apply to drive
       </Text>
+
+      {/* Before a session exists, because signing in needs the right server.
+          It was only under Profile, which is behind sign-in. */}
+      <Pressable
+        onPress={() => navigation.navigate('Server')}
+        accessibilityRole="button"
+        hitSlop={8}
+        style={styles.serverRow}
+      >
+        <Text style={[styles.footerText, styles.centered]}>
+          Server: {server} · Change
+        </Text>
+      </Pressable>
     </ScreenContainer>
   );
 }
@@ -75,5 +95,6 @@ const makeStyles = (colors: ColorScheme) =>
     centered: { textAlign: 'center' },
     tagline: { marginBottom: spacing.xxl },
     footer: { marginTop: spacing.lg },
+    serverRow: { marginTop: spacing.md, minHeight: 44, justifyContent: 'center' },
     error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
   });

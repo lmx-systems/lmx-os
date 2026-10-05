@@ -3,6 +3,10 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 export type AuthStackParamList = {
   SignIn: undefined;
   VerifyCode: { phone: string; debugCode: string | null };
+  // The same screen as Profile's. Signing in needs the right server, so the
+  // address has to be changeable before there is a session: every build ships
+  // localhost, which on a phone is the phone.
+  Server: undefined;
 };
 
 // The job-delivery loop (screens 1d-1m, plus 1p's masked customer
