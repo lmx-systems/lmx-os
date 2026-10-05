@@ -46,7 +46,6 @@ from app.models.hub import Hub
 from app.models.location import Location
 from app.models.order import Order
 from app.models.receiver_profile import ReceiverProfile
-from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 
 # How long a dock's answers are trusted before somebody is asked again.
@@ -60,19 +59,19 @@ MAX_SURVEYS_PER_SHIFT = 3
 async def location_for_stop(session: AsyncSession, stop: Stop) -> Location | None:
     """The dock this stop delivers to, or None when the record cannot say.
 
-    A dropoff's dock is reached through the order's shop, which `IDN-1` links to
-    a `Location` at creation. None is a real answer and the caller must treat it
-    as one: an address that named no place gets no `location_id` deliberately,
-    because the alternative was every such address collapsing into one shared
-    fictional dock.
+    The order's `delivery_location_id`, which intake resolves from the delivery
+    address through `IDN-1`. This went through the order's shop before, and the
+    shop is the *pickup*: every survey taken at a delivery door was filed under
+    the distributor's yard, and asked for again there a year later.
+
+    None is a real answer and the caller must treat it as one: an address that
+    named no place gets no dock deliberately, because the alternative was every
+    such address collapsing into one shared fictional dock. Orders from before
+    the column existed have none either.
     """
-    # Through the order, not `stop.shop_id`: that column carries the *pickup*
-    # shop and is null on a dropoff, which is exactly the stop whose dock this
-    # survey is about.
     location_id = (
         await session.execute(
-            select(Shop.location_id)
-            .join(Order, Order.shop_id == Shop.id)
+            select(Order.delivery_location_id)
             .join(StopOrder, StopOrder.order_id == Order.id)
             .where(StopOrder.stop_id == stop.id)
             .limit(1)

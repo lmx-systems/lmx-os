@@ -30,6 +30,7 @@ from app.experiment import (
     control_arm_is_live,
 )
 from app.identity import link_shop_to_dock, receiver_key_for
+from app.identity.resolution import resolve_location
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.record.abstention import record_arm_abstention
@@ -536,6 +537,22 @@ async def ingest_lmx_order(
             )
         drop_lat, drop_lng = resolved_drop.lat, resolved_drop.lng
 
+    # The receiving door's dock (IDN-1), the way the shop gets its own. Without
+    # it a drop-off had no dock: its stop carries no shop, and going through the
+    # order's shop found the pickup, which is where the dock survey was filed.
+    delivery_location_id = None
+    if lmx.drop_address_raw:
+        try:
+            delivery_location_id = (
+                await resolve_location(
+                    session, address=lmx.drop_address_raw, lat=drop_lat, lng=drop_lng
+                )
+            ).id
+        except ValueError:
+            # An address that names no place gets no dock, as IDN-1 says, rather
+            # than every such address pooling into one.
+            logger.info("delivery_address_names_no_dock", address=lmx.drop_address_raw)
+
     order = Order(
         hub_id=uuid.UUID(lmx.hub_id),
         client_id=uuid.UUID(lmx.client_id) if lmx.client_id else None,
@@ -576,6 +593,7 @@ async def ingest_lmx_order(
         delivery_contact_name=lmx.drop_contact_name,
         delivery_contact_phone=lmx.drop_contact_phone,
         delivery_notes=lmx.access_notes,
+        delivery_location_id=delivery_location_id,
         intake_mode=mode,
     )
     session.add(order)
