@@ -17,11 +17,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Literal, overload
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.identity.resolution import canonical_location
 from app.models.location import Location
+from app.models.order import Order
 from app.models.receiver_profile import (
     CARRY_EFFORTS,
     CURB_ACCESS,
@@ -38,7 +39,7 @@ from app.models.receiver_profile import (
 )
 from app.models.route import Route
 from app.models.shop import Shop
-from app.models.stop import Stop
+from app.models.stop import Stop, StopOrder
 from app.models.stop_geofence_event import KIND_ENTER, KIND_EXIT, StopGeofenceEvent
 
 _WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -116,11 +117,36 @@ def _geofence_edge(kind: str, label: str):
     )
 
 
+def _stop_docks():
+    """Which dock each stop was at: (stop_id, location_id), as a subquery.
+
+    Two ways a stop reaches a dock. A pickup carries the shop, whose dock IDN-1
+    resolved; a drop-off carries no shop, and reaches the receiving door through
+    its order's `delivery_location_id`. Only the first existed before, so the
+    dwell at the delivery door - the one M1 is about - was never measured, and
+    "observed dwell" meant time at the distributor's counter.
+    """
+    at_shop = (
+        select(Stop.id.label("stop_id"), Shop.location_id.label("location_id"))
+        .join(Shop, Stop.shop_id == Shop.id)
+        .where(Shop.location_id.is_not(None))
+    )
+    at_door = (
+        select(Stop.id.label("stop_id"), Order.delivery_location_id.label("location_id"))
+        .join(StopOrder, StopOrder.stop_id == Stop.id)
+        .join(Order, Order.id == StopOrder.order_id)
+        .where(Stop.stop_type == "dropoff", Order.delivery_location_id.is_not(None))
+    )
+    # A union, not union all: a drop-off that carries two orders to one door is
+    # one visit to it.
+    return union(at_shop, at_door).subquery()
+
+
 def _completed_dwells_at(location_id) -> Select:
     """Seconds at the door, for stops that actually finished.
 
-    Joined through `Shop.location_id` because that is how a stop reaches a dock,
-    and restricted to `status == 'completed'`: a failed or flagged stop never
+    Joined through `_stop_docks`, which is how a stop reaches a dock from either
+    end of a route, and restricted to `status == 'completed'`: a failed or flagged stop never
     produced a true dwell, only a lower bound on one (M1b). Counting those as
     observations would bias the worst docks downward, which is the one direction
     that breaks an SLA promise rather than merely being wrong.
@@ -141,17 +167,18 @@ def _completed_dwells_at(location_id) -> Select:
     """
     enters = _geofence_edge(KIND_ENTER, "entered_at")
     exits = _geofence_edge(KIND_EXIT, "exited_at")
+    docks = _stop_docks()
 
     arrived = func.coalesce(enters.c.entered_at, Stop.arrived_at)
     departed = func.coalesce(exits.c.exited_at, Stop.completed_at)
 
     return (
         select(func.extract("epoch", departed - arrived).label("dwell"))
-        .join(Shop, Stop.shop_id == Shop.id)
+        .join(docks, docks.c.stop_id == Stop.id)
         .outerjoin(enters, enters.c.stop_id == Stop.id)
         .outerjoin(exits, exits.c.stop_id == Stop.id)
         .where(
-            Shop.location_id == location_id,
+            docks.c.location_id == location_id,
             Stop.status == "completed",
             arrived.is_not(None),
             departed.is_not(None),
@@ -187,11 +214,12 @@ async def refresh_dwell_statistics(
         )
     ).one()
 
+    docks = _stop_docks()
     censored = await session.scalar(
         select(func.count())
         .select_from(Stop)
-        .join(Shop, Stop.shop_id == Shop.id)
-        .where(Shop.location_id == dock.id, Stop.status == "failed")
+        .join(docks, docks.c.stop_id == Stop.id)
+        .where(docks.c.location_id == dock.id, Stop.status == "failed")
     )
 
     profile.dwell_sample_count = int(row.n or 0)
@@ -385,14 +413,15 @@ async def refresh_hub_dwell_statistics(
     # Ids first, grouped, then the rows. A `SELECT DISTINCT` cannot order by a
     # column it does not select, and the column worth ordering by - when this
     # dock was last observed - lives on the profile rather than the dock.
+    docks = _stop_docks()
     ordered = (
         await session.execute(
             select(
                 Location.id,
                 func.min(ReceiverProfile.dwell_observed_at).label("observed"),
             )
-            .join(Shop, Shop.location_id == Location.id)
-            .join(Stop, Stop.shop_id == Shop.id)
+            .join(docks, docks.c.location_id == Location.id)
+            .join(Stop, Stop.id == docks.c.stop_id)
             # Through the route, because a `Stop` has no hub of its own - it
             # belongs to a route, and the route belongs to a hub.
             .join(Route, Stop.route_id == Route.id)

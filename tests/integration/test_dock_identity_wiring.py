@@ -33,7 +33,7 @@ from app.models.location import Location
 from app.models.receiver_profile import ReceiverProfile
 from app.models.route import Route
 from app.models.shop import Shop
-from app.models.stop import Stop
+from app.models.stop import Stop, StopOrder
 from app.schemas.lmx_order import LMXOrder
 
 pytestmark = pytest.mark.integration
@@ -231,6 +231,78 @@ class TestDwellIsActuallyRefreshed:
         )
         assert profile.dwell_p50_seconds is not None
         assert profile.dwell_p90_seconds is None
+
+    async def _dropped_off(self, db_session, hub_id, order, *, seconds):
+        """A completed drop-off of `order`: no shop on the stop, as a drop-off
+        has none, reaching its dock through the order."""
+        when = datetime.now(timezone.utc) - timedelta(hours=2)
+        driver = Driver(
+            hub_id=hub_id, name="Sam D.", phone=f"+1555555{uuid.uuid4().int % 10000:04d}",
+            vehicle_capacity_units=5,
+        )
+        db_session.add(driver)
+        await db_session.flush()
+        route = Route(hub_id=hub_id, driver_id=driver.id, status="completed")
+        db_session.add(route)
+        await db_session.flush()
+        stop = Stop(
+            route_id=route.id, stop_type="dropoff", sequence=2, status="completed",
+            arrived_at=when, completed_at=when + timedelta(seconds=seconds),
+        )
+        db_session.add(stop)
+        await db_session.flush()
+        db_session.add(StopOrder(stop_id=stop.id, order_id=order.id))
+        await db_session.flush()
+        return stop
+
+    async def test_the_delivery_door_gets_its_dwell_too(self, db_session, real_redis_client):
+        """A drop-off carries no shop, so it reached no dock, and the time at the
+        receiving door - the dwell M1 is about - was never measured. "Observed
+        dwell" meant time at the distributor's counter."""
+        hub_id, client_id = await _seed(db_session)
+        order = await ingest_lmx_order(
+            db_session, HoldQueueStore(), _order(hub_id, client_id), geocoder=FakeGeocoder()
+        )
+        for seconds in (400, 500, 600):
+            await self._dropped_off(db_session, hub_id, order, seconds=seconds)
+        await db_session.commit()
+
+        refreshed = await refresh_hub_dwell_statistics(db_session, hub_id=hub_id)
+
+        assert refreshed == 1
+        door = await db_session.scalar(
+            select(ReceiverProfile).where(
+                ReceiverProfile.location_id == order.delivery_location_id
+            )
+        )
+        assert door.dwell_sample_count == 3
+        assert door.dwell_p50_seconds == 500
+
+    async def test_the_pickups_dwell_and_the_doors_stay_apart(
+        self, db_session, real_redis_client
+    ):
+        hub_id, client_id = await _seed(db_session)
+        order = await ingest_lmx_order(
+            db_session, HoldQueueStore(), _order(hub_id, client_id), geocoder=FakeGeocoder()
+        )
+        shop = await db_session.get(Shop, order.shop_id)
+        await self._stop_at(db_session, hub_id, shop, seconds=100)
+        await self._dropped_off(db_session, hub_id, order, seconds=900)
+        await db_session.commit()
+
+        refreshed = await refresh_hub_dwell_statistics(db_session, hub_id=hub_id)
+
+        assert refreshed == 2
+        counter = await db_session.scalar(
+            select(ReceiverProfile).where(ReceiverProfile.location_id == shop.location_id)
+        )
+        door = await db_session.scalar(
+            select(ReceiverProfile).where(
+                ReceiverProfile.location_id == order.delivery_location_id
+            )
+        )
+        assert (counter.dwell_sample_count, counter.dwell_p50_seconds) == (1, 100)
+        assert (door.dwell_sample_count, door.dwell_p50_seconds) == (1, 900)
 
     async def test_a_dock_with_no_completed_stops_is_not_touched(
         self, db_session, real_redis_client
