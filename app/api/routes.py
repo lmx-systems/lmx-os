@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from typing import Annotated
 
@@ -56,6 +56,7 @@ from app.identity.merge import (
 )
 from app.identity.node_class import classification_coverage, set_node_class
 from app.record.consequences import (
+    CONSEQUENCE_CREDIT,
     CONSEQUENCE_LABELS,
     CONSEQUENCES,
     late_orders_awaiting_judgement,
@@ -602,6 +603,11 @@ async def consequence_kinds(
     ]
 
 
+# How far ahead of the server's clock a consequence may be dated: a laptop clock
+# that runs a little fast shouldn't refuse "it happened just now".
+_CLOCK_GRACE = timedelta(minutes=5)
+
+
 @router.post("/orders/{order_id}/consequence", response_model=dict)
 async def record_order_consequence(
     order_id: uuid.UUID,
@@ -625,12 +631,28 @@ async def record_order_consequence(
     order = await session.get(Order, order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="No such order")
+
+    # A label is only as good as its date and its amount, and the ledger is
+    # append-only, so a wrong one is never corrected - only outvoted.
+    now = datetime.now(timezone.utc)
+    occurred_at = body.occurred_at or now
+    if occurred_at.tzinfo is None:
+        # The console sends a zone. A script that doesn't means UTC far more often
+        # than anything else, and comparing a naive time below would raise.
+        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+    if occurred_at > now + _CLOCK_GRACE:
+        raise HTTPException(status_code=422, detail="A consequence can't be dated in the future")
+    if body.amount_cents is not None and body.kind != CONSEQUENCE_CREDIT:
+        raise HTTPException(
+            status_code=422, detail="Only a credit has an amount: it records what the credit cost"
+        )
+
     try:
         entry = await record_consequence(
             session,
             order,
             body.kind,
-            occurred_at=body.occurred_at or datetime.now(timezone.utc),
+            occurred_at=occurred_at,
             detail=body.detail,
             amount_cents=body.amount_cents,
         )

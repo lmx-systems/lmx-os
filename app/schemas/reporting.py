@@ -252,7 +252,7 @@ class ConsequenceRequest(BaseModel):
     )
     detail: str | None = Field(default=None, max_length=500)
     amount_cents: int | None = Field(
-        default=None, description="For credit_issued - what it cost us."
+        default=None, ge=0, description="For credit_issued - what it cost us."
     )
 
 
