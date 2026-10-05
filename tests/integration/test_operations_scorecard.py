@@ -495,24 +495,64 @@ async def test_hold_window_flags_are_rated_against_completed_deliveries(db_sessi
 async def test_an_unrelated_flag_does_not_count_as_a_hold_problem(db_session):
     """Only the two hold-window flags. A driver noting a gate code is useful annotation
     and says nothing about whether the window was right."""
+    from app.learning_loop.detection import HOLD_TOO_LONG_FLAG
+
     hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
     at = NOW - timedelta(hours=4)
     route = await _delivered_stops(db_session, hub_id, driver_id, count=2, at=at)
-    stop = (
-        await db_session.execute(select(Stop).where(Stop.route_id == route.id).limit(1))
-    ).scalars().first()
+    gate, held = (
+        await db_session.execute(select(Stop).where(Stop.route_id == route.id))
+    ).scalars().all()
     db_session.add(
-        StopFlag(
-            stop_id=stop.id,
-            flag_type="gate_code_needed",
-            created_by_driver_id=driver_id,
-        )
+        StopFlag(stop_id=gate.id, flag_type="gate_code_needed", created_by_driver_id=driver_id)
+    )
+    db_session.add(
+        StopFlag(stop_id=held.id, flag_type=HOLD_TOO_LONG_FLAG, created_by_driver_id=driver_id)
     )
     await db_session.commit()
 
     rate = _find(await build_operations_scorecard(db_session, now=NOW), "held wrong")
-    assert rate.numerator == 0
+    assert rate.numerator == 1
     assert rate.denominator == 2
+
+
+async def test_no_held_wrong_flag_ever_recorded_is_not_a_measured_zero(db_session):
+    """Nothing raises these flags yet, so the rate read 0% held wrong: a perfect
+    record, quoted from an instrument that doesn't exist."""
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    await _delivered_stops(db_session, hub_id, driver_id, count=3, at=NOW - timedelta(hours=4))
+
+    rate = _find(await build_operations_scorecard(db_session, now=NOW), "held wrong")
+
+    assert rate.percentage is None
+    assert "nothing has recorded a held-wrong flag yet" in rate.not_measured
+
+
+async def test_once_a_flag_exists_a_quiet_month_is_a_measured_zero(db_session):
+    """The first flag ever recorded makes this a measurement, so a window with none
+    is a real zero and says so."""
+    from app.learning_loop.detection import HOLD_TOO_SHORT_FLAG
+
+    hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
+    old_route = await _delivered_stops(
+        db_session, hub_id, driver_id, count=1, at=NOW - timedelta(days=90)
+    )
+    [old_stop] = (
+        await db_session.execute(select(Stop).where(Stop.route_id == old_route.id))
+    ).scalars().all()
+    flag = StopFlag(
+        stop_id=old_stop.id, flag_type=HOLD_TOO_SHORT_FLAG, created_by_driver_id=driver_id
+    )
+    db_session.add(flag)
+    await db_session.commit()
+    flag.created_at = NOW - timedelta(days=90)
+    await db_session.commit()
+    await _delivered_stops(db_session, hub_id, driver_id, count=2, at=NOW - timedelta(hours=4))
+
+    rate = _find(await build_operations_scorecard(db_session, now=NOW), "held wrong")
+
+    assert rate.not_measured is None
+    assert (rate.numerator, rate.denominator) == (0, 2)
 
 
 # ---------------------------------------------------------------------------
