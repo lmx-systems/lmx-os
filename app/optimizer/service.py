@@ -31,6 +31,7 @@ from app.record.decisions import MODE_LIVE
 from app.fleet_state.manager import FleetStateManager
 from app.messaging.job_offer_notifications import notify_driver_of_new_offer
 from app.models.order import Order, OrderStatus
+from app.orders.status_service import advance_orders
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.models.stop import Stop, StopOrder
@@ -276,11 +277,17 @@ class DispatchOptimizerService:
         # with no request of its own (app/optimizer/event_trigger.py).
         if assigned_stop_ids:
             async with session_scope() as session:
-                await session.execute(
-                    update(Order)
-                    .where(Order.id.in_(uuid.UUID(order_id) for order_id in assigned_stop_ids))
-                    .values(status=OrderStatus.assigned, assigned_at=datetime.now(timezone.utc))
+                # Through the state machine, so the transition reaches the status
+                # sinks. This was a plain UPDATE, and no client ever got ASSIGNED.
+                assigned_at = datetime.now(timezone.utc)
+                moved = await advance_orders(
+                    session,
+                    [uuid.UUID(order_id) for order_id in assigned_stop_ids],
+                    OrderStatus.assigned,
+                    occurred_at=assigned_at,
                 )
+                for order in moved:
+                    order.assigned_at = assigned_at
 
         # Extend a job offer to each assigned driver rather than handing them
         # a route directly - see app/models/route_offer.py. Order.status is

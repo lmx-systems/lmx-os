@@ -38,6 +38,7 @@ from app.models.parcel import Parcel
 from app.models.return_item import ReturnItem
 from app.models.rules import ActiveRule
 from app.models.shop import Shop
+from app.orders.sinks import emit_status_change
 from app.schemas.lmx_order import LMXOrder
 from app.schemas.order import NormalizedOrder
 from app.sla.commitment import delivery_commitment, terms_for_client
@@ -695,6 +696,23 @@ async def ingest_lmx_order(
         )
         hold_deadline = now
         order.hold_deadline = now
+
+    if mode != INTAKE_BACKFILL:
+        # The order's first status a client can see. Written straight to `held`
+        # above rather than through advance_orders, so until this nothing emitted
+        # it and a client's webhook never heard that the order had arrived.
+        # History is excluded: a client has no use for news of an old delivery.
+        await session.flush()
+        await emit_status_change(
+            session=session,
+            order_id=str(order.id),
+            client_id=str(order.client_id) if order.client_id else None,
+            source_system=order.source_system,
+            source_order_ref=order.source_order_ref,
+            previous=OrderStatus.received,
+            current=OrderStatus.held,
+            occurred_at=now,
+        )
 
     await session.commit()
     metrics.ORDERS_INGESTED.labels(hub_id=lmx.hub_id, source_system=lmx.source_system).inc()

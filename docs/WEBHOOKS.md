@@ -38,9 +38,12 @@ you may not be able to do.
 
 ### Statuses
 
-`RECEIVED`, `CLASSIFIED`, `HELD`, `QUEUED`, `ASSIGNED`, `ACCEPTED`,
-`EN_ROUTE_PICKUP`, `PICKED_UP`, `EN_ROUTE_DROP`, `DELIVERED`, `EXCEPTION_RAISED`,
-`RETURNED_TO_HUB`, `CANCELLED`.
+`HELD`, `ASSIGNED`, `ACCEPTED`, `EN_ROUTE_PICKUP`, `PICKED_UP`, `EN_ROUTE_DROP`,
+`DELIVERED`, `EXCEPTION_RAISED`, `RETURNED_TO_HUB`, `CANCELLED`.
+
+An order's first event is `HELD`, sent when we accept it, with `previous_status`
+`RECEIVED`. If no driver takes an assigned order - one declines, or the offer
+lapses - you get `HELD` again, then `ASSIGNED` once it goes to someone else.
 
 Treat unknown values as informational and don't fail on them — we add states as
 the operation grows, and a handler that 400s on an unrecognised status will stop
