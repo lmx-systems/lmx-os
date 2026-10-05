@@ -509,6 +509,44 @@ async def test_the_caller_cannot_set_their_own_sla(db_session, real_redis_client
     assert result.collect_by is not None
 
 
+async def test_the_response_carries_the_promise_from_the_clients_terms(
+    db_session, real_redis_client
+):
+    """docs/ORDER_API.md tells an integrator that `collect_by` and `promised_at` are
+    the commitment. `promised_at` came from a column intake never fills for an order
+    LMX classifies, so every response, created or looked up, said null."""
+    from app.models.client_sla_term import ClientSlaTerm
+
+    _hub_id, client_id = await _seed_client(db_session)
+    db_session.add(ClientSlaTerm(client_id=client_id, sla_tier="T2", delivery_target_minutes=60))
+    await db_session.commit()
+    token = await _key_for(db_session, client_id)
+    body = _order_body()
+
+    created = await submit_order(body, api_client=await _authed(db_session, token), session=db_session)
+    fetched = await get_order(
+        body.your_order_ref, api_client=await _authed(db_session, token), session=db_session
+    )
+
+    order = await db_session.get(Order, uuid.UUID(created.order_id))
+    assert created.sla_tier == "T2"
+    assert created.promised_at == order.requested_at + timedelta(minutes=60)
+    assert fetched.promised_at == created.promised_at
+
+
+async def test_without_a_term_there_is_no_promise(db_session, real_redis_client):
+    """Not a guessed one either: a promise nobody agreed to would be one we credit
+    against."""
+    _hub_id, client_id = await _seed_client(db_session)
+    token = await _key_for(db_session, client_id)
+
+    result = await submit_order(
+        _order_body(), api_client=await _authed(db_session, token), session=db_session
+    )
+
+    assert result.promised_at is None
+
+
 # ---------------------------------------------------------------------------
 # Key management from the portal
 # ---------------------------------------------------------------------------

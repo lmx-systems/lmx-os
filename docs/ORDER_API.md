@@ -97,6 +97,10 @@ classifies the order into an SLA tier from your contract terms, and the response
 `collect_by` and `promised_at` are the commitment. Writing a tighter `deliver_by`
 does not buy a faster tier.
 
+`promised_at` is your contract's delivery target for that tier, counted from when
+we received the order. It's `null` until your account has a service term for the
+tier: we don't invent a promise nobody agreed to.
+
 ### Errors
 
 | Status | Meaning |
