@@ -48,6 +48,7 @@ from app.models.order import Order
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.schemas.lmx_order import LMXOrder
 from app.schemas.public_api import ApiOrderBody, ApiOrderResult
+from app.sla.commitment import delivery_commitment, terms_for_client
 
 logger = structlog.get_logger(__name__)
 
@@ -85,7 +86,7 @@ async def submit_order(
             your_order_ref=body.your_order_ref,
             order_id=str(existing.id),
         )
-        return _result(existing, duplicate=True)
+        return await _result(session, existing, duplicate=True)
 
     lmx = LMXOrder(
         # Not taken from the request. See the module docstring.
@@ -141,7 +142,7 @@ async def submit_order(
         order_id=str(order.id),
         your_order_ref=body.your_order_ref,
     )
-    return _result(order, duplicate=False)
+    return await _result(session, order, duplicate=False)
 
 
 @router.get("/orders/{your_order_ref}", response_model=ApiOrderResult)
@@ -161,7 +162,7 @@ async def get_order(
     order = await _existing_order(session, api_client, your_order_ref)
     if order is None:
         raise HTTPException(status_code=404, detail="No order with that reference")
-    return _result(order, duplicate=False)
+    return await _result(session, order, duplicate=False)
 
 
 # Every order through this endpoint is tagged with one source system, so API traffic
@@ -189,18 +190,29 @@ async def _existing_order(
     return result.scalar_one_or_none()
 
 
-def _result(order: Order, *, duplicate: bool) -> ApiOrderResult:
+async def _result(session: AsyncSession, order: Order, *, duplicate: bool) -> ApiOrderResult:
     if order.sla_tier is None:
         # Ingestion gives every order a tier - classified when LMX owns the promise,
         # a default when someone else does - so this is a broken invariant, and it
         # should say so rather than surface as a validation error in the response.
         raise RuntimeError(f"order {order.id} reached the public API response without a tier")
+    # The commitment docs/ORDER_API.md tells integrators this field carries: the
+    # client's term for the tier, measured from the request, as their portal and
+    # their credits measure it. It read `order.promised_at`, which is set only when a
+    # source system hands us a time, and an order LMX classifies never has one, so
+    # every response said null. Still null without a term: a promise nobody agreed
+    # would be one we credit against.
+    term = (
+        (await terms_for_client(session, order.client_id)).get(order.sla_tier.value)
+        if order.client_id is not None
+        else None
+    )
     return ApiOrderResult(
         order_id=str(order.id),
         your_order_ref=order.source_order_ref or "",
         status=order.status.value,
         sla_tier=order.sla_tier.value,
         collect_by=order.hold_deadline,
-        promised_at=order.promised_at,
+        promised_at=delivery_commitment(order, term).promised_delivery_by,
         duplicate=duplicate,
     )
