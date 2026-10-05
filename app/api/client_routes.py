@@ -71,6 +71,7 @@ from app.legal.documents import (
 from app.models.client_sla_term import ClientSlaTerm
 from app.models.delivery_rating import RECIPIENT, DeliveryRating
 from app.models.order import Order, OrderStatus
+from app.orders.cancellation import OrderNotCancellable, cancel_before_collection
 from app.models.stop import Stop, StopOrder
 from app.storage.photo_upload_client import readable_url
 from app.sla.commitment import delivery_commitment, terms_for_client
@@ -945,6 +946,29 @@ async def _resolve_pickup(
     if shop.external_ref is None:
         return shop.address, None
     return address, shop.external_ref
+
+
+@router.post("/orders/{order_id}/cancel", response_model=ClientOrderDetailView)
+async def cancel_my_order(
+    order_id: str,
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> ClientOrderDetailView:
+    """Take an order back before it is collected (app/orders/cancellation.py).
+
+    404 for another client's order, as `get_my_order`. 409 once a driver has
+    it, with the message saying to call dispatch. Cancelling an order already
+    cancelled is a replay and answers 200 with the order as it stands.
+    """
+    order = await session.get(Order, uuid.UUID(order_id))
+    if order is None or str(order.client_id) != client.client_id:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.status != OrderStatus.cancelled:
+        try:
+            await cancel_before_collection(session, HoldQueueStore(), order)
+        except OrderNotCancellable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return await get_my_order(order_id, client=client, session=session)
 
 
 @router.post("/orders/batch", response_model=ClientOrderBatchResult)

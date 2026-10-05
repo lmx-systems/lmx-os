@@ -129,6 +129,20 @@ while it's off, so poll the affected references once you're back.
 
 ---
 
+## Cancel an order
+
+```http
+DELETE /api/v1/orders/INVOICE-1001
+X-LMX-Api-Key: lmxk_live_…
+```
+
+Returns the order with `"status": "cancelled"`. **Only before it's collected:** once
+a driver has been assigned, the parts may be on a van, and the response is a `409`
+telling you to call dispatch. Cancelling an order that's already cancelled returns
+it as it stands, so a `DELETE` whose response you lost is safe to send again.
+
+---
+
 ## The shape of a good integration
 
 1. Submit on your side's "dispatch" action. Store our `order_id` if you like, but
