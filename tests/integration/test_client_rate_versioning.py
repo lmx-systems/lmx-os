@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.api.admin_routes import list_client_rates, upsert_client_rate
@@ -288,3 +289,20 @@ class TestSomethingFinallyListsClients:
         )
 
         assert [c.name for c in listed] == ["Design Partner"]
+
+
+async def test_a_tier_no_order_carries_is_refused(db_session, real_redis_client):
+    """The console offered T4, and this stored it: a rate no order can match,
+    sitting on the card as if it priced something."""
+    client = await _seed_client(db_session)
+
+    with pytest.raises(HTTPException) as refused:
+        await upsert_client_rate(
+            str(client.id), _body(1_800).model_copy(update={"sla_tier": "T4"}), session=db_session
+        )
+
+    assert refused.value.status_code == 422
+    stored = await db_session.scalar(
+        select(ClientRate.id).where(ClientRate.client_id == client.id, ClientRate.sla_tier == "T4")
+    )
+    assert stored is None

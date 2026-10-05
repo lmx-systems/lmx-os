@@ -38,7 +38,9 @@ import type { AdminClient, ClientRate } from '../lib/types'
  * the row would say so.
  */
 
-const TIERS = ['T1', 'T2', 'T3', 'T4'] as const
+// The tiers the API prices (VALID_SLA_TIERS in app/api/admin_routes.py). This
+// listed T1 to T4: HOT_SHOT could never be priced here, and T4 matched no order.
+const TIERS = ['HOT_SHOT', 'T1', 'T2', 'T3'] as const
 
 function money(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`
@@ -61,7 +63,7 @@ export function ClientRatesPanel({
   const [rates, setRates] = useState<ClientRate[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
-  const [draft, setDraft] = useState({ drop: '', mile: '', piece: '', minimum: '' })
+  const [draft, setDraft] = useState({ drop: '', mile: '', piece: '', weight: '', minimum: '' })
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -99,6 +101,10 @@ export function ClientRatesPanel({
       drop: existing ? (existing.rate_per_drop_cents / 100).toFixed(2) : '',
       mile: existing && existing.rate_per_mile_cents ? (existing.rate_per_mile_cents / 100).toFixed(2) : '',
       piece: existing && existing.rate_per_piece_cents ? (existing.rate_per_piece_cents / 100).toFixed(2) : '',
+      weight:
+        existing && existing.rate_per_weight_unit_cents
+          ? (existing.rate_per_weight_unit_cents / 100).toFixed(2)
+          : '',
       minimum:
         existing && existing.minimum_charge_cents !== null
           ? (existing.minimum_charge_cents / 100).toFixed(2)
@@ -115,7 +121,9 @@ export function ClientRatesPanel({
         rate_per_drop_cents: centsFrom(draft.drop),
         rate_per_mile_cents: centsFrom(draft.mile),
         rate_per_piece_cents: centsFrom(draft.piece),
-        rate_per_weight_unit_cents: 0,
+        // Sent from the form like every other price. This was a constant 0, so
+        // editing anything on a tier wiped its per-weight price.
+        rate_per_weight_unit_cents: centsFrom(draft.weight),
         minimum_charge_cents: draft.minimum.trim() === '' ? null : centsFrom(draft.minimum),
       })
       setEditing(null)
@@ -160,86 +168,95 @@ export function ClientRatesPanel({
 
       {clientId && rates !== null && (
         <>
-          <table className="w-full text-left text-[12.5px]">
-            <thead>
-              <tr className="text-[11px] text-[var(--text-muted)]">
-                <th className="py-1 pr-2 font-medium">Tier</th>
-                <th className="py-1 pr-2 text-right font-medium">Per drop</th>
-                <th className="py-1 pr-2 text-right font-medium">Per mile</th>
-                <th className="py-1 pr-2 text-right font-medium">Per piece</th>
-                <th className="py-1 pr-2 text-right font-medium">Minimum</th>
-                <th className="py-1" />
-              </tr>
-            </thead>
-            <tbody>
-              {TIERS.map((tier) => {
-                const rate = byTier.get(tier)
-                if (editing === tier) {
+          {/* Its own scroll: seven columns outgrow a narrow card. */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[12.5px]">
+              <thead>
+                <tr className="text-[11px] text-[var(--text-muted)]">
+                  <th className="py-1 pr-2 font-medium">Tier</th>
+                  <th className="py-1 pr-2 text-right font-medium">Per drop</th>
+                  <th className="py-1 pr-2 text-right font-medium">Per mile</th>
+                  <th className="py-1 pr-2 text-right font-medium">Per piece</th>
+                  <th className="py-1 pr-2 text-right font-medium">Per weight unit</th>
+                  <th className="py-1 pr-2 text-right font-medium">Minimum</th>
+                  <th className="py-1" />
+                </tr>
+              </thead>
+              <tbody>
+                {TIERS.map((tier) => {
+                  const rate = byTier.get(tier)
+                  if (editing === tier) {
+                    return (
+                      <tr key={tier} className="border-t border-[var(--border)]">
+                        <td className="py-1 pr-2 text-[var(--text-primary)]">{tier}</td>
+                        {(['drop', 'mile', 'piece', 'weight', 'minimum'] as const).map((field) => (
+                          <td key={field} className="py-1 pr-2">
+                            <input
+                              inputMode="decimal"
+                              value={draft[field]}
+                              placeholder={field === 'minimum' ? 'none' : '0.00'}
+                              onChange={(e) => setDraft({ ...draft, [field]: e.target.value })}
+                              className="w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-right text-[12.5px] text-[var(--text-primary)]"
+                            />
+                          </td>
+                        ))}
+                        <td className="py-1 text-right">
+                          <button
+                            disabled={busy}
+                            onClick={() => save(tier)}
+                            className="mr-1 rounded-md bg-[var(--accent)] px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-40"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditing(null)}
+                            className="text-[11px] text-[var(--text-muted)] underline"
+                          >
+                            Cancel
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  }
                   return (
                     <tr key={tier} className="border-t border-[var(--border)]">
                       <td className="py-1 pr-2 text-[var(--text-primary)]">{tier}</td>
-                      {(['drop', 'mile', 'piece', 'minimum'] as const).map((field) => (
-                        <td key={field} className="py-1 pr-2">
-                          <input
-                            inputMode="decimal"
-                            value={draft[field]}
-                            placeholder={field === 'minimum' ? 'none' : '0.00'}
-                            onChange={(e) => setDraft({ ...draft, [field]: e.target.value })}
-                            className="w-full rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-right text-[12.5px] text-[var(--text-primary)]"
-                          />
-                        </td>
-                      ))}
+                      <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-primary)]">
+                        {rate ? money(rate.rate_per_drop_cents) : '—'}
+                      </td>
+                      <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-secondary)]">
+                        {rate && rate.rate_per_mile_cents ? money(rate.rate_per_mile_cents) : '—'}
+                      </td>
+                      <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-secondary)]">
+                        {rate && rate.rate_per_piece_cents ? money(rate.rate_per_piece_cents) : '—'}
+                      </td>
+                      <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-secondary)]">
+                        {rate && rate.rate_per_weight_unit_cents
+                          ? money(rate.rate_per_weight_unit_cents)
+                          : '—'}
+                      </td>
+                      <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-secondary)]">
+                        {rate && rate.minimum_charge_cents !== null
+                          ? money(rate.minimum_charge_cents)
+                          : '—'}
+                      </td>
                       <td className="py-1 text-right">
                         <button
-                          disabled={busy}
-                          onClick={() => save(tier)}
-                          className="mr-1 rounded-md bg-[var(--accent)] px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-40"
-                        >
-                          Save
-                        </button>
-                        <button
-                          onClick={() => setEditing(null)}
+                          onClick={() => startEdit(tier, rate)}
                           className="text-[11px] text-[var(--text-muted)] underline"
                         >
-                          Cancel
+                          {rate ? 'Change' : 'Set'}
                         </button>
                       </td>
                     </tr>
                   )
-                }
-                return (
-                  <tr key={tier} className="border-t border-[var(--border)]">
-                    <td className="py-1 pr-2 text-[var(--text-primary)]">{tier}</td>
-                    <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-primary)]">
-                      {rate ? money(rate.rate_per_drop_cents) : '—'}
-                    </td>
-                    <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-secondary)]">
-                      {rate && rate.rate_per_mile_cents ? money(rate.rate_per_mile_cents) : '—'}
-                    </td>
-                    <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-secondary)]">
-                      {rate && rate.rate_per_piece_cents ? money(rate.rate_per_piece_cents) : '—'}
-                    </td>
-                    <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-secondary)]">
-                      {rate && rate.minimum_charge_cents !== null
-                        ? money(rate.minimum_charge_cents)
-                        : '—'}
-                    </td>
-                    <td className="py-1 text-right">
-                      <button
-                        onClick={() => startEdit(tier, rate)}
-                        className="text-[11px] text-[var(--text-muted)] underline"
-                      >
-                        {rate ? 'Change' : 'Set'}
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                })}
+              </tbody>
+            </table>
+          </div>
 
           <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-            Components add up: base + miles + pieces, floored at the minimum. A change
+            Components add up: base + miles + pieces + weight, floored at the minimum. A change
             applies to the <strong>next</strong> order — fees are frozen on an order when
             it is taken, so editing a card never moves an invoice that has already been
             priced.
