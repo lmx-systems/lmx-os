@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { api, ApiError } from '../lib/api'
 import type { ClientOrderDetailView } from '../lib/types'
 import { formatCents, formatDate, formatFailureReason, formatStatus, isFailedStatus } from '../lib/format'
 import { TierBadge } from './TierBadge'
@@ -5,7 +7,12 @@ import { TierBadge } from './TierBadge'
 interface OrderDetailProps {
   order: ClientOrderDetailView
   onBack: () => void
+  onCancelled: (order: ClientOrderDetailView) => void
 }
+
+// Before a driver has it. Mirrors app/orders/cancellation.py; the server is the
+// judge, this only decides whether to show the button.
+const CANCELLABLE = ['received', 'classified', 'held', 'queued']
 
 const PROOF_METHOD: Record<string, string> = {
   photo: 'Photographed at drop-off',
@@ -19,7 +26,7 @@ function loadable(url: string | null): string | null {
   return url && /^https?:\/\//i.test(url) ? url : null
 }
 
-export function OrderDetail({ order, onBack }: OrderDetailProps) {
+export function OrderDetail({ order, onBack, onCancelled }: OrderDetailProps) {
   return (
     <div className="flex flex-col gap-4">
       <button
@@ -165,7 +172,74 @@ export function OrderDetail({ order, onBack }: OrderDetailProps) {
             <dd className="mt-0.5 text-[var(--text-secondary)]">{order.delivery_contact_name ?? '—'}</dd>
           </div>
         </dl>
+
+        {CANCELLABLE.includes(order.status) && (
+          <CancelOrder order={order} onCancelled={onCancelled} />
+        )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Take the order back before it's collected. The only cancel anywhere was ops
+ * resolving a failed delivery, so an order placed twice went out regardless.
+ * Asks once more first, since nothing reopens it.
+ */
+function CancelOrder({
+  order,
+  onCancelled,
+}: {
+  order: ClientOrderDetailView
+  onCancelled: (order: ClientOrderDetailView) => void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [refused, setRefused] = useState<string | null>(null)
+
+  async function cancel() {
+    setBusy(true)
+    setRefused(null)
+    try {
+      onCancelled(await api.cancelOrder(order.order_id))
+    } catch (err) {
+      // A 409 says why in words a client can act on ("call dispatch").
+      setRefused(err instanceof ApiError ? err.message : 'Could not cancel the order. Try again.')
+      setConfirming(false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-6 border-t border-[var(--border)] pt-4 text-sm">
+      {confirming ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-[var(--text-primary)]">Cancel this order? It won't be collected.</span>
+          <button
+            onClick={cancel}
+            disabled={busy}
+            className="rounded-[var(--radius)] bg-[var(--red)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+          >
+            {busy ? 'Cancelling…' : 'Yes, cancel it'}
+          </button>
+          <button
+            onClick={() => setConfirming(false)}
+            disabled={busy}
+            className="text-xs font-medium text-[var(--text-secondary)] underline"
+          >
+            Keep it
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setConfirming(true)}
+          className="text-xs font-medium text-[var(--text-secondary)] underline hover:text-[var(--text-primary)]"
+        >
+          Cancel this order
+        </button>
+      )}
+      {refused && <p className="mt-2 text-xs text-[var(--text-muted)]">{refused}</p>}
     </div>
   )
 }

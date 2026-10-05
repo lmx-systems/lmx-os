@@ -44,7 +44,8 @@ from app.ingestion.service import (
     ShopNotFoundError,
     ingest_lmx_order,
 )
-from app.models.order import Order
+from app.models.order import Order, OrderStatus
+from app.orders.cancellation import OrderNotCancellable, cancel_before_collection
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.schemas.lmx_order import LMXOrder
 from app.schemas.public_api import ApiOrderBody, ApiOrderResult
@@ -162,6 +163,29 @@ async def get_order(
     order = await _existing_order(session, api_client, your_order_ref)
     if order is None:
         raise HTTPException(status_code=404, detail="No order with that reference")
+    return await _result(session, order, duplicate=False)
+
+
+@router.delete("/orders/{your_order_ref}", response_model=ApiOrderResult)
+async def cancel_order(
+    your_order_ref: str,
+    api_client: AuthedApiClient = Depends(get_api_client),
+    session: AsyncSession = Depends(get_db),
+) -> ApiOrderResult:
+    """Take an order back before it is collected (docs/ORDER_API.md).
+
+    Idempotent like the POST: a DELETE whose response was lost can be sent
+    again, and an order already cancelled answers 200 as it stands. 409 once a
+    driver has it - that is a phone call, not an API call.
+    """
+    order = await _existing_order(session, api_client, your_order_ref)
+    if order is None:
+        raise HTTPException(status_code=404, detail="No order with that reference")
+    if order.status != OrderStatus.cancelled:
+        try:
+            await cancel_before_collection(session, HoldQueueStore(), order)
+        except OrderNotCancellable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     return await _result(session, order, duplicate=False)
 
 

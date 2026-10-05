@@ -439,7 +439,14 @@ export default function App() {
         )}
         {view.name === 'order-detail' &&
           (selectedOrder ? (
-            <OrderDetail order={selectedOrder} onBack={() => setView({ name: 'orders' })} />
+            <OrderDetail
+              order={selectedOrder}
+              onBack={() => setView({ name: 'orders' })}
+              onCancelled={(order) => {
+                setSelectedOrder(order)
+                loadOrders().catch(() => {})
+              }}
+            />
           ) : (
             <div className="text-sm text-[var(--text-muted)]">Loading order…</div>
           ))}

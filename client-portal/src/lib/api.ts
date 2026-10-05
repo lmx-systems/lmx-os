@@ -198,6 +198,9 @@ export const api = {
   // Placing an order (LMX_LINK_PLAN.md §2.2).
   submitOrder: (body: ClientOrderBody) =>
     request<ClientOrderResult>('/client/orders', { method: 'POST', body: JSON.stringify(body) }),
+  // Before collection only; the server answers 409 once a driver has it.
+  cancelOrder: (orderId: string) =>
+    request<ClientOrderDetailView>(`/client/orders/${orderId}/cancel`, { method: 'POST' }),
 
   // Public signup - the only call here made with no token at all. The
   // endpoint is exempt from ops auth (app/ops_auth/middleware.py) and
