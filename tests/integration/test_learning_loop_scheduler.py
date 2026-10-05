@@ -104,6 +104,32 @@ async def test_runs_the_nightly_job_on_an_open_day(db_session, real_redis_client
     assert called == [str(hub.id)]
 
 
+async def test_a_failed_rule_detection_does_not_cost_the_night_its_other_steps(
+    db_session, real_redis_client, monkeypatch
+):
+    """Rule detection ran outside the per-step tries the rest of the night has,
+    so its failure skipped the dwell refresh, silences, linkage flags, labels
+    and merges, and left the day unmarked to fail again on every poll."""
+    hub = await _seed_hub(db_session, tz="UTC")
+    _set_fixed_utc_hour(monkeypatch, scheduler_module.NIGHTLY_RUN_LOCAL_HOUR)
+
+    async def _fails(session, *, hub_id):
+        raise RuntimeError("rule detection fell over")
+
+    refreshed = []
+
+    async def _refresh(session, *, hub_id):
+        refreshed.append(hub_id)
+        return 0
+
+    monkeypatch.setattr(scheduler_module, "run_nightly_job", _fails)
+    monkeypatch.setattr(scheduler_module, "refresh_hub_dwell_statistics", _refresh)
+    await LearningLoopScheduler().maybe_run_for_hub(hub)
+
+    assert refreshed == [str(hub.id)]
+    assert await real_redis_client.get(_last_run_date_key(str(hub.id))) == "2026-07-22"
+
+
 async def test_does_not_run_twice_in_the_same_local_day(db_session, real_redis_client, monkeypatch):
     hub = await _seed_hub(db_session, tz="UTC")
     _set_fixed_utc_hour(monkeypatch, scheduler_module.NIGHTLY_RUN_LOCAL_HOUR)
