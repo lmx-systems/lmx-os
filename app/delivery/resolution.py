@@ -25,6 +25,7 @@ from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
 from app.models.order import Order, OrderStatus
 from app.models.shop import Shop
+from app.orders.status_service import advance_orders
 from app.sla.engine import resolve_hold_window_minutes
 
 REDELIVER = "redeliver"
@@ -59,13 +60,29 @@ async def resolve_failed_order(
     if action == REDELIVER:
         await _redeliver(session, hold_queue, order)
     elif action == RETURN_TO_SHOP:
-        order.status = OrderStatus.returned
+        await _move(session, order, OrderStatus.returned)
     elif action == CANCEL:
-        order.status = OrderStatus.cancelled
+        await _move(session, order, OrderStatus.cancelled)
     else:
         raise ValueError(f"Unknown resolution action: {action!r}")
     await session.commit()
     return order
+
+
+async def _move(session: AsyncSession, order: Order, status: OrderStatus) -> None:
+    """Through the state machine, so the status sinks hear it.
+
+    Written directly, as these were, no client's webhook was ever told that a
+    failed order had been returned, cancelled or put back in the queue - the
+    last thing it heard was that the delivery had failed.
+    """
+    moved = await advance_orders(session, [order.id], status)
+    if not moved:
+        # Unreachable while the caller checks for delivery_failed first; loud
+        # rather than a resolution that silently changed nothing.
+        raise OrderNotFailedError(
+            f"Order {order.id} could not move from '{order.status.value}' to '{status.value}'"
+        )
 
 
 async def _redeliver(session: AsyncSession, hold_queue: HoldQueueStore, order: Order) -> None:
@@ -102,7 +119,6 @@ async def _redeliver(session: AsyncSession, hold_queue: HoldQueueStore, order: O
     hold_minutes = resolve_hold_window_minutes(tier)
 
     order.delivery_attempts += 1
-    order.status = OrderStatus.held
     order.hold_deadline = now + timedelta(minutes=hold_minutes)
     # Clear the prior attempt's failure reason - this order is back in
     # flight, not failed, so client/ops views shouldn't still show why the
@@ -112,6 +128,7 @@ async def _redeliver(session: AsyncSession, hold_queue: HoldQueueStore, order: O
     # reads this as still attached to the old, failed stop.
     order.assigned_at = None
     await session.flush()
+    await _move(session, order, OrderStatus.held)
 
     await hold_queue.add(
         str(order.hub_id),

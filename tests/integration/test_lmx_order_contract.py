@@ -277,9 +277,15 @@ def test_an_order_can_be_cancelled_from_any_live_status():
 
 
 def test_a_failed_delivery_is_not_terminal():
-    """R5: a failed order still has to be redelivered, returned or cancelled."""
+    """R5: a failed order still has to be redelivered, returned or cancelled. A
+    redelivery goes back through the hold queue, so `held` is among them."""
     assert OrderStatus.delivery_failed not in allowed_next(OrderStatus.delivered)
-    for resolution in (OrderStatus.assigned, OrderStatus.returned, OrderStatus.cancelled):
+    for resolution in (
+        OrderStatus.held,
+        OrderStatus.assigned,
+        OrderStatus.returned,
+        OrderStatus.cancelled,
+    ):
         assert can_transition(OrderStatus.delivery_failed, resolution) is True
 
 

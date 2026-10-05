@@ -38,7 +38,9 @@ import type {
   RecordHealth,
   UnlabelledDock,
   OverrideReasonOption,
+  OrderResolutionResult,
   OverrideResult,
+  ResolutionAction,
   OpsAuthToken,
   OpsProfileView,
   OptimizationResult,
@@ -173,6 +175,14 @@ export const api = {
     request<OverrideResult>(`/orders/${orderId}/override`, {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+
+  // R5: redeliver, return to the shop, or cancel a failed delivery. Admin-only on
+  // the server, and until now called by nothing.
+  resolveOrder: (orderId: string, action: ResolutionAction) =>
+    request<OrderResolutionResult>(`/admin/orders/${orderId}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
     }),
 
   // Late deliveries nobody has judged (docs/ROADMAP_1.5.md REC-2). The worklist

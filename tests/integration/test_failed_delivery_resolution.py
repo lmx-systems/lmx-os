@@ -8,12 +8,14 @@ from datetime import date, datetime, timezone
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from app.api.admin_routes import resolve_order
 from app.batch_queue.store import HoldQueueStore
 from app.billing.service import NoBillableOrdersError, generate_invoice
 from app.delivery.resolution import OrderNotFailedError, resolve_failed_order
 from app.models.client import Client
+from app.models.client_webhook import ClientWebhookEndpoint, WebhookDelivery, new_webhook_secret
 from app.models.hub import Hub
 from app.models.order import Order, OrderStatus
 from app.models.shop import Shop
@@ -121,3 +123,35 @@ async def test_a_redelivered_then_delivered_order_bills_exactly_once(db_session)
     # Re-running finds nothing new - it was billed once (Order.invoice_id set).
     with pytest.raises(NoBillableOrdersError):
         await generate_invoice(db_session, client_id, date(2026, 6, 1), date(2026, 7, 1))
+
+
+@pytest.mark.parametrize(
+    ("action", "told"),
+    [
+        ("redeliver", ("EXCEPTION_RAISED", "HELD")),
+        ("return_to_shop", ("EXCEPTION_RAISED", "RETURNED_TO_HUB")),
+        ("cancel", ("EXCEPTION_RAISED", "CANCELLED")),
+    ],
+)
+async def test_the_client_hears_how_a_failed_order_was_resolved(
+    db_session, real_redis_client, action, told
+):
+    """Each resolution wrote its status directly, around the state machine, so a
+    client's webhook last heard that the delivery failed and never what became
+    of the order."""
+    order, _hub, client_id, _shop = await _seed_order(db_session)
+    db_session.add(
+        ClientWebhookEndpoint(
+            client_id=client_id,
+            url="https://consumer.example.com/lmx",
+            secret=new_webhook_secret(),
+        )
+    )
+    await db_session.commit()
+
+    await resolve_failed_order(db_session, HoldQueueStore(), order, action)
+
+    sent = (
+        await db_session.execute(select(WebhookDelivery).order_by(WebhookDelivery.sequence))
+    ).scalars()
+    assert [(row.payload["previous_status"], row.payload["status"]) for row in sent] == [told]
