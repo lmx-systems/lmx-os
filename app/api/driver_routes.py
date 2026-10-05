@@ -2706,7 +2706,19 @@ async def flag_stop_issue(
     report.
     """
     stop = await _get_owned_stop(session, stop_id, driver, for_update=True)
-    _assert_stop_not_terminal(stop, "flag")
+
+    if stop.status == "failed":
+        # Idempotent replay, as complete_stop's is. The app's offline queue
+        # resends a flag whose response it never got, and a 409 here left that
+        # flag stuck in the queue under "will retry", for good. First write wins:
+        # a different reason is logged, never stored.
+        if stop.failure_reason != body.reason.value:
+            logger.warning(
+                "stop_flag_replay_reason_mismatch", stop_id=stop_id, driver_id=driver.driver_id
+            )
+        return await _stop_view_after_reload(session, stop)
+
+    _assert_stop_not_terminal(stop, "flag")  # a completed stop is a genuine conflict
 
     stop.status = "failed"
     stop.failure_reason = body.reason.value

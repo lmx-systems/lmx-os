@@ -745,3 +745,33 @@ async def test_request_otp_rate_limit_applies_to_unregistered_phone_numbers_too(
     with pytest.raises(HTTPException) as exc_info:
         await request_otp(RequestOtpBody(phone=unregistered_phone), session=db_session)
     assert exc_info.value.status_code == 429
+
+
+async def test_a_flag_resent_after_a_lost_response_is_the_same_success(db_session, real_redis_client):
+    """The app's offline queue resends an action whose response it never got.
+    A resent flag used to get a 409, which left it stuck in the queue under
+    "will retry" with no way to clear it."""
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+    body = FlagStopBody(reason=StopFailureReason.SHOP_CLOSED, note="Shutters down")
+
+    first = await flag_stop_issue(pickup.stop_id, body, driver=authed, session=db_session)
+    again = await flag_stop_issue(pickup.stop_id, body, driver=authed, session=db_session)
+
+    assert first.status == again.status == "failed"
+
+
+async def test_a_resent_flag_keeps_the_first_reason(db_session, real_redis_client):
+    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
+    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
+
+    await flag_stop_issue(
+        pickup.stop_id, FlagStopBody(reason=StopFailureReason.SHOP_CLOSED), driver=authed, session=db_session
+    )
+    await flag_stop_issue(
+        pickup.stop_id, FlagStopBody(reason=StopFailureReason.ACCESS_ISSUE), driver=authed, session=db_session
+    )
+
+    stop = await db_session.get(Stop, uuid.UUID(pickup.stop_id))
+    await db_session.refresh(stop)
+    assert stop.failure_reason == StopFailureReason.SHOP_CLOSED.value
