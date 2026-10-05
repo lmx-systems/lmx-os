@@ -64,6 +64,7 @@ _REASON_TEXT = {
     "sla_hold_deadline_reached": "the hold deadline arrived",
     "dispatcher_released": "a dispatcher released it (see the override)",
     "cluster_mate_found": "batched with another order going the same way",
+    "driver_passing": "a driver already heading that way collected it on the way",
     "would_conflict_with_higher_priority_order": (
         "the only free driver is needed for a more urgent order due soon"
     ),

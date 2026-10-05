@@ -42,17 +42,11 @@ The per-cycle questions, evaluated in order for every held order:
      above only so that an order those would have released anyway records
      the queue's own reason. Like HOT_SHOT, not one of the four canonical
      questions.
-  2. Is there currently no available driver at the hub at all? -> if yes,
-     releasing wouldn't lead to a dispatch anyway, so keep holding
-     regardless of clustering (avoids releasing into a queue with nothing
-     to assign to). A prerequisite underlying question 3, not one of the
-     four questions itself - if there is no driver at all, trivially none
-     is "heading this direction" either.
-  3. (Question 2) Is there another held order within the cluster radius
-     that could be batched? -> if yes, Section 6 says "batch and dispatch
-     together": release it, and its cluster mates release on the same cycle
-     by the same rule. A HOT_SHOT order is nobody's cluster mate, since it
-     is never commingled.
+  2. (Question 2) Is there another held order within the cluster radius
+     that could be batched, and an idle driver to send the batch to? -> if
+     yes, Section 6 says "batch and dispatch together": release it, and its
+     cluster mates release on the same cycle by the same rule. A HOT_SHOT
+     order is nobody's cluster mate, since it is never commingled.
      ...unless (Question 4) dispatching now would strand a more urgent,
      still-held order about to need the same scarce driver supply - then
      keep holding and reassess. The spec words question 4 for a solo
@@ -60,7 +54,19 @@ The per-cycle questions, evaluated in order for every held order:
      a cluster's, and the scarcity it guards against is the same. Only a
      real risk when drivers are tight (<=1 available) - see
      _would_conflict_with_a_more_urgent_order for the exact rule.
-  4. Otherwise keep holding: there is nothing to batch with yet, and the
+  3. (Question 3) Is a driver already heading this way? -> if yes, release
+     it to be collected on that route. The optimizer answers this, since it
+     needs the active routes: the route's end is within
+     `in_flight_insertion_radius_miles` of the shop, the driver has room, and
+     the detour still makes the order's promise. Needs no idle driver, which
+     is the point, so it is asked before the next answer. Until October 2026
+     nothing asked it: the queue counted idle drivers, found none, and held
+     the order while a van passed the shop door.
+  4. Is there currently no available driver at the hub at all? -> if yes,
+     releasing wouldn't lead to a dispatch anyway, so keep holding
+     regardless of clustering (avoids releasing into a queue with nothing
+     to assign to).
+  5. Otherwise keep holding: there is nothing to batch with yet, and the
      order waits for a partner until its deadline. This wait is the queue's
      whole purpose - Section 6: it "waits, deliberately, to create the
      opportunity to send two or three orders together instead of one at a
@@ -171,7 +177,12 @@ def evaluate_held_order(
     now: datetime,
     cluster_radius_miles: float | None = None,
     released_by_dispatcher: bool = False,
+    driver_passing: bool = False,
 ) -> BatchDecision:
+    """`driver_passing`: a driver on an active route will pass this order's shop
+    with room for it and time to make its promise - the optimizer works that out,
+    since it needs the routes (`DispatchOptimizerService._held_orders_a_driver_is_passing`).
+    """
     radius = cluster_radius_miles or settings.batch_hold_cluster_radius_miles
 
     # Question 0: HOT_SHOT never waits to pair with a cluster-mate - see
@@ -212,17 +223,10 @@ def evaluate_held_order(
     ]
     cluster_mate_ids = cluster_members(order.shop_lat, order.shop_lng, candidates, radius)
 
-    # Prerequisite underlying question 3: nothing to dispatch to, so holding
-    # costs nothing extra - keep holding regardless of clustering.
-    if available_driver_count == 0:
-        return BatchDecision(
-            order_id=order.order_id,
-            action="keep_holding",
-            reason="no_available_drivers",
-            cluster_mate_ids=cluster_mate_ids,
-        )
-
-    if cluster_mate_ids:
+    # A batch needs an idle driver to dispatch to; with none, holding the
+    # cluster costs nothing extra. Question 3 below needs no idle driver -
+    # that is its point - so it is asked before the no-driver answer.
+    if cluster_mate_ids and available_driver_count > 0:
         # Question 4: sending this batch now would strand a more urgent order.
         if _would_conflict_with_a_more_urgent_order(
             order,
@@ -246,6 +250,27 @@ def evaluate_held_order(
             cluster_mate_ids=cluster_mate_ids,
         )
 
+    # Question 3: a driver already heading this way collects it on the way,
+    # instead of the order waiting out its hold for a partner that may never
+    # come. Until October 2026 nothing asked this - an active driver passing
+    # the shop door left the order held, because the queue counted only idle
+    # drivers and found none.
+    if driver_passing:
+        return BatchDecision(
+            order_id=order.order_id,
+            action="release",
+            reason="driver_passing",
+            cluster_mate_ids=cluster_mate_ids,
+        )
+
+    if available_driver_count == 0:
+        return BatchDecision(
+            order_id=order.order_id,
+            action="keep_holding",
+            reason="no_available_drivers",
+            cluster_mate_ids=cluster_mate_ids,
+        )
+
     # Nothing to batch with yet. Wait for a partner; the deadline (question 1)
     # sends it alone if none comes.
     return BatchDecision(
@@ -263,10 +288,13 @@ def run_hold_cycle(
     now: datetime | None = None,
     cluster_radius_miles: float | None = None,
     released_by_dispatcher: Collection[str] = (),
+    driver_passing: Collection[str] = (),
 ) -> list[BatchDecision]:
     """Evaluate every currently-held order for one dispatch cycle.
 
-    `released_by_dispatcher` is the ids of held orders a dispatcher released.
+    `released_by_dispatcher` is the ids of held orders a dispatcher released;
+    `driver_passing` the ids a driver on an active route will pass with room
+    and time for (question 3).
     """
     reference_time = now or datetime.utcnow()
     return [
@@ -277,6 +305,7 @@ def run_hold_cycle(
             now=reference_time,
             cluster_radius_miles=cluster_radius_miles,
             released_by_dispatcher=order.order_id in released_by_dispatcher,
+            driver_passing=order.order_id in driver_passing,
         )
         for order in held_orders
     ]
