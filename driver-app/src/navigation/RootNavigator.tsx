@@ -43,6 +43,11 @@ function AuthNavigator() {
     <AuthStack.Navigator screenOptions={{ headerShown: false }}>
       <AuthStack.Screen name="SignIn" component={SignInScreen} />
       <AuthStack.Screen name="VerifyCode" component={VerifyCodeScreen} />
+      <AuthStack.Screen
+        name="Server"
+        component={ServerScreen}
+        options={{ headerShown: true, title: 'Server' }}
+      />
     </AuthStack.Navigator>
   );
 }
