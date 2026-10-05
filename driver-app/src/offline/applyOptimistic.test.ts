@@ -106,6 +106,20 @@ describe('showing a queued action before it sends', () => {
     expect(result.status).toBe('failed');
   });
 
+  it('leaves the stop as the server has it when the server rejected the action', () => {
+    // A rejected item stays in the queue so the driver can read why. Overlaid,
+    // it showed a stop the server refused to complete as completed.
+    const result = applyPendingToStop(stop({ status: 'arrived' }), [
+      item({
+        type: 'complete',
+        permanentlyFailed: true,
+        lastError: 'Scan all parcels before completing',
+      }),
+    ]);
+
+    expect(result.status).toBe('arrived');
+  });
+
   it('ignores queued items belonging to another stop', () => {
     // One queue serves every stop on the route. Overlaying a neighbour's
     // arrival would mark a stop the driver has not reached.

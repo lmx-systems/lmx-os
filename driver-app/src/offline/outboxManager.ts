@@ -1,4 +1,5 @@
 import NetInfo from '@react-native-community/netinfo';
+import { AppState } from 'react-native';
 
 import type { DockSurveyBody } from '../api/types';
 import { api, ApiError } from '../api/client';
@@ -7,6 +8,10 @@ import { loadOutbox, saveOutbox } from './outboxStore';
 import type { OutboxActionType, OutboxItem } from './types';
 
 const BACKOFF_STEPS_MS = [2000, 5000, 15000, 30000, 60000];
+
+// The soonest the retry timer comes back. Items held up behind something else
+// are due already, so without a floor a pass that stopped early would loop.
+const MIN_RETRY_DELAY_MS = 1000;
 
 // 4xx statuses that are the server asking us to come back rather than telling
 // us the request was wrong. Retrying these is the whole point; treating a 401
@@ -44,12 +49,14 @@ function makeId(): string {
 // updates optimistically (see applyOptimistic.ts) without waiting for the
 // network, and this drains to the real API in the background whenever
 // connectivity is available. Singleton, not a hook, since it needs to keep
-// running/retrying even while no screen using it is mounted.
-class OutboxManager {
+// running/retrying even while no screen using it is mounted. The class is
+// exported for its tests; the app uses the one instance below.
+export class OutboxManager {
   private items: OutboxItem[] = [];
   private listeners = new Set<(items: OutboxItem[]) => void>();
   private flushing = false;
   private initialized = false;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   async init(): Promise<void> {
     if (this.initialized) return;
@@ -59,11 +66,16 @@ class OutboxManager {
     NetInfo.addEventListener((state) => {
       if (state.isConnected && state.isInternetReachable !== false) this.flush();
     });
+    // Timers don't run while the app is in the background, so coming back to
+    // it is a moment to try again too.
+    AppState.addEventListener('change', (state) => {
+      if (state === 'active') this.flush();
+    });
     this.flush();
   }
 
   /**
-   * How many actions have not reached the server yet.
+   * How many actions have not reached the server yet and still can.
    *
    * For the one caller that has to ask before doing something irreversible:
    * signing out, or revoking the session these items would be sent under.
@@ -71,9 +83,12 @@ class OutboxManager {
    * every subsequent flush 401s and `refreshOnce` has nothing to refresh
    * with. `flush` treats a 401 as transient precisely so a shift is not lost
    * (DRV-4), and that reasoning only holds while a driver can still sign in.
+   *
+   * A rejected action is left out: it can't reach the server whatever happens
+   * to the session, so signing out doesn't strand it.
    */
   pendingCount(): number {
-    return this.items.length;
+    return this.items.filter((i) => !i.permanentlyFailed).length;
   }
 
   subscribe(fn: (items: OutboxItem[]) => void): () => void {
@@ -83,6 +98,14 @@ class OutboxManager {
   }
 
   async enqueue(type: OutboxActionType, stopId: string, payload: Record<string, unknown>): Promise<void> {
+    // Doing an action again after the server rejected it is how a driver fixes
+    // the rejection, so the new attempt replaces the rejected one. Matched as a
+    // duplicate below, the redo was silently dropped, and a rejected scan kept
+    // every later count for its stop from being sent.
+    this.items = this.items.filter(
+      (i) => !(i.permanentlyFailed && i.type === type && i.stopId === stopId),
+    );
+
     if (type === 'scan') {
       // Coalesce: only the latest absolute scanned_count matters, so
       // several rapid taps while offline collapse into one queued item
@@ -98,7 +121,9 @@ class OutboxManager {
       }
     } else if (this.items.some((i) => i.type === type && i.stopId === stopId)) {
       // arrive/complete/flag are one-shot state transitions - don't queue
-      // the same transition twice for the same stop.
+      // the same transition twice for the same stop. Persisted anyway, in case
+      // the filter above removed a rejected one.
+      await this.persistAndNotify();
       return;
     }
 
@@ -118,12 +143,26 @@ class OutboxManager {
     this.flush();
   }
 
+  /**
+   * Clear a rejected action once the driver has read why.
+   *
+   * Only a rejected one: an item still trying is work the driver did, and the
+   * queue's promise is that a tap survives until the server has it.
+   */
+  async dismiss(id: string): Promise<void> {
+    const before = this.items.length;
+    this.items = this.items.filter((i) => !(i.id === id && i.permanentlyFailed));
+    if (this.items.length !== before) await this.persistAndNotify();
+  }
+
   async flush(): Promise<void> {
     if (this.flushing) return;
     this.flushing = true;
+    let online = false;
     try {
       const net = await NetInfo.fetch();
       if (!net.isConnected || net.isInternetReachable === false) return;
+      online = true;
 
       // Preserve per-stop order: never run a stop's later action ahead of
       // its own earlier failure (e.g. don't attempt "complete" before a
@@ -132,7 +171,13 @@ class OutboxManager {
       for (const item of [...this.items]) {
         if (failedStopIds.has(item.stopId)) continue;
         if (item.permanentlyFailed) continue;
-        if (new Date(item.nextAttemptAt).getTime() > Date.now()) continue;
+        if (new Date(item.nextAttemptAt).getTime() > Date.now()) {
+          // Still backing off, so its stop's later actions wait behind it. Left
+          // unblocked, a "complete" went out ahead of its own unsent "arrive",
+          // and the server's refusal of it was permanent.
+          failedStopIds.add(item.stopId);
+          continue;
+        }
 
         try {
           await this.send(item);
@@ -193,7 +238,34 @@ class OutboxManager {
       }
     } finally {
       this.flushing = false;
+      // Offline, the connectivity listener is what brings us back.
+      if (online) this.scheduleRetry();
     }
+  }
+
+  /**
+   * Come back when the next item is due.
+   *
+   * Before this, a failure while online was tried again only when something
+   * else happened (the connection changing, another tap, the app starting), so
+   * the backoff above was a wait before nothing, and the pill's "will retry"
+   * wasn't true. Each stop's first live item decides when that stop can move,
+   * because the rest of its items wait behind it.
+   */
+  private scheduleRetry(): void {
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    const nextPerStop = new Map<string, number>();
+    for (const item of this.items) {
+      if (item.permanentlyFailed || nextPerStop.has(item.stopId)) continue;
+      nextPerStop.set(item.stopId, new Date(item.nextAttemptAt).getTime());
+    }
+    if (nextPerStop.size === 0) return;
+    const delay = Math.max(Math.min(...nextPerStop.values()) - Date.now(), MIN_RETRY_DELAY_MS);
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.flush();
+    }, delay);
   }
 
   /**
