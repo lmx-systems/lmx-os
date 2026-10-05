@@ -148,6 +148,14 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     delivery_contact_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     delivery_contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     delivery_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # The dock the delivery address names (IDN-1), resolved at intake like a
+    # shop's. The receiving door is the place the dock survey and the dwell
+    # statistics are about, and without this it had no row: a drop-off stop
+    # carries no shop, and reaching through the order's shop finds the pickup.
+    # Null when the address names no place, and for orders that predate it.
+    delivery_location_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("locations.id"), nullable=True, index=True
+    )
 
     # How many seconds the client spent entering this order, as measured by their
     # own browser (LMX_LINK_PLAN §3.4, migration 0036). Persisted rather than only

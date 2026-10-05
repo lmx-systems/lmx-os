@@ -150,13 +150,26 @@ export function StopDetailScreen({ route, navigation }: Props) {
     navigation.navigate('Home');
   }
 
+  // DRV-7. **After the completion is queued or confirmed, never before it** - a
+  // measurement may fail, a delivery may not. The driver is already free to
+  // walk away; this asks while they are still at the door, and dismissing it
+  // costs nothing. One place for both ways of completing a drop-off: the PIN
+  // path went straight home, so a dock confirmed by PIN was never surveyed.
+  function leaveTheDoor() {
+    if (stop?.dock_needs_survey) {
+      setSurveying(true);
+      return;
+    }
+    navigation.navigate('Home');
+  }
+
   async function handleDropoffComplete() {
     if (method === 'pin') {
       setSubmittingPin(true);
       setPinError(null);
       try {
         await api.completeStop(stopId, { method: 'pin', pin, left_at: leftAt.trim() || undefined });
-        navigation.navigate('Home');
+        leaveTheDoor();
       } catch (err) {
         setPinError(err instanceof ApiError ? err.message : 'Could not verify PIN. Try again.');
       } finally {
@@ -176,15 +189,7 @@ export function StopDetailScreen({ route, navigation }: Props) {
       left_at: leftAt.trim() || undefined,
     });
 
-    // DRV-7. **After the completion is queued, never before it** - a
-    // measurement may fail, a delivery may not. The driver is already free to
-    // walk away; this asks while they are still at the door, and dismissing it
-    // costs nothing.
-    if (stop?.dock_needs_survey) {
-      setSurveying(true);
-      return;
-    }
-    navigation.navigate('Home');
+    leaveTheDoor();
   }
 
   if (error) {

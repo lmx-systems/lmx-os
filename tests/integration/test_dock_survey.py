@@ -62,6 +62,18 @@ async def _world(db_session, *, linked=True):
     )
     await db_session.commit()
 
+    # The shop is the pickup, with a dock of its own. The survey is about the
+    # delivery door, so the two are different places here, and a survey filed
+    # under the wrong one shows.
+    pickup_dock = Location(
+        normalized_address=f"1larkspuryard{uuid.uuid4().hex[:6]}",
+        address="1 Larkspur Yard",
+        lat=30.30,
+        lng=-97.70,
+    )
+    db_session.add(pickup_dock)
+    await db_session.commit()
+
     location = None
     if linked:
         location = Location(
@@ -78,18 +90,22 @@ async def _world(db_session, *, linked=True):
             id=shop_id,
             client_id=client_id,
             name="Larkspur Panel",
-            address="14 Quillon Lane",
-            lat=30.26,
-            lng=-97.74,
+            address="1 Larkspur Yard",
+            lat=30.30,
+            lng=-97.70,
             external_ref=f"SHOP-{uuid.uuid4().hex[:8]}",
-            location_id=location.id if location else None,
+            location_id=pickup_dock.id,
         )
     )
     await db_session.commit()
     return hub_id, client_id, shop_id, driver_id, location
 
 
-async def _dropoff(db_session, hub_id, client_id, shop_id, driver_id, status="completed"):
+async def _dropoff(
+    db_session, hub_id, client_id, shop_id, driver_id, status="completed", dock=None
+):
+    """A delivered order and its drop-off stop. `dock` is the delivery address's
+    Location, as intake resolves it; None is an address that named no place."""
     now = datetime.now(timezone.utc)
     order = Order(
         hub_id=hub_id,
@@ -107,6 +123,7 @@ async def _dropoff(db_session, hub_id, client_id, shop_id, driver_id, status="co
         delivery_address="14 Quillon Lane",
         delivery_lat=30.26,
         delivery_lng=-97.74,
+        delivery_location_id=dock.id if dock is not None else None,
     )
     db_session.add(order)
     await db_session.commit()
@@ -128,8 +145,8 @@ def _authed(driver_id, hub_id):
 
 class TestWhenToAsk:
     async def test_an_unsurveyed_dock_is_asked_about(self, db_session):
-        hub, client, shop, driver, _ = await _world(db_session)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        hub, client, shop, driver, location = await _world(db_session)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
 
         assert await dock_needs_survey(db_session, stop, driver) is True
 
@@ -137,8 +154,8 @@ class TestWhenToAsk:
         # The dock being surveyed is the *receiver's*. A shop's own yard is not
         # it, and asking there would put a supplier's loading bay into M5's
         # labels as though it were a delivery address.
-        hub, client, shop, driver, _ = await _world(db_session)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        hub, client, shop, driver, location = await _world(db_session)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
         stop.stop_type = "pickup"
         await db_session.commit()
 
@@ -146,8 +163,8 @@ class TestWhenToAsk:
 
     async def test_a_failed_stop_is_never_asked_about(self, db_session):
         # A driver who could not deliver may never have reached the door.
-        hub, client, shop, driver, _ = await _world(db_session)
-        stop = await _dropoff(db_session, hub, client, shop, driver, status="failed")
+        hub, client, shop, driver, location = await _world(db_session)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location, status="failed")
 
         assert await dock_needs_survey(db_session, stop, driver) is False
 
@@ -156,14 +173,14 @@ class TestWhenToAsk:
         # deliberately, because the alternative was every such address
         # collapsing into one shared fictional dock. Surveying that would put a
         # dozen unrelated businesses' answers on one row.
-        hub, client, shop, driver, _ = await _world(db_session, linked=False)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        hub, client, shop, driver, location = await _world(db_session, linked=False)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
 
         assert await dock_needs_survey(db_session, stop, driver) is False
 
     async def test_a_freshly_surveyed_dock_is_left_alone(self, db_session):
         hub, client, shop, driver, location = await _world(db_session)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
         await record_dock_survey(
             str(stop.id),
             DockSurveyBody(landing_surface="paved_lot"),
@@ -176,7 +193,7 @@ class TestWhenToAsk:
     async def test_a_dock_surveyed_over_a_year_ago_is_asked_again(self, db_session):
         # A door moves, a gate gets a code, a dock crew changes.
         hub, client, shop, driver, location = await _world(db_session)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
         await record_dock_survey(
             str(stop.id),
             DockSurveyBody(landing_surface="paved_lot"),
@@ -226,7 +243,7 @@ class TestWhenToAsk:
         # A first week at a new customer would otherwise turn every stop into
         # paperwork, and a driver asked eight questions at twenty stops stops
         # answering carefully by the fourth.
-        hub, client, shop, driver, _ = await _world(db_session)
+        hub, client, shop, driver, location = await _world(db_session)
         for _ in range(MAX_SURVEYS_PER_SHIFT):
             other = Location(
                 normalized_address=f"other{uuid.uuid4().hex[:8]}",
@@ -246,12 +263,12 @@ class TestWhenToAsk:
             )
             await db_session.commit()
 
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
 
         assert await dock_needs_survey(db_session, stop, driver) is False
 
     async def test_another_drivers_surveys_do_not_count_against_this_one(self, db_session):
-        hub, client, shop, driver, _ = await _world(db_session)
+        hub, client, shop, driver, location = await _world(db_session)
         # A real row: `surveyed_by_driver_id` is a foreign key, which is the
         # point of it - an unattributed judgement is not much better than no
         # judgement, so an id that names nobody must not be storable.
@@ -285,15 +302,35 @@ class TestWhenToAsk:
             )
             await db_session.commit()
 
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
 
         assert await dock_needs_survey(db_session, stop, driver) is True
 
 
 class TestRecordingIt:
+    async def test_it_is_filed_under_the_delivery_door_not_the_pickups_dock(self, db_session):
+        """`location_for_stop` reached a drop-off's dock through the order's shop,
+        and the shop is the pickup: every survey taken at a delivery door was
+        filed under the distributor's yard, which is the one place the module's
+        own docstring says it must never describe."""
+        hub, client, shop, driver, location = await _world(db_session)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
+
+        await record_dock_survey(
+            str(stop.id),
+            DockSurveyBody(landing_surface="gravel"),
+            driver=_authed(driver, hub),
+            session=db_session,
+        )
+
+        delivered_to = await profile_for(db_session, location, create=False)
+        assert delivered_to is not None and delivered_to.landing_surface == "gravel"
+        pickup_dock = await db_session.get(Location, (await db_session.get(Shop, shop)).location_id)
+        assert await profile_for(db_session, pickup_dock, create=False) is None
+
     async def test_it_writes_every_answer_to_the_dock(self, db_session):
         hub, client, shop, driver, location = await _world(db_session)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
 
         result = await record_dock_survey(
             str(stop.id),
@@ -326,7 +363,7 @@ class TestRecordingIt:
         # An unattributed judgement is not much better than no judgement: these
         # become M5's labels, and a bad surveyor has to be findable.
         hub, client, shop, driver, location = await _world(db_session)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
 
         await record_dock_survey(
             str(stop.id),
@@ -342,7 +379,7 @@ class TestRecordingIt:
         # Every question has a skip, and skipping all of them is a valid
         # request. A measurement may fail; a delivery may not.
         hub, client, shop, driver, location = await _world(db_session)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
 
         result = await record_dock_survey(
             str(stop.id), DockSurveyBody(), driver=_authed(driver, hub), session=db_session
@@ -357,8 +394,8 @@ class TestRecordingIt:
     async def test_a_value_outside_the_vocabulary_is_refused(self, db_session):
         # It does not fail at write time - it fails months later as a class the
         # model has one example of, which is indistinguishable from noise.
-        hub, client, shop, driver, _ = await _world(db_session)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        hub, client, shop, driver, location = await _world(db_session)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
 
         with pytest.raises(HTTPException) as exc:
             await record_dock_survey(
@@ -371,8 +408,8 @@ class TestRecordingIt:
         assert "landing_surface" in str(exc.value.detail)
 
     async def test_a_stop_with_no_dock_is_a_409_not_a_silent_write(self, db_session):
-        hub, client, shop, driver, _ = await _world(db_session, linked=False)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        hub, client, shop, driver, location = await _world(db_session, linked=False)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
 
         with pytest.raises(HTTPException) as exc:
             await record_dock_survey(
@@ -387,7 +424,7 @@ class TestRecordingIt:
         # The outbox retries. `profile_for` is keyed on the canonical dock, so a
         # replay overwrites rather than duplicating.
         hub, client, shop, driver, location = await _world(db_session)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
         body = DockSurveyBody(landing_surface="gravel", door_path="steps")
 
         await record_dock_survey(
@@ -406,7 +443,7 @@ class TestRecordingIt:
 
     async def test_a_correction_at_the_same_door_wins(self, db_session):
         hub, client, shop, driver, location = await _world(db_session)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
 
         await record_dock_survey(
             str(stop.id),
@@ -425,8 +462,8 @@ class TestRecordingIt:
         assert profile.door_path == "ramp"
 
     async def test_it_tells_the_app_how_many_more_it_will_ask_for(self, db_session):
-        hub, client, shop, driver, _ = await _world(db_session)
-        stop = await _dropoff(db_session, hub, client, shop, driver)
+        hub, client, shop, driver, location = await _world(db_session)
+        stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
 
         result = await record_dock_survey(
             str(stop.id),

@@ -2172,7 +2172,7 @@ async def record_dock_survey(
     and it is, for anybody who has to travel to the docks. Our drivers are
     already standing at them.
 
-    **A 409 when the stop's shop has no dock**, rather than a silent write to
+    **A 409 when the delivery address has no dock**, rather than a silent write to
     nothing. `IDN-1` leaves `location_id` null when an address names no place -
     deliberately, because the alternative was every such address collapsing into
     one shared fictional dock that then accumulated a dozen unrelated
@@ -2191,7 +2191,7 @@ async def record_dock_survey(
         raise HTTPException(
             status_code=409,
             detail=(
-                "This stop's address is not linked to a dock, so there is "
+                "This stop's delivery address is not linked to a dock, so there is "
                 "nothing to survey against"
             ),
         )

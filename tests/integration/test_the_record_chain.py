@@ -342,6 +342,10 @@ class TestTheRecordChain:
         shops = [await db_session.get(Shop, o.shop_id) for o in orders]
         assert shops[0].location_id == shops[1].location_id
 
+        # Both share a delivery address too, so that door is one dock as well:
+        # two addresses, two docks, however many orders.
+        assert orders[0].delivery_location_id is not None
+        assert orders[0].delivery_location_id == orders[1].delivery_location_id
         assert await db_session.scalar(
             select(func.count()).select_from(Location)
-        ) == 1, "two orders from one address created two docks"
+        ) == 2, "two orders from one pickup and one door created more than two docks"
