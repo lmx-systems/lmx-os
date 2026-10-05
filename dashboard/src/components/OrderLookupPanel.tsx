@@ -3,6 +3,11 @@ import { Card } from './ui/Card'
 import { api } from '../lib/api'
 import { truncateId } from '../lib/format'
 import type { DecisionFact, OrderLookupRow } from '../lib/types'
+import { CancelOrderButton } from './CancelOrderButton'
+
+// Statuses dispatch can still cancel from (app/orders/cancellation.py): the
+// server is the judge; this only decides whether to show the control.
+const CANCELLABLE = ['received', 'classified', 'held', 'queued', 'assigned', 'en_route_pickup']
 
 /**
  * Find an order (docs/ROADMAP_1.5.md CON-1).
@@ -18,13 +23,27 @@ import type { DecisionFact, OrderLookupRow } from '../lib/types'
  *
  * At the top of the dispatching column, above the pipeline. It is the thing
  * reached for when the phone rings, which is not a scheduled moment.
+ *
+ * And since the phone call is often "cancel it", an admin can, from the row,
+ * until the driver has the parts. This was the one place that could find such
+ * an order and do nothing about it.
  */
-export function OrderLookupPanel({ hubId }: { hubId: string }) {
+export function OrderLookupPanel({
+  hubId,
+  isAdmin,
+  onToast,
+}: {
+  hubId: string
+  isAdmin: boolean
+  onToast: (message: string) => void
+}) {
   const [query, setQuery] = useState('')
   const [rows, setRows] = useState<OrderLookupRow[] | null>(null)
   const [total, setTotal] = useState(0)
   const [error, setError] = useState<Error | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
+  // Bumped after a cancel, so the row's status is re-read rather than guessed.
+  const [refresh, setRefresh] = useState(0)
 
   useEffect(() => {
     const term = query.trim()
@@ -51,7 +70,7 @@ export function OrderLookupPanel({ hubId }: { hubId: string }) {
       live = false
       clearTimeout(timer)
     }
-  }, [query, hubId])
+  }, [query, hubId, refresh])
 
   return (
     <Card
@@ -97,6 +116,16 @@ export function OrderLookupPanel({ hubId }: { hubId: string }) {
                 </span>
               </button>
               {openId === row.order_id && <Why orderId={row.order_id} />}
+              {isAdmin && CANCELLABLE.includes(row.status) && (
+                <div className="px-2 pb-1.5">
+                  <CancelOrderButton
+                    orderId={row.order_id}
+                    label={row.external_ref || truncateId(row.order_id)}
+                    onDone={() => setRefresh((n) => n + 1)}
+                    onToast={onToast}
+                  />
+                </div>
+              )}
             </li>
           ))}
         </ul>

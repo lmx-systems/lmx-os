@@ -366,6 +366,13 @@ export interface OverrideReasonOption {
 // What becomes of a failed delivery (docs/ROADMAP.md R5), and what resolving it did.
 export type ResolutionAction = 'redeliver' | 'return_to_shop' | 'cancel'
 
+// Dispatch cancelled a live order; `how` says what was undone.
+export interface OrderCancellationResult {
+  order_id: string
+  status: string
+  how: 'before_collection' | 'offer_withdrawn' | 'stops_removed'
+}
+
 export interface OrderResolutionResult {
   order_id: string
   status: string

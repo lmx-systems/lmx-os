@@ -31,6 +31,7 @@ from app.billing.service import (
 from app.client_auth.passwords import hash_password
 from app.db import get_db
 from app.identity import link_shop_to_dock
+from app.orders.cancellation import OrderNotCancellable, cancel_live_order
 from app.delivery.resolution import (
     RESOLUTION_ACTIONS,
     OrderNotFailedError,
@@ -94,6 +95,7 @@ from app.schemas.admin import (
     PendingDriverDocumentView,
     ShopDisputeRowView,
     HubClosureView,
+    OrderCancellationResult,
     OrderResolutionResult,
     PayrollRunResult,
     ProposedRuleApprovalResult,
@@ -622,6 +624,33 @@ async def generate_client_invoice(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return await invoice_detail_view(session, invoice)
+
+
+@router.post("/orders/{order_id}/cancel", response_model=OrderCancellationResult)
+async def cancel_order_as_dispatch(
+    order_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> OrderCancellationResult:
+    """Cancel an order a client can't cancel themselves (app/orders/cancellation.py).
+
+    A client's cancel stops once a driver has the order and tells them to call
+    dispatch; this is what dispatch does with the call. It withdraws an open
+    offer or takes untouched stops off a live route. Once the parts are
+    collected it refuses with a 409: that is a return, resolved when the driver
+    reports (`/orders/{id}/resolve`).
+    """
+    order = await session.get(Order, uuid.UUID(order_id))
+    if order is None:
+        raise HTTPException(status_code=404, detail="No such order")
+    # The status is written from other sessions (the cycle assigns, a driver
+    # accepts), so read it fresh rather than from this session's copy.
+    await session.refresh(order)
+    try:
+        how = await cancel_live_order(session, HoldQueueStore(), order)
+    except OrderNotCancellable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return OrderCancellationResult(order_id=str(order.id), status=order.status.value, how=how)
 
 
 @router.post("/orders/{order_id}/resolve", response_model=OrderResolutionResult)

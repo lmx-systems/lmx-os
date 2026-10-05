@@ -221,7 +221,12 @@ function App() {
                         phone rings - and that is not a scheduled moment. Before
                         this a dispatcher could not look up an order at all once
                         it left the hold queue (CON-1). */}
-                    <OrderLookupPanel key={`lookup-${hubId}`} hubId={hubId} />
+                    <OrderLookupPanel
+                      key={`lookup-${hubId}`}
+                      hubId={hubId}
+                      isAdmin={opsProfile.role === 'admin'}
+                      onToast={showToast}
+                    />
                     <OrderPipeline summary={summary.data} error={summary.error} loading={summary.loading} />
                     {/* Above the hold queue on purpose: the hold queue is work
                         going to plan and this is work that is not, so a
@@ -241,7 +246,18 @@ function App() {
                       }}
                       onToast={showToast}
                     />
-                    <HoldQueueTable key={hubId} data={held.data} error={held.error} loading={held.loading} />
+                    <HoldQueueTable
+                      key={hubId}
+                      data={held.data}
+                      error={held.error}
+                      loading={held.loading}
+                      isAdmin={opsProfile.role === 'admin'}
+                      onCancelled={() => {
+                        held.refetchNow()
+                        exceptions.refetchNow()
+                      }}
+                      onToast={showToast}
+                    />
                   </>
                 )}
 
