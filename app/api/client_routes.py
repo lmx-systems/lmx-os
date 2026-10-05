@@ -72,6 +72,7 @@ from app.models.client_sla_term import ClientSlaTerm
 from app.models.delivery_rating import RECIPIENT, DeliveryRating
 from app.models.order import Order, OrderStatus
 from app.models.stop import Stop, StopOrder
+from app.storage.photo_upload_client import readable_url
 from app.sla.commitment import delivery_commitment, terms_for_client
 from app.models.return_item import ReturnItem
 from app.models.shop import Shop
@@ -100,6 +101,7 @@ from app.schemas.client_auth import (
     ClientOrderSummaryView,
     ClientPerformanceView,
     PerformanceRateView,
+    DeliveryProofView,
     DeliveryRatingView,
     TermsAcceptanceView,
     ClientProfileView,
@@ -632,6 +634,41 @@ async def list_my_orders(
     return ClientOrderPage(items=items, total=int(total), limit=limit, offset=offset)
 
 
+async def _delivery_proof(session: AsyncSession, order: Order) -> DeliveryProofView | None:
+    """How the order's drop-off was proved, once it was delivered.
+
+    The proof was shown only to the recipient, on the tracking page, so the
+    client whose order it was - and who answers when their customer says it
+    never came - could not see it at all.
+    """
+    if order.delivered_at is None:
+        return None
+    stop = (
+        await session.execute(
+            select(Stop)
+            .join(StopOrder, StopOrder.stop_id == Stop.id)
+            .where(
+                StopOrder.order_id == order.id,
+                Stop.stop_type == "dropoff",
+                Stop.status == "completed",
+            )
+            .order_by(Stop.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if stop is None:
+        return None
+    # pod_photo_urls holds every photo; stops completed before it existed have
+    # only the single column.
+    stored = stop.pod_photo_urls or ([stop.pod_photo_url] if stop.pod_photo_url else [])
+    return DeliveryProofView(
+        method=stop.pod_method,
+        photo_urls=[url for url in map(readable_url, stored) if url],
+        signature_url=readable_url(stop.pod_signature_url),
+        left_at=stop.pod_left_at,
+    )
+
+
 @router.get("/orders/{order_id}", response_model=ClientOrderDetailView)
 async def get_my_order(
     order_id: str,
@@ -669,6 +706,7 @@ async def get_my_order(
         **summary.model_dump(),
         delivery_address=order.delivery_address,
         delivery_contact_name=order.delivery_contact_name,
+        proof=await _delivery_proof(session, order),
         rating=(
             DeliveryRatingView(
                 score=rating_row.score,

@@ -170,11 +170,28 @@ class DeliveryRatingView(BaseModel):
     submitted_at: datetime
 
 
+class DeliveryProofView(BaseModel):
+    """How a delivery was proved, for the client whose order it was.
+
+    The photos and signature are links signed for an hour, minted per request.
+    Every photo, not the first: an order can require several, and a client asked
+    whether it was delivered needs whichever one shows it. A PIN is proof by being
+    secret, so it is never shown, only named as the method.
+    """
+
+    method: str | None
+    photo_urls: list[str] = []
+    signature_url: str | None = None
+    left_at: str | None = None
+
+
 class ClientOrderDetailView(ClientOrderSummaryView):
     delivery_address: str | None
     delivery_contact_name: str | None
     # What the recipient thought, when they told us. Null when they haven't.
     rating: DeliveryRatingView | None = None
+    # How it was proved delivered. Null until it is.
+    proof: DeliveryProofView | None = None
 
 
 class PerformanceRateView(BaseModel):

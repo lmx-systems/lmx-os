@@ -66,6 +66,14 @@ export interface ClientOrderDetailView extends ClientOrderSummaryView {
     comment: string | null
     submitted_at: string
   } | null
+  // How the drop-off was proved. Null until it's delivered. The photos and signature
+  // are links signed for an hour, so they're loaded with the page, not kept.
+  proof: {
+    method: string | null
+    photo_urls: string[]
+    signature_url: string | null
+    left_at: string | null
+  } | null
 }
 
 // Mirrors app/schemas/billing.py's response models exactly - shared
