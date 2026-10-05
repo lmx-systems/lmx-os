@@ -6,6 +6,8 @@ import { ThemeToggle } from './ui/ThemeToggle'
 
 interface TopBarProps {
   hubId: string
+  // Changes when a hub is created, so the list is fetched again.
+  hubsVersion: number
   onChangeHubId: (hubId: string) => void
   lastUpdatedAt: number | null
   opsProfile: OpsProfileView
@@ -18,7 +20,14 @@ interface TopBarProps {
  * back empty (e.g. no hubs seeded yet) - ops shouldn't be blocked from
  * targeting a hub just because this convenience lookup had a bad moment.
  */
-export function TopBar({ hubId, onChangeHubId, lastUpdatedAt, opsProfile, onLogout }: TopBarProps) {
+export function TopBar({
+  hubId,
+  hubsVersion,
+  onChangeHubId,
+  lastUpdatedAt,
+  opsProfile,
+  onLogout,
+}: TopBarProps) {
   const [secondsAgo, setSecondsAgo] = useState(0)
   const [hubs, setHubs] = useState<HubSummary[] | null>(null)
 
@@ -30,7 +39,7 @@ export function TopBar({ hubId, onChangeHubId, lastUpdatedAt, opsProfile, onLogo
         setHubs([])
       }
     })()
-  }, [])
+  }, [hubsVersion])
 
   useEffect(() => {
     if (lastUpdatedAt === null) return
@@ -61,7 +70,9 @@ export function TopBar({ hubId, onChangeHubId, lastUpdatedAt, opsProfile, onLogo
           onChange={(e) => onChangeHubId(e.target.value)}
           className="w-72 rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 py-1.5 text-[13.5px] font-medium text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
         >
-          <option value="">Select a hub…</option>
+          <option value="">
+            {opsProfile.role === 'admin' ? 'Select or create a hub…' : 'Select a hub…'}
+          </option>
           {hubs!.map((hub) => (
             <option key={hub.hub_id} value={hub.hub_id}>
               {hub.name}

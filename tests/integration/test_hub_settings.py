@@ -269,3 +269,32 @@ class TestWhoMayChangeIt:
 
         view = await get_hub(hub_id=hub.id, session=db_session, _ops=OPS)
         assert view.name == "Readable"
+
+
+class TestTheTimeZoneIsARealOne:
+    """A hub's clock decides its pay periods, invoices and closed days
+    (`app/hub_calendar.py`). Nothing checked the zone, so a mistyped one was
+    stored and failed only when one of those ran - far from whoever typed it.
+    The console now offers a list; these hold the API to the same rule."""
+
+    @pytest.mark.parametrize("bad", ["Mars/Olympus", "Eastern", "../etc/passwd"])
+    async def test_an_unknown_zone_is_refused_at_creation(self, bad):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="is not a time zone"):
+            _body(timezone=bad)
+
+    async def test_an_unknown_zone_is_refused_when_changed(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="is not a time zone"):
+            HubUpdateBody(timezone="Mars/Olympus")
+
+    async def test_a_real_zone_is_kept(self, db_session):
+        from app.api.admin_routes import create_hub
+
+        view = await create_hub(
+            body=_body(timezone="America/Chicago"), session=db_session, _admin=ADMIN
+        )
+
+        assert view.timezone == "America/Chicago"

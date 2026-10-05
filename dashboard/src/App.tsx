@@ -8,6 +8,7 @@ import { Tabs } from './components/ui/Tabs'
 import { DockLabellingPanel } from './components/DockLabellingPanel'
 import { DockLogReviewPanel } from './components/DockLogReviewPanel'
 import { HubSettingsPanel } from './components/HubSettingsPanel'
+import { CreateHubPanel } from './components/CreateHubPanel'
 import { MergeReviewPanel } from './components/MergeReviewPanel'
 import { OrderLookupPanel } from './components/OrderLookupPanel'
 import { RecordHealthPanel } from './components/RecordHealthPanel'
@@ -42,6 +43,8 @@ const POLL_INTERVAL_MS = 5000
 
 function App() {
   const [hubId, setHubId] = useState(() => localStorage.getItem(HUB_ID_STORAGE_KEY) ?? '')
+  // Bumped when a hub is created, so the top bar's list picks it up.
+  const [hubsVersion, setHubsVersion] = useState(0)
   const { message, showToast } = useToast()
 
   // Real per-account ops auth (docs/ROADMAP.md S1), replacing the old
@@ -150,6 +153,7 @@ function App() {
       <div className="mx-auto max-w-[1320px] px-7 py-5 pb-16">
         <TopBar
           hubId={hubId}
+          hubsVersion={hubsVersion}
           onChangeHubId={setHubId}
           lastUpdatedAt={hubId.length > 0 ? lastUpdatedAt : null}
           opsProfile={opsProfile}
@@ -157,10 +161,20 @@ function App() {
         />
 
         {hubId.length === 0 ? (
-          <p className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-muted)]">
-            Select a hub above to load fleet state, the hold queue, and order status for that
-            hub.
-          </p>
+          <div className="mx-auto max-w-xl space-y-4">
+            <p className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-muted)]">
+              Select a hub above to load fleet state, the hold queue, and order status for that
+              hub.
+            </p>
+            <CreateHubPanel
+              isAdmin={opsProfile.role === 'admin'}
+              onCreated={(hub) => {
+                setHubsVersion((v) => v + 1)
+                setHubId(hub.id)
+                showToast(`${hub.name} created.`)
+              }}
+            />
+          </div>
         ) : (
           <>
             <KpiStrip

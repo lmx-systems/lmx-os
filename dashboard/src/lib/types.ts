@@ -620,6 +620,30 @@ export interface HubSettings {
   overtime_rule: string
 }
 
+/** What `POST /admin/hubs` takes. */
+export interface HubCreate {
+  name: string
+  timezone: string
+  lat: number
+  lng: number
+  state_code: string | null
+}
+
+/**
+ * The zones a US hub can be in. A list rather than free text, because the hub's
+ * clock decides its pay periods, invoices and closed days, and a mistyped zone
+ * would only fail once one of those ran.
+ */
+export const HUB_TIME_ZONES: { zone: string; label: string }[] = [
+  { zone: 'America/New_York', label: 'Eastern' },
+  { zone: 'America/Chicago', label: 'Central' },
+  { zone: 'America/Denver', label: 'Mountain' },
+  { zone: 'America/Phoenix', label: 'Arizona (no daylight saving)' },
+  { zone: 'America/Los_Angeles', label: 'Pacific' },
+  { zone: 'America/Anchorage', label: 'Alaska' },
+  { zone: 'Pacific/Honolulu', label: 'Hawaii' },
+]
+
 export const US_STATE_CODES = (
   'AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN ' +
   'MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA ' +

@@ -1,8 +1,9 @@
 """Schemas for internal/admin-only endpoints (app/api/admin_routes.py)."""
 from datetime import date, datetime
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ShopOnboardingInput(BaseModel):
@@ -376,6 +377,21 @@ class DriverOnboardingResult(BaseModel):
     hourly_rate_is_placeholder: bool
 
 
+def _known_time_zone(value: str | None) -> str | None:
+    """A hub's clock decides its pay periods, invoices and closed days
+    (app/hub_calendar.py), so an unknown zone would fail there, far from
+    whoever typed it."""
+    if value is None:
+        return value
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ValueError(
+            f"{value!r} is not a time zone - use a name like America/New_York"
+        ) from None
+    return value
+
+
 class HubCreateBody(BaseModel):
     """Create a hub (`docs/ROADMAP_AUDIT_2026-09.md`).
 
@@ -397,6 +413,8 @@ class HubCreateBody(BaseModel):
     lng: float = Field(ge=-180, le=180)
     state_code: str | None = Field(default=None, min_length=2, max_length=2)
 
+    _timezone_is_known = field_validator("timezone")(_known_time_zone)
+
 
 class HubUpdateBody(BaseModel):
     """Change a hub. Every field optional; absent means "leave it".
@@ -411,6 +429,8 @@ class HubUpdateBody(BaseModel):
     timezone: str | None = Field(default=None, max_length=64)
     state_code: str | None = Field(default=None, min_length=2, max_length=2)
     active: bool | None = None
+
+    _timezone_is_known = field_validator("timezone")(_known_time_zone)
 
 
 class HubView(BaseModel):
