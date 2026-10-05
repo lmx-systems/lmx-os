@@ -41,6 +41,23 @@ DEFAULT_HOLD_WINDOW_MINUTES: dict[str, int] = {
     "T3": 1080,  # 18 hours
 }
 
+# The design doc's Section 5: "Hold deadline = SLA commitment time minus
+# estimated drive time minus 5-minute buffer."
+HOLD_DEADLINE_BUFFER = timedelta(minutes=5)
+
+
+def latest_safe_hold_deadline(promised_delivery_by: datetime, drive_minutes: float) -> datetime:
+    """The last moment an order can leave the hold queue and still make its promise.
+
+    The tier's hold window says how long batching may wait; this says how long
+    the promise lets it. The hold ends at whichever comes first. The design
+    doc's orders leave from the hub, so its formula has no term for a driver's
+    trip to the pickup, and neither does this - a promise tight enough to need
+    one can still be missed.
+    """
+    return promised_delivery_by - timedelta(minutes=drive_minutes) - HOLD_DEADLINE_BUFFER
+
+
 # Keys inside NormalizedOrder.raw_payload that force a tier regardless of
 # heuristics, when a POS adapter is able to surface them. Checked in order -
 # HOT_SHOT wins over a plain rush flag if a client somehow sets both, since

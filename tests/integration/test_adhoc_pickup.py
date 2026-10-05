@@ -265,9 +265,11 @@ async def test_an_external_order_is_not_classified_and_keeps_its_given_window(db
     )
 
     assert order.sla_owner == "EXTERNAL"
-    # The external window became the deadline the hold queue holds against -
-    # §1.3's claim that the queue needs no changes for an external path.
-    assert order.hold_deadline == window_end
+    # The hold queue holds against the latest moment that still makes the
+    # window - its end, less the drive and five minutes (the design doc's
+    # Section 5; see test_hold_deadline_respects_the_promise.py). It used to
+    # hold until the window closed. The window itself is kept as given.
+    assert order.hold_deadline < window_end
     assert order.delivery_window_end == window_end
 
 

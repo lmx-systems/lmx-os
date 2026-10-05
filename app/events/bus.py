@@ -26,6 +26,14 @@ at once, not just within one process:
     dirty for a later poll (by itself or by whichever instance releases
     the lock next).
 
+  - `events:wakeups` (Redis sorted set) - work that becomes due with time
+    rather than with an event, scored by when. Each poll moves what is due
+    into the dirty set. The batch-hold queue schedules one per held order
+    at its hold deadline: a lone order waits for a partner until exactly
+    then (the design doc's Section 6, "hold deadline reached for any
+    order"), and without this it waited for the next event at its hub or
+    the five-minute sweep.
+
 No pub/sub wake-up in this pass - a plain fixed-interval poll picks up
 newly-dirty hubs. That trades a small bounded latency (at most one poll
 interval) for far less moving parts than a persistent per-instance
@@ -37,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 
@@ -49,6 +58,7 @@ logger = structlog.get_logger(__name__)
 HubEventHandler = Callable[[str], Awaitable[None]]
 
 DIRTY_HUBS_KEY = "events:dirty_hubs"
+WAKEUPS_KEY = "events:wakeups"
 DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 # Comfortably longer than the design doc's 5s optimizer cycle budget (or
 # any other handler this bus might end up running), so a lock is never
@@ -59,6 +69,13 @@ LOCK_TTL_SECONDS = 60
 
 def _lock_key(hub_id: str) -> str:
     return f"events:running:{hub_id}"
+
+
+def wakeup_member(hub_id: str, token: str) -> str:
+    """One wake-up's entry in `WAKEUPS_KEY`. `token` tells one hub's apart -
+    the hold queue uses the order id, so re-adding an order moves its wake-up
+    rather than adding a second."""
+    return f"{hub_id}|{token}"
 
 
 class HubEventBus:
@@ -97,6 +114,7 @@ class HubEventBus:
 
     async def _poll_once(self) -> None:
         redis = get_client()
+        await self._wake_due_hubs(redis)
         dirty_hub_ids = [as_text(hub_id) for hub_id in await redis.smembers(DIRTY_HUBS_KEY)]
         for hub_id in dirty_hub_ids:
             if hub_id in self._local_running:
@@ -114,6 +132,18 @@ class HubEventBus:
             task = asyncio.create_task(self._run_and_release(hub_id))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
+
+    async def _wake_due_hubs(self, redis) -> None:
+        """Mark dirty every hub with a wake-up that has come due.
+
+        ZREM's count says which instance claimed a wake-up, so with several
+        polling, only one marks the hub - and marking it twice would be
+        harmless anyway, since the dirty set coalesces.
+        """
+        for raw in await redis.zrangebyscore(WAKEUPS_KEY, "-inf", time.time()):
+            member = as_text(raw)
+            if await redis.zrem(WAKEUPS_KEY, member):
+                await redis.sadd(DIRTY_HUBS_KEY, member.split("|", 1)[0])
 
     async def _run_and_release(self, hub_id: str) -> None:
         try:

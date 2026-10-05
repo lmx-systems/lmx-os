@@ -16,6 +16,7 @@ import json
 from datetime import datetime
 
 from app.batch_queue.queue import HeldOrder
+from app.events.bus import WAKEUPS_KEY, wakeup_member
 from app.redis_client import as_text, get_client, timed_operation
 
 
@@ -66,10 +67,17 @@ class HoldQueueStore:
     async def add(self, hub_id: str, order: HeldOrder) -> None:
         async with timed_operation("holdqueue.add"):
             await self._redis.hset(_queue_key(hub_id), order.order_id, _serialize(order))
+            # Look at the hub again the moment this hold runs out. A lone order
+            # waits for a partner until exactly then, and no event marks it.
+            await self._redis.zadd(
+                WAKEUPS_KEY,
+                {wakeup_member(hub_id, order.order_id): order.hold_deadline.timestamp()},
+            )
 
     async def remove(self, hub_id: str, order_id: str) -> None:
         async with timed_operation("holdqueue.remove"):
             await self._redis.hdel(_queue_key(hub_id), order_id)
+            await self._redis.zrem(WAKEUPS_KEY, wakeup_member(hub_id, order_id))
 
     async def get_all(self, hub_id: str) -> list[HeldOrder]:
         async with timed_operation("holdqueue.get_all"):

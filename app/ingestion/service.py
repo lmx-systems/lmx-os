@@ -40,7 +40,14 @@ from app.models.rules import ActiveRule
 from app.models.shop import Shop
 from app.schemas.lmx_order import LMXOrder
 from app.schemas.order import NormalizedOrder
-from app.sla.engine import HoldWindowOverride, TierOverride, classify_order
+from app.sla.commitment import delivery_commitment, terms_for_client
+from app.sla.engine import (
+    HoldWindowOverride,
+    TierOverride,
+    classify_order,
+    latest_safe_hold_deadline,
+)
+from app.travel import minutes_for_miles
 
 logger = structlog.get_logger(__name__)
 
@@ -607,6 +614,12 @@ async def ingest_lmx_order(
         sla_tier = classified.sla_tier
         hold_deadline = classified.hold_deadline
         reason = classified.reason
+        term = (
+            (await terms_for_client(session, order.client_id)).get(sla_tier)
+            if order.client_id is not None
+            else None
+        )
+        promise = delivery_commitment(order, term).promised_delivery_by
     else:
         # EXTERNAL: somebody else promised the customer a window, so we enforce
         # it rather than reclassifying. The window IS the deadline.
@@ -618,6 +631,19 @@ async def ingest_lmx_order(
             raise ValueError("an EXTERNAL order reached intake without delivery_window_end")
         hold_deadline = lmx.delivery_window_end
         reason = "external commitment - window accepted as given, not classified"
+        promise = lmx.delivery_window_end
+
+    # The hold ends early enough to make the promise, not only when batching has
+    # waited out its tier's window - the design doc's Section 5. Nothing here
+    # looked at the promise before: a lone order left the queue at once, which
+    # hid it, until the queue waited for partners as Section 6 says. An external
+    # order held until its window closed.
+    if promise is not None:
+        miles = distance_between(shop.lat, shop.lng, drop_lat, drop_lng)
+        drive_minutes = minutes_for_miles(miles) if miles is not None else 0.0
+        hold_deadline = max(
+            now, min(hold_deadline, latest_safe_hold_deadline(promise, drive_minutes))
+        )
 
     order.sla_tier = SLATier(sla_tier)
     order.hold_deadline = hold_deadline

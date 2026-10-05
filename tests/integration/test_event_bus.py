@@ -6,9 +6,12 @@ waiting on real sleeps - deterministic and fast, and exactly how the loop
 itself drives it internally (see _poll_loop).
 """
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from app.batch_queue.queue import HeldOrder
+from app.batch_queue.store import HoldQueueStore
 from app.events.bus import DIRTY_HUBS_KEY, HubEventBus, _lock_key
 
 pytestmark = pytest.mark.integration
@@ -152,3 +155,86 @@ async def test_dirty_hubs_set_is_empty_after_a_successful_run(real_redis_client)
 
     remaining = await real_redis_client.smembers(DIRTY_HUBS_KEY)
     assert "hub-1" not in remaining
+
+
+# ---------------------------------------------------------------------------
+# Wake-ups: work that comes due with time, not with an event
+# ---------------------------------------------------------------------------
+#
+# A lone held order waits for a partner until its hold deadline (the design
+# doc's Section 6), and nothing publishes an event at that moment. The queue
+# schedules a wake-up for it instead; without one, it waited for the next event
+# at its hub or the five-minute sweep.
+
+
+def _held(order_id, *, deadline):
+    return HeldOrder(
+        order_id=order_id, shop_lat=30.27, shop_lng=-97.74, sla_tier="T1",
+        hold_deadline=deadline, held_since=datetime.now(timezone.utc),
+    )
+
+
+async def test_a_held_orders_deadline_wakes_its_hub(real_redis_client):
+    calls = []
+
+    async def handler(hub_id):
+        calls.append(hub_id)
+
+    bus = HubEventBus(handler)
+    past = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await HoldQueueStore().add("hub-1", _held("o1", deadline=past))
+
+    await bus._poll_once()
+    await bus.wait_idle()
+
+    assert calls == ["hub-1"]
+
+
+async def test_a_deadline_still_ahead_wakes_nothing(real_redis_client):
+    calls = []
+
+    async def handler(hub_id):
+        calls.append(hub_id)
+
+    bus = HubEventBus(handler)
+    ahead = datetime.now(timezone.utc) + timedelta(minutes=10)
+    await HoldQueueStore().add("hub-1", _held("o1", deadline=ahead))
+
+    await bus._poll_once()
+    await bus.wait_idle()
+
+    assert calls == []
+
+
+async def test_an_order_that_left_the_queue_wakes_nothing(real_redis_client):
+    """Assigned before its deadline, so there is nothing left to release."""
+    calls = []
+
+    async def handler(hub_id):
+        calls.append(hub_id)
+
+    bus = HubEventBus(handler)
+    store = HoldQueueStore()
+    await store.add("hub-1", _held("o1", deadline=datetime.now(timezone.utc) - timedelta(seconds=1)))
+    await store.remove("hub-1", "o1")
+
+    await bus._poll_once()
+    await bus.wait_idle()
+
+    assert calls == []
+
+
+async def test_a_deadline_wakes_its_hub_once(real_redis_client):
+    calls = []
+
+    async def handler(hub_id):
+        calls.append(hub_id)
+
+    bus = HubEventBus(handler)
+    await HoldQueueStore().add("hub-1", _held("o1", deadline=datetime.now(timezone.utc) - timedelta(seconds=1)))
+
+    for _ in range(2):
+        await bus._poll_once()
+        await bus.wait_idle()
+
+    assert calls == ["hub-1"]

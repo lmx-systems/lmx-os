@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.schemas.order import NormalizedOrder
 from app.sla.engine import (
+    latest_safe_hold_deadline,
     DEFAULT_HOLD_WINDOW_MINUTES,
     HoldWindowOverride,
     TierOverride,
@@ -131,3 +132,12 @@ def test_no_tier_overrides_leaves_classification_unchanged():
     order = make_order(raw_payload={"rush": True})
     assert classify_order(order, tier_overrides=[]).sla_tier == "T1"
     assert classify_order(order).sla_tier == "T1"
+
+
+def test_the_latest_safe_hold_deadline_is_the_design_docs_worked_example():
+    """Section 5: "A T1 order with a 45-minute window going to a shop 15
+    minutes away gets a hold deadline of now + 25 minutes." """
+    now = datetime(2026, 10, 4, 9, 0, tzinfo=timezone.utc)
+    assert latest_safe_hold_deadline(now + timedelta(minutes=45), drive_minutes=15) == (
+        now + timedelta(minutes=25)
+    )
