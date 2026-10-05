@@ -643,6 +643,21 @@ async def test_a_contradictory_credit_range_is_refused(db_session, real_redis_cl
     assert exc_info.value.status_code == 422
 
 
+async def test_a_term_for_a_tier_no_order_carries_is_refused(db_session, real_redis_client):
+    """It would never be applied, and it would sit on the client's terms
+    looking as if it were. Rates and terms check the same list."""
+    _hub, client_id, _shop = await _seed(db_session)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await upsert_client_sla_term(
+            str(client_id),
+            ClientSlaTermBody(sla_tier="T4", delivery_target_minutes=60),
+            session=db_session,
+            _admin=_admin(),
+        )
+    assert exc_info.value.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # The placeholder schedule (docs/ROADMAP.md E11)
 # ---------------------------------------------------------------------------

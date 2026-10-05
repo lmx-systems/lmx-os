@@ -1541,6 +1541,13 @@ async def upsert_client_rate(
     tier is whatever this endpoint was last called with. What changed is that the earlier
     answers survive.
     """
+    if body.sla_tier not in VALID_SLA_TIERS:
+        # A rate for a tier no order carries is never applied, and it sits on the card
+        # looking as if it priced something. The console offered T4 and this stored it.
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown sla_tier {body.sla_tier!r}. Valid tiers: {sorted(VALID_SLA_TIERS)}",
+        )
     effective_from = datetime.now(timezone.utc)
 
     # Guard the one case the unique constraint would otherwise reject with a 500: two
@@ -1632,6 +1639,12 @@ async def upsert_client_sla_term(
         raise HTTPException(
             status_code=422,
             detail="The credit minimum can't be more than the maximum",
+        )
+    if body.sla_tier not in VALID_SLA_TIERS:
+        # Same as a rate: a term for a tier no order carries is never applied.
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown sla_tier {body.sla_tier!r}. Valid tiers: {sorted(VALID_SLA_TIERS)}",
         )
 
     result = await session.execute(
