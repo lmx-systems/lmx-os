@@ -126,8 +126,8 @@ class TestItCitesTheRecord:
                 hold_decisions=[
                     HoldDecisionRecord(
                         order_id=key,
-                        action="hold",
-                        reason="no_cluster_mate_and_drivers_available",
+                        action="keep_holding",
+                        reason="waiting_for_cluster_mate",
                     )
                 ],
             ),
@@ -137,7 +137,7 @@ class TestItCitesTheRecord:
 
         assert explanation.is_explained
         (fact,) = explanation.facts
-        assert "waiting for another order going the same way" in fact.statement
+        assert fact.statement == "still held - waiting for another order going the same way"
         assert fact.snapshot_id == snapshot.id
         assert fact.engine == "stub_nearest_neighbor"
 
@@ -186,9 +186,9 @@ class TestItCitesTheRecord:
         order = await _order(db_session, hub)
         key = str(order.id)
 
-        for minutes, reason in (
-            (30, "sla_hold_deadline_reached"),
-            (10, "no_available_drivers"),
+        for minutes, action, reason in (
+            (30, "release", "sla_hold_deadline_reached"),
+            (10, "keep_holding", "no_available_drivers"),
         ):
             await record_decision(
                 db_session,
@@ -197,7 +197,7 @@ class TestItCitesTheRecord:
                     decided_at=ARRIVED + timedelta(minutes=minutes),
                     order_ids=[key],
                     hold_decisions=[
-                        HoldDecisionRecord(order_id=key, action="hold", reason=reason)
+                        HoldDecisionRecord(order_id=key, action=action, reason=reason)
                     ],
                 ),
             )
@@ -378,6 +378,48 @@ class TestTheReasonsStayInStep:
         assert emitted, "found no reasons in queue.py - the parse is wrong, not the code"
         assert emitted - set(_REASON_TEXT) == set(), "a queue reason has no sentence"
         assert set(_REASON_TEXT) - emitted == set(), "a sentence for a reason nobody emits"
+
+    async def test_each_sentence_says_what_the_queue_did(self):
+        """Three of the seven used to say the opposite: "released" for an order
+        the queue kept holding, "still held" for one it let go. The pairs are
+        read off `BatchDecision(...)` in queue.py, so the check follows the code
+        rather than a list kept beside it."""
+        import ast
+        import inspect
+
+        from app.record.explain import _describe
+
+        pairs = {
+            (keywords["action"], keywords["reason"])
+            for node in ast.walk(ast.parse(inspect.getsource(queue_module)))
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) == "BatchDecision"
+            for keywords in [
+                {
+                    k.arg: k.value.value
+                    for k in node.keywords
+                    if isinstance(k.value, ast.Constant)
+                }
+            ]
+        }
+
+        assert len(pairs) == len(_REASON_TEXT), "every reason should pair with one action"
+        for action, reason in pairs:
+            expected = "released" if action == "release" else "still held"
+            sentence = _describe({"action": action, "reason": reason})
+            assert sentence.startswith(expected + " - "), (action, reason, sentence)
+
+    async def test_the_verb_is_the_recorded_action(self):
+        """Not the reason's. Records from before October 2026 have the queue
+        holding a cluster, which it now releases; they still read as held."""
+        from app.record.explain import _describe
+
+        assert _describe(
+            {"action": "keep_holding", "reason": "cluster_mate_found", "cluster_mate_ids": ["x"]}
+        ) == "still held - batched with another order going the same way (1 candidate(s) nearby)"
+        assert _describe({"action": "release", "reason": "cluster_mate_found"}) == (
+            "released - batched with another order going the same way"
+        )
 
     async def test_an_unmapped_reason_is_printed_raw_not_smoothed(self, db_session):
         """If the guard above is ever skipped, the failure must be a dispatcher

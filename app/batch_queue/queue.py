@@ -48,15 +48,30 @@ The per-cycle questions, evaluated in order for every held order:
      to assign to). A prerequisite underlying question 3, not one of the
      four questions itself - if there is no driver at all, trivially none
      is "heading this direction" either.
-  3. (Question 4) Would dispatching this order right now risk stranding a
-     more urgent, still-held order that's about to need this same scarce
-     driver supply? Only a real risk when driver availability is already
-     tight (<=1 available) - with drivers to spare, dispatching this order
-     doesn't cost the other one anything. See _would_conflict_with_a_more_
-     urgent_order for the exact rule.
-  4. (Question 2) Is there at least one other held order within the
-     cluster radius? -> if yes, this order is a commingling candidate;
-     keep holding.
+  3. (Question 2) Is there another held order within the cluster radius
+     that could be batched? -> if yes, Section 6 says "batch and dispatch
+     together": release it, and its cluster mates release on the same cycle
+     by the same rule. A HOT_SHOT order is nobody's cluster mate, since it
+     is never commingled.
+     ...unless (Question 4) dispatching now would strand a more urgent,
+     still-held order about to need the same scarce driver supply - then
+     keep holding and reassess. The spec words question 4 for a solo
+     dispatch; here the only release the queue makes on its own judgment is
+     a cluster's, and the scarcity it guards against is the same. Only a
+     real risk when drivers are tight (<=1 available) - see
+     _would_conflict_with_a_more_urgent_order for the exact rule.
+  4. Otherwise keep holding: there is nothing to batch with yet, and the
+     order waits for a partner until its deadline. This wait is the queue's
+     whole purpose - Section 6: it "waits, deliberately, to create the
+     opportunity to send two or three orders together instead of one at a
+     time."
+
+**Questions 2 and 4 ran backwards until October 2026.** An order with a
+cluster mate was held until its deadline, and a lone order was released the
+moment a driver was free - the reverse of Section 6. Lone orders never waited
+for a partner, and orders that had one waited their whole hold window (up to
+eighteen hours, for T3) before going together, so batching happened only by
+accident. docs/ARCHITECTURE.md had recorded question 2 as matching the spec.
 
 Question 3 ("is a driver already heading this direction with capacity, add
 to route") is not implemented in this function - it requires real-time
@@ -190,7 +205,10 @@ def evaluate_held_order(
         )
 
     candidates = [
-        (o.order_id, o.shop_lat, o.shop_lng) for o in other_held_orders if o.order_id != order.order_id
+        (o.order_id, o.shop_lat, o.shop_lng)
+        for o in other_held_orders
+        # HOT_SHOT is never commingled (question 0), so it is nobody's batch.
+        if o.order_id != order.order_id and o.sla_tier != "HOT_SHOT"
     ]
     cluster_mate_ids = cluster_members(order.shop_lat, order.shop_lng, candidates, radius)
 
@@ -204,30 +222,36 @@ def evaluate_held_order(
             cluster_mate_ids=cluster_mate_ids,
         )
 
-    # Question 4: dispatching now would strand a more urgent order.
-    if _would_conflict_with_a_more_urgent_order(
-        order, other_held_orders, cluster_mate_ids, available_driver_count=available_driver_count, now=now
-    ):
-        return BatchDecision(
-            order_id=order.order_id,
-            action="keep_holding",
-            reason="would_conflict_with_higher_priority_order",
-            cluster_mate_ids=cluster_mate_ids,
-        )
-
-    # Question 2: a good cluster match is worth continuing to hold for.
     if cluster_mate_ids:
+        # Question 4: sending this batch now would strand a more urgent order.
+        if _would_conflict_with_a_more_urgent_order(
+            order,
+            other_held_orders,
+            cluster_mate_ids,
+            available_driver_count=available_driver_count,
+            now=now,
+        ):
+            return BatchDecision(
+                order_id=order.order_id,
+                action="keep_holding",
+                reason="would_conflict_with_higher_priority_order",
+                cluster_mate_ids=cluster_mate_ids,
+            )
+
+        # Question 2: batch and dispatch together.
         return BatchDecision(
             order_id=order.order_id,
-            action="keep_holding",
+            action="release",
             reason="cluster_mate_found",
             cluster_mate_ids=cluster_mate_ids,
         )
 
+    # Nothing to batch with yet. Wait for a partner; the deadline (question 1)
+    # sends it alone if none comes.
     return BatchDecision(
         order_id=order.order_id,
-        action="release",
-        reason="no_cluster_mate_and_drivers_available",
+        action="keep_holding",
+        reason="waiting_for_cluster_mate",
         cluster_mate_ids=[],
     )
 

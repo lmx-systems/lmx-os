@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
+from tests.integration.queue_helpers import let_the_hold_run_out
 
 from app.batch_queue.store import HoldQueueStore
 from app.fleet_state.manager import FleetStateManager
@@ -100,10 +101,12 @@ async def test_full_pipeline_ingest_to_optimizer_assignment(db_session, real_red
         str(hub_id),
     )
 
-    # 3. Run one Dispatch Optimizer cycle. No GOOGLE_CLOUD_PROJECT_ID is set
-    # in the test environment, so this exercises the real batch-hold
-    # decision logic + StubRouteOptimizationClient, all against real
-    # Postgres/Redis-backed state.
+    # 3. Run one Dispatch Optimizer cycle, once the order's hold has run out:
+    # alone, it waits for a partner until its deadline. No
+    # GOOGLE_CLOUD_PROJECT_ID is set in the test environment, so this
+    # exercises the real batch-hold decision logic + StubRouteOptimizationClient,
+    # all against real Postgres/Redis-backed state.
+    await let_the_hold_run_out(hub_id)
     service = DispatchOptimizerService()
     result = await service.run_cycle(str(hub_id))
 

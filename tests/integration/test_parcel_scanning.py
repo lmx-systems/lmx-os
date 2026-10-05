@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
+from tests.integration.queue_helpers import let_the_hold_run_out
 from fastapi import HTTPException
 from sqlalchemy import select
 
@@ -187,6 +188,7 @@ async def test_accept_offer_sets_pickup_parcel_count_from_real_parcels(db_sessio
     )
 
     authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="d")
+    await let_the_hold_run_out(hub_id)
     await DispatchOptimizerService().run_cycle(str(hub_id))
     offers = await list_my_offers(driver=authed, session=db_session)
     route = await accept_offer(offers[0].offer_id, driver=authed, session=db_session)

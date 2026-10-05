@@ -448,8 +448,12 @@ and updated to match:
    geographic cluster within the default 0.8mi radius, (3) is a driver
    already heading this direction with capacity, (4) would dispatching now
    break another optimization (create a conflict for a higher-priority
-   order arriving soon). Questions 1 and 2 already matched what was built.
-   Question 4 did not — the earlier interpretation substituted a fabricated
+   order arriving soon). Question 1 matched what was built. **Question 2
+   did not, and this note said it did:** the spec's answer to a cluster is
+   "batch and dispatch together", and a lone order waits for one; the code
+   held an order with a cluster mate until its deadline and released a lone
+   one at once. Corrected in October 2026. Question 4 did not match
+   either — the earlier interpretation substituted a fabricated
    absolute hold-time cap, which is now replaced with a genuine
    conflict-avoidance check (`_would_conflict_with_a_more_urgent_order`):
    when driver availability is tight (≤1 available), holding continues if

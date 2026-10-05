@@ -98,12 +98,14 @@ async def _system_held(
     hub,
     order,
     *,
-    reason="no_cluster_mate_and_drivers_available",
-    action="hold",
+    reason="waiting_for_cluster_mate",
+    action="keep_holding",
     at=DECIDED_AT,
 ):
     """Record the queue deciding something about this order, the way a real
-    cycle would - through `record_decision`, never by writing the JSON."""
+    cycle would - through `record_decision`, never by writing the JSON. The
+    default is a hold the queue really makes, in its own words: it keeps a
+    lone order while it waits for another going the same way."""
     key = str(order.id)
     return await record_decision(
         db_session,
@@ -256,9 +258,9 @@ class TestEveryOverrideIsALabelledExample:
     """CON-3, and the cases where it honestly is not one."""
 
     async def test_the_systems_decision_is_copied_onto_the_override(self, db_session):
-        """The pair is the training example: the queue said hold because no
-        cluster mate had arrived, the dispatcher said release because the
-        customer called."""
+        """The pair is the training example: the queue said hold because nothing
+        going the same way had arrived yet, the dispatcher said release because
+        the customer called."""
         hub = await _hub(db_session)
         order = await _order(db_session, hub)
         snapshot = await _system_held(db_session, hub, order)
@@ -270,8 +272,8 @@ class TestEveryOverrideIsALabelledExample:
 
         override = outcome.override
         assert override.system_decision_known is True
-        assert override.system_action == "hold"
-        assert override.system_reason == "no_cluster_mate_and_drivers_available"
+        assert override.system_action == "keep_holding"
+        assert override.system_reason == "waiting_for_cluster_mate"
         assert override.cited_snapshot_id == snapshot.id
         assert override.is_labelled_example
         assert outcome.contradicted_the_system
@@ -331,7 +333,7 @@ class TestEveryOverrideIsALabelledExample:
         )
         await db_session.flush()
 
-        assert outcome.override.system_action == "hold"
+        assert outcome.override.system_action == "keep_holding"
         assert outcome.override.action == "hold"
         assert outcome.override.is_labelled_example
         assert not outcome.contradicted_the_system
@@ -518,7 +520,9 @@ class TestItShowsUpInTheExplanation:
         explanation = await explain_order(db_session, order_id=order.id)
 
         statements = [fact.statement for fact in explanation.facts]
-        assert any("waiting for another order going the same way" in s for s in statements)
+        assert any(
+            s == "still held - waiting for another order going the same way" for s in statements
+        )
         assert any("dispatcher@lmxit.com" in s for s in statements)
         assert [f.at for f in explanation.facts] == sorted(f.at for f in explanation.facts)
 
@@ -712,10 +716,10 @@ class _NoAssignments(RouteOptimizationClient):
         return [], [stop.stop_id for stop in stops]
 
 
-async def _held_at_one_shop(db_session, hub, count=2):
+async def _held_at_one_shop(db_session, hub, count=1):
     """Orders queued for real - held in Postgres and in the Redis hold queue,
-    with an hour left on their deadlines - at one shop, so the queue holds
-    each one for the others."""
+    with an hour left on their deadlines - at one shop. One on its own is what
+    the queue holds: it waits for a partner."""
     orders = [await _order(db_session, hub, status=OrderStatus.held) for _ in range(count)]
     await db_session.commit()
     now = datetime.now(timezone.utc)
@@ -800,30 +804,29 @@ class TestDispatchActsOnIt:
         self, db_session, real_redis_client
     ):
         hub = await _hub(db_session)
-        released, waiting = await _held_at_one_shop(db_session, hub)
+        (released,) = await _held_at_one_shop(db_session, hub)
         await _a_driver_on_shift(hub)
         _, before = await _decisions(hub)
-        assert before[str(released.id)] == ("keep_holding", "cluster_mate_found")
+        assert before[str(released.id)] == ("keep_holding", "waiting_for_cluster_mate")
 
         await _override_via_endpoint(db_session, released, "release")
         plan, after = await _decisions(hub)
 
         assert after[str(released.id)] == ("release", "dispatcher_released")
-        assert after[str(waiting.id)] == ("keep_holding", "cluster_mate_found")
         assert plan.released_order_ids == [str(released.id)]
 
     async def test_a_hold_hands_it_back_to_the_queues_own_rules(
         self, db_session, real_redis_client
     ):
         hub = await _hub(db_session)
-        order, _mate = await _held_at_one_shop(db_session, hub)
+        (order,) = await _held_at_one_shop(db_session, hub)
         await _a_driver_on_shift(hub)
 
         await _override_via_endpoint(db_session, order, "release")
         await _override_via_endpoint(db_session, order, "hold", reason_code="hub_constraint")
         plan, after = await _decisions(hub)
 
-        assert after[str(order.id)] == ("keep_holding", "cluster_mate_found")
+        assert after[str(order.id)] == ("keep_holding", "waiting_for_cluster_mate")
         assert plan.released_order_ids == []
 
 
@@ -837,7 +840,7 @@ class TestTheLabelIsTheQueuesOwnView:
         hub = await _hub(db_session)
         order = await _order(db_session, hub, status=OrderStatus.queued)
         await _system_held(
-            db_session, hub, order, action="keep_holding", reason="cluster_mate_found"
+            db_session, hub, order, action="keep_holding", reason="waiting_for_cluster_mate"
         )
 
         outcome = await apply_override(
@@ -855,7 +858,7 @@ class TestTheLabelIsTheQueuesOwnView:
         hub = await _hub(db_session)
         order = await _order(db_session, hub, status=OrderStatus.queued)
         judged = await _system_held(
-            db_session, hub, order, action="keep_holding", reason="cluster_mate_found"
+            db_session, hub, order, action="keep_holding", reason="waiting_for_cluster_mate"
         )
         await _system_held(
             db_session, hub, order, action="release", reason="dispatcher_released",
@@ -868,5 +871,5 @@ class TestTheLabelIsTheQueuesOwnView:
         )
 
         assert outcome.override.cited_snapshot_id == judged.id
-        assert outcome.override.system_reason == "cluster_mate_found"
+        assert outcome.override.system_reason == "waiting_for_cluster_mate"
         assert not outcome.contradicted_the_system

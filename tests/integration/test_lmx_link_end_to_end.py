@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
+from tests.integration.queue_helpers import let_the_hold_run_out
 from sqlalchemy import select
 
 from app.api.admin_routes import approve_signup, list_signups
@@ -204,7 +205,8 @@ async def test_signup_to_delivered(db_session, real_redis_client, monkeypatch):
         str(hub_id),
     )
 
-    # ---- 5. Dispatch assigns it ----------------------------------------
+    # ---- 5. Dispatch assigns it, once its hold runs out -----------------
+    await let_the_hold_run_out(hub_id)
     cycle = await DispatchOptimizerService().run_cycle(str(hub_id))
     assert len(cycle.assignments) == 1
 
