@@ -145,7 +145,16 @@ class LearningLoopScheduler:
                     logger.info("learning_loop_skipped_hub_closed", hub_id=hub_id)
                     created = []
                 else:
-                    created = await run_nightly_job(session, hub_id=hub_id)
+                    # Its own try, like every step below. Without one, a failure
+                    # here skipped all of them and left the day unmarked, so the
+                    # hub failed again on every poll for the hour and lost the
+                    # night's dwell refresh, silences, flags, labels and merges.
+                    try:
+                        created = await run_nightly_job(session, hub_id=hub_id)
+                    except Exception:
+                        await session.rollback()
+                        logger.exception("rule_detection_failed", hub_id=hub_id)
+                        created = []
 
                 # IDN-4's dwell statistics, refreshed on the same nightly tick.
                 # `refresh_dwell_statistics` existed and nothing called it, so
