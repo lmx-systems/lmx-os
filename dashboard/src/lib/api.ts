@@ -38,6 +38,7 @@ import type {
   RecordHealth,
   UnlabelledDock,
   OverrideReasonOption,
+  OrderCancellationResult,
   OrderResolutionResult,
   OverrideResult,
   ResolutionAction,
@@ -176,6 +177,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  // Cancel an order a client no longer can: withdraws an open offer or takes its
+  // stops off a live route. Admin-only on the server; 409 once the parts are collected.
+  cancelOrderAsDispatch: (orderId: string) =>
+    request<OrderCancellationResult>(`/admin/orders/${orderId}/cancel`, { method: 'POST' }),
 
   // R5: redeliver, return to the shop, or cancel a failed delivery. Admin-only on
   // the server, and until now called by nothing.

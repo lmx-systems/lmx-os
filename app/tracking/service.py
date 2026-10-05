@@ -63,7 +63,8 @@ _TOKEN_BYTES = 32
 # Stop rows that are done with, one way or the other. Mirrors
 # app/api/driver_routes.py's _TERMINAL_STOP_STATUSES - duplicated rather than
 # imported to avoid this module depending on the API layer.
-_TERMINAL_STOP_STATUSES = ("completed", "failed")
+# `cancelled`: a stop dispatch took off the route (app/orders/cancellation.py).
+_TERMINAL_STOP_STATUSES = ("completed", "failed", "cancelled")
 
 # Order states where nothing is moving yet and there is nothing to place on a map.
 _PRE_DISPATCH_STATUSES = (

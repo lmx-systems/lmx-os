@@ -4,6 +4,7 @@ import { Chip } from './ui/Chip'
 import { TierBadge } from './ui/Badge'
 import { api } from '../lib/api'
 import { truncateId } from '../lib/format'
+import { CancelOrderButton } from './CancelOrderButton'
 import type { ExceptionItem, ExceptionQueue, ResolutionAction } from '../lib/types'
 
 interface ExceptionsPanelProps {
@@ -161,6 +162,17 @@ export function ExceptionsPanel({
                       {item.next_action}
                       {isAdmin && item.kind === 'delivery_failed' && (
                         <Resolve item={item} onResolved={onResolved} onToast={onToast} />
+                      )}
+                      {isAdmin && item.kind !== 'delivery_failed' && (
+                        // A failed delivery's cancel is one of its resolutions above.
+                        <div className="mt-1.5">
+                          <CancelOrderButton
+                            orderId={item.order_id}
+                            label={item.external_ref || truncateId(item.order_id)}
+                            onDone={onResolved}
+                            onToast={onToast}
+                          />
+                        </div>
                       )}
                     </td>
                   </tr>

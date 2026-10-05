@@ -1,15 +1,21 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Card } from './ui/Card'
 import { Chip } from './ui/Chip'
 import { TierBadge } from './ui/Badge'
 import { AT_RISK_MINUTES, formatCountdown, minutesUntil, truncateId } from '../lib/format'
 import { api } from '../lib/api'
 import type { HeldOrderView, OrderExplanation, OverrideReasonOption } from '../lib/types'
+import { CancelOrderButton } from './CancelOrderButton'
 
 interface HoldQueueTableProps {
   data: HeldOrderView[] | null
   error: Error | null
   loading: boolean
+  // Cancelling is admin-only on the server.
+  isAdmin: boolean
+  onCancelled: () => void
+  onToast: (message: string) => void
 }
 
 type SortKey = 'shop_name' | 'sla_tier' | 'held_since' | 'hold_deadline'
@@ -18,7 +24,7 @@ type SortKey = 'shop_name' | 'sla_tier' | 'held_since' | 'hold_deadline'
 // hub staff most need to filter to at a glance.
 const TIERS = ['all', 'HOT_SHOT', 'T1', 'T2', 'T3'] as const
 
-export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
+export function HoldQueueTable({ data, error, loading, isAdmin, onCancelled, onToast }: HoldQueueTableProps) {
   const [search, setSearch] = useState('')
   const [tier, setTier] = useState<(typeof TIERS)[number]>('all')
   const [sortKey, setSortKey] = useState<SortKey>('hold_deadline')
@@ -161,7 +167,21 @@ export function HoldQueueTable({ data, error, loading }: HoldQueueTableProps) {
                           </button>
                         </td>
                       </tr>
-                      {open && <ExplanationRow orderId={order.order_id} />}
+                      {open && (
+                        <ExplanationRow
+                          orderId={order.order_id}
+                          cancel={
+                            isAdmin ? (
+                              <CancelOrderButton
+                                orderId={order.order_id}
+                                label={`${order.shop_name}'s order ${truncateId(order.order_id)}`}
+                                onDone={onCancelled}
+                                onToast={onToast}
+                              />
+                            ) : null
+                          }
+                        />
+                      )}
                       </Fragment>
                     )
                   })}
@@ -207,7 +227,7 @@ function SortableHeader({
  * cannot tell "we held it because no driver was on shift" from "we have no idea
  * why we held it" will stop believing both.
  */
-function ExplanationRow({ orderId }: { orderId: string }) {
+function ExplanationRow({ orderId, cancel }: { orderId: string; cancel: ReactNode }) {
   const [data, setData] = useState<OrderExplanation | null>(null)
   const [error, setError] = useState<Error | null>(null)
 
@@ -257,6 +277,7 @@ function ExplanationRow({ orderId }: { orderId: string }) {
         )}
 
         <OverrideForm orderId={orderId} />
+        {cancel && <div className="mt-2.5 border-t border-[var(--border)] pt-2.5">{cancel}</div>}
       </td>
     </tr>
   )

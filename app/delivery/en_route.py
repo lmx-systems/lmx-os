@@ -43,7 +43,8 @@ logger = structlog.get_logger(__name__)
 
 # Mirrors app/api/driver_routes.py's set. Duplicated rather than imported so this
 # module doesn't depend on the API layer.
-_TERMINAL_STOP_STATUSES = ("completed", "failed")
+# `cancelled`: a stop dispatch took off the route (app/orders/cancellation.py).
+_TERMINAL_STOP_STATUSES = ("completed", "failed", "cancelled")
 
 
 async def mark_current_stop_en_route(session: AsyncSession, route_id) -> Stop | None:

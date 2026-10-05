@@ -63,6 +63,19 @@ class OrderResolutionResult(BaseModel):
     action: str
 
 
+class OrderCancellationResult(BaseModel):
+    """Dispatch cancelled a live order (app/orders/cancellation.py).
+
+    `how` says what had to be undone: `before_collection` (it was only held),
+    `offer_withdrawn` (a driver's open offer was taken back) or `stops_removed`
+    (its stops came off a route under way).
+    """
+
+    order_id: str
+    status: str
+    how: str
+
+
 class HubClosureBody(BaseModel):
     """A day a hub is closed (docs/ROADMAP.md R6) - a local calendar date in
     the hub's own timezone."""
