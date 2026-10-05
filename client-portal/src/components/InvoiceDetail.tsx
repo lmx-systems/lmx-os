@@ -121,6 +121,29 @@ export function InvoiceDetail({ invoice, profile, onBack }: InvoiceDetailProps) 
             ))}
           </tbody>
           <tfoot>
+            {/* The lines add up to the gross, so credits come off in sight of
+                them. With only the net total shown, the lines didn't add up to
+                it and nothing on the page said why. */}
+            {invoice.credit_cents > 0 && (
+              <>
+                <tr>
+                  <td colSpan={4} className="pt-4 text-right text-sm text-[var(--text-secondary)]">
+                    Subtotal
+                  </td>
+                  <td className="pt-4 text-right text-sm text-[var(--text-secondary)]">
+                    {formatCents(invoice.gross_cents)}
+                  </td>
+                </tr>
+                <tr>
+                  <td colSpan={4} className="pt-1 text-right text-sm text-[var(--text-secondary)]">
+                    Service credits
+                  </td>
+                  <td className="pt-1 text-right text-sm text-[var(--text-secondary)]">
+                    −{formatCents(invoice.credit_cents)}
+                  </td>
+                </tr>
+              </>
+            )}
             <tr>
               <td colSpan={4} className="pt-4 text-right text-sm font-semibold text-[var(--text-primary)]">
                 Total
@@ -131,7 +154,44 @@ export function InvoiceDetail({ invoice, profile, onBack }: InvoiceDetailProps) 
             </tr>
           </tfoot>
         </table>
+
+        {invoice.credits.length > 0 && <CreditsTaken invoice={invoice} />}
       </div>
     </div>
+  )
+}
+
+/** Each credit with its reason: a client can't check "credits: $84". */
+function CreditsTaken({ invoice }: { invoice: InvoiceDetailView }) {
+  const refs = new Map(invoice.line_items.map((item) => [item.order_id, item.external_order_ref]))
+  return (
+    <section className="mt-8">
+      <h3 className="text-sm font-semibold text-[var(--text-primary)]">Service credits</h3>
+      <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+        Taken off this invoice for deliveries that missed what was promised for their tier.
+      </p>
+      <table className="mt-3 w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-[var(--border)] text-xs font-medium text-[var(--text-muted)]">
+            <th className="py-2">Order</th>
+            <th className="py-2">Why</th>
+            <th className="py-2 text-right">Credit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {invoice.credits.map((credit, index) => (
+            <tr key={`${credit.order_id}-${index}`} className="border-b border-[var(--border)] last:border-0">
+              <td className="py-2.5 font-medium text-[var(--text-primary)]">
+                {refs.get(credit.order_id) ?? credit.order_id.slice(0, 8)}
+              </td>
+              <td className="py-2.5 text-[var(--text-secondary)]">{credit.reason}</td>
+              <td className="py-2.5 text-right text-[var(--text-secondary)]">
+                −{formatCents(credit.amount_cents)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   )
 }

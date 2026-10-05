@@ -11,9 +11,9 @@ grouped by (tier, rate) here so the invoice reads as a short tier summary
 ("HOT_SHOT x 12 @ $45.00") rather than one row per parcel.
 
 Deliberately minimal, matching the rest of C3: LMX header, client +
-period, the tier-summary table, and the total. No payment stub or
-remittance details - that's the payment-collection half of C3, still
-gated on a processor decision.
+period, the tier-summary table, the total, and any service credits taken
+off it. No payment stub or remittance details - that's the
+payment-collection half of C3, still gated on a processor decision.
 """
 from __future__ import annotations
 
@@ -54,10 +54,11 @@ def _tier_label(tier: str | None) -> str:
 
 
 def _summarize_lines(invoice: InvoiceDetailView) -> list[tuple[str | None, int, int, int]]:
-    """Group the per-order line items into (tier, rate_per_drop, count,
-    subtotal) rows. Grouped by rate as well as tier so a mid-period rate
-    change shows as two honest lines instead of one wrong average - same
-    rule the (now superseded) planning-line statements module used."""
+    """Group the per-order line items into (tier, fee, count, subtotal) rows.
+
+    Grouped by fee as well as tier so a mid-period rate change shows as two
+    honest lines instead of one wrong average - same rule the (now
+    superseded) planning-line statements module used."""
     grouped: dict[tuple[str | None, int], int] = {}
     for item in invoice.line_items:
         key = (item.sla_tier, item.fee_cents)
@@ -106,9 +107,18 @@ def render_invoice_pdf(invoice: InvoiceDetailView, client_name: str) -> bytes:
         Spacer(1, 0.3 * inch),
     ]
 
-    rows = [["Service tier", "Rate per drop", "Deliveries", "Subtotal"]]
-    for tier, rate, count, subtotal in _summarize_lines(invoice):
-        rows.append([_tier_label(tier), _dollars(rate), str(count), _dollars(subtotal)])
+    # "Fee per delivery", not "rate per drop": a fee comes from the client's rate
+    # table and can include miles, pieces and weight as well as the drop.
+    rows = [["Service tier", "Fee per delivery", "Deliveries", "Subtotal"]]
+    for tier, fee, count, subtotal in _summarize_lines(invoice):
+        rows.append([_tier_label(tier), _dollars(fee), str(count), _dollars(subtotal)])
+    last_line = len(rows) - 1
+    if invoice.credit_cents:
+        # The lines add up to the gross, so the credits come off in sight of them.
+        # With only the net total printed, the lines didn't add up to it and
+        # nothing on the page said why.
+        rows.append(["", "", "Subtotal", _dollars(invoice.gross_cents)])
+        rows.append(["", "", "Service credits", f"-{_dollars(invoice.credit_cents)}"])
     rows.append(["", "", "Total", _dollars(invoice.total_cents)])
 
     table = Table(rows, colWidths=[2.2 * inch, 1.6 * inch, 1.4 * inch, 1.8 * inch])
@@ -119,7 +129,8 @@ def render_invoice_pdf(invoice: InvoiceDetailView, client_name: str) -> bytes:
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                 ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, LIGHT]),
+                ("ROWBACKGROUNDS", (0, 1), (-1, last_line), [colors.white, LIGHT]),
+                ("LINEABOVE", (0, last_line + 1), (-1, last_line + 1), 0.5, SLATE),
                 ("FONTNAME", (2, -1), (-1, -1), "Helvetica-Bold"),
                 ("LINEABOVE", (0, -1), (-1, -1), 0.75, NAVY),
                 ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
@@ -129,6 +140,39 @@ def render_invoice_pdf(invoice: InvoiceDetailView, client_name: str) -> bytes:
         )
     )
     elements.append(table)
+
+    if invoice.credits:
+        # Each credit with its reason, since a client can't check "credits: $84".
+        refs = {item.order_id: item.external_order_ref for item in invoice.line_items}
+        credit_rows = [["Order", "Why", "Credit"]]
+        for credit in invoice.credits:
+            credit_rows.append([
+                refs.get(credit.order_id, credit.order_id[:8]),
+                credit.reason,
+                f"-{_dollars(credit.amount_cents)}",
+            ])
+        credit_table = Table(credit_rows, colWidths=[1.6 * inch, 3.8 * inch, 1.6 * inch])
+        credit_table.setStyle(
+            TableStyle(
+                [
+                    ("TEXTCOLOR", (0, 0), (-1, 0), SLATE),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("LINEBELOW", (0, 0), (-1, 0), 0.5, SLATE),
+                    ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ]
+            )
+        )
+        h2 = ParagraphStyle("InvoiceH2", parent=styles["Heading2"], textColor=NAVY, fontSize=12, spaceAfter=2)
+        elements += [
+            Spacer(1, 0.3 * inch),
+            Paragraph("Service credits", h2),
+            Paragraph("Taken off this invoice for deliveries that missed what was promised for their tier.", meta),
+            Spacer(1, 0.1 * inch),
+            credit_table,
+        ]
 
     doc.build(elements)
     return buffer.getvalue()
