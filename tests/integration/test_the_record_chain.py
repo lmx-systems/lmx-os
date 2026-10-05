@@ -265,16 +265,18 @@ class TestTheRecordChain:
         )
 
         # ------------------------------------------------------------------
-        # 5. IDN-4 - the nightly refresh computes dwell for the dock the order
-        #    was collected from. It had no caller until #75, so every profile
-        #    held whatever a one-off script last left there.
+        # 5. IDN-4 - the nightly refresh computes dwell for both docks the order
+        #    used: the one it was collected from and the door it went to. It
+        #    had no caller until #75, so every profile held whatever a one-off
+        #    script last left there, and the door had no profile at all.
         # ------------------------------------------------------------------
         refreshed = await refresh_hub_dwell_statistics(db_session, hub_id=hub_id)
-        assert refreshed == 1, "IDN-4: the dock this order used was not refreshed"
-        profile = await db_session.scalar(
-            select(ReceiverProfile).where(ReceiverProfile.location_id == dock.id)
-        )
-        assert profile is not None and profile.dwell_observed_at is not None
+        assert refreshed == 2, "IDN-4: the docks this order used were not both refreshed"
+        for dock_id in (dock.id, order.delivery_location_id):
+            profile = await db_session.scalar(
+                select(ReceiverProfile).where(ReceiverProfile.location_id == dock_id)
+            )
+            assert profile is not None and profile.dwell_observed_at is not None
 
         # ------------------------------------------------------------------
         # 6. REC-4 - the detectors run and raise questions rather than errors.
