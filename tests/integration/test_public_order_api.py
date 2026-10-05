@@ -455,6 +455,42 @@ async def test_an_unresolvable_pickup_address_is_a_422_not_a_guess(
     assert "couldn't find that pickup address" in exc_info.value.detail
 
 
+class _FindsEverythingBut(_FakeGeocoder):
+    """Resolves every address except one, so a test can fail just the drop."""
+
+    def __init__(self, unknown: str) -> None:
+        super().__init__()
+        self.unknown = unknown.lower()
+
+    async def geocode(self, address: str) -> GeocodeResult | None:
+        if self.unknown in address.lower():
+            return None
+        return await super().geocode(address)
+
+
+async def test_an_unresolvable_delivery_address_is_a_422_that_names_it(
+    db_session, real_redis_client, monkeypatch
+):
+    """It escaped as a 500, and this API's docs tell clients to retry a 5xx -
+    so an address that can never resolve was retried forever, and the client
+    never learned which address was wrong."""
+    import app.api.public_api_routes as routes
+
+    monkeypatch.setattr(routes, "get_geocoder", lambda: _FindsEverythingBut("Nowhere Lane"))
+    _hub_id, client_id = await _seed_client(db_session)
+    token = await _key_for(db_session, client_id)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await submit_order(
+            _order_body(delivery_address="9999 Nowhere Lane, Austin TX"),
+            api_client=await _authed(db_session, token),
+            session=db_session,
+        )
+    assert exc_info.value.status_code == 422
+    assert "couldn't find that delivery address" in exc_info.value.detail
+    assert "9999 Nowhere Lane" in exc_info.value.detail
+
+
 async def test_the_caller_cannot_set_their_own_sla(db_session, real_redis_client):
     """`deliver_by` is advisory. LMX classifies the tier and `collect_by` is the
     commitment - a caller writing a tighter time must not be able to buy a faster tier

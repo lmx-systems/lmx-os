@@ -39,6 +39,7 @@ from app.client_api.dependencies import AuthedApiClient, get_api_client
 from app.db import get_db
 from app.geocoding import get_geocoder
 from app.ingestion.service import (
+    DestinationUnresolvableError,
     OriginUnresolvableError,
     ShopNotFoundError,
     ingest_lmx_order,
@@ -112,6 +113,17 @@ async def submit_order(
             status_code=422,
             detail=(
                 f"We couldn't find that pickup address: {exc}. "
+                "Check it and resubmit - we don't guess at coordinates."
+            ),
+        ) from exc
+    except DestinationUnresolvableError as exc:
+        # It escaped as a 500 until October 2026, and this API's docs tell clients
+        # to retry a 5xx - so an address that can never resolve was retried
+        # forever, and the client never learned which address was wrong.
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"We couldn't find that delivery address: {exc}. "
                 "Check it and resubmit - we don't guess at coordinates."
             ),
         ) from exc
