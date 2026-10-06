@@ -26,7 +26,11 @@ from app.batch_queue.store import HoldQueueStore
 from app.models.order import Order, OrderStatus
 from app.models.shop import Shop
 from app.orders.status_service import advance_orders
-from app.sla.engine import resolve_hold_window_minutes
+from app.batch_queue.clustering import miles_between
+from app.sla.commitment import delivery_commitment, terms_for_client
+from app.sla.engine import latest_safe_hold_deadline, resolve_hold_window_minutes
+from app.sla.overrides import load_hold_window_overrides
+from app.travel import minutes_for_miles
 
 REDELIVER = "redeliver"
 RETURN_TO_SHOP = "return_to_shop"
@@ -116,10 +120,32 @@ async def _redeliver(session: AsyncSession, hold_queue: HoldQueueStore, order: O
     # normalizes both to the "T2"/"HOT_SHOT" string the hold window and
     # HeldOrder expect.
     tier = getattr(order.sla_tier, "value", order.sla_tier) or "T2"
-    hold_minutes = resolve_hold_window_minutes(tier)
+    # The hold intake would give this order now, by the same rules: the tier's
+    # window as the shop's and hub's overrides set it, ended early enough to make
+    # the promise (design doc §5). It used the default window alone, so an
+    # approved "hold this shop's orders longer" rule and the promise itself were
+    # both ignored on exactly the order that had already let a customer down once.
+    # A promise already past ends the hold now - the order is late; send it.
+    overrides = await load_hold_window_overrides(session, str(order.hub_id), str(order.shop_id))
+    hold_deadline = now + timedelta(minutes=resolve_hold_window_minutes(tier, overrides))
+    term = (
+        (await terms_for_client(session, order.client_id)).get(tier)
+        if order.client_id is not None
+        else None
+    )
+    promise = delivery_commitment(order, term).promised_delivery_by
+    if promise is not None:
+        drive_minutes = (
+            minutes_for_miles(
+                miles_between(shop.lat, shop.lng, float(order.delivery_lat), float(order.delivery_lng))
+            )
+            if order.delivery_lat is not None and order.delivery_lng is not None
+            else 0.0
+        )
+        hold_deadline = max(now, min(hold_deadline, latest_safe_hold_deadline(promise, drive_minutes)))
 
     order.delivery_attempts += 1
-    order.hold_deadline = now + timedelta(minutes=hold_minutes)
+    order.hold_deadline = hold_deadline
     # Clear the prior attempt's failure reason - this order is back in
     # flight, not failed, so client/ops views shouldn't still show why the
     # *last* attempt failed.

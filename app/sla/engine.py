@@ -106,8 +106,31 @@ def match_tier_override(order: NormalizedOrder, overrides: list[TierOverride]) -
     return None
 
 
+# Values a POS or a spreadsheet sends to mean "no". The check was plain truthiness,
+# so any non-empty string counted as set: a `priority` column reading "normal", or
+# `next_day` reading "N", forced T1 or T3 - and a T1 is priced and held as urgent.
+# Only negatives are listed. Anything else non-empty still counts - "Y", "yes",
+# "high", "rush" - so this stops a "no" being read as a "yes" without inventing a
+# vocabulary for "yes".
+_NEGATIVE_FLAG_VALUES = frozenset(
+    {"", "0", "n", "no", "false", "f", "off", "none", "null", "normal", "standard", "regular"}
+)
+
+
+def _flag_set(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().casefold() not in _NEGATIVE_FLAG_VALUES
+    return bool(value)
+
+
 def _payload_flag_true(payload: dict, keys: tuple[str, ...]) -> bool:
-    return any(bool(payload.get(k)) for k in keys)
+    return any(_flag_set(payload.get(k)) for k in keys)
 
 
 def classify_tier(order: NormalizedOrder) -> tuple[str, str]:

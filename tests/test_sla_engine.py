@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.schemas.order import NormalizedOrder
 from app.sla.engine import (
     latest_safe_hold_deadline,
@@ -141,3 +143,37 @@ def test_the_latest_safe_hold_deadline_is_the_design_docs_worked_example():
     assert latest_safe_hold_deadline(now + timedelta(minutes=45), drive_minutes=15) == (
         now + timedelta(minutes=25)
     )
+
+
+# ---------------------------------------------------------------------------
+# A "no" in a payload is not a "yes"
+# ---------------------------------------------------------------------------
+#
+# The flag check was plain truthiness, so any non-empty string counted: a POS or a
+# spreadsheet column reading `priority: "normal"` made the order T1 - priced and held
+# as urgent - and `next_day: "N"` made it T3.
+
+
+@pytest.mark.parametrize("value", ["normal", "N", "no", "No", "false", "0", "", "  ", "standard", "off", 0, False, None])
+def test_a_negative_priority_is_not_a_rush(value):
+    tier, _ = classify_tier(make_order(raw_payload={"priority": value}))
+    assert tier == "T2"
+
+
+@pytest.mark.parametrize("value", ["N", "no", "false", "0"])
+def test_a_negative_next_day_is_not_scheduled(value):
+    tier, _ = classify_tier(make_order(raw_payload={"next_day": value}))
+    assert tier == "T2"
+
+
+@pytest.mark.parametrize("value", ["N", "no", "0", False])
+def test_a_negative_hot_shot_is_not_a_hot_shot(value):
+    tier, _ = classify_tier(make_order(raw_payload={"hot_shot": value}))
+    assert tier == "T2"
+
+
+@pytest.mark.parametrize("value", [True, 1, "Y", "yes", "TRUE", "1", "high", "rush", "x"])
+def test_a_set_flag_still_counts(value):
+    """Only negatives were added. Anything else that was a "yes" still is."""
+    tier, _ = classify_tier(make_order(raw_payload={"priority": value}))
+    assert tier == "T1"

@@ -43,8 +43,8 @@ from app.orders.sinks import emit_status_change
 from app.schemas.lmx_order import LMXOrder
 from app.schemas.order import NormalizedOrder
 from app.sla.commitment import delivery_commitment, terms_for_client
+from app.sla.overrides import load_hold_window_overrides
 from app.sla.engine import (
-    HoldWindowOverride,
     TierOverride,
     classify_order,
     latest_safe_hold_deadline,
@@ -313,37 +313,6 @@ async def _resolve_or_create_shop(
         external_ref=ref,
     )
     return shop
-
-
-async def _load_sla_overrides(
-    session: AsyncSession, hub_id: str, shop_id: str
-) -> list[HoldWindowOverride]:
-    result = await session.execute(
-        select(ActiveRule).where(
-            ActiveRule.rule_type == "sla_hold_window_override",
-            ActiveRule.enabled.is_(True),
-            ActiveRule.hub_id == uuid.UUID(hub_id),
-        )
-    )
-    overrides: list[HoldWindowOverride] = []
-    shop_scoped: list[HoldWindowOverride] = []
-    hub_scoped: list[HoldWindowOverride] = []
-
-    for rule in result.scalars():
-        override = HoldWindowOverride(
-            scope_shop_id=rule.scope.get("shop_id"),
-            scope_hub_id=hub_id,
-            tier_minutes=rule.value,
-        )
-        if override.scope_shop_id == shop_id:
-            shop_scoped.append(override)
-        elif override.scope_shop_id is None:
-            hub_scoped.append(override)
-
-    # Most specific first: shop-level overrides checked before hub-level.
-    overrides.extend(shop_scoped)
-    overrides.extend(hub_scoped)
-    return overrides
 
 
 async def _load_tier_overrides(session: AsyncSession, hub_id: str) -> list[TierOverride]:
@@ -622,7 +591,7 @@ async def ingest_lmx_order(
     # the hold queue, the optimizer, the driver app - is identical either way,
     # because the queue holds against whatever deadline ends up on the object.
     if lmx.needs_classification:
-        overrides = await _load_sla_overrides(session, lmx.hub_id, str(shop.id))
+        overrides = await load_hold_window_overrides(session, lmx.hub_id, str(shop.id))
         tier_overrides = await _load_tier_overrides(session, lmx.hub_id)
         classified = classify_order(
             _lmx_to_normalized_for_classification(lmx, shop),

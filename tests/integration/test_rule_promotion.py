@@ -2,7 +2,7 @@
 Learning-Loop rule review & promotion (docs/ROADMAP.md I2) against real
 Postgres. Covers the promotion service + admin endpoints, including the
 end-to-end proof that an approved proposal actually reaches the consumer
-(ingestion's _load_sla_overrides) - i.e. the loop actually closes.
+(app/sla/overrides.py's load_hold_window_overrides) - i.e. the loop actually closes.
 """
 import uuid
 
@@ -15,7 +15,7 @@ from app.api.admin_routes import (
     dismiss_proposed_rule_endpoint,
     list_proposed_rules,
 )
-from app.ingestion.service import _load_sla_overrides
+from app.sla.overrides import load_hold_window_overrides
 from app.models.hub import Hub
 from app.models.rules import ActiveRule, ProposedRule
 
@@ -63,7 +63,7 @@ async def test_approving_a_proposal_creates_an_active_rule_that_ingestion_consum
 
     # End-to-end: the promoted rule is what ingestion actually reads for
     # that shop - the loop closes, it's not a write nothing consumes.
-    overrides = await _load_sla_overrides(db_session, str(hub_id), shop_id)
+    overrides = await load_hold_window_overrides(db_session, str(hub_id), shop_id)
     assert any(o.scope_shop_id == shop_id and o.tier_minutes == {"T2": 45} for o in overrides)
 
 
