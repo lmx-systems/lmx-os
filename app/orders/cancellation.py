@@ -18,15 +18,20 @@ import json
 from datetime import datetime, timezone
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.batch_queue.store import HoldQueueStore
+from app.delivery.en_route import mark_current_stop_en_route
+from app.delivery.eta import refresh_route_etas
+from app.delivery.routes import lock_route
+from app.fleet_state.manager import FleetStateManager
 from app.models.order import Order, OrderStatus
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.models.stop import Stop, StopOrder
 from app.orders.requeue import requeue_orders_from_offer
+from app.optimizer.event_trigger import dispatch_event_bus
 from app.orders.status_service import advance_orders
 from app.redis_client import get_client
 
@@ -52,6 +57,10 @@ LIVE_CANCELLABLE_STATUSES = (OrderStatus.assigned, OrderStatus.en_route_pickup)
 BEFORE_COLLECTION = "before_collection"
 OFFER_WITHDRAWN = "offer_withdrawn"
 STOPS_REMOVED = "stops_removed"
+
+# Mirrors app/api/driver_routes.py's set, as app/delivery/en_route.py does, so
+# this module doesn't depend on the API layer.
+_TERMINAL_STOP_STATUSES = ("completed", "failed", "cancelled")
 
 # A stop taken off a route by a cancellation. Beside pending, en_route, arrived,
 # completed and failed; never a stop the driver reached.
@@ -123,14 +132,43 @@ async def cancel_live_order(
     if order.status not in LIVE_CANCELLABLE_STATUSES:
         raise OrderNotCancellable(why_dispatch_cannot_cancel(order))
 
-    how = await _withdraw_offer(session, order) or await _remove_stops(session, order)
+    finished: tuple[str, str, str] | None = None
+    withdrawn = await _withdraw_offer(session, order)
+    if withdrawn is not None:
+        how = withdrawn
+    else:
+        how, finished = await _remove_stops(session, order)
     moved = await advance_orders(session, [order.id], OrderStatus.cancelled)
     if not moved:
         raise OrderNotCancellable(why_dispatch_cannot_cancel(order))
+    order_id, hub_id = str(order.id), str(order.hub_id)
     await session.commit()
-    await hold_queue.remove(str(order.hub_id), str(order.id))
-    logger.info("order_cancelled_by_dispatch", order_id=str(order.id), hub_id=str(order.hub_id), how=how)
+    await hold_queue.remove(hub_id, order_id)
+    if finished is not None:
+        await _free_driver(*finished)
+    logger.info("order_cancelled_by_dispatch", order_id=order_id, hub_id=hub_id, how=how)
     return how
+
+
+async def _free_driver(hub_id: str, driver_id: str, route_id: str) -> None:
+    """The driver's route is over: offerable again, and the dispatcher told, as
+    `complete_stop` does when a route's last stop is done. After the commit, so
+    the cycle this wakes reads the route as finished.
+
+    Only a driver who was working this route. `complete_stop` frees the driver
+    unconditionally because the driver just tapped Complete; here dispatch acted
+    from a desk, and the driver may have gone on break or off shift since - and
+    going `available` on their own passes the document check this would skip.
+    Their status is theirs; the route just isn't any more.
+    """
+    manager = FleetStateManager()
+    state = await manager.get_driver_state(hub_id, driver_id)
+    if state is not None and state.current_route_id == route_id:
+        state.current_route_id = None
+        if state.status == "en_route":
+            state.status = "available"
+        await manager.upsert_driver_state(state)
+        await dispatch_event_bus.publish(hub_id, "driver_status_changed")
 
 
 async def _withdraw_offer(session: AsyncSession, order: Order) -> str | None:
@@ -152,7 +190,12 @@ async def _withdraw_offer(session: AsyncSession, order: Order) -> str | None:
     return OFFER_WITHDRAWN
 
 
-async def _remove_stops(session: AsyncSession, order: Order) -> str:
+async def _remove_stops(
+    session: AsyncSession, order: Order
+) -> tuple[str, tuple[str, str, str] | None]:
+    """Take the order's stops off its route. Returns how, and - when that left
+    the route with nothing to do - its (hub id, driver id, route id), so the
+    caller can free the driver once the change is committed."""
     rows = (
         await session.execute(
             select(Stop, Route)
@@ -165,7 +208,7 @@ async def _remove_stops(session: AsyncSession, order: Order) -> str:
     if not rows:
         # Assigned with neither an open offer nor a live route: nothing holds
         # the order, so there is nothing to take it off.
-        return STOPS_REMOVED
+        return STOPS_REMOVED, None
     pickup = next((stop for stop, _ in rows if stop.stop_type == "pickup"), None)
     if pickup is not None and pickup.status in ("arrived", "completed"):
         raise OrderNotCancellable(
@@ -191,9 +234,34 @@ async def _remove_stops(session: AsyncSession, order: Order) -> str:
         # the row, and a record of a stop that was planned and then cancelled
         # is worth more than a gap. The route view leaves cancelled stops out.
         stop.status = STOP_CANCELLED
+        # No arrival to forecast for a visit that won't happen. `planned_eta`
+        # stays: it is the record of what was planned.
+        stop.eta = None
         removed.append(str(stop.id))
     route.plan_version += 1
     await session.flush()
+    # A route whose every stop is now finished is over, the way `complete_stop`
+    # and `flag_stop_issue` close one. Left `active`, it held the driver as busy
+    # and stayed a candidate for in-flight insertion with nothing ahead of it.
+    # Locked first, as the driver's complete and flag paths do, so a driver
+    # finishing the last other stop at this moment can't leave it open.
+    await lock_route(session, route.id)
+    live = await session.scalar(
+        select(func.count())
+        .select_from(Stop)
+        .where(Stop.route_id == route.id, Stop.status.notin_(_TERMINAL_STOP_STATUSES))
+    )
+    finished: tuple[str, str, str] | None = None
+    if not live:
+        route.status = "completed"
+        finished = (str(route.hub_id), str(route.driver_id), str(route.id))
+    else:
+        # If the stop being driven to was one of the cancelled ones, the next one
+        # is where the driver goes now - promoted as completing a stop promotes it.
+        await mark_current_stop_en_route(session, route.id)
+        # The stops after the cancelled ones are now reached sooner; say so. The
+        # walk skips a cancelled stop the way it skips a completed one.
+        await refresh_route_etas(session, route.id)
     # The same channel the live insertion uses, so the app sees one kind of change.
     await get_client().publish(
         f"driver_route_events:{route.driver_id}",
@@ -209,4 +277,4 @@ async def _remove_stops(session: AsyncSession, order: Order) -> str:
             }
         ),
     )
-    return STOPS_REMOVED
+    return STOPS_REMOVED, finished

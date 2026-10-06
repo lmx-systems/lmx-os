@@ -27,11 +27,20 @@ road-network travel times, which is exactly what `minutes_for_miles` approximate
 assumed speed. Shifting the walk onto those is the next step, and it is bounded by
 sending `timeWindows` to the solver so the HOT_SHOT hoist can go away.
 
-**One travel model, shared.** `minutes_for_miles` and `PLACEHOLDER_STOP_SERVICE_MINUTES`
-from `app/travel.py` - the same placeholders the accept-gate, the client portal's
-estimate and the recipient tracking page already use. The point is not that the
-model is good; it is that a driver, a recipient and a counter person must never be shown
-numbers derived three different ways.
+**One travel model, shared.** `minutes_for_miles` from `app/travel.py` for the legs -
+the same placeholder the accept-gate, the client portal's estimate and the recipient
+tracking page use. The point is not that the model is good; it is that a driver, a
+recipient and a counter person must never be shown numbers derived three different ways.
+
+**Time at the door is the dock's own, where we know it.** The nightly dwell refresh
+(`IDN-4`) stores each dock's median dwell on its `ReceiverProfile`, beside any figure
+inherited from a previous operator's export; the walk reads them through
+`planning_service_minutes`, which falls back to the flat
+`PLACEHOLDER_STOP_SERVICE_MINUTES` for a dock with no figure or one over fewer than
+five visits (its docstring has the full rule). A pickup's dock is its shop's; a
+drop-off's is the order's delivery door (since #182). Most docks start on the flat
+figure, so the ETAs tighten dock by dock rather than all at once. The in-flight
+insertion uses the same function for the same reason.
 
 **A missing location ends the walk.** If a stop has no coordinates, it gets no ETA - and
 neither does anything after it, because you cannot know when a driver reaches stop 5
@@ -55,7 +64,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.batch_queue.clustering import miles_between
-from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES, minutes_for_miles
+from app.identity.inherited_dwell import planning_service_minutes, profiles_by_location
+from app.travel import minutes_for_miles
 from app.models.driver_location_ping import DriverLocationPing
 from app.models.hub import Hub
 from app.models.order import Order
@@ -70,7 +80,12 @@ logger = structlog.get_logger(__name__)
 # forecast with a description of the present, which is both useless and a quiet way to
 # destroy the accuracy signal. `arrived` counts even though the driver is still working
 # the stop: the question "when will you get here" has been answered.
-_REACHED = ("arrived", "completed", "failed")
+#
+# `cancelled` is here too, for a different reason: nobody is going there. Dispatch
+# cancelling an order (#187) marks its stops rather than deleting them, and a walk that
+# still drove to a cancelled stop and waited there added its leg and its dwell to every
+# ETA after it, for the rest of the route.
+_REACHED = ("arrived", "completed", "failed", "cancelled")
 
 
 @dataclass(frozen=True)
@@ -84,6 +99,9 @@ class _Point:
     lng: float | None
     arrived_at: datetime | None
     completed_at: datetime | None
+    flagged_at: datetime | None
+    # Minutes on the ground here: the dock's observed median, or the placeholder.
+    service_minutes: float
 
     @property
     def located(self) -> bool:
@@ -98,9 +116,11 @@ class _Point:
         """The latest thing we actually know happened here.
 
         A completion beats an arrival: a driver who has left is a better anchor for the
-        next leg than one who was standing at the door twenty minutes ago.
+        next leg than one who was standing at the door twenty minutes ago. A flag is
+        the same kind of leaving - `flag_stop_issue` stamps `flagged_at`, never
+        `completed_at` - so a failed stop is dated by when it was given up on.
         """
-        return self.completed_at or self.arrived_at
+        return self.completed_at or self.flagged_at or self.arrived_at
 
 
 async def _points(session: AsyncSession, route_id: uuid.UUID) -> list[_Point]:
@@ -146,18 +166,30 @@ async def _points(session: AsyncSession, route_id: uuid.UUID) -> list[_Point]:
     )
     orders_by_id = {o.id: o for o in orders}
 
+    # Each stop's dock, for its dwell figure: a pickup's is its shop's, a drop-off's
+    # is the order's delivery door. Either may be unknown, and then the placeholder
+    # answers.
+    profiles = await profiles_by_location(
+        session,
+        [s.location_id for s in shops] + [o.delivery_location_id for o in orders],
+    )
+
     points: list[_Point] = []
     for stop in stops:
         lat = lng = None
+        location_id = None
         if stop.stop_type == "pickup":
             shop = shops_by_id.get(stop.shop_id) if stop.shop_id else None
             if shop is not None:
                 lat, lng = shop.lat, shop.lng
+                location_id = shop.location_id
         else:
             order_id = orders_by_stop.get(stop.id)
             order = orders_by_id.get(order_id) if order_id is not None else None
             if order is not None and order.delivery_lat is not None and order.delivery_lng is not None:
                 lat, lng = float(order.delivery_lat), float(order.delivery_lng)
+            if order is not None:
+                location_id = order.delivery_location_id
         points.append(
             _Point(
                 stop_id=stop.id,
@@ -167,6 +199,10 @@ async def _points(session: AsyncSession, route_id: uuid.UUID) -> list[_Point]:
                 lng=lng,
                 arrived_at=stop.arrived_at,
                 completed_at=stop.completed_at,
+                flagged_at=stop.flagged_at,
+                service_minutes=planning_service_minutes(
+                    profiles.get(location_id) if location_id is not None else None
+                ),
             )
         )
     return points
@@ -254,6 +290,22 @@ async def refresh_route_etas(
     # produce an ETA that has already been and gone.
     cursor = max(at, reference)
 
+    # A driver standing at a door is not leaving it yet. With the stop they have
+    # arrived at frozen and skipped below, the next leg would otherwise start the
+    # moment they arrived - invisible at eight minutes a stop, a real error at a
+    # counter that takes twenty. They leave when the dwell runs out, or now if it
+    # already has.
+    #
+    # The door they are at is the last thing they did: the reached stop observed
+    # most recently, if that was an arrival not yet completed. Nothing stops an
+    # earlier stop being left on `arrived` - a driver who drove on without
+    # completing it - and that stop says nothing about where they are now.
+    seen = [(p.observed_at, p) for p in points if p.reached and p.observed_at is not None]
+    if seen:
+        _, current = max(seen, key=lambda pair: pair[0])
+        if current.status == "arrived" and current.completed_at is None and current.arrived_at is not None:
+            cursor = max(cursor, current.arrived_at + timedelta(minutes=current.service_minutes))
+
     written = 0
     stalled: str | None = None
     for point in points:
@@ -280,7 +332,7 @@ async def refresh_route_etas(
 
         # Time on the ground before the next leg starts. The ETA itself is arrival, so
         # the dwell is added after it rather than before.
-        cursor = cursor + timedelta(minutes=PLACEHOLDER_STOP_SERVICE_MINUTES)
+        cursor = cursor + timedelta(minutes=point.service_minutes)
         lat, lng = point_lat, point_lng
 
     if stalled:

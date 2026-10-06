@@ -17,12 +17,14 @@ import pytest
 from sqlalchemy import select, update
 
 from app.fleet_state.manager import FleetStateManager
+from app.identity import resolve_location
 from app.models.client import Client
 from app.models.client_sla_term import ClientSlaTerm
 from app.models.client_webhook import ClientWebhookEndpoint, WebhookDelivery, new_webhook_secret
 from app.models.driver import Driver
 from app.models.hub import Hub
 from app.models.order import Order, OrderStatus
+from app.models.receiver_profile import ReceiverProfile
 from app.models.route import Route
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
@@ -353,3 +355,91 @@ async def test_the_client_hears_an_inserted_order_was_assigned(db_session, real_
 
     sent = (await db_session.execute(select(WebhookDelivery).order_by(WebhookDelivery.sequence))).scalars()
     assert [(row.payload["previous_status"], row.payload["status"]) for row in sent] == [("HELD", "ASSIGNED")]
+
+
+async def test_insert_writes_a_live_eta_on_the_new_stops_too(db_session, real_redis_client):
+    """`planned_eta` alone left `eta` null until the driver's next tap, so the app
+    showed nothing for the new stops and the portal fell back to a guess."""
+    hub_id, client_id, *_ = await _seed_active_route(db_session)
+    order, _ = await _seed_new_order(db_session, hub_id, client_id)
+
+    await _insert(hub_id, order)
+
+    pickup, dropoff = (
+        await db_session.execute(
+            select(Stop).join(StopOrder, StopOrder.stop_id == Stop.id)
+            .where(StopOrder.order_id == order.id).order_by(Stop.sequence)
+        )
+    ).scalars().all()
+    assert pickup.eta is not None and dropoff.eta is not None
+    assert dropoff.eta > pickup.eta
+    assert pickup.planned_eta is not None
+
+
+async def test_insert_judges_the_route_free_at_its_live_eta_not_its_plan(db_session, real_redis_client):
+    """A route running late was still judged free at the time it was planned to be,
+    so the new stops were promised too early."""
+    planned = datetime.now(timezone.utc) + timedelta(minutes=20)
+    running_late = planned + timedelta(minutes=40)
+    hub_id, client_id, shop_id, driver_id, route, current_dropoff = await _seed_active_route(
+        db_session, ends_eta=planned
+    )
+    current_dropoff.eta = running_late
+    await db_session.commit()
+    order, _ = await _seed_new_order(db_session, hub_id, client_id)
+
+    await _insert(hub_id, order)
+
+    pickup = (
+        await db_session.execute(
+            select(Stop).join(StopOrder, StopOrder.stop_id == Stop.id)
+            .where(StopOrder.order_id == order.id, Stop.stop_type == "pickup")
+        )
+    ).scalar_one()
+    assert pickup.planned_eta >= running_late
+
+
+async def test_insert_plans_on_the_shops_own_dwell(db_session, real_redis_client):
+    """The promise check and the ETA walk use the same figure: a counter measured at
+    twenty minutes puts the drop twenty minutes after the pickup, not eight."""
+    hub_id, client_id, *_ = await _seed_active_route(db_session)
+    order, new_shop_id = await _seed_new_order(db_session, hub_id, client_id)
+    dock = await resolve_location(
+        db_session, address=f"{uuid.uuid4().int % 9000 + 100} Dock Rd, Los Angeles, CA"
+    )
+    shop = await db_session.get(Shop, new_shop_id)
+    shop.location_id = dock.id
+    db_session.add(ReceiverProfile(location_id=dock.id, dwell_sample_count=12, dwell_p50_seconds=1200))
+    await db_session.commit()
+
+    await _insert(hub_id, order)
+
+    pickup, dropoff = (
+        await db_session.execute(
+            select(Stop).join(StopOrder, StopOrder.stop_id == Stop.id)
+            .where(StopOrder.order_id == order.id).order_by(Stop.sequence)
+        )
+    ).scalars().all()
+    # The shop and the drop are a few hundred feet apart, so the gap is almost all dwell.
+    assert (dropoff.planned_eta - pickup.planned_eta) >= timedelta(minutes=20)
+    assert (dropoff.planned_eta - pickup.planned_eta) < timedelta(minutes=21)
+
+
+async def test_insert_never_plans_from_a_moment_already_past(db_session, real_redis_client):
+    """A forecast refreshed at the driver's last tap can be hours stale. The route
+    is not free two hours ago, and stops planned from then would carry arrival
+    times already gone - and pass a promise check they should fail."""
+    stale = datetime.now(timezone.utc) - timedelta(hours=2)
+    hub_id, client_id, *_ = await _seed_active_route(db_session, ends_eta=stale)
+    order, _ = await _seed_new_order(db_session, hub_id, client_id)
+    asked_at = datetime.now(timezone.utc)
+
+    await _insert(hub_id, order)
+
+    pickup = (
+        await db_session.execute(
+            select(Stop).join(StopOrder, StopOrder.stop_id == Stop.id)
+            .where(StopOrder.order_id == order.id, Stop.stop_type == "pickup")
+        )
+    ).scalar_one()
+    assert pickup.planned_eta >= asked_at

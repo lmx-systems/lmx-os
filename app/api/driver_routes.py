@@ -145,6 +145,7 @@ from app.delivery.cod import (
 )
 from app.delivery.en_route import mark_current_stop_en_route
 from app.delivery.eta import refresh_route_etas
+from app.delivery.routes import lock_route
 from app.reporting.measurement import Measurement
 from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_driver_scorecard
 from app.models.cod_collection import CodCollection
@@ -2488,6 +2489,10 @@ async def complete_stop(
         if stop.stop_type == "dropoff" and moved:
             await record_delivery_outcomes(session, moved)
 
+    # The route row is locked before counting what's left on it, so this and a
+    # dispatch cancel (app/orders/cancellation.py, which takes the same lock) can't
+    # each see the other's stop as still live and both leave the route open.
+    await lock_route(session, stop.route_id)
     remaining_result = await session.execute(
         select(func.count())
         .select_from(Stop)
@@ -2647,6 +2652,10 @@ async def flag_stop_issue(
             update(Order).where(Order.id.in_(order_ids)).values(failure_reason=body.reason.value)
         )
 
+    # The route row is locked before counting what's left on it, so this and a
+    # dispatch cancel (app/orders/cancellation.py, which takes the same lock) can't
+    # each see the other's stop as still live and both leave the route open.
+    await lock_route(session, stop.route_id)
     remaining_result = await session.execute(
         select(func.count())
         .select_from(Stop)

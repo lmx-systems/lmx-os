@@ -34,14 +34,22 @@ derived one - see its comment.
 """
 from __future__ import annotations
 
+import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.identity.resolution import canonical_location
+from app.models.location import Location
 from app.models.receiver_profile import SOURCE_INHERITED, SOURCE_OBSERVED, ReceiverProfile
 from app.models.shop import Shop
+from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES
+
+logger = structlog.get_logger(__name__)
 
 # Below this many of our own stops at a dock, an inherited figure is the better
 # answer if there is one.
@@ -70,6 +78,18 @@ MIN_OWN_SAMPLES = 10
 # the cold start this exists to solve. Five keeps about half and is where the
 # distribution stops being one or two stops.
 THIN_SAMPLE_COUNT = 5
+
+# The least time a stop is planned to take, whatever a dock's median says.
+#
+# **Stated, not measured.** A dock's own median can be zero: the nightly refresh
+# keeps a dwell of zero seconds (`completed_dwell_rows` admits departed == arrived),
+# and a driver who taps Arrive and Complete back to back at a door the geofence
+# never saw produces exactly that - 65.5% of the design partner's tap-grade stops
+# compute to zero. Getting out, walking in and walking back is never free, and a
+# plan of zero minutes at a door is a driver promised to the next stop early.
+# One minute sits below the shortest real counter visits the second-precision
+# file shows clustering around and well above zero.
+PLANNING_FLOOR_MINUTES = 1.0
 
 
 @dataclass(frozen=True)
@@ -147,6 +167,92 @@ def dwell_estimate(profile: ReceiverProfile | None) -> DwellEstimate:
         )
 
     return DwellEstimate(None, 0, None, "no dwell observed here and none inherited")
+
+
+def planning_service_minutes(profile: ReceiverProfile | None) -> float:
+    """How long to plan on spending at this dock, in minutes.
+
+    The one place the ETA walk (`app/delivery/eta.py`) and the in-flight
+    insertion (`app/optimizer/service.py`) turn a dock into a stop time, so a
+    driver, a recipient and a client are shown numbers derived one way.
+
+    `dwell_estimate` chooses the figure and this takes it, floored at
+    `PLANNING_FLOOR_MINUTES`, unless there is none or it is thin. In practice:
+
+      - our own median, once a dock has `MIN_OWN_SAMPLES` (10) completed stops;
+      - the inherited median from a previous operator's export, at a dock with
+        fewer of our own - including none, which is the cold start that column
+        exists for - when it rests on `THIN_SAMPLE_COUNT` (5) or more visits;
+      - our own median from 5-9 stops when nothing usable is inherited -
+        including when an inherited figure exists but is thin, which
+        `dwell_estimate` would prefer and this does not;
+      - the flat `PLACEHOLDER_STOP_SERVICE_MINUTES` otherwise: no profile, no
+        figure, or every figure over fewer than five visits, which is
+        arithmetic rather than a dwell.
+
+    So at first this is the placeholder almost everywhere and tightens dock by
+    dock as the record fills in.
+
+    The M1 gate's verdict was to ship the shrunk per-dock quantile (own figure
+    shrunk toward the node class's). This is the un-shrunk half of that: the
+    class-level quantiles aren't stored anywhere in `app/` yet, so a dock either
+    has its own figure or the placeholder. Recorded here rather than hidden.
+    """
+    estimate = dwell_estimate(profile)
+    seconds = estimate.p50_seconds if not estimate.is_thin else None
+    if seconds is None and profile is not None and profile.dwell_p50_seconds is not None:
+        # `dwell_estimate` takes any inherited figure over fewer than ten of our
+        # own, even a thin one. Planning on nothing would throw away our own
+        # median from five to nine stops; take that instead.
+        if (profile.dwell_sample_count or 0) >= THIN_SAMPLE_COUNT:
+            seconds = profile.dwell_p50_seconds
+    if seconds is None:
+        return PLACEHOLDER_STOP_SERVICE_MINUTES
+    return max(seconds / 60.0, PLANNING_FLOOR_MINUTES)
+
+
+async def profiles_by_location(
+    session: AsyncSession, location_ids: Iterable[uuid.UUID | None]
+) -> dict[uuid.UUID, ReceiverProfile]:
+    """The receiver profiles for a set of docks, keyed by the dock asked about.
+
+    A dock with no profile row is simply absent, and `planning_service_minutes(None)`
+    answers for it. A dock merged into another answers with the surviving dock's
+    profile, as `profile_for` does: a merge repoints shops but not the delivery
+    door recorded on orders taken before it, and those must not lose the figure.
+    An alias cycle - which `canonical_location` refuses loudly - is logged and the
+    dock left out, so a corrupt merge costs a driver the dock's figure rather than
+    the route they are accepting.
+    """
+    wanted = {location_id for location_id in location_ids if location_id is not None}
+    if not wanted:
+        return {}
+    surviving: dict[uuid.UUID, uuid.UUID] = {}
+    for location_id in wanted:
+        location = await session.get(Location, location_id)
+        if location is None:
+            continue
+        try:
+            surviving[location_id] = (await canonical_location(session, location)).id
+        except RuntimeError:
+            logger.exception("dock_alias_cycle", location_id=str(location_id))
+    if not surviving:
+        return {}
+    rows = (
+        await session.execute(
+            select(ReceiverProfile).where(ReceiverProfile.location_id.in_(set(surviving.values())))
+        )
+    ).scalars().all()
+    by_dock = {profile.location_id: profile for profile in rows}
+    return {asked: by_dock[dock] for asked, dock in surviving.items() if dock in by_dock}
+
+
+async def service_minutes_at(session: AsyncSession, location_id: uuid.UUID | None) -> float:
+    """`planning_service_minutes` for one dock, by id. None, an unknown dock or one
+    with no profile is the placeholder."""
+    if location_id is None:
+        return PLACEHOLDER_STOP_SERVICE_MINUTES
+    return planning_service_minutes((await profiles_by_location(session, [location_id])).get(location_id))
 
 
 @dataclass
