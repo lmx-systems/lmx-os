@@ -154,7 +154,14 @@ def test_the_latest_safe_hold_deadline_is_the_design_docs_worked_example():
 # as urgent - and `next_day: "N"` made it T3.
 
 
-@pytest.mark.parametrize("value", ["normal", "N", "no", "No", "false", "0", "", "  ", "standard", "off", 0, False, None])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "normal", "N", "no", "No", "false", "0", "", "  ", "standard", "off", 0, False, None,
+        "routine", "Same Day", "same-day", "today", "tomorrow", "next_day", "Overnight",
+        "N/A", "-", "low", "Medium",
+    ],
+)
 def test_a_negative_priority_is_not_a_rush(value):
     tier, _ = classify_tier(make_order(raw_payload={"priority": value}))
     assert tier == "T2"
@@ -177,3 +184,17 @@ def test_a_set_flag_still_counts(value):
     """Only negatives were added. Anything else that was a "yes" still is."""
     tier, _ = classify_tier(make_order(raw_payload={"priority": value}))
     assert tier == "T1"
+
+
+def test_a_word_means_the_same_in_a_payload_as_in_a_manifest():
+    """The manifest upload reads a priority column by its own vocabulary. A word it
+    calls not urgent must not force T1 when the same word arrives in a POS payload's
+    `priority` field, and a word it calls urgent must still count as set."""
+    from app.ingestion.manifest import _DEADLINE_WORDS
+
+    for word, choice in _DEADLINE_WORDS.items():
+        tier, _ = classify_tier(make_order(raw_payload={"priority": word}))
+        if choice in ("today", "tomorrow"):
+            assert tier == "T2", word
+        else:
+            assert tier == "T1", word

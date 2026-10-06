@@ -126,14 +126,21 @@ async def _redeliver(session: AsyncSession, hold_queue: HoldQueueStore, order: O
     # approved "hold this shop's orders longer" rule and the promise itself were
     # both ignored on exactly the order that had already let a customer down once.
     # A promise already past ends the hold now - the order is late; send it.
-    overrides = await load_hold_window_overrides(session, str(order.hub_id), str(order.shop_id))
-    hold_deadline = now + timedelta(minutes=resolve_hold_window_minutes(tier, overrides))
-    term = (
-        (await terms_for_client(session, order.client_id)).get(tier)
-        if order.client_id is not None
-        else None
-    )
-    promise = delivery_commitment(order, term).promised_delivery_by
+    if order.sla_owner == "EXTERNAL" and order.delivery_window_end is not None:
+        # Somebody else promised the customer a window, and intake holds against it
+        # rather than classifying - so does this. No contract term is looked up:
+        # ours doesn't apply to a commitment we didn't make.
+        hold_deadline = order.delivery_window_end
+        promise: datetime | None = order.delivery_window_end
+    else:
+        overrides = await load_hold_window_overrides(session, str(order.hub_id), str(order.shop_id))
+        hold_deadline = now + timedelta(minutes=resolve_hold_window_minutes(tier, overrides))
+        term = (
+            (await terms_for_client(session, order.client_id)).get(tier)
+            if order.client_id is not None
+            else None
+        )
+        promise = delivery_commitment(order, term).promised_delivery_by
     if promise is not None:
         drive_minutes = (
             minutes_for_miles(

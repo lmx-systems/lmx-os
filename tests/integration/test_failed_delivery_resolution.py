@@ -102,6 +102,27 @@ async def test_a_redelivery_already_past_its_promise_is_not_held(db_session, rea
     assert resolved.hold_deadline <= datetime.now(timezone.utc) + timedelta(seconds=5)
 
 
+async def test_an_external_redelivery_is_held_against_its_window_not_our_terms(
+    db_session, real_redis_client
+):
+    """Somebody else promised this customer a window. Intake holds against it and
+    looks up no contract term of ours; a redelivery does the same, rather than
+    collapsing the hold by a target that was never promised."""
+    order, hub_id, client_id, _shop = await _seed_order(db_session)
+    window = datetime.now(timezone.utc) + timedelta(hours=3)
+    order.sla_owner = "EXTERNAL"
+    order.delivery_window_end = window
+    # A term that, wrongly applied from the June request time, would release at once.
+    db_session.add(ClientSlaTerm(client_id=client_id, sla_tier="T2", delivery_target_minutes=60))
+    await db_session.commit()
+
+    resolved = await resolve_failed_order(db_session, HoldQueueStore(), order, "redeliver")
+
+    # Held until the window less the drive and the buffer, as intake would hold it:
+    # well after now, and before the window itself.
+    assert datetime.now(timezone.utc) + timedelta(hours=2) < resolved.hold_deadline < window
+
+
 async def test_return_to_shop_is_terminal(db_session):
     order, *_ = await _seed_order(db_session)
     resolved = await resolve_failed_order(db_session, HoldQueueStore(), order, "return_to_shop")
