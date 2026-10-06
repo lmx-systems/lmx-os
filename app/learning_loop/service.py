@@ -39,6 +39,9 @@ async def _load_recent_flags(
             Route.hub_id == uuid.UUID(hub_id),
             StopFlag.flag_type.in_(RELEVANT_FLAG_TYPES),
             StopFlag.created_at >= cutoff,
+            # A drop-off stop has no shop. A flag on one would otherwise become
+            # a proposal scoped to the shop "None".
+            Stop.shop_id.is_not(None),
         )
     )
     return [

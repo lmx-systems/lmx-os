@@ -4,7 +4,7 @@ Redis. The real wall clock is replaced with a fixed instant so "is it 2am
 in this hub's timezone yet" is deterministic - see _FixedDatetime.
 """
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -186,3 +186,97 @@ async def test_different_hub_timezones_trigger_at_different_utc_instants(db_sess
 
     assert await real_redis_client.get(_last_run_date_key(str(utc_hub.id))) is not None
     assert await real_redis_client.get(_last_run_date_key(str(la_hub.id))) is None
+
+
+async def test_the_not_ready_inference_runs_before_rule_detection_on_yesterday(
+    db_session, real_redis_client, monkeypatch
+):
+    """The inference is the loop's only writer of `hold_window_too_short`. It
+    runs first so the flags it writes are read the same night, and before the
+    dwell refresh so yesterday's stops are judged against the baseline as it
+    stood before them. The fixed instant is 2026-07-22 02:00 in a UTC hub, so
+    "yesterday" is the 21st; the week before it is caught up in the same pass,
+    yesterday first."""
+    hub = await _seed_hub(db_session, tz="UTC")
+    _set_fixed_utc_hour(monkeypatch, scheduler_module.NIGHTLY_RUN_LOCAL_HOUR)
+
+    order = []
+
+    async def _infer(session, *, hub_id, day):
+        order.append(("not_ready", hub_id, day))
+        return 2
+
+    async def _detect(session, *, hub_id):
+        order.append(("rules", hub_id, None))
+        return []
+
+    async def _refresh(session, *, hub_id):
+        order.append(("dwell", hub_id, None))
+        return 0
+
+    monkeypatch.setattr(scheduler_module, "flag_pickups_that_waited", _infer)
+    monkeypatch.setattr(scheduler_module, "run_nightly_job", _detect)
+    monkeypatch.setattr(scheduler_module, "refresh_hub_dwell_statistics", _refresh)
+    await LearningLoopScheduler().maybe_run_for_hub(hub)
+
+    assert order == [
+        *(("not_ready", str(hub.id), date(2026, 7, 22) - timedelta(days=back)) for back in range(1, 8)),
+        ("rules", str(hub.id), None),
+        ("dwell", str(hub.id), None),
+    ]
+    assert order[0] == ("not_ready", str(hub.id), date(2026, 7, 21))
+
+
+async def test_a_failed_inference_does_not_stop_rule_detection(
+    db_session, real_redis_client, monkeypatch
+):
+    hub = await _seed_hub(db_session, tz="UTC")
+    _set_fixed_utc_hour(monkeypatch, scheduler_module.NIGHTLY_RUN_LOCAL_HOUR)
+
+    async def _fails(session, *, hub_id, day):
+        raise RuntimeError("inference fell over")
+
+    detected = []
+
+    async def _detect(session, *, hub_id):
+        detected.append(hub_id)
+        return []
+
+    monkeypatch.setattr(scheduler_module, "flag_pickups_that_waited", _fails)
+    monkeypatch.setattr(scheduler_module, "run_nightly_job", _detect)
+    await LearningLoopScheduler().maybe_run_for_hub(hub)
+
+    assert detected == [str(hub.id)]
+    assert await real_redis_client.get(_last_run_date_key(str(hub.id))) == "2026-07-22"
+
+
+async def test_the_inference_still_runs_on_a_closed_day_because_it_judges_yesterday(
+    db_session, real_redis_client, monkeypatch
+):
+    """The closed-day skip asks about today; the inference judges yesterday. A
+    hub shut on the 22nd still had pickups on the 21st, and tonight is the one
+    night they can be judged before the dwell refresh folds them into the
+    baseline - so the inference runs while rule detection is skipped."""
+    hub = await _seed_hub(db_session, tz="UTC")
+    db_session.add(HubClosure(hub_id=hub.id, closure_date=date(2026, 7, 22)))
+    await db_session.commit()
+    _set_fixed_utc_hour(monkeypatch, scheduler_module.NIGHTLY_RUN_LOCAL_HOUR)
+
+    judged = []
+    detected = []
+
+    async def _infer(session, *, hub_id, day):
+        judged.append(day)
+        return 0
+
+    async def _detect(session, *, hub_id):
+        detected.append(hub_id)
+        return []
+
+    monkeypatch.setattr(scheduler_module, "flag_pickups_that_waited", _infer)
+    monkeypatch.setattr(scheduler_module, "run_nightly_job", _detect)
+    await LearningLoopScheduler().maybe_run_for_hub(hub)
+
+    assert judged[0] == date(2026, 7, 21)
+    assert len(judged) == scheduler_module.LOOKBACK_DAYS
+    assert detected == []

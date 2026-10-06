@@ -31,6 +31,7 @@ delivery          complete_stop                   app/api/driver_routes.py
                      └─ snapshot_that_assigned → decision_snapshot_id
 
 nightly, 2am      LearningLoopScheduler           app/learning_loop/scheduler.py
+  ├─ not ready     flag_pickups_that_waited       → stop_flags (source = inferred)
   ├─ rules         run_nightly_job                → proposed_rules
   ├─ dwell         refresh_hub_dwell_statistics   → receiver_profiles (IDN-4)
   ├─ silence       close_consequence_windows      → outcome_ledger (REC-2)
@@ -46,9 +47,14 @@ its first run is worth doubting.
 
 ### The nightly tick
 
-Per hub, at each hub's own local 2am, claimed with a Redis day key. Six jobs,
-**six independent `try` blocks**: a dwell refresh must not cost a hub its rule
-proposals, and a consequence close must not cost it the linkage flags.
+Per hub, at each hub's own local 2am, claimed with a Redis day key. Seven jobs,
+**seven independent `try` blocks**: a dwell refresh must not cost a hub its rule
+proposals, and a consequence close must not cost it the linkage flags. Two of
+them are ordered on purpose: the not-ready inference runs first, so the flags
+it writes are read by rule detection the same night and so yesterday's pickups
+are judged against the dock's dwell figures as they stood before the refresh
+folds yesterday into them. It judges the past week each night, so a missed
+night costs nothing; a stop already flagged is skipped.
 
 `propose_duplicate_locations` is the exception — it is claimed once a day across
 *all* hubs, because the comparison is deliberately global. The same physical dock

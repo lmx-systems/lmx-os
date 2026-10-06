@@ -49,7 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.order import Order, OrderStatus
-from app.models.stop import Stop, StopFlag, StopOrder
+from app.models.stop import FLAG_SOURCE_DRIVER, Stop, StopFlag, StopOrder
 
 # Ordered most-actionable-first for ties, not most-urgent-first: the clock does
 # the urgency ranking and this only decides what to do when two things are
@@ -124,6 +124,11 @@ async def build_exception_queue(
 
     # Flagged stops on orders that have not landed. A flag on a delivered order
     # is history; on an open one it is the earliest warning available.
+    #
+    # Driver flags only. An inferred flag (app/learning_loop/not_ready.py) is
+    # the system's reading of a dwell, not somebody who was there saying so,
+    # and this kind's whole claim - and its next action, "read the driver's
+    # note" - is that a person was.
     flagged = (
         await session.execute(
             _scope(
@@ -132,7 +137,10 @@ async def build_exception_queue(
                 .join(Stop, Stop.id == StopFlag.stop_id)
                 .join(StopOrder, StopOrder.stop_id == Stop.id)
                 .join(Order, Order.id == StopOrder.order_id)
-                .where(Order.delivered_at.is_(None))
+                .where(
+                    Order.delivered_at.is_(None),
+                    StopFlag.source == FLAG_SOURCE_DRIVER,
+                )
             )
         )
     ).all()

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import structlog
@@ -33,6 +33,7 @@ from app.identity import (
 )
 from app.record.consequences import close_consequence_windows
 from app.record.linkage import run_linkage_detectors
+from app.learning_loop.not_ready import LOOKBACK_DAYS, flag_pickups_that_waited
 from app.learning_loop.service import run_nightly_job
 from app.models.hub import Hub
 from app.redis_client import get_client
@@ -115,7 +116,23 @@ class LearningLoopScheduler:
 
     async def maybe_run_for_hub(self, hub: Hub) -> None:
         """Public so tests can drive one hub directly without waiting on
-        the poll loop's real-time clock check."""
+        the poll loop's real-time clock check.
+
+        The night's steps, in order, each in its own try so one failing costs
+        the hub nothing else:
+
+          1. infer `hold_window_too_short` flags from yesterday's pickup dwells,
+             and catch up the week before it (judged whether or not the hub is
+             closed today: the day being judged is yesterday, not today)
+          2. rule detection over recent flags - after (1), so the flags it just
+             wrote are read the same night (open day only)
+          3. refresh every dock's dwell statistics - after (1), so yesterday's
+             stops were judged against the baseline as it stood before them
+          4. close consequence windows
+          5. run the linkage detectors
+          6. classify unlabelled docks
+          7. propose duplicate docks (once a night across all hubs)
+        """
         hub_id = str(hub.id)
         try:
             local_now = datetime.now(ZoneInfo(hub.timezone))
@@ -141,6 +158,30 @@ class LearningLoopScheduler:
                 # - a closed day has no delivery activity for the pattern
                 # detector to learn from. Still marked as "run" below so the
                 # scheduler doesn't retry it all day.
+                # The loop's only writer of `hold_window_too_short`. Before
+                # rule detection, so the flags it writes are read tonight
+                # rather than tomorrow; before the dwell refresh, so
+                # yesterday's stops are compared against the baseline as it
+                # stood before they were added to it - a slow day must not
+                # raise the bar it is then judged against.
+                #
+                # Outside the closed-day branch below: that branch asks whether
+                # the hub is closed *today*, and the day judged here is
+                # yesterday. A hub shut every Sunday would otherwise never have
+                # its Saturdays judged - and Saturday's dwells would be folded
+                # into the baseline that night all the same. A closed yesterday
+                # simply has no pickups to find. Yesterday first, then the
+                # catch-up days, each already-flagged stop skipped.
+                not_ready = 0
+                try:
+                    for back in range(1, LOOKBACK_DAYS + 1):
+                        not_ready += await flag_pickups_that_waited(
+                            session, hub_id=hub_id, day=local_now.date() - timedelta(days=back)
+                        )
+                except Exception:
+                    await session.rollback()
+                    logger.exception("not_ready_inference_failed", hub_id=hub_id)
+
                 if await is_hub_closed_on(session, hub_id, local_now.date()):
                     logger.info("learning_loop_skipped_hub_closed", hub_id=hub_id)
                     created = []
@@ -253,6 +294,7 @@ class LearningLoopScheduler:
             logger.info(
                 "learning_loop_scheduled_run_completed",
                 hub_id=hub_id,
+                pickups_flagged_not_ready=not_ready,
                 proposed_rules_created=len(created),
                 docks_refreshed=docks,
                 silences_recorded=silences,

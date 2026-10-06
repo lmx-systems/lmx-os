@@ -1,9 +1,11 @@
 """
 Pattern detection for the Annotation and Learning Loop (component 6).
 
-Drivers flag stops via `stop_flags` (app/models/stop.py). This module looks
-for two specific, repeated flag types per shop and turns a strong enough
-pattern into a proposed SLA hold-window adjustment for that shop:
+Stops are flagged via `stop_flags` (app/models/stop.py) - by a driver, or
+for HOLD_TOO_SHORT_FLAG inferred nightly from a pickup's dwell against its
+dock's usual dwell (app/learning_loop/not_ready.py). This module looks for
+two specific, repeated flag types per shop and turns a strong enough pattern
+into a proposed SLA hold-window adjustment for that shop:
 
   - HOLD_TOO_SHORT_FLAG: driver arrived and the shop wasn't ready yet
     (order was released from the hold queue too early) -> propose
@@ -15,12 +17,12 @@ Everything here is a pure function - no DB, no I/O - so it's cheap to unit
 test and the DB-facing orchestration (app/learning_loop/service.py) stays
 a thin wrapper around it.
 
-CAVEAT (flag naming convention): `HOLD_TOO_SHORT_FLAG` /
-`HOLD_TOO_LONG_FLAG` are proposed conventions for what the driver app
-writes into `stop_flags.flag_type` - they are not yet agreed with whoever
-builds the driver app (OS Shell, component 7, not started). Treat these
-two string constants as the contract to finalize with that team, not as
-already-shipped behavior.
+Flag naming: `HOLD_TOO_SHORT_FLAG` / `HOLD_TOO_LONG_FLAG` are the agreed
+contract for `stop_flags.flag_type` - signed off as-is at the July 28 2026
+cofounder alignment (docs/ROADMAP.md, decision log entry E6 near line 131
+and the struck-through E6 row near line 254). The driver app still has no
+control that writes either; the only writer today is the dwell inference
+above, and it writes only HOLD_TOO_SHORT_FLAG.
 
 CAVEAT (tuning): `HOLD_WINDOW_ADJUSTMENT_MINUTES`, `DEFAULT_MIN_OCCURRENCES`,
 and the confidence formula are placeholders, in the same spirit as the SLA

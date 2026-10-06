@@ -142,8 +142,13 @@ def _stop_docks():
     return union(at_shop, at_door).subquery()
 
 
-def _completed_dwells_at(location_id) -> Select:
-    """Seconds at the door, for stops that actually finished.
+def completed_dwell_rows():
+    """Seconds at the door, per stop that actually finished, as a subquery.
+
+    Columns `stop_id`, `location_id`, `dwell`. `_completed_dwells_at` below
+    aggregates this per dock; `app/learning_loop/not_ready.py` reads it per stop
+    to compare one visit against the dock's figures. One definition of "a dwell
+    we observed", so the two can never disagree about which stops count.
 
     Joined through `_stop_docks`, which is how a stop reaches a dock from either
     end of a route, and restricted to `status == 'completed'`: a failed or flagged stop never
@@ -173,12 +178,15 @@ def _completed_dwells_at(location_id) -> Select:
     departed = func.coalesce(exits.c.exited_at, Stop.completed_at)
 
     return (
-        select(func.extract("epoch", departed - arrived).label("dwell"))
+        select(
+            Stop.id.label("stop_id"),
+            docks.c.location_id.label("location_id"),
+            func.extract("epoch", departed - arrived).label("dwell"),
+        )
         .join(docks, docks.c.stop_id == Stop.id)
         .outerjoin(enters, enters.c.stop_id == Stop.id)
         .outerjoin(exits, exits.c.stop_id == Stop.id)
         .where(
-            docks.c.location_id == location_id,
             Stop.status == "completed",
             arrived.is_not(None),
             departed.is_not(None),
@@ -188,7 +196,14 @@ def _completed_dwells_at(location_id) -> Select:
             # the minute-rounding defect we are replacing.
             departed >= arrived,
         )
+        .subquery()
     )
+
+
+def _completed_dwells_at(location_id) -> Select:
+    """One dock's observed dwells - `completed_dwell_rows` filtered to it."""
+    rows = completed_dwell_rows()
+    return select(rows.c.dwell).where(rows.c.location_id == location_id)
 
 
 async def refresh_dwell_statistics(
