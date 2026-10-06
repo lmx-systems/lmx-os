@@ -183,10 +183,12 @@ def planning_service_minutes(profile: ReceiverProfile | None) -> float:
       - the inherited median from a previous operator's export, at a dock with
         fewer of our own - including none, which is the cold start that column
         exists for - when it rests on `THIN_SAMPLE_COUNT` (5) or more visits;
-      - our own median from 5-9 stops when nothing is inherited;
+      - our own median from 5-9 stops when nothing usable is inherited -
+        including when an inherited figure exists but is thin, which
+        `dwell_estimate` would prefer and this does not;
       - the flat `PLACEHOLDER_STOP_SERVICE_MINUTES` otherwise: no profile, no
-        figure, or one over fewer than five visits, which is arithmetic rather
-        than a dwell.
+        figure, or every figure over fewer than five visits, which is
+        arithmetic rather than a dwell.
 
     So at first this is the placeholder almost everywhere and tightens dock by
     dock as the record fills in.
@@ -197,9 +199,16 @@ def planning_service_minutes(profile: ReceiverProfile | None) -> float:
     has its own figure or the placeholder. Recorded here rather than hidden.
     """
     estimate = dwell_estimate(profile)
-    if estimate.p50_seconds is None or estimate.is_thin:
+    seconds = estimate.p50_seconds if not estimate.is_thin else None
+    if seconds is None and profile is not None and profile.dwell_p50_seconds is not None:
+        # `dwell_estimate` takes any inherited figure over fewer than ten of our
+        # own, even a thin one. Planning on nothing would throw away our own
+        # median from five to nine stops; take that instead.
+        if (profile.dwell_sample_count or 0) >= THIN_SAMPLE_COUNT:
+            seconds = profile.dwell_p50_seconds
+    if seconds is None:
         return PLACEHOLDER_STOP_SERVICE_MINUTES
-    return max(estimate.p50_seconds / 60.0, PLANNING_FLOOR_MINUTES)
+    return max(seconds / 60.0, PLANNING_FLOOR_MINUTES)
 
 
 async def profiles_by_location(

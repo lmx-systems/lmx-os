@@ -733,3 +733,61 @@ async def test_a_cancelled_stop_is_driven_past_not_to(db_session, real_redis_cli
     assert _gap_minutes(pickup, last) == pytest.approx(
         _leg_minutes(SHOP, await _coords(db_session, last)) + FLAT, abs=0.05
     )
+
+
+async def test_a_stop_flagged_since_is_where_the_driver_last_was(db_session, real_redis_client):
+    """A flag is the driver leaving a stop as much as a completion is, and it is
+    dated by the flag, not by the arrival before it. A driver who arrived at one
+    stop, then at another and flagged that one a minute ago, is not standing at
+    the first."""
+    hub_id, driver_id, orders = await _seed(db_session, drop_count=3)
+    _, route = await _accept(db_session, hub_id, driver_id)
+    route_id = uuid.UUID(route.route_id)
+    pickup, left_on_arrived, flagged, last = await _stops(db_session, route_id)
+    now = datetime.now(timezone.utc)
+    pickup.status, pickup.arrived_at, pickup.completed_at = (
+        "completed", now - timedelta(minutes=50), now - timedelta(minutes=45)
+    )
+    left_on_arrived.status, left_on_arrived.arrived_at = "arrived", now - timedelta(minutes=30)
+    # Arrived before the other was, and flagged after it: the arrival alone would
+    # date it earlier than the stop left on "arrived".
+    flagged.status, flagged.arrived_at, flagged.flagged_at = (
+        "failed", now - timedelta(minutes=40), now - timedelta(minutes=1)
+    )
+    await db_session.commit()
+    await refresh_route_etas(db_session, route_id, now=now)
+    await db_session.commit()
+    *_, last = await _stops(db_session, route_id)
+    before = last.eta
+
+    order = await _order_at(db_session, left_on_arrived)
+    order.delivery_location_id = await _dock(
+        db_session, {"dwell_sample_count": 12, "dwell_p50_seconds": 2700}
+    )
+    await db_session.commit()
+    await refresh_route_etas(db_session, route_id, now=now)
+    await db_session.commit()
+    *_, last = await _stops(db_session, route_id)
+
+    assert last.eta == before
+
+
+async def test_our_own_median_is_not_hidden_by_a_thin_inherited_one(db_session, real_redis_client):
+    """Seven of our own visits at ten minutes, and two inherited at five. The
+    inherited figure is too thin to plan on, and that is no reason to throw our
+    own away for the placeholder."""
+    hub_id, driver_id, orders = await _seed(
+        db_session,
+        drop_count=2,
+        shop_dock={
+            "dwell_sample_count": 7,
+            "dwell_p50_seconds": 600,
+            "inherited_dwell_p50_seconds": 300,
+            "inherited_dwell_sample_count": 2,
+            "inherited_dwell_source": "design partner export",
+        },
+    )
+    _, route = await _accept(db_session, hub_id, driver_id)
+    stops = await _stops(db_session, uuid.UUID(route.route_id))
+
+    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=10.0)

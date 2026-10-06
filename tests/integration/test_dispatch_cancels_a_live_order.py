@@ -235,3 +235,65 @@ async def test_an_unknown_order_is_a_404(db_session, real_redis_client):
     with pytest.raises(HTTPException) as refused:
         await cancel_order_as_dispatch(str(__import__("uuid").uuid4()), session=db_session, _admin=ADMIN)
     assert refused.value.status_code == 404
+
+
+async def test_a_driver_on_break_is_not_put_back_to_work_by_a_cancel(db_session, real_redis_client):
+    """Dispatch acted from a desk; the driver chose their own status since. The
+    route closes, but a driver on break stays on break - going available on their
+    own passes a document check this would otherwise skip."""
+    hub_id, client_id, driver_id, order, route, authed = await _accepted(db_session)
+    manager = FleetStateManager()
+    state = await manager.get_driver_state(str(hub_id), str(driver_id))
+    state.status = "on_break"
+    await manager.upsert_driver_state(state)
+    order_id = order.id
+
+    await cancel_order_as_dispatch(str(order_id), session=db_session, _admin=ADMIN)
+
+    db_session.expire_all()
+    assert (await db_session.get(Route, route.route_id)).status == "completed"
+    state = await manager.get_driver_state(str(hub_id), str(driver_id))
+    assert state.status == "on_break"
+    assert state.current_route_id is None
+
+
+async def test_cancelling_the_stop_being_driven_to_promotes_the_next(db_session, real_redis_client):
+    """The driver was on their way to the cancelled order's pickup. The next live
+    stop is where they go now, and it says so, as completing a stop would."""
+    hub_id, client_id, shop_id, driver_id, first = await driver_app._seed(db_session)
+    other_shop = Shop(
+        client_id=client_id, name="Eastside Parts", address="40 East St",
+        lat=34.06, lng=-118.24, external_ref="SHOP-EASTSIDE",
+    )
+    db_session.add(other_shop)
+    await db_session.commit()
+    second = await _second_order(db_session, hub_id, client_id, other_shop.id)
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+    await let_the_hold_run_out(hub_id)
+    await DispatchOptimizerService().run_cycle(str(hub_id))
+    [offer] = await list_my_offers(driver=authed, session=db_session)
+    route = await accept_offer(offer.offer_id, driver=authed, session=db_session)
+    route_id = route.route_id
+    assert second.id  # two shops, so two pickups
+
+    current = (
+        await db_session.execute(
+            select(Stop).where(Stop.route_id == route_id, Stop.status == "en_route")
+        )
+    ).scalar_one()
+    assert current.stop_type == "pickup"
+    cancel_id = (
+        await db_session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == current.id))
+    ).scalar_one()
+
+    await cancel_order_as_dispatch(str(cancel_id), session=db_session, _admin=ADMIN)
+
+    db_session.expire_all()
+    live = (
+        await db_session.execute(
+            select(Stop)
+            .where(Stop.route_id == route_id, Stop.status.notin_(("cancelled", "completed", "failed")))
+            .order_by(Stop.sequence)
+        )
+    ).scalars().all()
+    assert live and live[0].status == "en_route"

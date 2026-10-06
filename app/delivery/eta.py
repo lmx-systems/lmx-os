@@ -99,6 +99,7 @@ class _Point:
     lng: float | None
     arrived_at: datetime | None
     completed_at: datetime | None
+    flagged_at: datetime | None
     # Minutes on the ground here: the dock's observed median, or the placeholder.
     service_minutes: float
 
@@ -115,9 +116,11 @@ class _Point:
         """The latest thing we actually know happened here.
 
         A completion beats an arrival: a driver who has left is a better anchor for the
-        next leg than one who was standing at the door twenty minutes ago.
+        next leg than one who was standing at the door twenty minutes ago. A flag is
+        the same kind of leaving - `flag_stop_issue` stamps `flagged_at`, never
+        `completed_at` - so a failed stop is dated by when it was given up on.
         """
-        return self.completed_at or self.arrived_at
+        return self.completed_at or self.flagged_at or self.arrived_at
 
 
 async def _points(session: AsyncSession, route_id: uuid.UUID) -> list[_Point]:
@@ -196,6 +199,7 @@ async def _points(session: AsyncSession, route_id: uuid.UUID) -> list[_Point]:
                 lng=lng,
                 arrived_at=stop.arrived_at,
                 completed_at=stop.completed_at,
+                flagged_at=stop.flagged_at,
                 service_minutes=planning_service_minutes(
                     profiles.get(location_id) if location_id is not None else None
                 ),
