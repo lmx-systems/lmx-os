@@ -34,6 +34,8 @@ derived one - see its comment.
 """
 from __future__ import annotations
 
+import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -42,6 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.receiver_profile import SOURCE_INHERITED, SOURCE_OBSERVED, ReceiverProfile
 from app.models.shop import Shop
+from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES
 
 # Below this many of our own stops at a dock, an inherited figure is the better
 # answer if there is one.
@@ -147,6 +150,49 @@ def dwell_estimate(profile: ReceiverProfile | None) -> DwellEstimate:
         )
 
     return DwellEstimate(None, 0, None, "no dwell observed here and none inherited")
+
+
+def planning_service_minutes(profile: ReceiverProfile | None) -> float:
+    """How long to plan on spending at this dock, in minutes.
+
+    The one place the ETA walk (`app/delivery/eta.py`) and the in-flight
+    insertion (`app/optimizer/service.py`) turn a dock into a stop time, so a
+    driver, a recipient and a client are shown numbers derived one way.
+
+    `dwell_estimate` chooses the figure - our own median once there are
+    `MIN_OWN_SAMPLES` of it, the inherited one otherwise - and this takes it
+    unless it is thin: a median over two visits is arithmetic, not a dwell, and
+    the flat placeholder is the better guess until there are more. Docks with no
+    figure at all get the placeholder too, which is every dock until the night
+    after its tenth completed stop, so at first this *is* the flat eight minutes
+    almost everywhere and tightens dock by dock as the record fills in.
+
+    The M1 gate's verdict was to ship the shrunk per-dock quantile (own figure
+    shrunk toward the node class's). This is the un-shrunk half of that: the
+    class-level quantiles aren't stored anywhere in `app/` yet, so a dock either
+    has its own figure or the placeholder. Recorded here rather than hidden.
+    """
+    estimate = dwell_estimate(profile)
+    if estimate.p50_seconds is None or estimate.is_thin:
+        return PLACEHOLDER_STOP_SERVICE_MINUTES
+    return estimate.p50_seconds / 60.0
+
+
+async def profiles_by_location(
+    session: AsyncSession, location_ids: Iterable[uuid.UUID | None]
+) -> dict[uuid.UUID, ReceiverProfile]:
+    """The receiver profiles for a set of docks, keyed by dock. One query; a dock
+    with no profile row is simply absent, and `planning_service_minutes(None)`
+    answers for it."""
+    wanted = {location_id for location_id in location_ids if location_id is not None}
+    if not wanted:
+        return {}
+    rows = (
+        await session.execute(
+            select(ReceiverProfile).where(ReceiverProfile.location_id.in_(wanted))
+        )
+    ).scalars().all()
+    return {profile.location_id: profile for profile in rows}
 
 
 @dataclass

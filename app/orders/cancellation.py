@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.batch_queue.store import HoldQueueStore
+from app.delivery.eta import refresh_route_etas
 from app.models.order import Order, OrderStatus
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
@@ -194,6 +195,9 @@ async def _remove_stops(session: AsyncSession, order: Order) -> str:
         removed.append(str(stop.id))
     route.plan_version += 1
     await session.flush()
+    # The stops after the cancelled ones are now reached sooner; say so. The walk
+    # skips a cancelled stop the way it skips a completed one.
+    await refresh_route_etas(session, route.id)
     # The same channel the live insertion uses, so the app sees one kind of change.
     await get_client().publish(
         f"driver_route_events:{route.driver_id}",

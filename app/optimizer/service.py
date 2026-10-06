@@ -27,6 +27,8 @@ from app.batch_queue.store import HoldQueueStore
 from app.hub_calendar import is_hub_closed_at
 from app.config import settings
 from app.db import session_scope
+from app.delivery.eta import refresh_route_etas
+from app.identity.inherited_dwell import planning_service_minutes, profiles_by_location
 from app.record import record_decision
 from app.record.decisions import MODE_LIVE
 from app.fleet_state.manager import FleetStateManager
@@ -42,7 +44,7 @@ from app.optimizer.last_cycle_store import LastCycleStore
 from app.redis_client import get_client
 from app.schemas.fleet import DriverState
 from app.sla.commitment import delivery_commitment, terms_for_client
-from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES, minutes_for_miles
+from app.travel import minutes_for_miles
 from app.schemas.optimizer import (
     CyclePlan,
     DriverCandidate,
@@ -576,6 +578,12 @@ class DispatchOptimizerService:
                 # an inserted order had been assigned.
                 for moved in await advance_orders(session, [order.id], OrderStatus.assigned):
                     moved.assigned_at = datetime.now(timezone.utc)
+                # The live ETA too, not only the plan. Until now the two new stops
+                # carried `eta = None` until the driver's next tap, so the app
+                # showed nothing and the portal fell back to a guess for an order
+                # that was on a route. `planned_eta` set above is left alone.
+                await session.flush()
+                await refresh_route_etas(session, route.id)
                 await session.commit()
 
                 event_payload = {
@@ -624,6 +632,14 @@ class DispatchOptimizerService:
         pickup_to_drop = minutes_for_miles(
             _miles(shop.lat, shop.lng, order.delivery_lat, order.delivery_lng) or 0.0
         )
+        # Time at the shop's counter: its dock's observed median where we have
+        # one, the placeholder otherwise - the same figure the ETA walk will
+        # write for the stop, so the promise check and the ETA agree.
+        at_counter = planning_service_minutes(
+            (await profiles_by_location(session, [shop.location_id])).get(shop.location_id)
+            if shop.location_id is not None
+            else None
+        )
 
         best: tuple[float, Route, datetime, datetime] | None = None
         for route in active_routes:
@@ -642,7 +658,7 @@ class DispatchOptimizerService:
             if detour is None or detour > radius:
                 continue
             at_pickup = free_at + timedelta(minutes=minutes_for_miles(detour))
-            at_drop = at_pickup + timedelta(minutes=PLACEHOLDER_STOP_SERVICE_MINUTES + pickup_to_drop)
+            at_drop = at_pickup + timedelta(minutes=at_counter + pickup_to_drop)
             if promise is not None and at_drop > promise:
                 continue
             if best is None or detour < best[0]:
@@ -695,34 +711,54 @@ class DispatchOptimizerService:
         """Where this route's driver will be when its last stop is done, and when.
 
         The last stop by sequence: a pickup is at its shop, a drop-off at its
-        order's delivery address. Its `planned_eta` says when; a stop never
-        given one is taken as now, which understates the ETA rather than
-        inventing one. A stop with no address at all falls back to the driver's
-        live position, as of now. None when neither is known: a route whose end
+        order's delivery address. When is its live `eta` - the refreshed one,
+        so a route running late is not judged free at the time it was planned
+        to be - plus the time the driver will spend at that door, which is the
+        dock's observed dwell or the placeholder. A stop never given an ETA
+        falls back to its plan, then to now, which understates rather than
+        invents. A stop with no address at all falls back to the driver's live
+        position, as of now. None when neither is known: a route whose end
         can't be placed is not known to be passing anything.
         """
         last = (
             await session.execute(
-                select(Stop).where(Stop.route_id == route.id).order_by(Stop.sequence.desc()).limit(1)
+                select(Stop)
+                .where(Stop.route_id == route.id, Stop.status != "cancelled")
+                .order_by(Stop.sequence.desc())
+                .limit(1)
             )
         ).scalar_one_or_none()
         now = datetime.now(timezone.utc)
         if last is not None:
-            free_at = last.planned_eta or now
+            arrives = last.eta or last.planned_eta or now
             if last.stop_type == "pickup" and last.shop_id is not None:
                 shop = await session.get(Shop, last.shop_id)
                 if shop is not None and shop.lat is not None and shop.lng is not None:
+                    profile = (
+                        (await profiles_by_location(session, [shop.location_id])).get(shop.location_id)
+                        if shop.location_id is not None
+                        else None
+                    )
+                    free_at = arrives + timedelta(minutes=planning_service_minutes(profile))
                     return float(shop.lat), float(shop.lng), free_at
             else:
                 drop = (
                     await session.execute(
-                        select(Order.delivery_lat, Order.delivery_lng)
+                        select(Order.delivery_lat, Order.delivery_lng, Order.delivery_location_id)
                         .join(StopOrder, StopOrder.order_id == Order.id)
                         .where(StopOrder.stop_id == last.id, Order.delivery_lat.is_not(None))
                         .limit(1)
                     )
                 ).first()
                 if drop is not None:
+                    profile = (
+                        (await profiles_by_location(session, [drop.delivery_location_id])).get(
+                            drop.delivery_location_id
+                        )
+                        if drop.delivery_location_id is not None
+                        else None
+                    )
+                    free_at = arrives + timedelta(minutes=planning_service_minutes(profile))
                     return float(drop.delivery_lat), float(drop.delivery_lng), free_at
         position = await self._fleet_state.get_driver_location(hub_id, str(route.driver_id))
         if position is None:
