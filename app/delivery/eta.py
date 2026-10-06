@@ -66,12 +66,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.batch_queue.clustering import miles_between
 from app.identity.inherited_dwell import planning_service_minutes, profiles_by_location
 from app.travel import minutes_for_miles
+from app.delivery.routes import try_lock_route_and_stops
 from app.models.driver_location_ping import DriverLocationPing
 from app.models.hub import Hub
-from app.models.order import Order
+from app.models.order import Order, OrderStatus
 from app.models.route import Route
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
+from app.redis_client import get_client
 
 logger = structlog.get_logger(__name__)
 
@@ -339,3 +341,120 @@ async def refresh_route_etas(
         logger.info("route_eta_incomplete", route_id=str(route_id), reason=stalled, written=written)
 
     return {"written": written, "reason": stalled or "ok"}
+
+
+# ---------------------------------------------------------------------------
+# One answer to "when will it arrive"
+# ---------------------------------------------------------------------------
+
+# Orders with nothing left to arrive: cancelled, a failed delivery waiting on a
+# person, or going back to the shop. Their stop's last forecast is not an answer.
+_NOTHING_ARRIVING = frozenset(
+    {OrderStatus.cancelled.value, OrderStatus.delivery_failed.value, OrderStatus.returned.value}
+)
+
+
+async def straight_line_delivery_estimate(session: AsyncSession, order: Order) -> datetime | None:
+    """A rough delivery time before the order is on a route - an ESTIMATE, not a promise.
+
+    The hold deadline plus a straight-line drive from the shop at the placeholder
+    speed (`app/travel.py`). There is no verified travel-time model: the real
+    routing integration has never made a live call (`E1`). Returns None when the
+    drop hasn't been geocoded - guessing without a destination would be inventing
+    twice over.
+    """
+    if order.hold_deadline is None or order.delivery_lat is None or order.delivery_lng is None:
+        return None
+    # Pickup coordinates live on the Shop, not the Order.
+    shop = await session.get(Shop, order.shop_id) if order.shop_id else None
+    if shop is None:
+        return None
+    miles = miles_between(shop.lat, shop.lng, float(order.delivery_lat), float(order.delivery_lng))
+    return order.hold_deadline + timedelta(minutes=minutes_for_miles(miles))
+
+
+# A drop-off stop that no longer stands for this order's delivery: a failed attempt
+# kept as history when the order is redelivered, or one dispatch cancelled.
+_STOP_NO_LONGER_LIVE = frozenset({"failed", "cancelled"})
+
+
+async def order_arrival_estimate(
+    session: AsyncSession,
+    order: Order,
+    *,
+    stop_status: str | None,
+    stop_eta: datetime | None,
+) -> datetime | None:
+    """When an order should arrive, as every surface quotes it.
+
+    The recipient's tracking page and the client portal used to answer this two
+    ways - one from the driver's live position in a straight line, the other from
+    the route walk - and showed different times for the same drop. Now both pass
+    the same thing - the status and `eta` of the order's newest drop-off stop, or
+    None for both when it has none - and get the same answer:
+
+      - nothing, once there is nothing left to arrive (cancelled, failed, going
+        back to the shop);
+      - the stop's `eta` while that stop is live, which is the number the driver's
+        stop list shows. When the walk could not reach it - a stop ahead with no
+        address - that is None, and so is this: refusing is the walk's
+        convention, and a straight line from the shop would ignore every stop
+        ahead of it;
+      - the straight-line estimate when the order has no live drop-off: not yet
+        on a route, or put back in the queue after a failed attempt whose stop
+        is kept as history.
+    """
+    if str(getattr(order.status, "value", order.status)) in _NOTHING_ARRIVING:
+        return None
+    if stop_status is not None and stop_status not in _STOP_NO_LONGER_LIVE:
+        return stop_eta
+    return await straight_line_delivery_estimate(session, order)
+
+
+# ---------------------------------------------------------------------------
+# Refreshed by where the driver is
+# ---------------------------------------------------------------------------
+
+# How often a location ping may re-walk a route. The pings arrive every thirty
+# seconds or so; a minute keeps the walk off the hot path and is far inside the
+# design doc's ten-minute threshold for telling anyone their time has moved.
+PING_REFRESH_SECONDS = 60
+
+
+async def refresh_after_ping(session: AsyncSession, driver_id: uuid.UUID) -> dict | None:
+    """Re-walk the driver's active route from the position they just reported.
+
+    Before this, ETAs moved only when the driver tapped something - accept,
+    arrive, complete, flag - so a driver stuck in traffic for half an hour moved
+    nobody's ETA until they next touched the phone. The walk already anchors on
+    the latest ping (`_anchor`); this is what calls it.
+
+    At most once a minute per route (a Redis key, not a clock check, so two app
+    instances agree), and only when the route and its stops can be locked without
+    waiting: this is the one refresh that can always be skipped, because the next
+    ping does the same work. `planned_eta` is never touched - the walk writes it
+    once, at acceptance - so the I1 accuracy measure is unaffected.
+
+    Commits on its own; the ping it follows has already been committed. Returns
+    the walk's summary, or None when nothing ran.
+    """
+    route_id = await session.scalar(
+        select(Route.id)
+        .where(Route.driver_id == driver_id, Route.status == "active")
+        .order_by(Route.created_at.desc())
+        .limit(1)
+    )
+    if route_id is None:
+        return None
+    redis = get_client()
+    key = f"eta_refresh:{route_id}"
+    if not await redis.set(key, "1", nx=True, ex=PING_REFRESH_SECONDS):
+        return None
+    if not await try_lock_route_and_stops(session, route_id):
+        # Somebody else is changing the route right now and will refresh it; let
+        # the next ping try again rather than waiting out the minute.
+        await redis.delete(key)
+        return None
+    summary = await refresh_route_etas(session, route_id)
+    await session.commit()
+    return summary

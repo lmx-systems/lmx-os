@@ -64,7 +64,7 @@ Scope: **132 lettered items** across 14 prefixes. Roughly **60 are already done*
 | **CON-1** | Dispatcher board | `D1`, `D2`, `F2` | Done |
 | **CON-2..3** | Override + reason code → training data | `I2` | Rule promotion exists; override capture does not |
 | **CON-4** | Exception queue | `R5` | Done |
-| **NTF-1** | Notification throttle | `C2` | Shipped |
+| **NTF-1** | Notification throttle | `C2` | Not shipped: `C2` was the shop's dispatch text, and no delay text exists (corrected October 2026) |
 | **TEN-1** | Three-level tenancy | `C4` | Client users exist; tenancy scoping does not |
 | **TEN-2..5** | Pooling consent, leak tests, cross-tenant batching, audit | `W7` | W7 is the contract half; the code half is new |
 | **ONB-1..3** | Feed onboarding, mapping, telemetry | `L19`, `ingestion registry` | Adapter registry is the foundation |

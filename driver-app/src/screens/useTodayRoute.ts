@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { api } from '../api/client';
@@ -8,6 +8,10 @@ import { useAppForeground } from '../hooks/useAppForeground';
 import type { JobOffer, Route } from '../api/types';
 
 const OFFER_POLL_INTERVAL_MS = 8000;
+// While a route is active the server moves its ETAs on the driver's pings, at
+// most once a minute (app/delivery/eta.py::refresh_after_ping). Refetching on the
+// same beat keeps the times on the stop list the ones the customer is seeing.
+export const ROUTE_REFRESH_INTERVAL_MS = 60_000;
 
 // One data source for TodayRouteScreen, replacing what used to be three
 // separate useFocusEffect/polling lifecycles spread across HomeScreen,
@@ -57,6 +61,18 @@ export function useTodayRoute() {
     return () => clearInterval(id);
   }, [isForeground, isOnline, route, refresh]);
 
+  // With a route, refetch it once a minute while the app is in front, and as soon
+  // as it comes back to the front. Before this the route was fetched only when the
+  // screen gained focus, which a driver on it all shift never does again, so the
+  // ETAs on it went stale while the customer's moved.
+  const hasRoute = route !== null;
+  useEffect(() => {
+    if (!isForeground || !hasRoute) return;
+    void refresh();
+    const id = setInterval(refresh, ROUTE_REFRESH_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [isForeground, hasRoute, refresh]);
+
   // Keep the geofence window on the stops that still need measuring (DRV-1).
   // Runs on every route change rather than once per shift, because the window
   // has to advance: iOS monitors 20 regions at most and a real route is longer
@@ -72,13 +88,23 @@ export function useTodayRoute() {
       ? { id: profile.hub_id, lat: profile.hub_lat, lng: profile.hub_lng }
       : null;
 
+  // Keyed on the stops and their states rather than the route object: the route is
+  // refetched every minute now, and re-registering the same regions each time
+  // would make the OS re-evaluate them - a chance to drop an enter or exit for
+  // nothing. A stop added, removed or finished changes the key.
+  const geofenceKey = useMemo(
+    () => (route ? route.stops.map((s) => `${s.stop_id}:${s.status}`).join('|') : ''),
+    [route],
+  );
   useEffect(() => {
     if (!route && !hub) {
       void stopStopGeofencing();
       return;
     }
     void syncStopGeofences(route?.stops ?? [], hub);
-  }, [route, hub?.id, hub?.lat, hub?.lng]);
+    // `route` is read through the key; listing it would undo the point of the key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geofenceKey, hub?.id, hub?.lat, hub?.lng]);
 
   return { route, offers, loading, isOnline, refresh, setRoute };
 }

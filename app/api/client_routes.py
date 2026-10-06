@@ -13,7 +13,7 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from typing import Annotated, Literal
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
@@ -22,12 +22,11 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.batch_queue.clustering import miles_between
+from app.delivery.eta import order_arrival_estimate, straight_line_delivery_estimate
 from app.batch_queue.store import HoldQueueStore
 from app.billing.invoice_pdf import render_invoice_pdf
 from app.billing.service import invoice_detail_view, invoice_summary_view
 from app.geocoding import get_geocoder
-from app.travel import minutes_for_miles
 from app.ingestion.service import (
     DestinationUnresolvableError,
     OriginUnresolvableError,
@@ -326,6 +325,9 @@ class _StopFacts:
     """What this order's own stops know: when we expect to arrive, and when we collected."""
 
     eta: datetime | None = None
+    # The newest drop-off's status, so the estimate can tell a live stop from a
+    # failed attempt kept as history. None when the order has no drop-off yet.
+    dropoff_status: str | None = None
     collected_at: datetime | None = None
 
 
@@ -351,6 +353,7 @@ async def _stop_facts(
             select(
                 StopOrder.order_id,
                 Stop.stop_type,
+                Stop.status,
                 Stop.eta,
                 Stop.completed_at,
                 Stop.created_at,
@@ -365,12 +368,19 @@ async def _stop_facts(
     ).all()
 
     facts: dict[uuid.UUID, _StopFacts] = {}
-    for order_id, stop_type, eta, completed_at, _created in rows:
+    seen: set[tuple[uuid.UUID, str]] = set()
+    for order_id, stop_type, status, eta, completed_at, _created in rows:
         entry = facts.setdefault(order_id, _StopFacts())
-        # First row per (order, type) is the newest, by the ordering above.
-        if stop_type == "dropoff" and entry.eta is None:
+        # Only the first row per (order, type), which is the newest by the ordering
+        # above. Not "the first with a value": a newer stop with no ETA yet, or a
+        # new pickup not yet made, must not let an older attempt's figure through.
+        if (order_id, stop_type) in seen:
+            continue
+        seen.add((order_id, stop_type))
+        if stop_type == "dropoff":
             entry.eta = eta
-        elif stop_type == "pickup" and entry.collected_at is None:
+            entry.dropoff_status = status
+        else:
             entry.collected_at = completed_at
     return facts
 
@@ -404,8 +414,12 @@ async def _annotate_commitments(
     )
 
     # The live route's arrival when there is one, the pre-route straight-line estimate
-    # otherwise. An estimate either way - never a promise, unlike the field above.
-    eta = facts.eta or await _estimate_delivery_by(session, order)
+    # otherwise, nothing once there is nothing left to arrive - the same answer the
+    # recipient's tracking page gives (app/delivery/eta.py::order_arrival_estimate).
+    # An estimate either way, never a promise, unlike the field above.
+    eta = await order_arrival_estimate(
+        session, order, stop_status=facts.dropoff_status, stop_eta=facts.eta
+    )
     view.estimated_delivery_by = eta.isoformat() if eta else None
 
 
@@ -1068,7 +1082,7 @@ async def submit_orders_batch(
                     status=order.status.value,
                     sla_tier=tier,
                     collect_by=collect_by,
-                    estimated_delivery_by=await _estimate_delivery_by(session, order),
+                    estimated_delivery_by=await straight_line_delivery_estimate(session, order),
                     fee_cents=order.fee_cents,
                     dispatchable=order.delivery_lat is not None and order.delivery_lng is not None,
                 ),
@@ -1190,7 +1204,7 @@ async def submit_order(
         status=order.status.value,
         sla_tier=tier,
         collect_by=collect_by,
-        estimated_delivery_by=await _estimate_delivery_by(session, order),
+        estimated_delivery_by=await straight_line_delivery_estimate(session, order),
         fee_cents=order.fee_cents,
         dispatchable=order.delivery_lat is not None and order.delivery_lng is not None,
     )
@@ -1207,31 +1221,6 @@ def _classified(order: Order) -> tuple[str, datetime]:
     if order.sla_tier is None or order.hold_deadline is None:
         raise RuntimeError(f"order {order.id} reached the portal response unclassified")
     return order.sla_tier.value, order.hold_deadline
-
-
-async def _estimate_delivery_by(session: AsyncSession, order: Order) -> datetime | None:
-    """A rough delivery time for the confirmation - an ESTIMATE, not a promise.
-
-    §2.2 principle 6 wants the confirmation to show a commitment rather than a
-    spinner, and a collect-by time alone reads as half an answer. But there is
-    no verified travel-time model here: the real routing integration has never
-    made a live call (E1, blocked on a Google Cloud account). So this is
-    straight-line distance at the same placeholder average speed the gig
-    accept-gate uses, and the field it populates is named
-    `estimated_delivery_by` rather than `delivery_by` on purpose.
-
-    Returns None when the drop hasn't been geocoded - guessing without a
-    destination would be inventing twice over.
-    """
-    if order.hold_deadline is None or order.delivery_lat is None or order.delivery_lng is None:
-        return None
-    # Pickup coordinates live on the Shop, not the Order - that Shop-dependency
-    # is the same one documented in app/ingestion/service.py.
-    shop = await session.get(Shop, order.shop_id) if order.shop_id else None
-    if shop is None:
-        return None
-    miles = miles_between(shop.lat, shop.lng, float(order.delivery_lat), float(order.delivery_lng))
-    return order.hold_deadline + timedelta(minutes=minutes_for_miles(miles))
 
 
 # ---------------------------------------------------------------------------

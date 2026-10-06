@@ -144,7 +144,7 @@ from app.delivery.cod import (
     record_dispute,
 )
 from app.delivery.en_route import mark_current_stop_en_route
-from app.delivery.eta import refresh_route_etas
+from app.delivery.eta import refresh_after_ping, refresh_route_etas
 from app.delivery.routes import lock_route
 from app.reporting.measurement import Measurement
 from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_driver_scorecard
@@ -361,6 +361,12 @@ async def report_my_location(
     what the optimizer can assign, a raw location ping does not. Publishing
     here would re-run a hub's whole optimization cycle every 30 seconds per
     on-duty driver.
+
+    It does move the driver's ETAs, at most once a minute
+    (`app/delivery/eta.py::refresh_after_ping`): a driver stuck in traffic is
+    exactly the case a recipient's ETA most needs to follow, and without this it
+    moved only when they next tapped something. Best-effort - a failed refresh
+    never fails the ping.
     """
     manager = FleetStateManager()
     await manager.update_driver_location(
@@ -384,6 +390,12 @@ async def report_my_location(
         )
     )
     await session.commit()
+
+    try:
+        await refresh_after_ping(session, uuid.UUID(driver.driver_id))
+    except Exception:
+        await session.rollback()
+        logger.exception("eta_refresh_after_ping_failed", driver_id=driver.driver_id)
 
 
 # ---------------------------------------------------------------------------
