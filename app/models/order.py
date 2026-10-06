@@ -6,7 +6,7 @@ import uuid
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
@@ -106,6 +106,15 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     weight_units: Mapped[float] = mapped_column(Numeric(10, 2), default=1, nullable=False)
+    # --- The item, as the golden record's Delivery layer holds it (DE-1) -------
+    # `weight_units` above is dispatch's capacity unit, 1.0 per order by default;
+    # these are the item's real figures, from the invoice or a catalogue, or
+    # weighed. Null means not known - never defaulted, so a missing weight shows
+    # as missing (DE-5).
+    item_description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    item_weight_kg: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    item_size_class: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    item_hazmat_or_liquid: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus, name="order_status"), default=OrderStatus.received, nullable=False
     )

@@ -107,6 +107,19 @@ class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # delivered at" must not be corrupted by a failed stop's timestamp.
     flagged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # --- The golden record's Delivery layer (`docs/ROADMAP_1.5.md` DE-1) -------
+    # A drop-off or visit stop is a record: one delivery or visit, from one
+    # source, on one date. Which door it used, and who captured it how.
+    handoff_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("handoff_points.id"), nullable=True, index=True
+    )
+    # lmx_app for a stop driven in our app; an import, a gig form or a desk
+    # pre-fill says so. Every record carries its source.
+    record_source: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="lmx_app", server_default="lmx_app"
+    )
+    collected_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
 
 class StopOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """

@@ -33,7 +33,7 @@ and nothing downstream can detect it. A duplicate is visible; a bad merge is
 not. Per §2.2(c) the founding set is merged by a person for exactly this reason.
 """
 import uuid
-from sqlalchemy import Float, ForeignKey, String
+from sqlalchemy import Boolean, Float, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -99,6 +99,23 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # checkable at a glance, "dealer" is not. Null for a human label, which is
     # its own evidence.
     node_class_evidence: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # --- The golden record's Site layer (`docs/ROADMAP_1.5.md` DE-1, D-GR) ----
+    # Kind of site is the data engine's taxonomy code - nine kinds, from a
+    # listing and confirmed on site. It sits beside `node_class` rather than
+    # replacing it: node class is the dispatch-side coarse class IDN-3 infers
+    # from names, and the two vocabularies have not been reconciled.
+    kind_of_site: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # city_core | suburb, from the density rule. With kind of site it makes the
+    # "group" accuracy is reported per.
+    setting: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    # Whose test pool the site may count toward: records from NJ never count
+    # toward a Texas pool (decision D-NJ).
+    region: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Null until somebody checked; which neighbours, in `site_address_shares`.
+    shares_address: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Where the site fields came from: listing, technician, desk, import.
+    site_source: Mapped[str | None] = mapped_column(String(24), nullable=True)
 
     @property
     def geocoded(self) -> bool:
