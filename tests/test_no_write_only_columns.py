@@ -32,8 +32,52 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = ROOT / "app"
 MODELS = APP / "models"
 
+# The golden record's schema (`docs/ROADMAP_1.5.md` DE-1, migration 0069) lands
+# before anything writes it, by plan: the Experiment 0 import (DE-3), capture in
+# the driver app (DE-4, DE-5) and the labelling queue (DE-9) are the writers.
+# Each entry comes off as its writer lands - the test below sees to it.
+_GOLDEN_RECORD = "DE-1: golden-record schema; written by DE-3 (import), DE-4/DE-5 (capture), DE-9 (labels)"
+
 # Columns nothing writes, with why. Each is a real gap or a stated hold.
 KNOWN_UNWRITTEN: dict[str, str] = {
+    "collected_by": _GOLDEN_RECORD,
+    "collected_on": _GOLDEN_RECORD,
+    "continuous_sidewalk": _GOLDEN_RECORD,
+    "dock_height_cm": _GOLDEN_RECORD,
+    "door_lat": _GOLDEN_RECORD,
+    "door_lng": _GOLDEN_RECORD,
+    "door_width_cm": _GOLDEN_RECORD,
+    "drone_ground_distance_m": _GOLDEN_RECORD,
+    "drone_open_ground": _GOLDEN_RECORD,
+    "handoff_point_id": _GOLDEN_RECORD,
+    "handoff_type": _GOLDEN_RECORD,
+    "is_blind_second": _GOLDEN_RECORD,
+    "item_description": _GOLDEN_RECORD,
+    "item_hazmat_or_liquid": _GOLDEN_RECORD,
+    "item_size_class": _GOLDEN_RECORD,
+    "item_weight_kg": _GOLDEN_RECORD,
+    "kind_of_site": _GOLDEN_RECORD,
+    "machine": _GOLDEN_RECORD,
+    "machine_limits_version": _GOLDEN_RECORD,
+    "obstructions": _GOLDEN_RECORD,
+    "overhead": _GOLDEN_RECORD,
+    "photo_approach": _GOLDEN_RECORD,
+    "photo_handoff": _GOLDEN_RECORD,
+    "photo_path": _GOLDEN_RECORD,
+    "photo_stop_point": _GOLDEN_RECORD,
+    "reason_codes": _GOLDEN_RECORD,
+    "record_source": _GOLDEN_RECORD,
+    "scorer_id": _GOLDEN_RECORD,
+    "setting": _GOLDEN_RECORD,
+    "shares_address": _GOLDEN_RECORD,
+    "shares_with_location_id": _GOLDEN_RECORD,
+    "site_source": _GOLDEN_RECORD,
+    "steps_or_ramps": _GOLDEN_RECORD,
+    "stop_lat": _GOLDEN_RECORD,
+    "stop_legal": _GOLDEN_RECORD,
+    "stop_lng": _GOLDEN_RECORD,
+    "verdict": _GOLDEN_RECORD,
+    "walk_distance_m": _GOLDEN_RECORD,
     "stripe_connect_account_id": "A11: gig payout is stubbed - app/config.py says no driver has a real one",
     # M5's survey answers. `set_autonomy_fit` writes them and is itself an
     # allowlisted orphan: nothing asks a receiver yet.

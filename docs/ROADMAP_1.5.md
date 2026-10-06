@@ -1,6 +1,8 @@
 # LMX 1.5 — Build Roadmap
 
-**v1.3 · 25 September 2026 · Sourabh**
+**v1.4 · 6 October 2026 · Sourabh**
+
+*v1.4 merges the data engine (`DE-1` to `DE-16`) from the 6 October addendum. Its decisions are §2.4 and its items are a new section after Phase 5. `REC-5` now covers the golden record (decision D-GR). The addendum was checked against main at #192 before merging, and where its account of what exists was wrong, the rows say what the tree holds: sites are `locations`, not a docks table; receiving hours and who receives already exist; the dock survey is `DRV-7`. `DE-12` is LightGBM, not CatBoost, because §2.1's veto stands. The addendum's single counsel blocker is split in two, because 0.2 is only the pooling clause and photo privacy and Google's terms are separate. §2.1's pointer to the brief's section on that veto is corrected from §3 to §5.*
 
 *v1.3 adds `DRV-7`, the dock survey at the stop — the missing writer for `IDN-4`'s surveyed and `M5` columns — with its spec kept beside the built row. It also corrects two statuses that had gone stale: `DRV-1` read `NEW` ten days after it shipped, and `MODEL_AND_DATA_BRIEF.md` recorded gates `0.4` and `0.8` as closed when this document, which holds jurisdiction over gate status, said open. Nothing else changes.*
 
@@ -91,7 +93,7 @@ Richard asked for this on the record and both co-founders agreed. **There are tw
 
 - `app/learning_loop/` is repointed at a set of per-domain predictors rather than growing into one cross-vertical model.
 - No shared embedding space and no single foundation model. If either is proposed, cite this decision.
-- **CatBoost is vetoed** (Matan, 13 Sep — Yandex origin). M1's library is **LightGBM**, which is what `lmx-dwell/` already runs — not the XGBoost named on the call. XGBoost lacks the ordered target-statistic encoding that was the reason to want CatBoost at all. See `MODEL_AND_DATA_BRIEF.md` §3 for what the veto does and does not cost.
+- **CatBoost is vetoed** (Matan, 13 Sep — Yandex origin). M1's library is **LightGBM**, which is what `lmx-dwell/` already runs — not the XGBoost named on the call. XGBoost lacks the ordered target-statistic encoding that was the reason to want CatBoost at all. See `MODEL_AND_DATA_BRIEF.md` §5 for what the veto does and does not cost.
 - `PRD-8` changes job. It was cross-*tenant* transfer evaluation; it is now **the evidence for the compounding claim**, and must measure transfer both across customers and across verticals, reporting either way.
 
 **The honest reading, which should be said the same way externally.** "It compounds across verticals" is a claim about the schema and the collection method, not about model transfer. An investor will hear the second. Say which one we mean, and let `PRD-8` be the thing that settles it rather than an assertion.
@@ -150,6 +152,21 @@ Savings share is the expensive one. It requires a defensible counterfactual for 
 **The recommendation, for what it is worth.** Take the licence. Leave savings share dead. Matan's own argument against it on 10 September is the strongest one anybody made: *"we performed so much better — and then [the customer] is going to say, what are you talking about? It's us that performed so much better."* A saving you have to prove against a counterfactual the customer disputes is a collections problem disguised as a revenue line, and it re-introduces exactly the incentive the fixed fee exists to remove.
 
 **Until this is settled, treat §2.2(d) as still live.** The metering key stays pluggable; it does not collapse to a constant on 0.5 alone. If the licence lands, `ING-2`'s Done-when needs one word — "one record and one billable **ingest** event" — so that the subscription charge in `STL-3` is not read as a second ingest event.
+
+---
+
+### 2.4 Decisions — the data engine (6 October 2026)
+
+The definitions doc, *LMX data engine: What and How?*, is the source of truth for what a record is. These are the calls the `DE` items rest on.
+
+| # | Decision | Status |
+|---|---|---|
+| **D-GR** | **Golden record format.** Four linked layers: **Site**, **Handoff point**, **Delivery**, **Labels**. The handoff point (one door, bay or counter), not the site, is the row the modality model learns from. A *record* is one delivery or visit, from one source, on one date | **Locked by Sourabh, 6 Oct.** Agreed once `REC-5` is signed |
+| **D-TIER** | **Tiers by completeness.** A record has five elements: pickup, drop-off, item, delivery profile, autonomy qualifier. Gold has all five, silver is missing one, bronze two, reference three or more. Unknown is stored as null, never guessed. Source is its own field and does not set the tier | Decided 29 Sep (Rich's definition, adopted by Sourabh) |
+| **D-TEST** | **Frozen test sites.** Per group (kind of site × setting), test sites are chosen at random **before** collection, are blind-checked gold only, and are never trained on | Decided (definitions doc) |
+| **D-ACC** | **Accuracy bars.** 90% with a person checking every "yes", 95% for pilots, 98% as the licence bar. Always reported per group, with coverage beside it | **Open.** Proposed by Sourabh 5 Oct |
+| **D-NJ** | **New Jersey records** (Experiment 0's two sources) test the process and seed training. They never count toward a Texas test pool | Agreed, Sourabh 5 Oct |
+| **D-SIM** | **Illustrative is not accuracy.** Any run that fills gaps with guesses is labelled *illustrative* and never reported as model accuracy | Proposed (tenets) |
 
 ---
 
@@ -304,7 +321,7 @@ and is deliberately not backfilled.
 | **REC-2** | Execution trace — geofence, warehouse, exceptions, actual cost, **abstentions** | `BUILT` | **Wired, and in that order deliberately.** A dispatcher records what happened through `POST /orders/{id}/consequence`, working from `GET /operations/late-orders`; the nightly tick then closes the windows nobody judged. Wiring the scheduler first would have labelled *every* late delivery `silence` — false labels, in an append-only ledger, indistinguishable from true ones by the time anyone trained on them. The close records the silences rather than asking anyone for them, because somebody always reports the angry phone call and nobody reports the twelve deliveries that were late and fine. A late delivery is on the console's list from delivery until its window closes, so a consequence is recorded when somebody hears about it; until October 2026 it appeared only after the window closed and was closed as silence that night. Stop-level arrive/depart **does** exist — `DRV-1` shipped `stop_geofence_event`, and the old row predates it. `app/record/cost.py` costs a **driver-day** (not a route: first-arrival-to-last-departure makes overhead exactly zero by construction) and writes each drop's share into REC-3's ledger with its whole basis — rate, rate source, timing source, how many orders shared the stop. Loaded costs sum to the wage bill; own-time answers "was this drop worth making". **The gap is warehouse turnaround** — `DRV-3` is the geofence that would break it out, so today it sits inside overhead rather than missing from it |
 | **REC-3** | Outcome ledger | `BUILT` | **Wired at delivery completion.** `record_delivery_outcomes` runs inside `complete_stop`'s transaction for every dropoff, on the orders `advance_orders` actually moved — so a replayed offline action cannot write a second row into an append-only ledger. The commitment is resolved at delivery against the client's terms *then*, because terms change and a recomputed outcome would judge a delivery against a promise made after it. `snapshot_that_assigned` fills `decision_snapshot_id`, which was null on every row: `REC-1` and `REC-3` are built to be compared and nothing had ever joined them. Before this the ledger was empty in production — the only writer was `record_arm_abstention`, itself inert until a client contracts an arm (`docs/ROADMAP_AUDIT_2026-09.md`). `app/record/outcomes.py`, merged (#48). Values are copied, not referenced, so a later edit cannot move a replay. Supersede requires a reason |
 | **REC-4** | Linkage flag engine — open return on the same part, duplicate order across branches, repeat visit today | `BUILT` | **Wired both ends.** `run_linkage_detectors` runs on the nightly tick and `GET /operations/linkage-flags` reads them into the console — raising flags into a table nobody opens is not better than not raising them. Resolving records that somebody looked rather than deleting: a dismissed flag is evidence a person considered the case, and deleting it would let the detector ask the same question tomorrow. `app/record/linkage.py`, merged (#48). All three detectors |
-| **REC-5** | **Data dictionary** — dwell, stop, order, route defined in writing | `NEW` | One page, signed by all three founders. Three sources currently report three different stop counts for the same window |
+| **REC-5** | **Data dictionary** — dwell, stop, order, route and, since v1.4, the golden record ([D-GR, §2.4](#24-decisions--the-data-engine-6-october-2026)) defined in writing | `NEW` | One page, signed by all three founders. Three sources currently report three different stop counts for the same window. The golden record is in scope because D-GR is only locked by one founder: Matan's and Rich's signatures are what make the format agreed, and Sourabh still signs the page. The golden-record part is drafted from `DE-1`'s schema in `docs/DATA_DICTIONARY.md`, unsigned. Dwell, stop, order and route are not drafted, because those definitions are the founders' to write |
 
 ---
 
@@ -374,7 +391,8 @@ rather than an audit.
 - **The shadow cadence.** `DEC-0` runs but is off; the cadence bounds what the
   dispatch lead can show and is an operating cost, so it is not ours to pick.
 - **`REC-5`** — three founder signatures. The evidence for why is now concrete:
-  the two exports disagree about what a route is by a factor of seven.
+  the two exports disagree about what a route is by a factor of seven. Since
+  v1.4 the same page signs off the golden record (D-GR, §2.4).
 
 **Blocked on data nobody holds yet:**
 
@@ -449,6 +467,85 @@ order — and the four switches are days of work, not weeks.
 
 ---
 
+## Data engine — the golden record and the modality model (beside Phases 1–5)
+
+Merged in v1.4 from the 6 October addendum. Definitions come from the definitions doc, through the decisions in §2.4. Within each group the order is build order. This section produces the evidence `SUP-3` (modality eligibility) and `SUP-4` (payload-eligibility dataset) need. `DE-12` is the `M5` predictor in §2.1's sense, one small model per machine, and `DE-14` is how its output reaches `SUP-3` without dispatch reading it.
+
+**What already exists, checked against the tree** (main at #192, 6 Oct; the addendum's version of this table said 2 Oct and described several pieces wrongly).
+
+| Layer | What exists | Gap |
+|---|---|---|
+| Site | `locations` (`IDN-1`): one row per normalized address, shared by every shop account there. There is no docks table. Since #182 a delivery address resolves to one at intake (`orders.delivery_location_id`, no backfill). Merges (`IDN-2`) and a seven-class node class (`IDN-3`). Receiving hours and who receives are on `receiver_profiles` (`IDN-4`), and `set_receiving_hours` is called by nothing | Setting, region, and whether the address is shared. Kind of site overlaps node class, and the two vocabularies are not reconciled. Shops at one address collapse into one location, so "shares an address" has to be recorded rather than inferred |
+| Handoff point | The dock survey (`DRV-7`, #104, 23 Sep): after a completed drop-off, three a shift, once a year per dock. #182 filed it under the delivery door and extended it to PIN drop-offs. It already asks stop point and legality, walk-distance band, door path, obstruction, landing surface and who receives | Handoff type, door and stop pins, door width, dock height, continuous sidewalk, and all four photos (the survey stores none). One row per location, not per door |
+| Delivery | Orders, stops, geofenced arrive and depart (#39, #41, #46), proof photo and signature (#162), observed dwell (#183). Barcodes are stored on parcels and `POST /scan-parcel` validates them | The driver app discards the scanned value and posts a count. `weight_units` is defaulted to 1.0 by the portal, batch and API paths, has no unit, and the solver uses a constant 1.0. The intake schema's size classes (`SizeClass`) are never stored. No hazmat field. No single source on a record: provenance is spread over `source_system`, `intake_mode`, flag sources and per-field profile sources. Nothing records a coordinate when a stop completes |
+| Labels | `orders.modality_eligible`, which nothing writes (a JSON object, while the intake schema says a list). `M5` autonomy-fit columns on `receiver_profiles`: one scorer, one row per dock | A table per record and machine, and a second scorer |
+| Model | `ml/` holds five offline packages (`agt1`, `m1`, `m2`, `prd`, `real`), run from `scripts/`. Nothing in `app/` imports `ml/`, and the API image has no ML dependencies. Holdouts are hash splits made per run | A modality model, and a test-site flag that persists |
+| Off-platform | `/driver/me/gig-jobs` with create, evaluate, list and patch (`app/api/driver_routes.py`), and the console's gig panel | No driver-app screen. Stripe Connect is stubbed, and `GigPayout` is unique per stop, so a gig-job bonus has no payout path |
+
+### Record layer
+
+| ID | Feature | Status | Done when |
+|---|---|---|---|
+| **DE-1** | **Golden-record schema** — the four layers (D-GR), a tier for every record (D-TIER), and a source on every record | `SCHEMA BUILT · NOTHING WRITES IT YET` | Migrations apply; the tier is tested on one example of each tier; the fields are documented for `REC-5`. **All three hold; the dictionary is unsigned.** `migrations/versions/0069_golden_record.py` extends `locations` with kind of site, setting, region, the shared-address answer and its source, rather than adding a docks table, and does not duplicate receiving hours or who receives. New tables: `handoff_points` (`HandoffPoint`, one row per door), `machine_labels` (`MachineLabel`; not `labels`, which the console already uses for node class) and `site_address_shares`. Stops gain the handoff point, `record_source` and who collected the record. Orders gain the item's description, its weight in kilograms beside dispatch's unitless `weight_units`, its size class in the intake schema's vocabulary, and a hazmat-or-liquid flag. The delivery profile needed nothing new. The `record_tiers` view grades every drop-off or visit, and `tests/integration/test_record_tiers.py` builds one record of each tier. New columns stay on `KNOWN_UNWRITTEN` until `DE-3`, `DE-4`, `DE-5` and `DE-9` write them. Six cannot be listed (`region`, `confidence`, `source`, `stop_type`, `stop_id`, `location_id`): the check matches by column name, and other code writes those names, so nothing guards them. A handoff point on a merged location takes its site facts from the location it was merged into. The fields are drafted in `docs/DATA_DICTIONARY.md` |
+| **DE-2** | **Machine limits, versioned** — weight, size, steps, walk distance and open-ground need per machine, with a version every label records | `NEW` | A label refuses to save without a limits version; `machine_labels.machine_limits_version` is nullable until then. Seed values are marked *assumed*. **Blocked on Rich** for the drone weight limit (2.5 kg against about 9 lb) and for the robot and car limits from the two autonomy operators |
+| **DE-3** | **Baseline import** — Experiment 0 loaded as records | `NEW` | A script loads the Experiment 0 workbook, which stays on the shared drive because it carries customer data, tagged `region=NJ` with its source. Counts match Experiment 0: 218 sites (215 drop-off, 3 pickup), 167 drop-off sites with an address, 3,372 delivery rows of which none is weighed, and a second source whose 50 deliveries exist only as per-site counts. **Every imported record grades reference.** Experiment 0 has no handoff-point data and no labels, so pickup, drop-off and the qualifier are all missing; the workbook's "bronze at best" for the second source's sites becomes reachable only once `DE-4` captures their handoff points. Tiers count records (drop-off stops), not sites. NJ rows are excluded from every test pool (D-NJ). The same script takes a CSV of re-drive captures until `DE-4` is on phones |
+
+### Capture in the driver app
+
+| ID | Feature | Status | Done when |
+|---|---|---|---|
+| **DE-4** | **Golden handoff capture** — the dock survey (`DRV-7`) becomes the capture at the delivery door | `NEW` | A drop-off writes one `handoff_points` row and four photos, and the tier recomputes. Offered at every drop-off whose handoff point is not gold yet; the once-a-year cap stays for gold ones. The survey's existing answers map across, and the new questions are taps. The door pin is taken at Delivered and the stop pin at geofence entry or the Arrived tap, with nothing typed; today no coordinate is recorded at either. Four guided photos with a reminder about faces and number plates. **Photos need an offline path:** the outbox queues a survey but cannot queue a photo. Blocked on Twilio (sign-in), the AWS deploy, and 0.4 |
+| **DE-5** | **Item capture at pickup** | `NEW` | No new order carries 1.0 as if it were a weight: a missing weight shows as missing, and `weight_units` stays dispatch's. Weight and size come from the invoice when present, but no intake path fills line-item weight or size today and there is no catalogue source, so mostly the driver enters them (a van scale is assumed). A hazmat-or-liquid toggle. The barcode needs wiring, not capture: `POST /scan-parcel` already validates one, and the app has to send the scanned value through an outbox action instead of a count |
+| **DE-6** | **Technician visit mode** — a `visit` stop with no delivery, for re-drives | `NEW` | One re-drive day runs end to end in the app, with the full golden capture and access recorded as unknown. `record_tiers` already grades `visit` stops, but the stop type does not exist yet. **Open before building:** the addendum expects a visit to land silver, but under D-TIER a visit has no order, so pickup, item and delivery profile are all missing and it grades reference. Either a visit's three elements get defined, or a visit is graded on the drop-off end and the qualifier alone |
+| **DE-7** | **Off-platform record screen** — a driver-app screen over the gig-jobs endpoints, using the short form | `NEW` | A driver logs one off-platform delivery, and it lands silver or bronze with source `off_platform`. The bonus is recorded. Paying it needs Stripe Connect, which is stubbed, and a payout keyed on the gig job. Gig month 3 |
+
+### Labels and quality
+
+| ID | Feature | Status | Done when |
+|---|---|---|---|
+| **DE-8** | **Test-site freeze** (D-TEST) | `NEW` | Per region and group, test sites are chosen at random before collection and stored as a flag. Training refuses flagged sites, and a unit test fails if any training set contains one. Today `ml/` holds out by a hash split made per run, so nothing persists between runs. The flag has to be exported to `ml/`, because `app/` and `ml/` share no code |
+| **DE-9** | **Labelling queue in the console** | `NEW` | The first scorer sets a verdict and reasons per machine. A blind second scorer cannot see the first (`is_blind_second`). Agreement per group shows on the scorecard, and gig is gated at 85% agreement. This replaces the single-scorer `M5` columns on `receiver_profiles` as the label source; whether to migrate those answers is a call for this item |
+
+### Model — offline first, in `ml/`, following `M1`
+
+| ID | Feature | Status | Done when |
+|---|---|---|---|
+| **DE-10** | **Checklist baseline** — rules from the machine limits give a verdict and reason codes | `NEW` | A baseline scorecard on Experiment 0 plus re-drive labels, scored on frozen test sites. It is the bar any model must beat, as `PRD-3` is for dwell |
+| **DE-11** | **Scorecard** | `NEW` | Runs on `DE-10`'s output. Per machine and group: "yes" accuracy with its 95% lower bound (Clopper–Pearson), coverage, lift over the baseline, the cost of a wrong "yes" (fallback dollars per routed order, on assumed costs), accuracy against record count, and scorer agreement. JSON plus Markdown, and a console page later. The bars it is judged against are D-ACC, still open |
+| **DE-12** | **First modality model** — `M5` in §2.1's sense: one small classifier per machine over handoff-point geometry | `NEW` | **LightGBM, not CatBoost.** The addendum named CatBoost, which §2.1 vetoes; the ML requirements pin LightGBM. Trained on gold and silver, evaluated only on frozen gold test sites. Release gate: it beats the baseline on "yes" accuracy at equal or better coverage, per group. Otherwise the baseline ships, as `M1`'s did. A model card plus a scorecard. This is the first model run planned for October |
+| **DE-13** | **Two-week retrain** | `NEW` | Two consecutive scheduled runs, each with a scorecard and versioned artifacts in S3. The sweeps in `infra/aws/schedules.tf` are EventBridge calls to the API, not ECS tasks, so this needs a training image, its registry, a task definition, an ECS target and IAM. Starts once `DE-4` records flow |
+| **DE-14** | **Shadow scoring at intake** | `NEW` | Every new order carries a stored prediction, and a test proves dispatch ignores it. Intake writes `modality_eligible`, which needs a shape that holds a confidence and reasons per machine, and its `KNOWN_UNWRITTEN` entry goes. Because `app/` never imports `ml/`, the prediction comes from an exported artifact. Gated on `DE-12` passing its gate. This is what feeds `SUP-3` |
+
+### Desk pre-fill and illustrative analytics
+
+| ID | Feature | Status | Done when |
+|---|---|---|---|
+| **DE-15** | **Desk pre-fill agent** — public sources into Site and Handoff-point fields, with source `desk` and tier bronze at most | `NEW` | The ~160 NJ addresses are pre-filled, and technicians confirm rather than capture. Commercial addresses are filtered first (Census). Open data is preferred: Overture, OpenStreetMap, Microsoft building footprints, Mapillary, USGS lidar, county parcels. Google Street View and Places wait on counsel. An edge agent in §2.1's sense, next to `AGT-3`'s cold-start prior |
+| **DE-16** | **Illustrative analytics pack** (Rich, 5 Oct) | `NEW` | From Experiment 0: deliveries by hour of day, the share of drop-offs within a drone radius of a hub, and the spread of distances. Every chart is stamped *illustrative* (D-SIM) and is never quoted as model accuracy |
+
+### Build order
+
+| Order | Items | Needs a person first? |
+|---|---|---|
+| 1 | `DE-1` (schema built), `DE-2` with assumed limits, `DE-3`, `DE-8` | No |
+| 2 | `DE-10`, `DE-11`, `DE-16` on Experiment 0 data | No |
+| 3 | `DE-4`, `DE-5`, `DE-6` | The AWS deploy and Twilio (Sourabh); 0.4 (Matan) for pilot drivers; the visit grading call for `DE-6` |
+| 4 | `DE-9`, then the re-drive (about 300 records), then `DE-12` | Two scorers; Rich for the final machine limits |
+| 5 | `DE-13`, `DE-14` | Records flowing from the app |
+| 6 | `DE-7`, `DE-15` | Gig month 3; counsel on Google's terms |
+
+### Person blockers this adds
+
+| Item | Owner | Blocks |
+|---|---|---|
+| `REC-5`: sign the data dictionary, now including the golden record | Matan and Rich; Sourabh signs too, having locked the format on 6 Oct | Calling the format agreed. `REC-5` asks for all three signatures |
+| Machine limits: drone weight, robot and car limits | Rich, with the two autonomy operators | Final labels (`DE-2`, `DE-10`) |
+| The AWS deploy and Twilio | Sourabh | `DE-4` to `DE-6` on phones |
+| Data pooling clause (0.2) | Counsel; Rich | Pooling records across customers. No `DE` item waits on it; listed because the addendum grouped it with the two below |
+| Photo privacy and Google's terms (no Phase 0 number yet) | Counsel; Rich | `DE-4` photo storage at scale; `DE-15`'s Google sources |
+
+---
+
 ## 6. Not building
 
 All Bringg-parity, none closes a gate: branded tracking pages · customer self-rescheduling · ratings and CSAT · tipping · a no-code rules engine · a BI widget catalogue · rate-shopping UI · delivery-slot checkout promise · driver scheduling and shifts · vehicle inspection forms · ID and age verification.
@@ -476,10 +573,15 @@ app/
   fleet_state/    DEC-6      BUILT
   messaging/      NTF-1      NEW      the delay text; the one ETA it would carry is built
   gig_platform/   SUP-1..5   RESHAPE
+  models/         DE-1       BUILT    golden record (handoff_points, machine_labels) and the
+                                       record_tiers view; nothing writes it yet
   returns/        —          deferred
 driver-app/       DRV-1..7   BUILT    except DRV-2; the gap is handset time, not code
 dashboard/        CON-1..4   RESHAPE
+                  DE-9       NEW      the labelling queue
 lmx-dwell/        PRD-3..4   BUILT    promote into app/
+ml/               DE-8, DE-10..13  NEW  test-site freeze, checklist baseline, scorecard, modality
+                                       model, retrain (DE-13 also needs infra/aws/)
 ```
 
 Conventions: **no abstraction without two live callers** · **vendor, don't depend** · every decision row written at decision time with only what was known then.

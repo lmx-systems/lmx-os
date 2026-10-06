@@ -98,9 +98,11 @@ CITED_PATH = re.compile(
     r"`([A-Za-z0-9_./-]+\.(?:py|ts|tsx|md|json|sql|sh|yml|yaml|tf))`"
 )
 
-# `| **DRV-1** | description | `STATUS` | notes |`
+# `| **DRV-1** | description | `STATUS` | notes |`. Two letters as well as
+# three: the data engine's items are `DE-1`..`DE-16` (v1.4), and a three-letter
+# pattern skipped every one of them without saying so.
 STATUS_ROW = re.compile(
-    r"^\|\s*\*\*([A-Z]{3}-\d+)\*\*\s*\|([^|]*)\|\s*`([^`]+)`\s*\|(.*)$", re.M
+    r"^\|\s*\*\*([A-Z]{2,3}-\d+)\*\*\s*\|([^|]*)\|\s*`([^`]+)`\s*\|(.*)$", re.M
 )
 
 ANY_BACKTICKED = re.compile(r"`([A-Za-z0-9_./-]+)`")
@@ -267,7 +269,7 @@ def test_every_built_row_names_something_real():
         tokens = ANY_BACKTICKED.findall(notes)
         # A roadmap id is not evidence. `AGT-4` cited `REC-1` and nothing else,
         # which is a cross-reference to another claim rather than to any code.
-        tokens = [t for t in tokens if not re.fullmatch(r"[A-Z]{3}-\d+", t)]
+        tokens = [t for t in tokens if not re.fullmatch(r"[A-Z]{2,3}-\d+", t)]
         if any(("/" in t and _resolves(t)) or t in symbols for t in tokens):
             continue
         unevidenced.append(f"{item} [{status}]")
@@ -319,12 +321,12 @@ def test_the_status_table_is_still_parseable():
 
     Same argument as `test_every_router_is_classified`: a reformat that made
     `STATUS_ROW` match nothing would turn all three assertions green and mean
-    the opposite. 64 is the count as of v1.3; the floor moves up, never down,
+    the opposite. 80 is the count as of v1.4; the floor moves up, never down,
     and a genuine reduction should be an argued edit rather than a silent one.
     """
     rows = STATUS_ROW.findall(ROADMAP_1_5.read_text())
-    assert len(rows) >= 64, (
-        f"only {len(rows)} status rows parsed out of ROADMAP_1.5.md, expected at least 64. "
+    assert len(rows) >= 80, (
+        f"only {len(rows)} status rows parsed out of ROADMAP_1.5.md, expected at least 80. "
         "Either rows were removed, or the table format changed and these checks "
         "are now inspecting nothing."
     )
