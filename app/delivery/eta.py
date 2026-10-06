@@ -32,13 +32,15 @@ the same placeholder the accept-gate, the client portal's estimate and the recip
 tracking page use. The point is not that the model is good; it is that a driver, a
 recipient and a counter person must never be shown numbers derived three different ways.
 
-**Time at the door is the dock's own, where we have measured it.** The nightly dwell
-refresh (`IDN-4`) stores each dock's median dwell on its `ReceiverProfile`; the walk
-reads it through `planning_service_minutes`, which falls back to the flat
-`PLACEHOLDER_STOP_SERVICE_MINUTES` for a dock we don't know yet. A pickup's dock is its
-shop's; a drop-off's is the order's delivery door (since #182). Until a dock has ten
-completed stops this is the flat figure, so the ETAs tighten dock by dock rather than
-all at once. The in-flight insertion uses the same function for the same reason.
+**Time at the door is the dock's own, where we know it.** The nightly dwell refresh
+(`IDN-4`) stores each dock's median dwell on its `ReceiverProfile`, beside any figure
+inherited from a previous operator's export; the walk reads them through
+`planning_service_minutes`, which falls back to the flat
+`PLACEHOLDER_STOP_SERVICE_MINUTES` for a dock with no figure or one over fewer than
+five visits (its docstring has the full rule). A pickup's dock is its shop's; a
+drop-off's is the order's delivery door (since #182). Most docks start on the flat
+figure, so the ETAs tighten dock by dock rather than all at once. The in-flight
+insertion uses the same function for the same reason.
 
 **A missing location ends the walk.** If a stop has no coordinates, it gets no ETA - and
 neither does anything after it, because you cannot know when a driver reaches stop 5
@@ -289,9 +291,16 @@ async def refresh_route_etas(
     # moment they arrived - invisible at eight minutes a stop, a real error at a
     # counter that takes twenty. They leave when the dwell runs out, or now if it
     # already has.
-    working = next((p for p in points if p.status == "arrived" and p.completed_at is None), None)
-    if working is not None and working.arrived_at is not None:
-        cursor = max(cursor, working.arrived_at + timedelta(minutes=working.service_minutes))
+    #
+    # The door they are at is the last thing they did: the reached stop observed
+    # most recently, if that was an arrival not yet completed. Nothing stops an
+    # earlier stop being left on `arrived` - a driver who drove on without
+    # completing it - and that stop says nothing about where they are now.
+    seen = [(p.observed_at, p) for p in points if p.reached and p.observed_at is not None]
+    if seen:
+        _, current = max(seen, key=lambda pair: pair[0])
+        if current.status == "arrived" and current.completed_at is None and current.arrived_at is not None:
+            cursor = max(cursor, current.arrived_at + timedelta(minutes=current.service_minutes))
 
     written = 0
     stalled: str | None = None

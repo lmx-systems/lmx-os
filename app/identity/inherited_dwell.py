@@ -39,12 +39,17 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.identity.resolution import canonical_location
+from app.models.location import Location
 from app.models.receiver_profile import SOURCE_INHERITED, SOURCE_OBSERVED, ReceiverProfile
 from app.models.shop import Shop
 from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES
+
+logger = structlog.get_logger(__name__)
 
 # Below this many of our own stops at a dock, an inherited figure is the better
 # answer if there is one.
@@ -73,6 +78,18 @@ MIN_OWN_SAMPLES = 10
 # the cold start this exists to solve. Five keeps about half and is where the
 # distribution stops being one or two stops.
 THIN_SAMPLE_COUNT = 5
+
+# The least time a stop is planned to take, whatever a dock's median says.
+#
+# **Stated, not measured.** A dock's own median can be zero: the nightly refresh
+# keeps a dwell of zero seconds (`completed_dwell_rows` admits departed == arrived),
+# and a driver who taps Arrive and Complete back to back at a door the geofence
+# never saw produces exactly that - 65.5% of the design partner's tap-grade stops
+# compute to zero. Getting out, walking in and walking back is never free, and a
+# plan of zero minutes at a door is a driver promised to the next stop early.
+# One minute sits below the shortest real counter visits the second-precision
+# file shows clustering around and well above zero.
+PLANNING_FLOOR_MINUTES = 1.0
 
 
 @dataclass(frozen=True)
@@ -159,13 +176,20 @@ def planning_service_minutes(profile: ReceiverProfile | None) -> float:
     insertion (`app/optimizer/service.py`) turn a dock into a stop time, so a
     driver, a recipient and a client are shown numbers derived one way.
 
-    `dwell_estimate` chooses the figure - our own median once there are
-    `MIN_OWN_SAMPLES` of it, the inherited one otherwise - and this takes it
-    unless it is thin: a median over two visits is arithmetic, not a dwell, and
-    the flat placeholder is the better guess until there are more. Docks with no
-    figure at all get the placeholder too, which is every dock until the night
-    after its tenth completed stop, so at first this *is* the flat eight minutes
-    almost everywhere and tightens dock by dock as the record fills in.
+    `dwell_estimate` chooses the figure and this takes it, floored at
+    `PLANNING_FLOOR_MINUTES`, unless there is none or it is thin. In practice:
+
+      - our own median, once a dock has `MIN_OWN_SAMPLES` (10) completed stops;
+      - the inherited median from a previous operator's export, at a dock with
+        fewer of our own - including none, which is the cold start that column
+        exists for - when it rests on `THIN_SAMPLE_COUNT` (5) or more visits;
+      - our own median from 5-9 stops when nothing is inherited;
+      - the flat `PLACEHOLDER_STOP_SERVICE_MINUTES` otherwise: no profile, no
+        figure, or one over fewer than five visits, which is arithmetic rather
+        than a dwell.
+
+    So at first this is the placeholder almost everywhere and tightens dock by
+    dock as the record fills in.
 
     The M1 gate's verdict was to ship the shrunk per-dock quantile (own figure
     shrunk toward the node class's). This is the un-shrunk half of that: the
@@ -175,24 +199,51 @@ def planning_service_minutes(profile: ReceiverProfile | None) -> float:
     estimate = dwell_estimate(profile)
     if estimate.p50_seconds is None or estimate.is_thin:
         return PLACEHOLDER_STOP_SERVICE_MINUTES
-    return estimate.p50_seconds / 60.0
+    return max(estimate.p50_seconds / 60.0, PLANNING_FLOOR_MINUTES)
 
 
 async def profiles_by_location(
     session: AsyncSession, location_ids: Iterable[uuid.UUID | None]
 ) -> dict[uuid.UUID, ReceiverProfile]:
-    """The receiver profiles for a set of docks, keyed by dock. One query; a dock
-    with no profile row is simply absent, and `planning_service_minutes(None)`
-    answers for it."""
+    """The receiver profiles for a set of docks, keyed by the dock asked about.
+
+    A dock with no profile row is simply absent, and `planning_service_minutes(None)`
+    answers for it. A dock merged into another answers with the surviving dock's
+    profile, as `profile_for` does: a merge repoints shops but not the delivery
+    door recorded on orders taken before it, and those must not lose the figure.
+    An alias cycle - which `canonical_location` refuses loudly - is logged and the
+    dock left out, so a corrupt merge costs a driver the dock's figure rather than
+    the route they are accepting.
+    """
     wanted = {location_id for location_id in location_ids if location_id is not None}
     if not wanted:
         return {}
+    surviving: dict[uuid.UUID, uuid.UUID] = {}
+    for location_id in wanted:
+        location = await session.get(Location, location_id)
+        if location is None:
+            continue
+        try:
+            surviving[location_id] = (await canonical_location(session, location)).id
+        except RuntimeError:
+            logger.exception("dock_alias_cycle", location_id=str(location_id))
+    if not surviving:
+        return {}
     rows = (
         await session.execute(
-            select(ReceiverProfile).where(ReceiverProfile.location_id.in_(wanted))
+            select(ReceiverProfile).where(ReceiverProfile.location_id.in_(set(surviving.values())))
         )
     ).scalars().all()
-    return {profile.location_id: profile for profile in rows}
+    by_dock = {profile.location_id: profile for profile in rows}
+    return {asked: by_dock[dock] for asked, dock in surviving.items() if dock in by_dock}
+
+
+async def service_minutes_at(session: AsyncSession, location_id: uuid.UUID | None) -> float:
+    """`planning_service_minutes` for one dock, by id. None, an unknown dock or one
+    with no profile is the placeholder."""
+    if location_id is None:
+        return PLACEHOLDER_STOP_SERVICE_MINUTES
+    return planning_service_minutes((await profiles_by_location(session, [location_id])).get(location_id))
 
 
 @dataclass

@@ -42,6 +42,7 @@ from app.delivery.eta import refresh_route_etas
 from app.driver_auth.dependencies import AuthedDriver
 from app.identity import resolve_location
 from app.models.receiver_profile import ReceiverProfile
+from app.identity.inherited_dwell import PLANNING_FLOOR_MINUTES
 from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES, minutes_for_miles
 from app.fleet_state.manager import FleetStateManager
 from app.models.client import Client
@@ -67,10 +68,9 @@ async def _seed(
     drop_count: int = 3,
     locate_drops: bool = True,
     shop_dock: dict | None = None,
-    docked_drop: dict | None = None,
 ):
-    """`shop_dock` / `docked_drop`, when given, are ReceiverProfile fields for a dock
-    attached to the shop / to the delivery door at `DOCKED_DROP`."""
+    """`shop_dock`, when given, is the ReceiverProfile fields for a dock attached to
+    the shop."""
     hub_id, client_id, shop_id, driver_id = (
         uuid.uuid4(),
         uuid.uuid4(),
@@ -107,9 +107,6 @@ async def _seed(
     )
     await db_session.commit()
     await make_driver_compliant(db_session, driver_id)
-    docked_drop_location_id = (
-        await _dock(db_session, docked_drop) if docked_drop is not None else None
-    )
 
     now = datetime.now(timezone.utc)
     fleet = FleetStateManager()
@@ -147,7 +144,6 @@ async def _seed(
             delivery_address=f"{900 + index} Congress Ave, Austin TX",
             delivery_lat=(30.30 + index * 0.05) if locate_drops else None,
             delivery_lng=(-97.80 - index * 0.05) if locate_drops else None,
-            delivery_location_id=docked_drop_location_id if index == DOCKED_DROP_INDEX else None,
         )
         db_session.add(order)
         await db_session.commit()
@@ -191,10 +187,7 @@ def _gap_minutes(earlier: Stop, later: Stop) -> float:
 
 
 SHOP = (30.264, -97.730)
-# The delivery door `_seed` puts `docked_drop` on: the farthest order's, which the
-# stub engine happens to visit first, so there is a stop after it to be delayed.
-DOCKED_DROP_INDEX = 2
-DOCKED_DROP = (round(30.30 + DOCKED_DROP_INDEX * 0.05, 6), round(-97.80 - DOCKED_DROP_INDEX * 0.05, 6))
+FLAT = PLACEHOLDER_STOP_SERVICE_MINUTES
 
 
 async def _coords(db_session, stop: Stop) -> tuple[float, float]:
@@ -202,30 +195,27 @@ async def _coords(db_session, stop: Stop) -> tuple[float, float]:
     that cares about distances reads them off the stop rather than assuming."""
     if stop.stop_type == "pickup":
         return SHOP
+    order = await _order_at(db_session, stop)
+    return float(order.delivery_lat), float(order.delivery_lng)
+
+
+async def _order_at(db_session, stop: Stop) -> Order:
     order_id = (
         await db_session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == stop.id))
     ).scalar_one()
-    order = await db_session.get(Order, order_id)
-    # Rounded, so a coordinate that went through the database compares equal to the
-    # constant it was seeded from.
-    return round(float(order.delivery_lat), 6), round(float(order.delivery_lng), 6)
+    return await db_session.get(Order, order_id)
 
 
 async def _assert_every_gap_is_leg_plus_dwell(
-    db_session, stops: list[Stop], *, at_shop: float, at_docked_drop: float
+    db_session, stops: list[Stop], *, at_shop: float, after: dict | None = None
 ):
     """Each consecutive pair of stops is one leg apart plus the time at the earlier
-    one's door: `at_shop` after the pickup, `at_docked_drop` after the docked
-    delivery door, the placeholder everywhere else."""
+    one's door: `at_shop` after the pickup, `after[stop.id]` where given, the
+    placeholder everywhere else."""
+    after = after or {}
     for earlier, later in zip(stops, stops[1:]):
         here, there = await _coords(db_session, earlier), await _coords(db_session, later)
-        dwell = (
-            at_shop
-            if earlier.stop_type == "pickup"
-            else at_docked_drop
-            if here == DOCKED_DROP
-            else PLACEHOLDER_STOP_SERVICE_MINUTES
-        )
+        dwell = at_shop if earlier.stop_type == "pickup" else after.get(earlier.id, FLAT)
         assert _gap_minutes(earlier, later) == pytest.approx(
             _leg_minutes(here, there) + dwell, abs=0.05
         ), (earlier.sequence, later.sequence, here, there, dwell)
@@ -535,8 +525,6 @@ async def test_a_recipient_who_is_not_next_gets_the_route_eta(db_session, real_r
 # Time at the door is the dock's own
 # ---------------------------------------------------------------------------
 
-FLAT = PLACEHOLDER_STOP_SERVICE_MINUTES
-
 
 async def test_an_unknown_dock_gets_the_flat_stop_time(db_session, real_redis_client):
     """The baseline, so the tests below mean something: with no dock on file every
@@ -545,7 +533,7 @@ async def test_an_unknown_dock_gets_the_flat_stop_time(db_session, real_redis_cl
     _, route = await _accept(db_session, hub_id, driver_id)
     stops = await _stops(db_session, uuid.UUID(route.route_id))
 
-    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=FLAT, at_docked_drop=FLAT)
+    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=FLAT)
 
 
 async def test_a_measured_dock_replaces_the_flat_stop_time_with_its_own_median(
@@ -559,7 +547,7 @@ async def test_a_measured_dock_replaces_the_flat_stop_time_with_its_own_median(
     _, route = await _accept(db_session, hub_id, driver_id)
     stops = await _stops(db_session, uuid.UUID(route.route_id))
 
-    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=20.0, at_docked_drop=FLAT)
+    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=20.0)
 
 
 async def test_a_thin_dock_figure_is_not_planned_on(db_session, real_redis_client):
@@ -571,7 +559,19 @@ async def test_a_thin_dock_figure_is_not_planned_on(db_session, real_redis_clien
     _, route = await _accept(db_session, hub_id, driver_id)
     stops = await _stops(db_session, uuid.UUID(route.route_id))
 
-    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=FLAT, at_docked_drop=FLAT)
+    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=FLAT)
+
+
+async def test_a_dock_whose_median_is_zero_is_still_planned_a_minute(db_session, real_redis_client):
+    """Ten taps of Arrive and Complete back to back make a median of zero seconds.
+    Walking in and out of a counter is never free."""
+    hub_id, driver_id, orders = await _seed(
+        db_session, drop_count=2, shop_dock={"dwell_sample_count": 12, "dwell_p50_seconds": 0}
+    )
+    _, route = await _accept(db_session, hub_id, driver_id)
+    stops = await _stops(db_session, uuid.UUID(route.route_id))
+
+    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=PLANNING_FLOOR_MINUTES)
 
 
 async def test_an_inherited_dwell_is_planned_on_at_a_dock_we_have_not_visited(
@@ -592,24 +592,61 @@ async def test_an_inherited_dwell_is_planned_on_at_a_dock_we_have_not_visited(
     _, route = await _accept(db_session, hub_id, driver_id)
     stops = await _stops(db_session, uuid.UUID(route.route_id))
 
-    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=5.0, at_docked_drop=FLAT)
+    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=5.0)
+
+
+async def _dock_the_first_drop_with_a_stop_after_it(db_session, stops, profile_fields) -> Stop:
+    """Give a delivery door a dock, after acceptance: whichever drop the stub put
+    first has a stop after it to be delayed, whatever order it chose."""
+    first_drop = next(s for s in stops if s.stop_type == "dropoff")
+    assert first_drop.sequence < stops[-1].sequence
+    order = await _order_at(db_session, first_drop)
+    order.delivery_location_id = await _dock(db_session, profile_fields)
+    await db_session.commit()
+    return first_drop
 
 
 async def test_a_delivery_door_has_its_own_dwell_too(db_session, real_redis_client):
     """A drop-off reaches its dock through the order's delivery door (#182), so a
     slow receiving bay delays the stops after it while the unknown shop keeps the
     placeholder."""
-    hub_id, driver_id, orders = await _seed(
-        db_session,
-        drop_count=3,
-        docked_drop={"dwell_sample_count": 15, "dwell_p50_seconds": 900},
-    )
+    hub_id, driver_id, orders = await _seed(db_session, drop_count=3)
     _, route = await _accept(db_session, hub_id, driver_id)
-    stops = await _stops(db_session, uuid.UUID(route.route_id))
-    docked = [s for s in stops if await _coords(db_session, s) == DOCKED_DROP]
-    assert docked and docked[0].sequence < stops[-1].sequence, "the docked drop must have a stop after it"
+    route_id = uuid.UUID(route.route_id)
+    docked = await _dock_the_first_drop_with_a_stop_after_it(
+        db_session, await _stops(db_session, route_id), {"dwell_sample_count": 15, "dwell_p50_seconds": 900}
+    )
 
-    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=FLAT, at_docked_drop=15.0)
+    await refresh_route_etas(db_session, route_id)
+    await db_session.commit()
+    stops = await _stops(db_session, route_id)
+
+    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=FLAT, after={docked.id: 15.0})
+
+
+async def test_a_merged_dock_answers_with_the_surviving_docks_figure(db_session, real_redis_client):
+    """A merge repoints shops but not the delivery door on orders taken before it.
+    Those must read the surviving dock's figure, not lose it."""
+    hub_id, driver_id, orders = await _seed(db_session, drop_count=3)
+    _, route = await _accept(db_session, hub_id, driver_id)
+    route_id = uuid.UUID(route.route_id)
+    docked = await _dock_the_first_drop_with_a_stop_after_it(
+        db_session, await _stops(db_session, route_id), {"dwell_sample_count": 15, "dwell_p50_seconds": 900}
+    )
+    order = await _order_at(db_session, docked)
+    surviving = order.delivery_location_id
+    absorbed = await resolve_location(
+        db_session, address=f"{uuid.uuid4().int % 9000 + 100} Old Dock Rd, Austin, TX"
+    )
+    absorbed.merged_into_id = surviving
+    order.delivery_location_id = absorbed.id
+    await db_session.commit()
+
+    await refresh_route_etas(db_session, route_id)
+    await db_session.commit()
+    stops = await _stops(db_session, route_id)
+
+    await _assert_every_gap_is_leg_plus_dwell(db_session, stops, at_shop=FLAT, after={docked.id: 15.0})
 
 
 async def test_a_driver_at_a_door_is_not_leaving_it_yet(db_session, real_redis_client):
@@ -635,6 +672,44 @@ async def test_a_driver_at_a_door_is_not_leaving_it_yet(db_session, real_redis_c
     leaves = arrived_at + timedelta(minutes=20)
     expected = leaves + timedelta(minutes=_leg_minutes(SHOP, await _coords(db_session, next_stop)))
     assert abs((next_stop.eta - expected).total_seconds()) < 3
+
+
+async def test_a_stop_left_on_arrived_earlier_does_not_hold_up_the_route(
+    db_session, real_redis_client
+):
+    """The wait applies to the door the driver is at now. A driver who arrived at
+    one stop, drove on without completing it and has since finished another is not
+    still standing at the first - however slow that dock usually is."""
+    hub_id, driver_id, orders = await _seed(db_session, drop_count=3)
+    _, route = await _accept(db_session, hub_id, driver_id)
+    route_id = uuid.UUID(route.route_id)
+    pickup, left_on_arrived, finished, last = await _stops(db_session, route_id)
+    now = datetime.now(timezone.utc)
+    pickup.status, pickup.arrived_at, pickup.completed_at = (
+        "completed", now - timedelta(minutes=50), now - timedelta(minutes=45)
+    )
+    left_on_arrived.status, left_on_arrived.arrived_at = "arrived", now - timedelta(minutes=30)
+    finished.status, finished.arrived_at, finished.completed_at = (
+        "completed", now - timedelta(minutes=10), now - timedelta(minutes=5)
+    )
+    await db_session.commit()
+    await refresh_route_etas(db_session, route_id, now=now)
+    await db_session.commit()
+    *_, last = await _stops(db_session, route_id)
+    before = last.eta
+
+    # Make the forgotten stop a forty-five-minute dock. Arrived 30 minutes ago, a
+    # wait keyed on it would push the rest of the route a quarter of an hour.
+    order = await _order_at(db_session, left_on_arrived)
+    order.delivery_location_id = await _dock(
+        db_session, {"dwell_sample_count": 12, "dwell_p50_seconds": 2700}
+    )
+    await db_session.commit()
+    await refresh_route_etas(db_session, route_id, now=now)
+    await db_session.commit()
+    *_, last = await _stops(db_session, route_id)
+
+    assert last.eta == before
 
 
 async def test_a_cancelled_stop_is_driven_past_not_to(db_session, real_redis_client):

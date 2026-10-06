@@ -28,7 +28,7 @@ from app.hub_calendar import is_hub_closed_at
 from app.config import settings
 from app.db import session_scope
 from app.delivery.eta import refresh_route_etas
-from app.identity.inherited_dwell import planning_service_minutes, profiles_by_location
+from app.identity.inherited_dwell import service_minutes_at
 from app.record import record_decision
 from app.record.decisions import MODE_LIVE
 from app.fleet_state.manager import FleetStateManager
@@ -612,12 +612,23 @@ class DispatchOptimizerService:
         return inserted
 
     async def _passing_route(
-        self, session, hub_id: str, order: Order, shop: Shop, weight: float, active_routes: list[Route]
+        self,
+        session,
+        hub_id: str,
+        order: Order,
+        shop: Shop,
+        weight: float,
+        active_routes: list[Route],
+        ends: dict | None = None,
     ) -> tuple[float, Route, datetime, datetime] | None:
         """The active route whose end passes nearest this order's pickup, with
         room for it and time to make its promise: (detour miles, route, planned
         arrival at the pickup, planned arrival at the drop). None when no route
         is passing - the design doc's §6 third question, answered for one order.
+
+        `ends` memoises each route's end across the orders of one pass: where a
+        route ends doesn't depend on which order is asking, and the hold queue
+        asks for every held order against every active route.
         """
         radius = settings.in_flight_insertion_radius_miles
         # A string either way: an enum when freshly loaded, a plain string on an
@@ -635,11 +646,7 @@ class DispatchOptimizerService:
         # Time at the shop's counter: its dock's observed median where we have
         # one, the placeholder otherwise - the same figure the ETA walk will
         # write for the stop, so the promise check and the ETA agree.
-        at_counter = planning_service_minutes(
-            (await profiles_by_location(session, [shop.location_id])).get(shop.location_id)
-            if shop.location_id is not None
-            else None
-        )
+        at_counter = await service_minutes_at(session, shop.location_id)
 
         best: tuple[float, Route, datetime, datetime] | None = None
         for route in active_routes:
@@ -650,7 +657,12 @@ class DispatchOptimizerService:
             if remaining_capacity < weight:
                 continue
 
-            end = await self._route_end(session, hub_id, route)
+            if ends is not None and route.id in ends:
+                end = ends[route.id]
+            else:
+                end = await self._route_end(session, hub_id, route)
+                if ends is not None:
+                    ends[route.id] = end
             if end is None:
                 continue
             end_lat, end_lng, free_at = end
@@ -692,6 +704,7 @@ class DispatchOptimizerService:
             )
             if not active_routes:
                 return passing
+            ends: dict = {}
             for held in candidates:
                 order = await session.get(Order, uuid.UUID(held.order_id))
                 if order is None or order.delivery_lat is None or order.delivery_lng is None:
@@ -701,7 +714,7 @@ class DispatchOptimizerService:
                     continue
                 # Weight 1.0 per order, as the cycle's StopCandidate assumes
                 # (HeldOrder carries none).
-                if await self._passing_route(session, hub_id, order, shop, 1.0, active_routes):
+                if await self._passing_route(session, hub_id, order, shop, 1.0, active_routes, ends):
                     passing.add(held.order_id)
         return passing
 
@@ -710,15 +723,21 @@ class DispatchOptimizerService:
     ) -> tuple[float, float, datetime] | None:
         """Where this route's driver will be when its last stop is done, and when.
 
-        The last stop by sequence: a pickup is at its shop, a drop-off at its
-        order's delivery address. When is its live `eta` - the refreshed one,
-        so a route running late is not judged free at the time it was planned
-        to be - plus the time the driver will spend at that door, which is the
-        dock's observed dwell or the placeholder. A stop never given an ETA
-        falls back to its plan, then to now, which understates rather than
-        invents. A stop with no address at all falls back to the driver's live
-        position, as of now. None when neither is known: a route whose end
-        can't be placed is not known to be passing anything.
+        The last live stop by sequence: a pickup is at its shop, a drop-off at
+        its order's delivery address. When is the moment they leave it:
+
+          - a stop already completed or failed has been left, so now;
+          - a stop they are standing at, its arrival plus the dock's dwell;
+          - one still ahead, its live `eta` - the refreshed one, so a route
+            running late is not judged free at the time it was planned to be -
+            plus the dock's dwell. Never given an ETA, its plan; never given
+            one of those, now, which understates rather than invents.
+
+        Never earlier than now: a forecast refreshed at the driver's last tap
+        can already be in the past, and a route is not free before the present.
+        A stop with no address at all falls back to the driver's live position,
+        as of now. None when neither is known: a route whose end can't be
+        placed is not known to be passing anything.
         """
         last = (
             await session.execute(
@@ -729,18 +748,24 @@ class DispatchOptimizerService:
             )
         ).scalar_one_or_none()
         now = datetime.now(timezone.utc)
+
+        def leaves(dwell_minutes: float) -> datetime:
+            assert last is not None
+            if last.status in ("completed", "failed"):
+                return now
+            arrives = (
+                last.arrived_at
+                if last.status == "arrived" and last.arrived_at is not None
+                else last.eta or last.planned_eta or now
+            )
+            return max(now, arrives + timedelta(minutes=dwell_minutes))
+
         if last is not None:
-            arrives = last.eta or last.planned_eta or now
             if last.stop_type == "pickup" and last.shop_id is not None:
                 shop = await session.get(Shop, last.shop_id)
                 if shop is not None and shop.lat is not None and shop.lng is not None:
-                    profile = (
-                        (await profiles_by_location(session, [shop.location_id])).get(shop.location_id)
-                        if shop.location_id is not None
-                        else None
-                    )
-                    free_at = arrives + timedelta(minutes=planning_service_minutes(profile))
-                    return float(shop.lat), float(shop.lng), free_at
+                    dwell = await service_minutes_at(session, shop.location_id)
+                    return float(shop.lat), float(shop.lng), leaves(dwell)
             else:
                 drop = (
                     await session.execute(
@@ -751,15 +776,8 @@ class DispatchOptimizerService:
                     )
                 ).first()
                 if drop is not None:
-                    profile = (
-                        (await profiles_by_location(session, [drop.delivery_location_id])).get(
-                            drop.delivery_location_id
-                        )
-                        if drop.delivery_location_id is not None
-                        else None
-                    )
-                    free_at = arrives + timedelta(minutes=planning_service_minutes(profile))
-                    return float(drop.delivery_lat), float(drop.delivery_lng), free_at
+                    dwell = await service_minutes_at(session, drop.delivery_location_id)
+                    return float(drop.delivery_lat), float(drop.delivery_lng), leaves(dwell)
         position = await self._fleet_state.get_driver_location(hub_id, str(route.driver_id))
         if position is None:
             return None

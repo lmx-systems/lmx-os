@@ -404,7 +404,9 @@ async def test_insert_plans_on_the_shops_own_dwell(db_session, real_redis_client
     twenty minutes puts the drop twenty minutes after the pickup, not eight."""
     hub_id, client_id, *_ = await _seed_active_route(db_session)
     order, new_shop_id = await _seed_new_order(db_session, hub_id, client_id)
-    dock = await resolve_location(db_session, address="400 Dock Rd, Los Angeles, CA")
+    dock = await resolve_location(
+        db_session, address=f"{uuid.uuid4().int % 9000 + 100} Dock Rd, Los Angeles, CA"
+    )
     shop = await db_session.get(Shop, new_shop_id)
     shop.location_id = dock.id
     db_session.add(ReceiverProfile(location_id=dock.id, dwell_sample_count=12, dwell_p50_seconds=1200))
@@ -421,3 +423,23 @@ async def test_insert_plans_on_the_shops_own_dwell(db_session, real_redis_client
     # The shop and the drop are a few hundred feet apart, so the gap is almost all dwell.
     assert (dropoff.planned_eta - pickup.planned_eta) >= timedelta(minutes=20)
     assert (dropoff.planned_eta - pickup.planned_eta) < timedelta(minutes=21)
+
+
+async def test_insert_never_plans_from_a_moment_already_past(db_session, real_redis_client):
+    """A forecast refreshed at the driver's last tap can be hours stale. The route
+    is not free two hours ago, and stops planned from then would carry arrival
+    times already gone - and pass a promise check they should fail."""
+    stale = datetime.now(timezone.utc) - timedelta(hours=2)
+    hub_id, client_id, *_ = await _seed_active_route(db_session, ends_eta=stale)
+    order, _ = await _seed_new_order(db_session, hub_id, client_id)
+    asked_at = datetime.now(timezone.utc)
+
+    await _insert(hub_id, order)
+
+    pickup = (
+        await db_session.execute(
+            select(Stop).join(StopOrder, StopOrder.stop_id == Stop.id)
+            .where(StopOrder.order_id == order.id, Stop.stop_type == "pickup")
+        )
+    ).scalar_one()
+    assert pickup.planned_eta >= asked_at
