@@ -6,7 +6,7 @@ The nightly job (app/learning_loop/service.py) accumulates ProposedRule
 rows but nothing promotes them - until now that was a manual SQL insert.
 This is the human-approval step: an ops admin approves a proposal, which
 copies it into active_rules where the SLA engine / ingestion actually read
-it (app/ingestion/service.py's _load_sla_overrides), or dismisses it.
+it (app/sla/overrides.py's load_hold_window_overrides), or dismisses it.
 
 The promotion is a faithful field copy - rule_type and scope carry over
 unchanged and proposed_change becomes the active rule's value - so an

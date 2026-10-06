@@ -106,8 +106,47 @@ def match_tier_override(order: NormalizedOrder, overrides: list[TierOverride]) -
     return None
 
 
+# Values a POS or a spreadsheet sends to mean "no". The check was plain truthiness,
+# so any non-empty string counted as set: a `priority` column reading "normal", or
+# `next_day` reading "N", forced T1 or T3 - and a T1 is priced and held as urgent.
+#
+# Three groups, compared after the same clean-up the manifest's priority column gets
+# (case, hyphens, underscores, spacing):
+#   - the plain noes and blanks a spreadsheet holds: no, false, 0, n/a, a lone dash;
+#   - the low end of a priority scale: low, medium;
+#   - every word the manifest upload (app/ingestion/manifest.py, `_DEADLINE_WORDS`)
+#     already reads as not urgent - "routine", "same day", "tomorrow" and the rest -
+#     so one word means one thing whichever way an order arrives.
+#     `tests/test_sla_engine.py` checks the two lists agree.
+# Only negatives are listed. Anything else non-empty still counts - "Y", "yes",
+# "high", "rush" - so this stops a "no" being read as a "yes" without inventing a
+# vocabulary for "yes". A word for next-day in a rush column reads as not urgent,
+# not as T3: a priority field saying "tomorrow" is not a scheduled-delivery flag.
+_NEGATIVE_FLAG_VALUES = frozenset(
+    {
+        "", "0", "n", "no", "false", "f", "off", "none", "null", "n/a", "na",
+        "low", "medium",
+        "normal", "standard", "routine", "regular", "today", "same day",
+        "tomorrow", "next day", "overnight",
+    }
+)
+
+
+def _flag_set(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        cleaned = " ".join(value.strip().casefold().replace("-", " ").replace("_", " ").split())
+        return cleaned not in _NEGATIVE_FLAG_VALUES
+    return bool(value)
+
+
 def _payload_flag_true(payload: dict, keys: tuple[str, ...]) -> bool:
-    return any(bool(payload.get(k)) for k in keys)
+    return any(_flag_set(payload.get(k)) for k in keys)
 
 
 def classify_tier(order: NormalizedOrder) -> tuple[str, str]:

@@ -54,7 +54,7 @@ async def _resolve_current_minutes(
     session: AsyncSession, hub_id: str, shop_ids: set[str]
 ) -> dict[str, dict[str, int]]:
     """
-    Same precedence as app/ingestion/service.py's _load_sla_overrides:
+    Same precedence as app/sla/overrides.py's load_hold_window_overrides:
     shop-level active_rules override wins, then hub-level, then the
     hardcoded defaults in app/sla/engine.py.
     """

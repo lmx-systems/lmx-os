@@ -93,9 +93,10 @@ treat `duplicate: true` as success.**
 ### What we commit to
 
 `deliver_by` tells us what you need; it does not set your service level. LMX
-classifies the order into an SLA tier from your contract terms, and the response's
-`collect_by` and `promised_at` are the commitment. Writing a tighter `deliver_by`
-does not buy a faster tier.
+classifies the order into an SLA tier - through this API that is the standard tier
+today, because a request carries no urgency of its own - and your contract terms for
+that tier set `promised_at`. The response's `collect_by` and `promised_at` are the
+commitment. Writing a tighter `deliver_by` does not buy a faster tier.
 
 `promised_at` is your contract's delivery target for that tier, counted from when
 we received the order. It's `null` until your account has a service term for the
