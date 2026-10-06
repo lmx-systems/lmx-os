@@ -5,7 +5,7 @@ multiple commingled orders per Section 8's multi-client commingling design).
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -122,14 +122,42 @@ class StopOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
 
 
+# Who raised a StopFlag. A driver's report and the system's inference are
+# both evidence that a hold window was wrong, and only one of them is a person
+# saying so - the exception queue surfaces the first and must not surface the
+# second (migration 0068).
+FLAG_SOURCE_DRIVER = "driver"
+FLAG_SOURCE_INFERRED = "inferred"
+
+
 class StopFlag(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
-    Driver-annotated flag on a stop (e.g. 'gate code needed', 'shop closes
-    early Fridays'). Feeds the Annotation and Learning Loop (component 6).
+    Flag on a stop (e.g. 'gate code needed', 'shop closes early Fridays').
+    Feeds the Annotation and Learning Loop (component 6). Raised by a driver,
+    or - for `hold_window_too_short` - inferred from a pickup's dwell by
+    app/learning_loop/not_ready.py; `source` says which.
     """
     __tablename__ = "stop_flags"
+    __table_args__ = (
+        # One inferred flag of a type per stop, ever: the nightly inference is
+        # re-runnable and the query that skips already-flagged stops is not a
+        # guarantee. Partial, because a driver may flag a stop twice on purpose.
+        Index(
+            "uq_stop_flags_inferred_once",
+            "stop_id",
+            "flag_type",
+            unique=True,
+            postgresql_where=text("source = 'inferred'"),
+        ),
+    )
 
     stop_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("stops.id"), nullable=False)
     flag_type: Mapped[str] = mapped_column(String(64), nullable=False)
     note: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_by_driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(16), default=FLAG_SOURCE_DRIVER, server_default=FLAG_SOURCE_DRIVER, nullable=False
+    )
+    # Null when `source` is inferred - nobody raised it.
+    created_by_driver_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("drivers.id"), nullable=True
+    )

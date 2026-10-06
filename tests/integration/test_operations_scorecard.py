@@ -517,8 +517,9 @@ async def test_an_unrelated_flag_does_not_count_as_a_hold_problem(db_session):
 
 
 async def test_no_held_wrong_flag_ever_recorded_is_not_a_measured_zero(db_session):
-    """Nothing raises these flags yet, so the rate read 0% held wrong: a perfect
-    record, quoted from an instrument that doesn't exist."""
+    """Before the nightly inference (app/learning_loop/not_ready.py) nothing raised
+    these flags, and the rate read 0% held wrong: a perfect record, quoted from an
+    instrument that didn't exist. A hub with no flag yet is still in that state."""
     hub_id, _, driver_id, _ = await _hub_client_driver(db_session)
     await _delivered_stops(db_session, hub_id, driver_id, count=3, at=NOW - timedelta(hours=4))
 

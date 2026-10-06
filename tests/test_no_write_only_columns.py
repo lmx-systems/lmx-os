@@ -35,9 +35,6 @@ MODELS = APP / "models"
 # Columns nothing writes, with why. Each is a real gap or a stated hold.
 KNOWN_UNWRITTEN: dict[str, str] = {
     "stripe_connect_account_id": "A11: gig payout is stubbed - app/config.py says no driver has a real one",
-    # Dead rather than dangerous: read by nothing either, so a flag simply does
-    # not record who raised it.
-    "created_by_driver_id": "R5: StopFlag does not record who raised it - read by nothing either",
     # M5's survey answers. `set_autonomy_fit` writes them and is itself an
     # allowlisted orphan: nothing asks a receiver yet.
     # Stated decisions, both documented where they live.

@@ -35,7 +35,7 @@ review flagged, built solidly rather than everything built thinly.
 | 3 | Batch-Hold Queue | Built — 0.8mi clustering default, 4-question decision logic |
 | 4 | Fleet State Manager | Built — Redis-backed driver state/location |
 | 5 | Dispatch Optimizer | Built — real Google Route Optimization call implemented, unverified against a live Google Cloud project |
-| 6 | Annotation and Learning Loop | Built — pattern detection + nightly-job service; flag-type naming convention not yet agreed with driver app team |
+| 6 | Annotation and Learning Loop | Built — pattern detection + nightly-job service; since October 2026 the nightly job infers `hold_window_too_short` from pickup dwell (`app/learning_loop/not_ready.py`), the loop's only flag writer |
 | 7 | OS Shell (dashboards, driver app, shop SMS) | Built — orchestrator dashboard (`dashboard/`); driver app Phases 1–3 (core delivery loop, profile, earnings/messaging); client portal + shop SMS (Phase 8, see below). Driver app earnings/messaging are display-only/stub-backed until a payroll provider and a real Twilio account are provisioned (`docs/NEXT_STEPS.md` items 15/16); shop SMS runs through the same stub until then too |
 
 ## Data layer
@@ -484,15 +484,20 @@ and updated to match:
    the comparison metric is shadow-planned DPH vs. scaffold actual on
    identical orders, which is a stronger proof than a standalone pilot
    number would have been. See `ROADMAP.md` Phase 9.
-3. **Learning Loop flag-type naming convention** (`app/learning_loop/detection.py`,
-   `HOLD_TOO_SHORT_FLAG` / `HOLD_TOO_LONG_FLAG`). The nightly job detects
-   repeated driver annotations and proposes shop-specific SLA hold-window
-   adjustments, but the two flag-type strings it looks for are a proposed
-   contract, not one agreed with whoever builds the driver app (component
-   7, OS Shell — not started). Confirm this naming with that team before
-   relying on real data flowing through it. `HOLD_WINDOW_ADJUSTMENT_MINUTES`
-   and `DEFAULT_MIN_OCCURRENCES` are placeholder tuning constants in the
-   same spirit as the SLA hold windows above. Nothing in this loop
+3. **Learning Loop flags** (`app/learning_loop/detection.py`,
+   `HOLD_TOO_SHORT_FLAG` / `HOLD_TOO_LONG_FLAG`; names signed off July 28
+   2026, `ROADMAP.md` E6). The nightly job reads repeated flags per shop and
+   proposes shop-specific SLA hold-window adjustments. The driver app has no
+   control that writes a flag; since October 2026 the only writer is
+   `app/learning_loop/not_ready.py`, which infers `hold_window_too_short`
+   from a completed pickup whose dwell ran past its dock's own p90 (floor
+   five minutes, cap four hours, docks with ten or more visits), with
+   `stop_flags.source = 'inferred'` and no driver (migration `0068`). Its
+   thresholds are a starting point to recalibrate against the first weeks of
+   real flags; `hold_window_too_long` still has no writer.
+   `HOLD_WINDOW_ADJUSTMENT_MINUTES` and `DEFAULT_MIN_OCCURRENCES` are
+   placeholder tuning constants in the same spirit as the SLA hold windows
+   above. Nothing in this loop
    auto-promotes a proposal to `active_rules` — a human always reviews
    `proposed_rules` first, by design.
 

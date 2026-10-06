@@ -9,6 +9,31 @@ This supersedes the "Recommended next steps" list at the bottom of
 `docs/NEXT_STEPS.md`'s row-by-row punch list — that file is the detailed
 backlog; this one is the map of how those rows fit into getting to launch.
 
+## Decision log — product calls, October 5 2026
+
+Three calls made while closing the last engineering items that needed a
+decision rather than code. Each is built or recorded where it lives.
+
+1. **A dispatcher ops role.** Admins configure the hub, dispatchers do the
+   day's order work (overrides, consequences, dock labels, linkage flags,
+   taking an order in by hand, resolving and cancelling, forcing a cycle,
+   returns), viewers read. Before this "viewer" was the dispatcher's account
+   by intent, with the day's writes open to any session. `require_dispatcher`
+   in `app/ops_auth/dependencies.py`; S1 below.
+2. **"The order wasn't ready" is inferred from pickup dwell, not tapped by a
+   driver.** The hold-window detector (E6) read `hold_window_too_short` flags
+   nothing wrote. The nightly job now flags a completed pickup whose dwell ran
+   past its dock's own p90 (floor five minutes, cap four hours, docks with
+   ten or more visits), with `stop_flags.source = 'inferred'` and no driver
+   (`app/learning_loop/not_ready.py`, migration `0068`). The thresholds are a
+   starting point to recalibrate against the first weeks of real flags. A
+   driver-app control was declined for now.
+3. **Live routes keep appending new stops last.** When an order joins a route
+   under way (the in-flight insertion) it goes after everything already
+   planned; the un-started tail is not re-sequenced, although the design
+   document's §7 would allow it. "Pushed, not yanked" stands until shadow
+   mode gives live data to revisit it on.
+
 ## Decision log — founders offsite, August 3 2026
 
 **A second demand path.** The offsite adopted gig-platform demand sourcing
@@ -560,7 +585,7 @@ Where LMX OS's "learning" actually stands, and the ladder to make it real
 Optimizer optimizes but does not learn (every cycle solves from scratch);
 the SLA engine and batch-hold queue are hand-written rules with
 placeholder numbers; the one genuine seed is the Annotation & Learning
-Loop — driver annotations (`stop_flags`, written from the driver app) ARE
+Loop — stop flags (`stop_flags`; since October 2026 inferred from pickup dwell, as the driver app writes none) ARE
 labeled data, and the loop's shape (capture → detect → propose → human
 approves → per-shop override) is right — but detection is frequency
 counting (3+ repeated flags per shop → propose a fixed ±10min T2

@@ -44,8 +44,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.hub_calendar import hub_local_date
 
 # The two flags that say the hold window was wrong in one direction or the other.
-# Imported from the learning loop rather than restated, so a rename lands in one place -
-# these strings are still that module's proposed convention pending E6's sign-off.
+# Imported from the learning loop rather than restated, so a rename lands in one place
+# (the names themselves were signed off - docs/ROADMAP.md E6).
 from app.learning_loop.detection import HOLD_TOO_LONG_FLAG, HOLD_TOO_SHORT_FLAG
 from app.models.driver_shift_event import DriverShiftEvent
 from app.models.hub import Hub
@@ -425,13 +425,23 @@ async def _sla_hit_rates(
 # ---------------------------------------------------------------------------
 
 
+# Named for both sources on purpose - see the docstring below.
+_HELD_WRONG_RATE_NAME = "Orders flagged as held wrong (by a driver or inferred from dwell)"
+
+
 async def _hold_window_flag_rate(session: AsyncSession, since: datetime) -> Rate:
-    """How often a released order drew a "held wrong" flag from the driver.
+    """How often a released order drew a "held wrong" flag.
 
     Batching is the economic engine, so whether the windows are set right is the
     question underneath it. A driver arriving before the shop is ready
     (`hold_window_too_short`) and a shop that had been waiting (`hold_window_too_long`)
     are the two ways to be wrong, and both are already captured.
+
+    Both sources count. A flag a driver raised and one inferred from a pickup's dwell
+    (`app/learning_loop/not_ready.py`) are both evidence the window was wrong; only
+    the exception queue, which means "a person reported this", tells them apart. The
+    rate's name says so, because a reader who takes it for a count of driver reports
+    will overstate how often drivers complain.
 
     Reported as one rate rather than split by direction, because the useful headline is
     "how often were we wrong at all". The learning loop already reads the directions
@@ -454,14 +464,15 @@ async def _hold_window_flag_rate(session: AsyncSession, since: datetime) -> Rate
 
     if not completed:
         return Rate(
-            name="Orders flagged as held wrong",
+            name=_HELD_WRONG_RATE_NAME,
             target="lower is better",
             not_measured="no completed deliveries in the window",
         )
 
-    # Nothing raises these flags yet: the driver app has no control for them and
-    # nothing derives them. Until one has been recorded, a zero is the absence of
-    # an instrument, and it read as a perfect record. The first flag ever recorded
+    # The driver app has no control for these flags; since migration 0068 the
+    # nightly job derives `hold_window_too_short` from pickup dwell, and that is
+    # the only writer. Until one has been recorded, a zero is the absence of an
+    # instrument, and it read as a perfect record. The first flag ever recorded
     # makes this a measurement, and a zero after that means zero.
     instrumented = (
         await session.execute(
@@ -472,7 +483,7 @@ async def _hold_window_flag_rate(session: AsyncSession, since: datetime) -> Rate
     ).first()
     if instrumented is None:
         return Rate(
-            name="Orders flagged as held wrong",
+            name=_HELD_WRONG_RATE_NAME,
             target="lower is better",
             not_measured="nothing has recorded a held-wrong flag yet, so a zero would mean nothing",
         )
@@ -490,7 +501,7 @@ async def _hold_window_flag_rate(session: AsyncSession, since: datetime) -> Rate
     ).scalar_one()
 
     return Rate(
-        name="Orders flagged as held wrong",
+        name=_HELD_WRONG_RATE_NAME,
         target="lower is better",
         numerator=int(flagged),
         denominator=int(completed),
