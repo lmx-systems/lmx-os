@@ -29,12 +29,15 @@ async def try_lock_route_and_stops(session: AsyncSession, route_id: uuid.UUID) -
     """Lock the route and every stop on it without waiting, or give up.
 
     For the refresh a location ping triggers, which is optional - the next ping, or
-    the driver's next tap, refreshes the same ETAs. Every other path that touches a
-    route locks a stop and then waits for the route (`complete_stop`,
-    `flag_stop_issue`, a dispatch cancel). A ping refresh that waited too, holding
-    the route, would deadlock against them; one that never waits cannot. Taking
-    the stops as well means the walk reads statuses nobody can change under it,
-    so it never writes a forecast onto a stop the driver has just arrived at.
+    the driver's next tap, refreshes the same ETAs. The paths that change a route
+    take its locks in different orders: `complete_stop` and `flag_stop_issue` lock
+    a stop and then wait for the route; a dispatch cancel writes stops and then
+    waits for the route; the optimizer's in-flight insertion writes the route and
+    then the stops; `arrive_at_stop` and `accept_offer` lock stops only. A ping
+    refresh that waited on any of them could join a deadlock with another; one that
+    never waits cannot. Taking the stops as well means the walk reads statuses
+    nobody can change under it, so it never writes a forecast onto a stop the
+    driver has just arrived at.
 
     Returns False, with the transaction rolled back, when anything is busy.
     """

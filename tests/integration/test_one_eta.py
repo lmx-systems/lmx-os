@@ -184,6 +184,53 @@ async def test_nothing_is_estimated_once_nothing_is_arriving(db_session, real_re
     assert portal is None
 
 
+async def test_a_redelivered_order_is_not_quoted_its_failed_attempt(db_session, real_redis_client):
+    """Redelivery puts the order back in the queue and keeps the failed drop-off as
+    history, its last forecast frozen on it. The portal used to quote that time -
+    already gone - while the page gave the straight-line estimate."""
+    hub_id, client_id, driver_id, order, route = await _on_a_route_as_the_current_drop(db_session)
+    failed = await _dropoff(db_session, order)
+    failed.status = "failed"
+    order.status = OrderStatus.held
+    order.hold_deadline = datetime.now(timezone.utc) + timedelta(minutes=30)
+    await db_session.commit()
+
+    tracking = await resolve_tracking(db_session, order.tracking_token)
+    portal = await _portal_estimate(db_session, client_id, order)
+
+    assert portal is not None
+    assert tracking.estimated_arrival == portal
+    assert portal != failed.eta
+
+
+async def test_a_drop_the_route_walk_cannot_reach_has_no_estimate(db_session, real_redis_client):
+    """A stop ahead with no address ends the walk, and the driver's list shows no
+    time for anything after it. The page and the portal used to fill the gap with
+    a straight line from the shop, ignoring every stop in between."""
+    hub_id, client_id, shop_id, driver_id = await _seed(db_session)
+    order = await _order(db_session, hub_id, client_id, shop_id)
+    unlocated = await _order(db_session, hub_id, client_id, shop_id, drop=(None, None))
+    route = await _route_with_stops(
+        db_session,
+        hub_id,
+        driver_id,
+        stops=[
+            (order, "pickup", "completed"),
+            (unlocated, "dropoff", "pending"),
+            (order, "dropoff", "pending"),
+        ],
+    )
+    assert (await refresh_route_etas(db_session, route.id))["reason"].endswith("_unlocated")
+    await db_session.commit()
+    assert (await _dropoff(db_session, order)).eta is None
+
+    tracking = await resolve_tracking(db_session, order.tracking_token)
+    portal = await _portal_estimate(db_session, client_id, order)
+
+    assert tracking.estimated_arrival is None
+    assert portal is None
+
+
 # ---------------------------------------------------------------------------
 # Moved by where the driver is
 # ---------------------------------------------------------------------------

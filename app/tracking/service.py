@@ -301,28 +301,21 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
 
     headline, detail = _RECIPIENT_STATUS.get(order.status, _FALLBACK_STATUS)
 
-    # Fetched on its own rather than reusing the `stop` below, because that one
-    # is deliberately not looked up for a delivered order - which is the only
-    # state a proof-of-delivery photo can exist in. One extra query, on
-    # precisely the orders that have stopped polling.
+    # The order's newest drop-off, whatever its state: the proof of delivery hangs
+    # off it once delivered, and the arrival estimate reads it in exactly the way
+    # the client portal does (app/delivery/eta.py::order_arrival_estimate), so the
+    # two can't pick different stops - a redelivered order keeps its failed first
+    # attempt as history, and only the rule there decides it no longer counts.
+    stop = await _dropoff_stop_for(session, order)
+
     pod_photo_url: str | None = None
     pod_signature_url: str | None = None
-    if order.delivered_at is not None:
-        delivered_stop = await _dropoff_stop_for(session, order)
-        if delivered_stop is not None:
-            pod_photo_url = delivered_stop.pod_photo_url
-            pod_signature_url = delivered_stop.pod_signature_url
+    if order.delivered_at is not None and stop is not None:
+        pod_photo_url = stop.pod_photo_url
+        pod_signature_url = stop.pod_signature_url
 
     position: DriverPosition | None = None
-    # This drop's own stop ETA, which is route-aware and available whether or not the
-    # recipient is next. Fetched outside the current-stop check below because the two
-    # answer different questions: the ETA is fine to show from any position on the
-    # route, whereas the van's live location is not (rule 1).
-    stop_eta: datetime | None = None
     if order.status not in _PRE_DISPATCH_STATUSES and order.status != OrderStatus.delivered:
-        stop = await _dropoff_stop_for(session, order)
-        if stop is not None:
-            stop_eta = stop.eta
         if stop is not None and await _is_the_drivers_current_stop(session, stop):
             position = await _driver_position(session, stop, FleetStateManager())
             if position is not None:
@@ -346,7 +339,12 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
         # straight line from the live position while this was the current stop -
         # a second answer that disagreed with the portal, and could sit in the past
         # behind a stale ping. The position below is for the map only.
-        estimated_arrival=await order_arrival_estimate(session, order, stop_eta),
+        estimated_arrival=await order_arrival_estimate(
+            session,
+            order,
+            stop_status=stop.status if stop is not None else None,
+            stop_eta=stop.eta if stop is not None else None,
+        ),
         delivered_at=order.delivered_at,
         pod_photo_url=pod_photo_url,
         pod_signature_url=pod_signature_url,

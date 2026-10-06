@@ -373,22 +373,40 @@ async def straight_line_delivery_estimate(session: AsyncSession, order: Order) -
     return order.hold_deadline + timedelta(minutes=minutes_for_miles(miles))
 
 
+# A drop-off stop that no longer stands for this order's delivery: a failed attempt
+# kept as history when the order is redelivered, or one dispatch cancelled.
+_STOP_NO_LONGER_LIVE = frozenset({"failed", "cancelled"})
+
+
 async def order_arrival_estimate(
-    session: AsyncSession, order: Order, stop_eta: datetime | None
+    session: AsyncSession,
+    order: Order,
+    *,
+    stop_status: str | None,
+    stop_eta: datetime | None,
 ) -> datetime | None:
     """When an order should arrive, as every surface quotes it.
 
     The recipient's tracking page and the client portal used to answer this two
     ways - one from the driver's live position in a straight line, the other from
-    the route walk - and showed different times for the same drop. Now there is
-    one number: the order's drop-off `Stop.eta` once it is on a route (walked along
-    the driver's remaining stops, and refreshed on their pings at most once a
-    minute), the straight-line estimate before then, and nothing once there is
-    nothing left to arrive.
+    the route walk - and showed different times for the same drop. Now both pass
+    the same thing - the status and `eta` of the order's newest drop-off stop, or
+    None for both when it has none - and get the same answer:
+
+      - nothing, once there is nothing left to arrive (cancelled, failed, going
+        back to the shop);
+      - the stop's `eta` while that stop is live, which is the number the driver's
+        stop list shows. When the walk could not reach it - a stop ahead with no
+        address - that is None, and so is this: refusing is the walk's
+        convention, and a straight line from the shop would ignore every stop
+        ahead of it;
+      - the straight-line estimate when the order has no live drop-off: not yet
+        on a route, or put back in the queue after a failed attempt whose stop
+        is kept as history.
     """
     if str(getattr(order.status, "value", order.status)) in _NOTHING_ARRIVING:
         return None
-    if stop_eta is not None:
+    if stop_status is not None and stop_status not in _STOP_NO_LONGER_LIVE:
         return stop_eta
     return await straight_line_delivery_estimate(session, order)
 

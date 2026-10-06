@@ -14,14 +14,26 @@ import { isBeforeArrival } from './stopStatus';
  * with no address ends the walk for everything after it).
  *
  * A clock time rather than "in 12 min": the figure only moves when the app
- * refetches the route, so a countdown would tick past zero on a stale number.
- * Built from getHours/getMinutes in the phone's own zone rather than
- * toLocaleTimeString, whose output differs between Hermes and JSC.
+ * refetches the route (once a minute while a route is active), so a countdown
+ * would tick past zero on a stale number. Built from getHours/getMinutes in the
+ * phone's own zone rather than toLocaleTimeString, whose output differs between
+ * Hermes and JSC.
+ *
+ * Nothing at all once the time is more than a couple of minutes gone. The server
+ * never forecasts into the past, so a passed time means the screen is behind -
+ * offline, or between refetches - and a time already gone reads as a promise
+ * broken, not as "late".
  */
-export function etaLabel(stop: Pick<Stop, 'status' | 'eta'>): string | null {
+export const STALE_AFTER_MS = 2 * 60_000;
+
+export function etaLabel(
+  stop: Pick<Stop, 'status' | 'eta'>,
+  now: Date = new Date(),
+): string | null {
   if (!stop.eta || !isBeforeArrival(stop)) return null;
   const at = new Date(stop.eta);
   if (Number.isNaN(at.getTime())) return null;
+  if (now.getTime() - at.getTime() > STALE_AFTER_MS) return null;
   return `ETA ${clockTime(at)}`;
 }
 

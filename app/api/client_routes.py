@@ -325,6 +325,9 @@ class _StopFacts:
     """What this order's own stops know: when we expect to arrive, and when we collected."""
 
     eta: datetime | None = None
+    # The newest drop-off's status, so the estimate can tell a live stop from a
+    # failed attempt kept as history. None when the order has no drop-off yet.
+    dropoff_status: str | None = None
     collected_at: datetime | None = None
 
 
@@ -350,6 +353,7 @@ async def _stop_facts(
             select(
                 StopOrder.order_id,
                 Stop.stop_type,
+                Stop.status,
                 Stop.eta,
                 Stop.completed_at,
                 Stop.created_at,
@@ -364,12 +368,19 @@ async def _stop_facts(
     ).all()
 
     facts: dict[uuid.UUID, _StopFacts] = {}
-    for order_id, stop_type, eta, completed_at, _created in rows:
+    seen: set[tuple[uuid.UUID, str]] = set()
+    for order_id, stop_type, status, eta, completed_at, _created in rows:
         entry = facts.setdefault(order_id, _StopFacts())
-        # First row per (order, type) is the newest, by the ordering above.
-        if stop_type == "dropoff" and entry.eta is None:
+        # Only the first row per (order, type), which is the newest by the ordering
+        # above. Not "the first with a value": a newer stop with no ETA yet, or a
+        # new pickup not yet made, must not let an older attempt's figure through.
+        if (order_id, stop_type) in seen:
+            continue
+        seen.add((order_id, stop_type))
+        if stop_type == "dropoff":
             entry.eta = eta
-        elif stop_type == "pickup" and entry.collected_at is None:
+            entry.dropoff_status = status
+        else:
             entry.collected_at = completed_at
     return facts
 
@@ -406,7 +417,9 @@ async def _annotate_commitments(
     # otherwise, nothing once there is nothing left to arrive - the same answer the
     # recipient's tracking page gives (app/delivery/eta.py::order_arrival_estimate).
     # An estimate either way, never a promise, unlike the field above.
-    eta = await order_arrival_estimate(session, order, facts.eta)
+    eta = await order_arrival_estimate(
+        session, order, stop_status=facts.dropoff_status, stop_eta=facts.eta
+    )
     view.estimated_delivery_by = eta.isoformat() if eta else None
 
 

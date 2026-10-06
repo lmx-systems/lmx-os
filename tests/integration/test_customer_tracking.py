@@ -24,6 +24,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
+from app.delivery.eta import refresh_route_etas
 from app.api.public_routes import rate_delivery, track_delivery
 from app.config import settings
 from app.fleet_state.manager import FleetStateManager
@@ -208,12 +209,15 @@ async def test_the_position_shows_when_this_drop_is_the_drivers_current_stop(
     """The one positive case. Everything below is a refusal."""
     hub_id, client_id, shop_id, driver_id = await _seed(db_session)
     order = await _order(db_session, hub_id, client_id, shop_id)
-    await _route_with_stops(
+    route = await _route_with_stops(
         db_session,
         hub_id,
         driver_id,
         stops=[(order, "pickup", "completed"), (order, "dropoff", "pending")],
     )
+    # Walked, as accepting a route walks it: the drop's ETA is what the page shows.
+    await refresh_route_etas(db_session, route.id)
+    await db_session.commit()
     await _driver_reports_position(hub_id, driver_id)
 
     view = await resolve_tracking(db_session, order.tracking_token)
@@ -221,8 +225,9 @@ async def test_the_position_shows_when_this_drop_is_the_drivers_current_stop(
     assert view.driver_position is not None
     assert view.driver_position.lat == pytest.approx(DRIVER_AT[0])
     assert view.headline == "On the way"
-    # And an ETA - the same one the client portal shows for this order, not a
-    # second straight line from the position (tests/integration/test_one_eta.py).
+    # And an ETA - the drop's route ETA, the same one the client portal shows for
+    # this order, not a second straight line from the position
+    # (tests/integration/test_one_eta.py).
     assert view.estimated_arrival is not None
 
 
