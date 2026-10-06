@@ -189,10 +189,13 @@ export function OrdersTable({
               </td>
               <td className="px-4 py-2.5 text-[var(--text-secondary)]">{formatDate(order.requested_at)}</td>
               {/* An ESTIMATE, and worded as one. Once the order is on a driver's route
-                  this is the route-aware ETA - the same number the driver and the
-                  recipient see - and a straight-line guess before then. Blank once
-                  delivered, because the actual time is in the next column and showing
-                  both invites reading the estimate as the record. */}
+                  this is the route-aware ETA - the same number the driver sees on
+                  their stop list and the recipient on the tracking page (one
+                  function serves all three: app/delivery/eta.py) - and a
+                  straight-line guess before then. Blank once delivered, because the
+                  actual time is in the next column and showing both invites reading
+                  the estimate as the record, and blank when nothing is arriving
+                  (cancelled, failed, going back). */}
               <td className="px-4 py-2.5 text-[var(--text-secondary)]">
                 {order.delivered_at
                   ? '—'

@@ -21,6 +21,7 @@ import { useRouteEvents } from '../realtime/useRouteEvents';
 import { spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
 import { isStopTerminal, primaryActionForStop, primaryActionLabel, stopLabel } from '../utils/stopStatus';
+import { etaLabel } from '../utils/etaLabel';
 import { useTodayRoute } from './useTodayRoute';
 import { LocationDisclosureScreen } from './LocationDisclosureScreen';
 import { markAsked, shouldAskForBackgroundLocation } from '../location/backgroundConsent';
@@ -187,6 +188,7 @@ export function TodayRouteScreen({ navigation }: Props) {
         <Card style={styles.currentCard} onPress={() => navigation.navigate('StopDetail', { stopId: currentStop.stop_id })}>
           <Text style={styles.stopTypeLabel}>{currentStop.stop_type === 'pickup' ? 'Pickup' : 'Drop-off'}</Text>
           <Text style={styles.stopBodyText}>{stopLabel(currentStop)}</Text>
+          {etaLabel(currentStop) && <Text style={styles.cardSmall}>{etaLabel(currentStop)}</Text>}
           <Button
             label={primaryActionLabel(primaryActionForStop(currentStop))}
             onPress={() => navigation.navigate('StopDetail', { stopId: currentStop.stop_id })}
@@ -204,6 +206,7 @@ export function TodayRouteScreen({ navigation }: Props) {
               <Text style={styles.sequenceText}>{item.status === 'completed' ? '✓' : item.status === 'failed' ? '✕' : item.sequence + 1}</Text>
               <View style={styles.stopTextCol}>
                 <Text style={isStopTerminal(item) ? styles.stopLabelDone : styles.stopBodyText}>{stopLabel(item)}</Text>
+                {etaLabel(item) && <Text style={styles.cardSmall}>{etaLabel(item)}</Text>}
               </View>
             </View>
           )}

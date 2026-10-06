@@ -43,10 +43,9 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.batch_queue.clustering import miles_between
 from app.config import settings
+from app.delivery.eta import order_arrival_estimate
 from app.fleet_state.manager import FleetStateManager
-from app.travel import minutes_for_miles
 from app.models.order import Order, OrderStatus
 from app.tracking.ratings import RatingState, rating_state
 from app.models.route import Route
@@ -275,40 +274,6 @@ async def _driver_position(
     )
 
 
-def _estimated_arrival(
-    order: Order,
-    position: DriverPosition | None,
-    stop_eta: datetime | None = None,
-) -> datetime | None:
-    """When the recipient should expect the driver.
-
-    Three sources, in order of how much they actually know:
-
-      - a live position, which gives straight-line distance to the drop at the
-        same placeholder speed the gig accept-gate and the client-portal estimate
-        use. Only available while this drop is the driver's current stop (rule 1),
-        which is also the only time it is meaningful - a straight line from four
-        stops away would ignore the three in between and always read early.
-      - **this stop's ETA**, walked along the driver's actual remaining route
-        (app/delivery/eta.py). This is the case that used to fall through to
-        `promised_at`: a recipient who is fourth in line was shown what we
-        committed to rather than when we now expect to arrive, so a route running
-        an hour late told them nothing had changed.
-      - `promised_at`, what we committed to, when there is neither.
-
-    Straight-line rather than road-network because there is still no verified
-    travel-time model (E1) - but it is the same straight line everywhere, so the
-    recipient cannot see a different number from the one their sender was quoted.
-    Named an estimate everywhere it surfaces, and the page presents it as one.
-    """
-    if position is not None and order.delivery_lat is not None and order.delivery_lng is not None:
-        miles = miles_between(
-            position.lat, position.lng, float(order.delivery_lat), float(order.delivery_lng)
-        )
-        return position.recorded_at + timedelta(minutes=minutes_for_miles(miles))
-    return stop_eta or order.promised_at
-
-
 async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
     """The public page's whole payload, or `TrackingTokenInvalid`.
 
@@ -375,7 +340,13 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
         headline=headline,
         detail=detail,
         destination_hint=_destination_hint(order),
-        estimated_arrival=_estimated_arrival(order, position, stop_eta),
+        # The same number the client portal shows for this order, and the driver
+        # sees on their stop list: the drop's route ETA, refreshed by the driver's
+        # pings, or the pre-route estimate (app/delivery/eta.py). It used to be a
+        # straight line from the live position while this was the current stop -
+        # a second answer that disagreed with the portal, and could sit in the past
+        # behind a stale ping. The position below is for the map only.
+        estimated_arrival=await order_arrival_estimate(session, order, stop_eta),
         delivered_at=order.delivered_at,
         pod_photo_url=pod_photo_url,
         pod_signature_url=pod_signature_url,

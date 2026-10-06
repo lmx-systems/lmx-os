@@ -221,7 +221,8 @@ async def test_the_position_shows_when_this_drop_is_the_drivers_current_stop(
     assert view.driver_position is not None
     assert view.driver_position.lat == pytest.approx(DRIVER_AT[0])
     assert view.headline == "On the way"
-    # And an ETA derived from where the driver actually is.
+    # And an ETA - the same one the client portal shows for this order, not a
+    # second straight line from the position (tests/integration/test_one_eta.py).
     assert view.estimated_arrival is not None
 
 
