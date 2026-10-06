@@ -28,6 +28,7 @@ from app.ops_auth.dependencies import (
     AuthedOpsUser,
     get_current_ops_user,
     require_admin,
+    require_dispatcher,
 )
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.last_cycle_store import LastCycleStore
@@ -299,14 +300,14 @@ async def label_dock(
     location_id: uuid.UUID,
     body: NodeClassRequest,
     session: AsyncSession = Depends(get_db),
-    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+    _ops: AuthedOpsUser = Depends(require_dispatcher),
 ) -> UnlabelledDockView:
     """Say what kind of place a dock is (`IDN-3`).
 
     A human label outranks anything the rules inferred and is never overwritten
-    by them. Any ops session: a dispatcher who has been to the door knows better
-    than a regex over the account name, and making this admin-only would put the
-    knowledge and the permission in different people.
+    by them. A dispatcher's call: one who has been to the door knows better than
+    a regex over the account name, and making this admin-only would put the
+    knowledge and the permission in different people. A viewer only reads.
 
     Not a free-text field. The seven classes are what `PRD-1` groups by, and an
     eighth appearing would split a group without anyone noticing - which is why
@@ -433,9 +434,9 @@ async def confirm_merge_proposal(
 
     **Admin, unlike the queue itself.** Confirming rewrites which dock a shop
     points at, and every per-dock statistic - dwell, node class, the receiver
-    profile - moves with it. That is the shape `require_admin`'s docstring
-    describes: a mutating action a viewer should not reach. Reading the queue is
-    open to anyone, because a dispatcher spotting a duplicate is how good
+    profile - moves with it. That is configuring the record, which is an
+    admin's (labelling a dock, by contrast, runs the day and is a dispatcher's).
+    Reading the queue is open to anyone, because a dispatcher spotting a duplicate is how good
     proposals get noticed.
 
     Reversible, and the audit row records who decided and on what evidence.
@@ -613,7 +614,7 @@ async def record_order_consequence(
     order_id: uuid.UUID,
     body: ConsequenceRequest,
     session: AsyncSession = Depends(get_db),
-    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+    _ops: AuthedOpsUser = Depends(require_dispatcher),
 ) -> dict:
     """Record what actually happened after a late delivery (`REC-2`).
 
@@ -698,7 +699,7 @@ async def resolve_linkage_flag(
     flag_id: uuid.UUID,
     note: str | None = None,
     session: AsyncSession = Depends(get_db),
-    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+    _ops: AuthedOpsUser = Depends(require_dispatcher),
 ) -> LinkageFlagView:
     """Somebody looked. Recorded rather than deleted (`REC-4`).
 
@@ -744,21 +745,19 @@ async def override_order(
     order_id: uuid.UUID,
     body: OverrideRequest,
     session: AsyncSession = Depends(get_db),
-    ops: AuthedOpsUser = Depends(get_current_ops_user),
+    ops: AuthedOpsUser = Depends(require_dispatcher),
 ) -> OverrideView:
     """Overrule the queue on one order, with a reason (`CON-2`, `CON-3`).
 
     *"No override completes without a reason."* *"Every override lands in the
     decision log as a labelled example."*
 
-    **Any ops session, not admin-only** - and that is a deliberate reading of
-    `require_admin`, whose docstring scopes it to *"the specific mutating
-    endpoints a viewer shouldn't reach"* and names running a cycle, onboarding a
-    client, revoking a device. An override is none of those: it is the ordinary
-    work of the person answering the phone, and a dispatcher who cannot release
-    an order when the customer calls cannot run a day. What makes that safe is
-    not the role but the record - every override is attributed to an email and
-    append-only, so this is accountable rather than unguarded.
+    **A dispatcher's write, not admin-only.** An override is the ordinary work of
+    the person answering the phone, and a dispatcher who cannot release an order
+    when the customer calls cannot run a day. What makes that safe is not the
+    role but the record - every override is attributed to an email and
+    append-only, so this is accountable rather than unguarded. A viewer, who
+    only reads, is the one role it refuses.
 
     Refusals come back as 409 with a sentence a dispatcher can act on, not a 500.
     The common one is that the order moved since the screen was loaded.
@@ -953,9 +952,8 @@ async def operations_exceptions(
 
     **Any ops session, not admin only.** This was admin-gated when it was
     written, copied from the scorecard beside it, and building the dashboard
-    panel showed that to be wrong: `require_admin`'s own docstring says it is
-    "for the specific mutating endpoints a viewer shouldn't reach", and this is
-    a read. A dispatcher on a viewer account who cannot see their own exceptions
+    panel showed that to be wrong: the role guards are for writes, and this is
+    a read every role gets. A dispatcher who cannot see their own exceptions
     cannot run a day, which is `CON-1`'s whole bar. It names customers, but so
     do the hold queue and the fleet roster every ops user already reads.
     """
@@ -1159,14 +1157,14 @@ async def get_order_status_summary(
 
 
 @router.post("/optimizer/{hub_id}/run-cycle", response_model=OptimizationResult)
-async def run_optimizer_cycle(hub_id: str, _admin: AuthedOpsUser = Depends(require_admin)) -> OptimizationResult:
+async def run_optimizer_cycle(hub_id: str, _admin: AuthedOpsUser = Depends(require_dispatcher)) -> OptimizationResult:
     """
     Manually trigger one Dispatch Optimizer cycle for a hub. Real cycles
     are now event-triggered (see app/optimizer/event_trigger.py) off order
     ingestion and driver status changes rather than polled - this endpoint
     remains for manual triggering, testing, and ops (e.g. forcing a cycle
-    after an out-of-band fleet-state fix). Admin-only (docs/ROADMAP.md S1) -
-    a viewer can watch a cycle happen but not force one.
+    after an out-of-band fleet-state fix). A dispatcher's call (docs/ROADMAP.md
+    S1) - a viewer can watch a cycle happen but not force one.
     """
     service = DispatchOptimizerService()
     return await service.run_cycle(hub_id)

@@ -8,6 +8,7 @@ from app.batch_queue.store import HoldQueueStore
 from app.db import get_db
 from app.ingestion.adapters.base import IngestionAdapterError
 from app.ingestion.service import ShopNotFoundError, ingest_order
+from app.ops_auth.dependencies import AuthedOpsUser, require_dispatcher
 from app.optimizer.event_trigger import dispatch_event_bus
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
@@ -23,6 +24,9 @@ async def ingest_order_endpoint(
     client_id: str,
     source_system: str,
     payload: dict,
+    # Taking an order in by hand is the day's work, so a dispatcher may; it
+    # carried no role at all before, so a viewer could.
+    _dispatcher: AuthedOpsUser = Depends(require_dispatcher),
     session: AsyncSession = Depends(get_db),
     hold_queue: HoldQueueStore = Depends(get_hold_queue_store),
 ) -> dict:

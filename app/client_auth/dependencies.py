@@ -59,7 +59,7 @@ async def require_client_admin(client: AuthedClient = Depends(get_current_client
     """Gates the client-side user-management endpoints (list/create/update
     the other users at this client) - a member has read-only access to
     their company's orders/invoices but can't manage the account itself,
-    the same admin/viewer line app/ops_auth/dependencies.py draws for ops."""
+    analogous to the admin tier app/ops_auth/dependencies.py draws for ops."""
     if client.role != CLIENT_ADMIN_ROLE:
         raise HTTPException(status_code=403, detail="This action requires a client admin role")
     return client

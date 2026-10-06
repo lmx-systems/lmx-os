@@ -11,8 +11,8 @@ interface ExceptionsPanelProps {
   data: ExceptionQueue | null
   error: Error | null
   loading: boolean
-  // Resolving a failed delivery is admin-only on the server.
-  isAdmin: boolean
+  // Resolving a failed delivery and cancelling are a dispatcher's on the server.
+  canDispatch: boolean
   onResolved: () => void
   onToast: (message: string) => void
 }
@@ -69,7 +69,7 @@ export function ExceptionsPanel({
   data,
   error,
   loading,
-  isAdmin,
+  canDispatch,
   onResolved,
   onToast,
 }: ExceptionsPanelProps) {
@@ -160,10 +160,10 @@ export function ExceptionsPanel({
                     </td>
                     <td className="py-2.5 text-[var(--text-secondary)]">
                       {item.next_action}
-                      {isAdmin && item.kind === 'delivery_failed' && (
+                      {canDispatch && item.kind === 'delivery_failed' && (
                         <Resolve item={item} onResolved={onResolved} onToast={onToast} />
                       )}
-                      {isAdmin && item.kind !== 'delivery_failed' && (
+                      {canDispatch && item.kind !== 'delivery_failed' && (
                         // A failed delivery's cancel is one of its resolutions above.
                         <div className="mt-1.5">
                           <CancelOrderButton

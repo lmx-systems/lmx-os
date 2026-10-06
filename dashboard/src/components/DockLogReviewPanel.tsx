@@ -59,7 +59,10 @@ function answerText(value: string | boolean): string {
   return value.replace(/_/g, ' ')
 }
 
-export function DockLogReviewPanel({ onToast }: { onToast: (message: string) => void }) {
+// Importing a stranger's answers into M5's training data is a curation call, so
+// the buttons are an admin's; everyone else reads the queue (the list GET admits
+// any ops session, like the merge-proposal queue).
+export function DockLogReviewPanel({ onToast, isAdmin }: { onToast: (message: string) => void; isAdmin: boolean }) {
   const [submissions, setSubmissions] = useState<DockLogSubmission[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [chosen, setChosen] = useState<Record<string, string>>({})
@@ -183,20 +186,24 @@ export function DockLogReviewPanel({ onToast }: { onToast: (message: string) => 
                   </option>
                 ))}
               </select>
-              <button
-                disabled={busy !== null || !chosen[submission.submission_id]}
-                onClick={() => importOne(submission)}
-                className="rounded-md bg-[var(--accent)] px-2 py-1 text-[11px] font-medium text-white disabled:opacity-40"
-              >
-                Import
-              </button>
-              <button
-                disabled={busy !== null}
-                onClick={() => reject(submission)}
-                className="text-[11px] text-[var(--text-muted)] underline disabled:opacity-40"
-              >
-                Dismiss
-              </button>
+              {isAdmin && (
+                <>
+                  <button
+                    disabled={busy !== null || !chosen[submission.submission_id]}
+                    onClick={() => importOne(submission)}
+                    className="rounded-md bg-[var(--accent)] px-2 py-1 text-[11px] font-medium text-white disabled:opacity-40"
+                  >
+                    Import
+                  </button>
+                  <button
+                    disabled={busy !== null}
+                    onClick={() => reject(submission)}
+                    className="text-[11px] text-[var(--text-muted)] underline disabled:opacity-40"
+                  >
+                    Dismiss
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ))}

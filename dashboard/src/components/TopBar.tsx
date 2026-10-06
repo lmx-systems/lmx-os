@@ -102,9 +102,9 @@ export function TopBar({
 
       <span className="text-xs text-[var(--text-muted)]">
         {opsProfile.name}
-        {opsProfile.role === 'viewer' && (
+        {opsProfile.role !== 'admin' && (
           <span className="ml-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-0.5 text-[10.5px] font-medium">
-            view only
+            {opsProfile.role === 'dispatcher' ? 'dispatch' : 'view only'}
           </span>
         )}
       </span>

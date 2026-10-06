@@ -1,7 +1,8 @@
 """
-Internal/admin-only endpoints. Not client-facing, not driver-facing - gated
-by the real per-account ops auth (app/ops_auth/, docs/ROADMAP.md S1), same
-as the rest of app/api/routes.py's ops tooling. No new auth scheme needed
+Internal ops endpoints. Not client-facing, not driver-facing - gated by the
+real per-account ops auth (app/ops_auth/, docs/ROADMAP.md S1), same as the rest
+of app/api/routes.py's ops tooling; each write carries `require_admin`
+(configuring the hub) or `require_dispatcher` (running the day). No new auth scheme needed
 here since whoever calls this is LMX ops, not a client or a driver.
 
 Phase 8 (docs/ROADMAP.md): a minimal client onboarding endpoint. There's no
@@ -69,7 +70,7 @@ from app.models.order import Order
 from app.models.return_item import ReturnItem
 from app.models.rules import ActiveRule, ProposedRule
 from app.models.shop import Shop
-from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user, require_admin
+from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user, require_admin, require_dispatcher
 from app.payroll import get_payroll_provider
 from app.redis_client import get_client as get_redis_client
 from app.storage.photo_upload_client import readable_url
@@ -630,7 +631,7 @@ async def generate_client_invoice(
 async def cancel_order_as_dispatch(
     order_id: str,
     session: AsyncSession = Depends(get_db),
-    _admin: AuthedOpsUser = Depends(require_admin),
+    _admin: AuthedOpsUser = Depends(require_dispatcher),
 ) -> OrderCancellationResult:
     """Cancel an order a client can't cancel themselves (app/orders/cancellation.py).
 
@@ -658,7 +659,7 @@ async def resolve_order(
     order_id: str,
     body: ResolveFailedOrderBody,
     session: AsyncSession = Depends(get_db),
-    _admin: AuthedOpsUser = Depends(require_admin),
+    _admin: AuthedOpsUser = Depends(require_dispatcher),
 ) -> OrderResolutionResult:
     """
     The defined next step for a delivery_failed order (docs/ROADMAP.md R5,
@@ -938,7 +939,7 @@ async def list_returns(
     status: str | None = None,
     awaiting: bool = False,
     session: AsyncSession = Depends(get_db),
-    _admin: AuthedOpsUser = Depends(require_admin),
+    _admin: AuthedOpsUser = Depends(require_dispatcher),
 ) -> list[ReturnItemView]:
     """Returns/cores for this hub (docs/ROADMAP.md W1), optionally filtered
     by status (expected | ready_for_pickup | collected | returned_to_shop |
@@ -960,7 +961,7 @@ async def list_returns(
 async def mark_return_returned(
     return_id: str,
     session: AsyncSession = Depends(get_db),
-    _admin: AuthedOpsUser = Depends(require_admin),
+    _admin: AuthedOpsUser = Depends(require_dispatcher),
 ) -> ReturnItemView:
     """Manually mark a return as delivered back (docs/ROADMAP.md W1 slice 3) -
     an ops correction, and the path for standalone shop-flagged returns that
@@ -981,7 +982,7 @@ async def mark_return_returned(
 async def reschedule_return(
     return_id: str,
     session: AsyncSession = Depends(get_db),
-    _admin: AuthedOpsUser = Depends(require_admin),
+    _admin: AuthedOpsUser = Depends(require_dispatcher),
 ) -> ReturnItemView:
     """Requeue a core that wasn't ready at the delivery visit (docs/ROADMAP.md
     W1 slice 4). `not_ready` -> `ready_for_pickup`: it drops off the piggyback
@@ -1379,7 +1380,7 @@ async def cod_dispute_report(
     hub_id: str,
     window_days: int = 30,
     session: AsyncSession = Depends(get_db),
-    _admin: AuthedOpsUser = Depends(require_admin),
+    _admin: AuthedOpsUser = Depends(require_dispatcher),
 ) -> CodDisputeReportView:
     """Repeat COD disputes per account (docs/ROADMAP.md W2).
 
@@ -1706,9 +1707,13 @@ async def upsert_client_sla_term(
 @router.get("/dock-log/submissions", response_model=list[DockLogSubmissionView])
 async def list_dock_log_submissions(
     session: AsyncSession = Depends(get_db),
-    _admin: AuthedOpsUser = Depends(require_admin),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
 ) -> list[DockLogSubmissionView]:
     """The public Dock Log's review queue (`DRV-7`).
+
+    A read for any ops session, like the merge-proposal queue: the console shows
+    it on every role's record tab. Importing or dismissing a submission is a
+    curation call and stays an admin's, below.
 
     Unreviewed only, oldest first. This queue is the whole reason
     `dock_log_submissions` exists as a separate table: a stranger's answers are

@@ -131,7 +131,9 @@ export interface OpsProfileView {
   ops_user_id: string
   email: string
   name: string
-  role: 'admin' | 'viewer'
+  // Admins configure, dispatchers do the day's order work, viewers read
+  // (app/models/ops_user.py).
+  role: 'admin' | 'dispatcher' | 'viewer'
 }
 
 // --- UI-local types below - no backend equivalent, not response mirrors ---

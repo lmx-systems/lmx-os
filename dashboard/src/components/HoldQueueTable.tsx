@@ -12,8 +12,9 @@ interface HoldQueueTableProps {
   data: HeldOrderView[] | null
   error: Error | null
   loading: boolean
-  // Cancelling is admin-only on the server.
-  isAdmin: boolean
+  // Overriding the queue and cancelling are a dispatcher's on the server; a
+  // viewer reads why an order is held.
+  canDispatch: boolean
   onCancelled: () => void
   onToast: (message: string) => void
 }
@@ -24,7 +25,7 @@ type SortKey = 'shop_name' | 'sla_tier' | 'held_since' | 'hold_deadline'
 // hub staff most need to filter to at a glance.
 const TIERS = ['all', 'HOT_SHOT', 'T1', 'T2', 'T3'] as const
 
-export function HoldQueueTable({ data, error, loading, isAdmin, onCancelled, onToast }: HoldQueueTableProps) {
+export function HoldQueueTable({ data, error, loading, canDispatch, onCancelled, onToast }: HoldQueueTableProps) {
   const [search, setSearch] = useState('')
   const [tier, setTier] = useState<(typeof TIERS)[number]>('all')
   const [sortKey, setSortKey] = useState<SortKey>('hold_deadline')
@@ -163,15 +164,16 @@ export function HoldQueueTable({ data, error, loading, isAdmin, onCancelled, onT
                             className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
                             aria-expanded={open}
                           >
-                            {open ? 'Hide' : 'Why? / Release'}
+                            {open ? 'Hide' : canDispatch ? 'Why? / Release' : 'Why?'}
                           </button>
                         </td>
                       </tr>
                       {open && (
                         <ExplanationRow
                           orderId={order.order_id}
+                          canOverride={canDispatch}
                           cancel={
-                            isAdmin ? (
+                            canDispatch ? (
                               <CancelOrderButton
                                 orderId={order.order_id}
                                 label={`${order.shop_name}'s order ${truncateId(order.order_id)}`}
@@ -227,7 +229,15 @@ function SortableHeader({
  * cannot tell "we held it because no driver was on shift" from "we have no idea
  * why we held it" will stop believing both.
  */
-function ExplanationRow({ orderId, cancel }: { orderId: string; cancel: ReactNode }) {
+function ExplanationRow({
+  orderId,
+  canOverride,
+  cancel,
+}: {
+  orderId: string
+  canOverride: boolean
+  cancel: ReactNode
+}) {
   const [data, setData] = useState<OrderExplanation | null>(null)
   const [error, setError] = useState<Error | null>(null)
 
@@ -276,7 +286,7 @@ function ExplanationRow({ orderId, cancel }: { orderId: string; cancel: ReactNod
           </ol>
         )}
 
-        <OverrideForm orderId={orderId} />
+        {canOverride && <OverrideForm orderId={orderId} />}
         {cancel && <div className="mt-2.5 border-t border-[var(--border)] pt-2.5">{cancel}</div>}
       </td>
     </tr>

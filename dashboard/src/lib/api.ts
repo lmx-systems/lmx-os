@@ -150,8 +150,7 @@ export const api = {
   linkScorecard: () => request<LinkScorecard>('/lmx-link/scorecard'),
 
   // What to look at before the phone rings (docs/ROADMAP_1.5.md CON-4). Any ops
-  // session, not admin-only: a dispatcher on a viewer account who cannot see
-  // their own exceptions cannot run a day.
+  // session: a dispatcher who cannot see their own exceptions cannot run a day.
   operationsExceptions: (hubId?: string) =>
     request<ExceptionQueue>(
       hubId ? `/operations/exceptions?hub_id=${hubId}` : '/operations/exceptions',
@@ -179,12 +178,13 @@ export const api = {
     }),
 
   // Cancel an order a client no longer can: withdraws an open offer or takes its
-  // stops off a live route. Admin-only on the server; 409 once the parts are collected.
+  // stops off a live route. A dispatcher's (or admin's) write on the server; 409
+  // once the parts are collected.
   cancelOrderAsDispatch: (orderId: string) =>
     request<OrderCancellationResult>(`/admin/orders/${orderId}/cancel`, { method: 'POST' }),
 
-  // R5: redeliver, return to the shop, or cancel a failed delivery. Admin-only on
-  // the server, and until now called by nothing.
+  // R5: redeliver, return to the shop, or cancel a failed delivery. A dispatcher's
+  // (or admin's) write on the server, and until now called by nothing.
   resolveOrder: (orderId: string, action: ResolutionAction) =>
     request<OrderResolutionResult>(`/admin/orders/${orderId}/resolve`, {
       method: 'POST',

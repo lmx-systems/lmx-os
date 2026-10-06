@@ -24,17 +24,17 @@ const CANCELLABLE = ['received', 'classified', 'held', 'queued', 'assigned', 'en
  * At the top of the dispatching column, above the pipeline. It is the thing
  * reached for when the phone rings, which is not a scheduled moment.
  *
- * And since the phone call is often "cancel it", an admin can, from the row,
+ * And since the phone call is often "cancel it", a dispatcher can, from the row,
  * until the driver has the parts. This was the one place that could find such
  * an order and do nothing about it.
  */
 export function OrderLookupPanel({
   hubId,
-  isAdmin,
+  canDispatch,
   onToast,
 }: {
   hubId: string
-  isAdmin: boolean
+  canDispatch: boolean
   onToast: (message: string) => void
 }) {
   const [query, setQuery] = useState('')
@@ -116,7 +116,7 @@ export function OrderLookupPanel({
                 </span>
               </button>
               {openId === row.order_id && <Why orderId={row.order_id} />}
-              {isAdmin && CANCELLABLE.includes(row.status) && (
+              {canDispatch && CANCELLABLE.includes(row.status) && (
                 <div className="px-2 pb-1.5">
                   <CancelOrderButton
                     orderId={row.order_id}

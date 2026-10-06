@@ -6,6 +6,8 @@ import type { RunLogEntry } from '../lib/types'
 
 interface OperationsPanelProps {
   hubId: string
+  // The nightly job run by hand is an admin's; the dispatch cycle is the day's.
+  isAdmin: boolean
   // Everything a dispatch cycle can change (fleet state, the hold queue,
   // order-status counts, the last-cycle snapshot) is normally caught by the
   // next scheduled poll tick, up to POLL_INTERVAL_MS later. Calling this
@@ -33,7 +35,7 @@ const JOB_COPY: Record<Job, { title: string; description: string; confirmLabel: 
 
 const MAX_LOG_ENTRIES = 8
 
-export function OperationsPanel({ hubId, onAfterRun, onToast }: OperationsPanelProps) {
+export function OperationsPanel({ hubId, isAdmin, onAfterRun, onToast }: OperationsPanelProps) {
   const [openJob, setOpenJob] = useState<Job | null>(null)
   const [busy, setBusy] = useState(false)
   const [log, setLog] = useState<RunLogEntry[]>([])
@@ -97,13 +99,15 @@ export function OperationsPanel({ hubId, onAfterRun, onToast }: OperationsPanelP
           disabled={disabled}
           onClick={() => setOpenJob('optimizer')}
         />
-        <OpsButton
-          icon={<path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z" />}
-          title="Run learning-loop job"
-          sub="Detect hold-window patterns"
-          disabled={disabled}
-          onClick={() => setOpenJob('learning_loop')}
-        />
+        {isAdmin && (
+          <OpsButton
+            icon={<path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z" />}
+            title="Run learning-loop job"
+            sub="Detect hold-window patterns"
+            disabled={disabled}
+            onClick={() => setOpenJob('learning_loop')}
+          />
+        )}
       </div>
 
       <table className="w-full text-left text-[12px]">

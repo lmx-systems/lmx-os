@@ -11,16 +11,28 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 
-# admin: everything, including mutating actions (run a cycle, onboard a
-# client, revoke a driver device). viewer: read-only across the
-# dashboard - can't be given by anyone but an admin, and only two roles
-# rather than a full permissions matrix, since that's the actual line the
-# dashboard's own UI draws today (OperationsPanel/OnboardClientForm vs.
-# everything else) - a finer-grained model is a real gap to revisit if a
-# reason for one ever shows up, not a currently-needed one.
+# Three roles, one line between each (decided 5 October 2026):
+#
+#   admin       configures the hub - clients, rates, terms, rules, closures,
+#               onboarding people, reviewing documents and dock logs, payroll,
+#               approving the learning loop's proposals - and everything below.
+#   dispatcher  does the day's order work: releases and holds, cancels, resolves
+#               a failed delivery, records what happened after a late one,
+#               labels a dock, answers a linkage flag, forces a dispatch cycle,
+#               closes out a return, takes an order in by hand.
+#   viewer      reads. Every screen, no buttons.
+#
+# Before the middle tier existed "viewer" was the dispatcher's account by
+# intent - the override and consequence routes were open to any session so a
+# dispatcher could run a day - while the console badged it "view only".
+# Nothing is deployed yet, so adding the tier costs nothing; a finer matrix is
+# still a gap to revisit if a reason for one shows up.
 ADMIN_ROLE = "admin"
+DISPATCHER_ROLE = "dispatcher"
 VIEWER_ROLE = "viewer"
-OPS_ROLES = (ADMIN_ROLE, VIEWER_ROLE)
+OPS_ROLES = (ADMIN_ROLE, DISPATCHER_ROLE, VIEWER_ROLE)
+# Who may do the day's writes: a dispatcher, and an admin, who can do everything.
+DISPATCH_ROLES = frozenset({ADMIN_ROLE, DISPATCHER_ROLE})
 
 
 class OpsUser(Base, UUIDPrimaryKeyMixin, TimestampMixin):
