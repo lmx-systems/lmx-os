@@ -25,6 +25,15 @@ _PREVIEW_CHARS = 120
 
 
 async def notify_driver_of_support_reply(driver_id: uuid.UUID, body: str) -> None:
+    """Never raises: the reply is already saved, and a failed nudge must not
+    make the console think it wasn't (and send it again)."""
+    try:
+        await _notify(driver_id, body)
+    except Exception:
+        logger.exception("support_reply_push_failed", driver_id=str(driver_id))
+
+
+async def _notify(driver_id: uuid.UUID, body: str) -> None:
     async with session_scope() as session:
         result = await session.execute(
             select(DriverDevice.expo_push_token).where(

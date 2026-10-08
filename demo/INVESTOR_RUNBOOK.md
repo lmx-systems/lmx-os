@@ -244,8 +244,8 @@ exemption rationale actually covers it, rather than widening the exemption list
 for a GET that does not authenticate itself.
 
 **A CSV manifest could not carry a recipient phone.** The parser had no such
-column, `send_tracking_link_to_recipient` mints a token only when there is a
-number to text, and so **the CSV path — LMX Link's whole premise — could never
+column, the tracking-link sender of the time minted a token only when there was
+a number to text, and so **the CSV path — LMX Link's whole premise — could never
 produce a tracking page for anything.** The demo's delivered order had a null
 token and the recipient's page could not be opened at all.
 

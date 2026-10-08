@@ -31,10 +31,13 @@ export function SupportInboxPanel({ hubId, onToast }: { hubId: string; onToast: 
   const [error, setError] = useState<string | null>(null)
   // The thread on screen; a late response for another driver is dropped.
   const current = useRef<string | null>(null)
+  // Set before the request goes, so two quick Enters can't both send.
+  const inFlight = useRef(false)
 
   async function loadThreads() {
     try {
       setThreads(await api.supportInbox(hubId))
+      setError(null)
     } catch (e) {
       setError((e as Error).message)
     }
@@ -43,7 +46,10 @@ export function SupportInboxPanel({ hubId, onToast }: { hubId: string; onToast: 
   async function loadThread(id: string) {
     try {
       const thread = await api.supportThread(id)
-      if (current.current === id) setMessages(thread)
+      if (current.current === id) {
+        setMessages(thread)
+        setError(null)
+      }
     } catch (e) {
       if (current.current === id) setError((e as Error).message)
     }
@@ -69,18 +75,23 @@ export function SupportInboxPanel({ hubId, onToast }: { hubId: string; onToast: 
   }
 
   async function reply() {
-    if (!driverId || !draft.trim()) return
+    const to = driverId
+    if (inFlight.current || !to || !draft.trim()) return
+    inFlight.current = true
     setSending(true)
     setError(null)
     try {
-      const sent = await api.replyToDriver(driverId, draft.trim())
-      if (current.current === driverId) setMessages((prev) => [...(prev ?? []), sent])
-      setDraft('')
+      const sent = await api.replyToDriver(to, draft.trim())
+      if (current.current === to) {
+        setMessages((prev) => [...(prev ?? []), sent])
+        setDraft('')
+      }
       void loadThreads()
       onToast('Reply sent. It shows on the driver’s support screen.')
     } catch (e) {
       setError((e as Error).message)
     } finally {
+      inFlight.current = false
       setSending(false)
     }
   }
@@ -152,8 +163,9 @@ export function SupportInboxPanel({ hubId, onToast }: { hubId: string; onToast: 
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') void reply()
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing) void reply()
               }}
+              disabled={sending}
               placeholder={`Reply to ${selected.driver_name}`}
               maxLength={1600}
               className="min-w-0 flex-1 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-[13px] text-[var(--text-primary)]"

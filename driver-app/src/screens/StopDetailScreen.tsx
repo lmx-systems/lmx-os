@@ -20,6 +20,7 @@ import { useOutboxPending } from '../offline/OutboxContext';
 import { outboxManager } from '../offline/outboxManager';
 import { spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
+import { dialable } from '../utils/dialable';
 import { openTurnByTurnNavigation } from '../utils/navigation';
 import { primaryActionForStop, stopLabel } from '../utils/stopStatus';
 
@@ -130,12 +131,12 @@ export function StopDetailScreen({ route, navigation }: Props) {
   // phone's own dialer and messages app do it, and the recipient sees the
   // driver's number.
   function contactRecipient(scheme: 'tel' | 'sms') {
-    if (!stop?.contact_phone) return;
-    const url = `${scheme}:${stop.contact_phone.replace(/[^\d+]/g, '')}`;
-    Linking.openURL(url).catch(() => {
+    const number = dialable(stop?.contact_phone);
+    if (!number) return;
+    Linking.openURL(`${scheme}:${number}`).catch(() => {
       Alert.alert(
         scheme === 'tel' ? 'Could not start a call' : 'Could not open messages',
-        `The number is ${stop.contact_phone}.`,
+        `The number is ${number}.`,
       );
     });
   }
@@ -236,10 +237,20 @@ export function StopDetailScreen({ route, navigation }: Props) {
       )}
 
       {stop.stop_type === 'dropoff' && stop.contact_phone && (
-        <View style={styles.contactRow}>
-          <Button label="Call" variant="outline" onPress={() => contactRecipient('tel')} />
-          <Button label="Text" variant="outline" onPress={() => contactRecipient('sms')} />
-        </View>
+        <>
+          {/* The number as the sender gave it, so the driver can check what the
+              dialer will show - and still has it when it can't be dialled. */}
+          <Text style={styles.contactNumber}>
+            {stop.contact_name ? `${stop.contact_name} · ` : ''}
+            {stop.contact_phone}
+          </Text>
+          {dialable(stop.contact_phone) && (
+            <View style={styles.contactRow}>
+              <Button label="Call" variant="outline" onPress={() => contactRecipient('tel')} />
+              <Button label="Text" variant="outline" onPress={() => contactRecipient('sms')} />
+            </View>
+          )}
+        </>
       )}
 
       <Card style={styles.card}>
@@ -336,6 +347,7 @@ const makeStyles = (colors: ColorScheme) =>
     notes: { ...typography.small, color: colors.textMuted, marginBottom: spacing.md },
     navigateRow: { marginBottom: spacing.lg },
     contactRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
+    contactNumber: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.sm },
     card: { marginBottom: spacing.lg, gap: spacing.sm },
     doneText: { ...typography.body, color: colors.textPrimary, textAlign: 'center' },
     error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },

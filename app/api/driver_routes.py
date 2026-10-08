@@ -2424,6 +2424,17 @@ async def complete_stop(
     if not route_finished:
         await refresh_route_etas(session, stop.route_id)
 
+    # The tracking link exists from the moment the parts are on a van
+    # (docs/ROADMAP.md F3). Every order gets one, and the client sees it in the
+    # portal and the order API and forwards it to their customer; the page also
+    # shows the delivery PIN. Minted inside this transaction, so a failure in the
+    # best-effort work below can't leave a collected order without one - a retry
+    # returns early on the completed stop and would never mint it.
+    if stop.stop_type == "pickup" and order_ids:
+        picked_up = await session.execute(select(Order).where(Order.id.in_(order_ids)))
+        for order_row in picked_up.scalars().all():
+            await ensure_tracking_token(session, order_row)
+
     await session.commit()
 
     # Real per-delivery instant payout for gig-classified drivers
@@ -2454,17 +2465,6 @@ async def complete_stop(
                 else:
                     state.load_units = max(0.0, state.load_units - total_weight)
                 await fleet_state_manager.upsert_driver_state(state)
-
-    # The tracking link exists from the moment the parts are on a van
-    # (docs/ROADMAP.md F3). It used to be minted only when a text could carry it
-    # to a recipient with a phone number; now every order gets one, and the
-    # client sees it in the portal and the order API and forwards it to their
-    # customer. The page also shows the delivery PIN the driver asks for.
-    if stop.stop_type == "pickup" and order_ids:
-        picked_up = await session.execute(select(Order).where(Order.id.in_(order_ids)))
-        for order_row in picked_up.scalars().all():
-            await ensure_tracking_token(session, order_row)
-        await session.commit()
 
     if not route_finished:
         # Completing a stop promotes the next one, and that is the moment the driver

@@ -11,8 +11,9 @@ wireframe spec (`LMX Driver App Wireframes.dc.html`) across three phases
   documents (with a real going-online gate if either's expired), and a
   masked (last-4-only) payment method.
 - **Phase 3** (screens 1n/1o/1p/1q): a placeholder earnings estimate and
-  trip history, plus masked SMS messaging with the customer (from the
-  active-job screen) and with dispatch/support (from Profile).
+  trip history, plus an in-app support thread with dispatch (from Profile).
+  The stop screen's Call and Text buttons hand off to the phone's own
+  dialer and messages app.
 
 ## Setup
 

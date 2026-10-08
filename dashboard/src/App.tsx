@@ -234,6 +234,13 @@ function App() {
                       canDispatch={canDispatch}
                       onToast={showToast}
                     />
+                    {/* A driver's message is somebody standing at a locked gate,
+                        so it belongs with the live work, not the record-keeping.
+                        It used to be texted to a support number through Twilio
+                        and never shown here at all. */}
+                    {canDispatch && (
+                      <SupportInboxPanel key={`support-${hubId}`} hubId={hubId} onToast={showToast} />
+                    )}
                     <OrderPipeline summary={summary.data} error={summary.error} loading={summary.loading} />
                     {/* Above the hold queue on purpose: the hold queue is work
                         going to plan and this is work that is not, so a
@@ -301,11 +308,7 @@ function App() {
                     {/* Its list is a dispatcher's read on the server; a viewer
                         would only see it fail to load. */}
                     {canDispatch && <CodDisputesPanel key={`cod-${hubId}`} hubId={hubId} />}
-                    {/* Drivers' support messages. They used to be texted to a
-                        support number through Twilio and never shown here. */}
-                    {canDispatch && (
-                      <SupportInboxPanel key={`support-${hubId}`} hubId={hubId} onToast={showToast} />
-                    )}
+
                     {/* Recording work too, and the half of W1 that shipped
                         without a front end: a driver could never collect a core
                         and nobody could close one out. Hides itself when

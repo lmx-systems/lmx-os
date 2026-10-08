@@ -154,6 +154,9 @@ async def test_insert_appends_after_existing_stops_without_touching_them(db_sess
     # The new stops land strictly after, never renumbering what's already there.
     assert stops[2].sequence == 2 and stops[2].stop_type == "pickup" and stops[2].shop_id == new_shop_id
     assert stops[3].sequence == 3 and stops[3].stop_type == "dropoff"
+    # The appended drop gets a delivery PIN, as every drop does: the recipient
+    # reads it on the tracking page.
+    assert stops[3].delivery_pin is not None and len(stops[3].delivery_pin) == 4
 
     # Capture plain UUIDs before expire_all() - accessing an attribute on a
     # now-expired ORM instance would trigger a synchronous lazy-load

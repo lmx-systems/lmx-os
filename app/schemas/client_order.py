@@ -142,12 +142,10 @@ class ClientOrderBatchRow(BaseModel):
     drop_address: str = Field(min_length=1, max_length=255)
     reference: str | None = Field(default=None, max_length=120)
     drop_contact_name: str | None = Field(default=None, max_length=120)
-    # What decides whether this delivery gets a tracking link at all:
-    # `send_tracking_link_to_recipient` mints a token only when there is a
-    # number to text it to. A manifest row carries one now, and without this
-    # field the row's phone reached here and stopped - the manifest route
-    # delegates to the batch path, so the CSV intake could not produce an `F3`
-    # tracking page for anything.
+    # The recipient's number, which the driver uses to call ahead. Without this
+    # field a manifest row's phone reached here and stopped - the manifest route
+    # delegates to the batch path. (It once also decided whether the order got
+    # a texted tracking link; every order now gets one at pickup.)
     drop_contact_phone: str | None = Field(default=None, max_length=32)
 
 

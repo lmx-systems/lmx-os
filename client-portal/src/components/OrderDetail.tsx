@@ -17,7 +17,7 @@ const CANCELLABLE = ['received', 'classified', 'held', 'queued']
 const PROOF_METHOD: Record<string, string> = {
   photo: 'Photographed at drop-off',
   signature: 'Signed for at drop-off',
-  pin: 'Confirmed with the PIN texted to the recipient',
+  pin: 'Confirmed with the code on your customer’s tracking page',
 }
 
 // A `local-capture://` marker means nothing was stored (no bucket configured);

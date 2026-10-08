@@ -79,7 +79,10 @@ delivery addresses, contact numbers, and any delivery notes you send us. We hold
 it on your behalf, we use it to carry out your deliveries and to operate and
 improve our service, and we do not sell it.
 
-Where we send a tracking link to a recipient, it identifies you as the sender.
+We give you a tracking link for each delivery to pass to your customer if you choose. It
+shows the delivery's status, an estimated time, the code your customer gives the driver
+and, only while theirs is the driver's next stop, the vehicle's position. Share it only
+with the person receiving the delivery.
 
 How long we keep this information, and how someone asks for a copy of it or for it
 to be deleted, is set out in our privacy policy, which forms part of these terms.

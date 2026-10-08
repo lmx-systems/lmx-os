@@ -32,6 +32,7 @@ from app.identity.inherited_dwell import service_minutes_at
 from app.record import record_decision
 from app.record.decisions import MODE_LIVE
 from app.fleet_state.manager import FleetStateManager
+from app.messaging.delivery_pin import generate_delivery_pin
 from app.messaging.job_offer_notifications import notify_driver_of_new_offer
 from app.models.driver import Driver
 from app.models.order import Order, OrderStatus
@@ -606,6 +607,9 @@ class DispatchOptimizerService:
                     stop_type="dropoff",
                     parcel_count=1,
                     planned_eta=at_drop,
+                    # Every dropoff gets one, here as in accept_offer: the
+                    # recipient reads it on the tracking page.
+                    delivery_pin=generate_delivery_pin(),
                 )
                 session.add(dropoff)
                 await session.flush()
