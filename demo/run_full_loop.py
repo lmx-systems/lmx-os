@@ -14,10 +14,9 @@ calls and no database writes of its own. If this script passes, the same calls
 work from the driver app, because they are the same calls.
 
 **It needs no external service.** Without `GOOGLE_CLOUD_PROJECT_ID` the
-optimizer falls back to its nearest-neighbour stub, and without Twilio a server
-in local development (what `.env` sets) returns the OTP in its response. Both
-are deliberate unconfigured-to-stub paths, not test seams. No other
-environment ever returns the OTP.
+optimizer falls back to its nearest-neighbour stub. The driver signs in the way
+a real one does, with a sign-in code an ops admin issues, so the demo needs the
+ops login below; no text message is involved anywhere.
 
 What it does not demonstrate, and should not be described as demonstrating: a
 live routing solve (the stub does not model time), an SMS to a shop or a
@@ -152,9 +151,10 @@ def run(base_url: str, poll_seconds: float, stop_after_offer: bool = False) -> i
         step(2, "The SLA engine held them; the optimizer offers the work",
              look_at="ops console :5173 - Hold Queue, then the order leaving it")
         detail("held rather than dispatched instantly - that hold is the product")
-        driver_token = _sign_in_driver(http)
+        ops_token = _ops_token(http)
+        driver_token = _sign_in_driver(http, ops_token)
         clocked_on = _clock_on(http, driver_token)
-        offers = _wait_for_offer(http, driver_token, _ops_token(http), poll_seconds)
+        offers = _wait_for_offer(http, driver_token, ops_token, poll_seconds)
         detail(f"{len(offers)} offer(s) reached the driver with no button pressed")
 
         if stop_after_offer:
@@ -191,11 +191,8 @@ def run(base_url: str, poll_seconds: float, stop_after_offer: bool = False) -> i
 
 
 def _ops_token(http: httpx.Client) -> str | None:
-    """The dispatcher's own login, used only to nudge a cycle. Optional.
-
-    Without it the demo still works, it just waits for some other event to
-    trigger the cycle - which in a quiet local stack may be never.
-    """
+    """The ops admin's login: it issues the driver's sign-in code, and nudges
+    dispatch cycles. The demo cannot sign the driver in without it."""
     response = http.post(
         "/ops/auth/login", json={"email": OPS_EMAIL, "password": OPS_PASSWORD}
     )
@@ -209,26 +206,28 @@ def _ops_token(http: httpx.Client) -> str | None:
     return response.json()["access_token"]
 
 
-def _sign_in_driver(http: httpx.Client) -> str:
-    requested = http.post("/driver/auth/request-otp", json={"phone": DRIVER_PHONE})
-    if requested.status_code == 503:
+def _sign_in_driver(http: httpx.Client, ops_token: str | None) -> str:
+    """Sign the demo driver in as a real one would: ops issues a code, the
+    phone redeems it."""
+    if ops_token is None:
         raise DemoFailed(
-            "The server has no SMS provider and isn't in local development, so it "
-            "won't hand back the OTP. Run it with ENVIRONMENT=development, as .env does."
+            "Signing the driver in needs a sign-in code from an ops admin, and there "
+            "is no ops login. Create one with the command above, then run again."
         )
-    requested.raise_for_status()
-    code = requested.json().get("debug_code")
-    if not code:
-        raise DemoFailed(
-            "The OTP was sent by SMS rather than returned, so this script cannot read "
-            "it. Unset TWILIO_ACCOUNT_SID to run the demo without a phone."
-        )
-    verified = http.post(
-        "/driver/auth/verify-otp",
-        json={"phone": DRIVER_PHONE, "code": code, "device_id": "demo-loop"},
+    ops = {"Authorization": f"Bearer {ops_token}"}
+    roster = http.get(f"/admin/hubs/{HUB_ID}/drivers", headers=ops)
+    roster.raise_for_status()
+    driver = next((d for d in roster.json() if d["phone"] == DRIVER_PHONE), None)
+    if driver is None:
+        raise DemoFailed(f"No driver with {DRIVER_PHONE} on the demo hub. Run demo.seed_demo_data.")
+    issued = http.post(f"/admin/drivers/{driver['driver_id']}/sign-in-code", headers=ops)
+    issued.raise_for_status()
+    signed_in = http.post(
+        "/driver/auth/sign-in",
+        json={"code": issued.json()["code"], "device_id": "demo-loop", "device_name": "Demo loop"},
     )
-    verified.raise_for_status()
-    return verified.json()["access_token"]
+    signed_in.raise_for_status()
+    return signed_in.json()["access_token"]
 
 
 def _wait_for_offer(

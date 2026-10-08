@@ -7,8 +7,7 @@ one admin - which is every company on the day they sign up - is locked out
 permanently until someone at LMX runs `scripts/create_client_user.py` by hand.
 That is not a support process, it is an outage.
 
-Mirrors `app/driver_auth/otp_store.py`'s shape: a short-lived secret in Redis,
-with issuance throttled separately from consumption so a burst of requests can't
+A short-lived secret in Redis, with issuance throttled separately from consumption so a burst of requests can't
 widen the window it is trying to close.
 
 Four properties, each deliberate:
@@ -53,7 +52,7 @@ RESET_REQUEST_WINDOW_SECONDS = 60 * 60
 
 # 32 bytes of urandom, url-safe. Overwhelmingly more entropy than a guessing
 # attack against a one-hour window could search, which is why there is no
-# attempt counter on consumption the way the OTP has one.
+# attempt counter on consumption.
 _TOKEN_BYTES = 32
 
 

@@ -2,7 +2,7 @@
 Rate limiting for the public signup form (docs/LMX_LINK_PLAN.md).
 
 Same "Redis counter with an NX-guarded TTL" shape as
-`app/client_auth/login_rate_limit.py` and `app/driver_auth/otp_store.py`.
+`app/client_auth/login_rate_limit.py` and `app/driver_auth/sign_in_codes.py`.
 
 This surface deserves it for a different reason than login does. Login is a
 brute-force target; signup is a *write* endpoint that anyone on the internet can

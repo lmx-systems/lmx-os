@@ -15,13 +15,14 @@ from sqlalchemy import select
 
 from app.api.admin_routes import (
     admin_deactivate_driver,
+    admin_issue_sign_in_code,
     admin_list_hub_drivers,
     admin_reactivate_driver,
     admin_revoke_driver_device,
 )
-from app.api.driver_routes import request_otp, update_my_availability, verify_otp
+from app.api.driver_routes import sign_in, update_my_availability
 from app.batch_queue.store import HoldQueueStore
-from app.config import settings
+from app.driver_auth import sign_in_codes
 from app.driver_auth.dependencies import AuthedDriver, get_current_driver
 from app.fleet_state.manager import FleetStateManager
 from app.models.driver import Driver
@@ -33,10 +34,11 @@ from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.ops_auth.dependencies import AuthedOpsUser
 from app.optimizer.service import DispatchOptimizerService
-from app.schemas.driver_auth import RequestOtpBody, VerifyOtpBody
 from app.schemas.driver_app import DriverAvailabilityUpdate
+from app.schemas.driver_auth import SignInBody
 from app.schemas.fleet import DriverState
 from tests.integration import test_driver_app_integration as driver_app
+from tests.integration.conftest import fake_request, sign_in_driver
 from tests.integration.queue_helpers import let_the_hold_run_out
 
 pytestmark = pytest.mark.integration
@@ -61,14 +63,8 @@ async def _seed(db_session):
 
 
 async def _sign_in(db_session, device_id: str) -> str:
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(settings, "environment", "development")
-        otp = await request_otp(RequestOtpBody(phone=PHONE), session=db_session)
-    token = await verify_otp(
-        VerifyOtpBody(phone=PHONE, code=otp.debug_code, device_id=device_id, device_name="Phone"),
-        session=db_session,
-    )
-    return token.access_token
+    driver_id = await db_session.scalar(select(Driver.id).where(Driver.phone == PHONE))
+    return await sign_in_driver(db_session, driver_id, device_id)
 
 
 async def test_switching_a_driver_off_ends_every_session(db_session, real_redis_client):
@@ -91,27 +87,36 @@ async def test_switching_a_driver_off_ends_every_session(db_session, real_redis_
 
 
 async def test_a_switched_off_driver_cannot_sign_in_again(db_session, real_redis_client):
-    """Not with a fresh code, and not with one issued before the switch-off:
+    """Not with a code issued before the switch-off, and no new code is issued:
     signing in clears a device's revocation, so an old code must not bring a
     departed driver's phone back."""
     _, driver_id, admin = await _seed(db_session)
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(settings, "environment", "development")
-        early = await request_otp(RequestOtpBody(phone=PHONE), session=db_session)
+    early = await sign_in_codes.issue_code(db_session, driver_id, None)
+    await db_session.commit()
 
     await admin_deactivate_driver(driver_id=str(driver_id), session=db_session, _admin=admin)
 
+    # The switch-off retired the code, so it reads like any code that doesn't work.
     with pytest.raises(HTTPException) as exc:
-        await verify_otp(
-            VerifyOtpBody(phone=PHONE, code=early.debug_code, device_id="phone-a", device_name="Phone"),
+        await sign_in(
+            SignInBody(code=early.code, device_id="phone-a", device_name="Phone"),
+            request=fake_request(),
             session=db_session,
         )
-    assert exc.value.status_code == 403
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(settings, "environment", "development")
-        with pytest.raises(HTTPException) as exc:
-            await request_otp(RequestOtpBody(phone=PHONE), session=db_session)
-    assert exc.value.status_code == 403
+    assert exc.value.status_code == 401
+    with pytest.raises(HTTPException) as exc:
+        await admin_issue_sign_in_code(driver_id=str(driver_id), session=db_session, _admin=admin)
+    assert exc.value.status_code == 409
+
+    # Switched back on, the old code is still dead: the switch-off retired it.
+    await admin_reactivate_driver(driver_id=str(driver_id), session=db_session, _admin=admin)
+    with pytest.raises(HTTPException) as exc:
+        await sign_in(
+            SignInBody(code=early.code, device_id="phone-a", device_name="Phone"),
+            request=fake_request(),
+            session=db_session,
+        )
+    assert exc.value.status_code == 401
 
 
 async def test_switching_off_is_refused_while_the_driver_holds_a_route(db_session, real_redis_client):

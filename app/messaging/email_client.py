@@ -107,8 +107,7 @@ class StubEmailClient(EmailClient):
 
     Logs the full body deliberately. An email nobody receives is invisible, and
     during development the body is the only way to check that an approval
-    notification actually says something useful - the same reason the driver OTP
-    stub returns its code.
+    notification actually says something useful.
     """
 
     engine_name = "stub"

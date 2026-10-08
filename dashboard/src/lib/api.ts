@@ -10,6 +10,8 @@ import type {
   CodDisputeReport,
   AdminDriver,
   DriverDevice,
+  DriverSignInCode,
+  DriverSignInCodeRecord,
   GigDensityReport,
   GigJob,
   HubClosure,
@@ -412,6 +414,13 @@ export const api = {
   // The hub's whole roster, including drivers switched off. The fleet state
   // holds only drivers who have been on shift, never somebody who has left.
   listHubDrivers: (hubId: string) => request<AdminDriver[]>(`/admin/hubs/${hubId}/drivers`),
+
+  // A new sign-in code for a driver; any older unused one stops working.
+  issueSignInCode: (driverId: string) =>
+    request<DriverSignInCode>(`/admin/drivers/${driverId}/sign-in-code`, { method: 'POST' }),
+
+  signInCodeHistory: (driverId: string) =>
+    request<DriverSignInCodeRecord[]>(`/admin/drivers/${driverId}/sign-in-codes`),
 
   deactivateDriver: (driverId: string) =>
     request<AdminDriver>(`/admin/drivers/${driverId}/deactivate`, { method: 'POST' }),

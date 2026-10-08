@@ -2,7 +2,7 @@
 Login-attempt rate limiting for the ops dashboard (docs/ROADMAP.md S1).
 
 Same "Redis counter with an NX-guarded TTL" shape as
-app/client_auth/login_rate_limit.py / app/driver_auth/otp_store.py - an
+app/client_auth/login_rate_limit.py / app/driver_auth/sign_in_codes.py - an
 ops user's email is a fixed, guessable target, and an ops session
 authorizes fleet-wide read/write across every hub, making unthrottled
 login here at least as attractive a brute-force target as the client

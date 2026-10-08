@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Card } from './ui/Card'
 import { api } from '../lib/api'
 import { EMPLOYMENT_TYPES, VEHICLE_TYPES } from '../lib/types'
+import type { DriverOnboardingResult } from '../lib/types'
+import { SignInCode } from './SignInCode'
 
 /**
  * Provision a driver (docs/ROADMAP_AUDIT_2026-09.md).
@@ -36,6 +38,7 @@ export function OnboardDriverForm({
   const [plate, setPlate] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [added, setAdded] = useState<DriverOnboardingResult | null>(null)
 
   const capacityValue = Number(capacity)
   const ready =
@@ -58,6 +61,7 @@ export function OnboardDriverForm({
         vehicle_type: vehicle || null,
         plate_number: plate.trim() || null,
       })
+      setAdded(result)
       onToast(
         result.hourly_rate_is_placeholder
           ? `${result.name} added. No hourly rate yet — payroll will use the placeholder until scripts/set_driver_rate.py runs.`
@@ -143,6 +147,9 @@ export function OnboardDriverForm({
         >
           {saving ? 'Adding…' : 'Add driver'}
         </button>
+        {/* The new driver's first sign-in code, so onboarding ends with them
+            able to sign in. Shown until the next driver is added. */}
+        {added && <SignInCode name={added.name} code={added.sign_in_code} />}
       </div>
     </Card>
   )

@@ -345,7 +345,8 @@ class Settings(BaseSettings):
     general_rate_limit_window_seconds: int = 60
 
     # Driver app (Phase 1, see docs/NEXT_STEPS.md item 12): real per-driver
-    # auth. Signs/verifies the JWT issued on OTP verification
+    # auth. Signs/verifies the JWT issued at sign-in, and keys the hash of
+    # sign-in codes (app/driver_auth/sign_in_codes.py)
     # (app/driver_auth/tokens.py). The default is an
     # obviously-fake dev value, not a generated secret - deliberately loud
     # (see app/driver_auth/tokens.py's startup check) rather than silently

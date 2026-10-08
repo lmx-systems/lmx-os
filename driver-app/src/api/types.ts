@@ -4,11 +4,6 @@
  * schema-codegen step exists yet.
  */
 
-export interface RequestOtpResult {
-  ok: boolean;
-  debug_code: string | null;
-}
-
 export interface AuthToken {
   access_token: string;
   token_type: string;

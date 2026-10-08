@@ -610,6 +610,26 @@ export interface DriverOnboardingResult {
   employment_type: string
   vehicle_capacity_units: number
   hourly_rate_is_placeholder: boolean
+  // The driver's first sign-in code. Shown once; only a hash is kept.
+  sign_in_code: DriverSignInCode
+}
+
+/** A sign-in code from POST /admin/drivers/{id}/sign-in-code, shown once. */
+export interface DriverSignInCode {
+  code: string
+  display: string
+  qr_payload: string
+  expires_at: string
+}
+
+/** One issued code in a driver's history, without the code itself. */
+export interface DriverSignInCodeRecord {
+  issued_at: string
+  issued_by: string | null
+  expires_at: string
+  status: 'redeemed' | 'replaced' | 'expired' | 'open'
+  redeemed_at: string | null
+  redeemed_device_id: string | null
 }
 
 export const EMPLOYMENT_TYPES = [

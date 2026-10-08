@@ -149,16 +149,17 @@ camera/barcode SDK, no maps SDK).
 
 This closed three real gaps, not just "add some endpoints":
 
-- **Real per-driver auth.** `app/driver_auth/` — phone + OTP (Redis,
-  single-use, attempt-capped) issuing a JWT session
-  (`app/driver_auth/tokens.py`). Entirely separate from the ops-dashboard
-  auth: driver routes are exempt from `OpsUserAuthMiddleware`
-  (`app/ops_auth/middleware.py`'s `EXEMPT_PREFIXES`) since they have their
-  own real auth now. The code is texted through Twilio. In local
-  development with no SMS provider it comes back in the response
-  (`debug_code`) instead. Anywhere else the response never carries it:
-  without Twilio, `request-otp` refuses with 503, because returning the
-  code would let anyone who knows a driver's number sign in as them.
+- **Real per-driver auth.** `app/driver_auth/` — an ops admin issues a
+  sign-in code from the console (`app/driver_auth/sign_in_codes.py`: ten
+  characters, single use, stored as a keyed hash, shown as a QR code), and
+  the app trades it for a device-bound JWT session
+  (`app/driver_auth/tokens.py`). No text message, so no SMS provider is
+  needed to sign a driver in; the texted code it replaced (October 2026)
+  made Twilio a precondition for any driver using the app. Every request
+  checks the driver is still switched on and the device is not revoked.
+  Entirely separate from the ops-dashboard auth: driver routes are exempt
+  from `OpsUserAuthMiddleware` (`app/ops_auth/middleware.py`'s
+  `EXEMPT_PREFIXES`) since they have their own real auth.
 - **A job-offer/accept model.** Before this, `DispatchOptimizerService`
   decided an assignment and that was final — no accept/decline concept
   existed. Now every assignment also creates a `RouteOffer` row
@@ -412,10 +413,8 @@ swapping in the real thing is a contained change:
   used by driver app Phase 3's messaging) and will send for real once
   `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM_NUMBER` are set -
   but no account is provisioned yet, so every send currently goes through
-  `StubSmsClient` (logs, no real SMS). Driver sign-in depends on it: until
-  Twilio is set, codes are shown on-screen (`debug_code`) in local
-  development only, and every other environment refuses sign-in with 503.
-  The Twilio webhooks likewise refuse every request outside development
+  `StubSmsClient` (logs, no real SMS). Driver sign-in no longer depends on
+  it: drivers sign in with a code from the ops console. The Twilio webhooks likewise refuse every request outside development
   until `TWILIO_AUTH_TOKEN` is set. See `docs/NEXT_STEPS.md` item 16.
 - **ADP/Gusto**: not wired in at all - no client code exists for either,
   since which provider LMX will use hasn't been decided yet (`docs/

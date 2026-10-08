@@ -370,7 +370,7 @@ class DriverOnboardingBody(BaseModel):
     """Provision a driver (`docs/ROADMAP_AUDIT_2026-09.md`).
 
     Nothing created a `Driver` before this — every row was a hand-written
-    insert, while `app/api/driver_routes.py`'s OTP path says in its own comment
+    insert, while `app/api/driver_routes.py`'s sign-in said in its own comment
     that *"drivers are provisioned by ops, not self-registered"*. The
     provisioning it refers to did not exist.
 
@@ -387,14 +387,44 @@ class DriverOnboardingBody(BaseModel):
 
     hub_id: str
     name: str = Field(min_length=1, max_length=120)
-    # The login identity: OTP looks a driver up by this, and `scalar_one_or_none`
-    # raises on two rows. Unique at the database since migration `0063`.
+    # How dispatch reaches the driver. No longer how they sign in - that is a
+    # code from the console (app/driver_auth/sign_in_codes.py) - but still
+    # unique at the database since migration `0063`.
     phone: str = Field(min_length=5, max_length=32)
     vehicle_capacity_units: int = Field(ge=1, le=500)
     employment_type: str = Field(description="w2 | contractor_1099 | gig")
     vehicle_type: str | None = None
     plate_number: str | None = Field(default=None, max_length=32)
     hourly_rate_cents: int | None = Field(default=None, ge=0)
+
+
+class DriverSignInCodeIssued(BaseModel):
+    """A sign-in code, shown once to the ops user who issued it.
+
+    The only time the code leaves the server: only a keyed hash is stored, so
+    nobody can read it back later. Lost before the driver used it, the answer is
+    to issue another, which retires this one.
+    """
+
+    code: str
+    display: str
+    qr_payload: str
+    expires_at: datetime
+
+
+class DriverSignInCodeView(BaseModel):
+    """One code in a driver's history, without the code.
+
+    The record of who let which phone in, and when. `status` says what happened
+    to it: `redeemed`, `replaced` by a newer code, `expired`, or `open`.
+    """
+
+    issued_at: datetime
+    issued_by: str | None
+    expires_at: datetime
+    status: str
+    redeemed_at: datetime | None
+    redeemed_device_id: str | None
 
 
 class DriverOnboardingResult(BaseModel):
@@ -404,6 +434,9 @@ class DriverOnboardingResult(BaseModel):
     employment_type: str
     vehicle_capacity_units: int
     hourly_rate_is_placeholder: bool
+    # The driver's first sign-in code, so onboarding ends with the driver able
+    # to sign in rather than with a second trip to another screen.
+    sign_in_code: DriverSignInCodeIssued
 
 
 def _known_time_zone(value: str | None) -> str | None:

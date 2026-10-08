@@ -22,7 +22,6 @@ import { SupportScreen } from '../screens/SupportScreen';
 import { ScorecardScreen } from '../screens/ScorecardScreen';
 import { TripHistoryScreen } from '../screens/TripHistoryScreen';
 import { VehicleSetupScreen } from '../screens/VehicleSetupScreen';
-import { VerifyCodeScreen } from '../screens/VerifyCodeScreen';
 import type {
   AuthStackParamList,
   EarningsStackParamList,
@@ -42,7 +41,6 @@ function AuthNavigator() {
   return (
     <AuthStack.Navigator screenOptions={{ headerShown: false }}>
       <AuthStack.Screen name="SignIn" component={SignInScreen} />
-      <AuthStack.Screen name="VerifyCode" component={VerifyCodeScreen} />
       <AuthStack.Screen
         name="Server"
         component={ServerScreen}

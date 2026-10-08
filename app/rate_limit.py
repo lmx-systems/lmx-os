@@ -1,7 +1,7 @@
 """
 General per-IP API rate limiting (docs/ROADMAP.md S5) - the rate limiting
-that existed before this (driver OTP issuance, client portal login,
-app/driver_auth/otp_store.py / app/client_auth/login_rate_limit.py) only
+that existed before this (driver sign-in, client portal login,
+app/driver_auth/sign_in_codes.py / app/client_auth/login_rate_limit.py) only
 ever targeted specific brute-forceable actions; every other endpoint had
 none at all. Same "Redis counter with an NX-guarded TTL" shape as both.
 

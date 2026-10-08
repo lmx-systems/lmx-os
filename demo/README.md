@@ -87,8 +87,8 @@ database writes of its own. If it passes, the same calls work from the driver
 app, because they are the same calls.
 
 **It needs no external service.** Without `GOOGLE_CLOUD_PROJECT_ID` the
-optimizer uses its nearest-neighbour stub; without Twilio the OTP comes back in
-the response. Both are deliberate unconfigured-to-stub paths.
+optimizer uses its nearest-neighbour stub. The driver signs in with a code the
+demo's ops login issues, as a real driver would, so it needs that login.
 
 ### What it does not show
 

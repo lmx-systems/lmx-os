@@ -2,34 +2,39 @@
 
 `docs/ROADMAP_AUDIT_2026-09.md` found that no endpoint and no script creates a
 `Driver` — every row was a hand-written database insert. Meanwhile
-`app/api/driver_routes.py`'s OTP path says in its own comment that *"drivers are
-provisioned by ops, not self-registered"*. The provisioning it refers to did not
+`app/api/driver_routes.py`'s sign-in path said in its own comment that *"drivers are
+provisioned by ops, not self-registered"*. The provisioning it referred to did not
 exist, so the sentence described an intention rather than a route.
 
-Two things here are load-bearing rather than form-filling: the phone is the login
-identity and must be unique, and the capacity is what the router reads.
+Two things here are load-bearing rather than form-filling: the phone is how dispatch
+reaches a driver and must be unique, and the capacity is what the router reads.
 """
 import uuid
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import text
 
 from app.models.driver import EMPLOYMENT_TYPES, VEHICLE_TYPES, Driver
 from app.models.hub import Hub
-from app.models.ops_user import ADMIN_ROLE, VIEWER_ROLE
+from app.models.ops_user import ADMIN_ROLE, VIEWER_ROLE, OpsUser
 from app.ops_auth.dependencies import AuthedOpsUser
 from app.schemas.admin import DriverOnboardingBody
 
 pytestmark = pytest.mark.integration
 
-ADMIN = AuthedOpsUser(
-    ops_user_id=str(uuid.uuid4()), email="a@example.com", name="Admin", role=ADMIN_ROLE
-)
+ADMIN_ID = uuid.uuid4()
+ADMIN = AuthedOpsUser(ops_user_id=str(ADMIN_ID), email="a@example.com", name="Admin", role=ADMIN_ROLE)
 
 
 async def _hub(db_session) -> Hub:
+    """The hub, and the admin onboarding into it: the driver's first sign-in code
+    records who issued it, so the admin has to be a real row."""
     hub = Hub(id=uuid.uuid4(), name="Onboarding Hub", lat=30.27, lng=-97.74)
     db_session.add(hub)
+    if await db_session.get(OpsUser, ADMIN_ID) is None:
+        db_session.add(
+            OpsUser(id=ADMIN_ID, email="a@example.com", password_hash="x", name="Admin", role=ADMIN_ROLE)
+        )
     await db_session.commit()
     return hub
 
@@ -117,11 +122,10 @@ class TestADriverCanBeCreated:
         assert result.hourly_rate_is_placeholder is False
 
 
-class TestThePhoneIsTheLoginIdentity:
+class TestThePhoneIsUnique:
     async def test_a_duplicate_number_is_refused_readably(self, db_session):
-        """OTP looks a driver up by number with `scalar_one_or_none`, which
-        raises on two rows — so a duplicate locks **both** drivers out of the
-        app with a 500, not one of them with an error."""
+        """Phone is how dispatch and support reach a driver, so a second driver
+        on the same number is refused with a sentence, not an integrity error."""
         from fastapi import HTTPException
 
         from app.api.admin_routes import onboard_driver
@@ -138,7 +142,7 @@ class TestThePhoneIsTheLoginIdentity:
             )
 
         assert exc.value.status_code == 409
-        assert "lock both" in exc.value.detail
+        assert "already registered" in exc.value.detail
 
     async def test_the_database_refuses_it_too(self, db_session):
         """The endpoint is not the only writer and, on today's evidence, not
@@ -299,20 +303,26 @@ class TestWhoMayProvision:
 
 
 class TestTheDriverCanThenLogIn:
-    async def test_a_provisioned_driver_is_found_by_their_number(self, db_session):
-        """The point of provisioning. Before this the OTP path's 404 - "no
-        driver registered with this phone number" - was the only possible
-        answer, because nothing registered one."""
+    async def test_a_provisioned_driver_signs_in_with_the_code_onboarding_returns(
+        self, db_session, real_redis_client
+    ):
+        """The point of provisioning: onboarding ends with a driver who can sign in.
+        Before it, nothing registered a driver, so no sign-in could succeed."""
         from app.api.admin_routes import onboard_driver
+        from app.api.driver_routes import sign_in
+        from app.driver_auth.tokens import decode_token
+        from app.schemas.driver_auth import SignInBody
+        from tests.integration.conftest import fake_request
 
         hub = await _hub(db_session)
         result = await onboard_driver(
             body=_body(hub, phone="+15555550144"), session=db_session, _admin=ADMIN
         )
-        await db_session.commit()
 
-        found = await db_session.scalar(
-            select(Driver).where(Driver.phone == "+15555550144")
+        token = await sign_in(
+            SignInBody(code=result.sign_in_code.code, device_id="first-phone"),
+            request=fake_request(),
+            session=db_session,
         )
-        assert found is not None
-        assert str(found.id) == result.driver_id
+        driver_id, _hub_id, device_id = decode_token(token.access_token)
+        assert (driver_id, device_id) == (result.driver_id, "first-phone")

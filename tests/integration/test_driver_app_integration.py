@@ -26,14 +26,10 @@ from app.api.driver_routes import (
     get_my_profile,
     get_my_route,
     list_my_offers,
-    request_otp,
     scan_parcels,
     update_my_availability,
     update_my_profile,
-    verify_otp,
 )
-from app.driver_auth.otp_store import MAX_ISSUE_ATTEMPTS
-from app.config import settings
 from tests.integration.queue_helpers import let_the_hold_run_out
 from app.batch_queue.store import HoldQueueStore
 from app.batch_queue.queue import HeldOrder
@@ -60,10 +56,9 @@ from app.schemas.driver_app import (
     ScanParcelsBody,
     StopFailureReason,
 )
-from app.schemas.driver_auth import RequestOtpBody, VerifyOtpBody
 from app.schemas.fleet import DriverLocation, DriverState
 
-from tests.integration.conftest import make_driver_compliant
+from tests.integration.conftest import make_driver_compliant, sign_in_driver
 
 pytestmark = pytest.mark.integration
 
@@ -129,19 +124,9 @@ async def _seed(db_session):
 async def test_full_driver_app_core_loop(db_session, real_redis_client):
     hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
 
-    # 1. Phone + OTP login (screens 1a/1b), the way local development signs
-    # in: no SMS provider, so the code comes back in the response. Anywhere
-    # else it's only ever texted - see test_sign_in_code_stays_on_the_server.py.
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(settings, "environment", "development")
-        otp_result = await request_otp(RequestOtpBody(phone="+15555550199"), session=db_session)
-    assert otp_result.debug_code is not None
-
-    token = await verify_otp(
-        VerifyOtpBody(phone="+15555550199", code=otp_result.debug_code, device_id="test-device"),
-        session=db_session,
-    )
-    decoded_driver_id, decoded_hub_id, decoded_device_id = decode_token(token.access_token)
+    # 1. Sign in (screen 1a) with a code from the ops console.
+    token = await sign_in_driver(db_session, driver_id, "test-device")
+    decoded_driver_id, decoded_hub_id, decoded_device_id = decode_token(token)
     assert decoded_driver_id == str(driver_id)
     assert decoded_device_id == "test-device"
     authed = AuthedDriver(driver_id=decoded_driver_id, hub_id=decoded_hub_id, device_id=decoded_device_id)
@@ -726,25 +711,6 @@ async def test_profile_exposes_employment_type_defaulting_to_w2(db_session, real
 
     profile = await get_my_profile(driver=authed, session=db_session)
     assert profile.employment_type == "w2"
-
-
-async def test_request_otp_rate_limit_applies_to_unregistered_phone_numbers_too(db_session, real_redis_client):
-    """Security-review regression test (S6): request_otp used to run the
-    "does this phone belong to a driver" existence check before charging
-    any rate limit at all, making the 404-vs-200 response an unthrottled
-    oracle for enumerating real driver phone numbers. The limiter must now
-    be charged first, so probing a number that was never registered still
-    burns down to a 429 exactly like probing a real one would."""
-    unregistered_phone = "+15555559999"
-
-    for _ in range(MAX_ISSUE_ATTEMPTS):
-        with pytest.raises(HTTPException) as exc_info:
-            await request_otp(RequestOtpBody(phone=unregistered_phone), session=db_session)
-        assert exc_info.value.status_code == 404
-
-    with pytest.raises(HTTPException) as exc_info:
-        await request_otp(RequestOtpBody(phone=unregistered_phone), session=db_session)
-    assert exc_info.value.status_code == 429
 
 
 async def test_a_flag_resent_after_a_lost_response_is_the_same_success(db_session, real_redis_client):

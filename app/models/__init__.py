@@ -11,6 +11,7 @@ from app.models.client_webhook import ClientWebhookEndpoint, WebhookDelivery
 from app.models.delivery_rating import DeliveryRating
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
+from app.models.driver_sign_in_code import DriverSignInCode
 from app.models.driver_document import DriverDocument
 from app.models.driver_location_ping import DriverLocationPing
 from app.models.driver_shift_event import DriverShiftEvent
@@ -85,6 +86,7 @@ __all__ = [
     "ClientWebhookEndpoint",
     "WebhookDelivery",
     "DriverDevice",
+    "DriverSignInCode",
     "DriverShiftEvent",
     "OpsUser",
     "RouteOffer",
