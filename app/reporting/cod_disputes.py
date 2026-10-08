@@ -26,7 +26,7 @@ import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.messaging.cod_notifications import sms_is_configured
+from app.messaging.cod_notifications import email_is_configured
 from app.models.cod_collection import OUTCOME_COLLECTED, OUTCOME_DISPUTED, CodCollection
 from app.models.client import Client
 from app.models.shop import Shop
@@ -67,10 +67,10 @@ class CodDisputeReport:
     # Disputes nobody was told about. Named separately because it breaks the promise the
     # feature makes ("one tap escalates"), and a count buried in a total would hide it.
     unescalated_count: int = 0
-    # **Why that count is what it is.** With no SMS provider on this deployment (B5) every
+    # **Why that count is what it is.** With no mail server on this deployment every
     # dispute is un-escalated, and reporting that as N per-account failures would be a
     # metric that cries wolf permanently - it is one deployment-wide fact, said once.
-    sms_configured: bool = True
+    email_configured: bool = True
 
 
 async def build_cod_dispute_report(
@@ -155,7 +155,7 @@ async def build_cod_dispute_report(
         disputed_amount_cents=int(totals[2]),
         shops=rows,
         unescalated_count=int(totals[3]),
-        sms_configured=sms_is_configured(),
+        email_configured=email_is_configured(),
     )
 
 

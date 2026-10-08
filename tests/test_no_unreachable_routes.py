@@ -76,7 +76,6 @@ ROUTERS = (
     "public_routes",
     "public_api_routes",
     "internal_routes",
-    "webhooks",
     "media_routes",
 )
 
@@ -89,7 +88,6 @@ NOT_CALLED_BY_A_FRONT_END: dict[str, str] = {
         "a scheduler and an operator with a shell - the nightly dispatch, the "
         "learning loop, retention pruning, webhook delivery"
     ),
-    "webhooks": "Twilio calls these; nothing of ours does",
     "public_api_routes": (
         "a customer's own integration (docs/ORDER_API.md), which is not in this "
         "repository"

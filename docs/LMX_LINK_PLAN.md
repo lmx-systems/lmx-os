@@ -80,7 +80,7 @@ Everything below uses **LMX Link** for the intake work.
   Web intake form  ─┐                              ┌─ SLA engine            ┌─ Status link (web)
   CSV / email       ├─►  LMX Order Object  ──────► ├─ Batch-hold queue   ──►├─ Webhook callback
   REST webhook      │      (normalize +            ├─ Fleet optimizer       ├─ Aggregator status push
-  Aggregator push   │       enrich + geocode)      ├─ Rating engine  (new)  ├─ Shop SMS (Twilio)
+  Aggregator push   │       enrich + geocode)      ├─ Rating engine  (new)  ├─ Client webhooks 
   Epicor / MAM      │                              ├─ Driver app + POD      ├─ Client dashboard
   EDI 204 (bought) ─┘                              └─ Annotation capture    └─ Priced statement (new)
 ```

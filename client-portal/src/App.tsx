@@ -60,7 +60,7 @@ export default function App() {
       ? new URLSearchParams(window.location.search).get('token')
       : null,
   )
-  // Tracking links arrive by SMS as /track?token=… and go to a delivery
+  // Tracking links (/track?token=…) are forwarded by the client to a delivery
   // RECIPIENT, who has no account here at all. Read once on mount, and checked
   // before every auth branch below - a logged-in client following a tracking link
   // should still see the tracking page, not their own orders list.

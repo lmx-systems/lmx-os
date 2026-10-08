@@ -37,10 +37,10 @@ from app.api.driver_routes import (
 from app.delivery.cod import COD_PAYER_TYPE
 from app.driver_auth.dependencies import AuthedDriver
 from app.models.client import Client
+from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.models.cod_collection import OUTCOME_COLLECTED, OUTCOME_DISPUTED, CodCollection
 from app.models.driver import Driver
 from app.models.hub import Hub
-from app.models.message import Message
 from app.models.order import Order, OrderStatus
 from app.models.route import Route
 from app.models.shop import Shop
@@ -60,7 +60,7 @@ def _admin() -> AuthedOpsUser:
     )
 
 
-async def _seed(db_session, *, shop_phone: str | None = "+15125550111"):
+async def _seed(db_session, *, with_admin: bool = True):
     hub_id, client_id, shop_id, driver_id = (
         uuid.uuid4(),
         uuid.uuid4(),
@@ -91,9 +91,20 @@ async def _seed(db_session, *, shop_phone: str | None = "+15125550111"):
             lat=30.264,
             lng=-97.730,
             external_ref=f"SHOP-{uuid.uuid4().hex[:8]}",
-            phone=shop_phone,
+            phone="+15125550111",
         )
     )
+    if with_admin:
+        # Who a dispute is emailed to: the client's portal admins.
+        db_session.add(
+            ClientUser(
+                client_id=client_id,
+                email=f"counter-{uuid.uuid4().hex[:6]}@partner.example",
+                password_hash="x",
+                name="Counter Lead",
+                role=CLIENT_ADMIN_ROLE,
+            )
+        )
     await db_session.commit()
     return hub_id, client_id, shop_id, driver_id
 
@@ -389,11 +400,35 @@ async def test_every_order_on_a_commingled_stop_must_be_settled(
 # ---------------------------------------------------------------------------
 
 
-async def test_a_dispute_texts_the_distributor(db_session, real_redis_client):
-    """**To the shop, not to LMX ops.** The disputed sum is their invoice to their own
-    customer, so they are the only party who can decide anything about it - and routing it
-    through us first costs the thing that matters, them hearing while their customer is
-    still standing there."""
+class _Mailbox:
+    """A mail server that is configured and records what it was asked to send."""
+
+    engine_name = "smtp"
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.sent: list[tuple[str, str, str]] = []
+        self.fail = fail
+
+    async def send(self, *, to, subject, body):
+        if self.fail:
+            raise RuntimeError("mail server is down")
+        self.sent.append((to, subject, body))
+        return True
+
+
+def _use_mailbox(monkeypatch, mailbox: _Mailbox) -> None:
+    from app.messaging import client_emails, cod_notifications
+
+    monkeypatch.setattr(cod_notifications, "get_email_client", lambda: mailbox)
+    monkeypatch.setattr(client_emails, "get_email_client", lambda: mailbox)
+
+
+async def test_a_dispute_emails_the_clients_admins(db_session, real_redis_client, monkeypatch):
+    """**To the client, not to LMX ops.** The disputed sum is their invoice to their own
+    customer, so they are the only party who can decide anything about it. Email, because
+    LMX sends no texts; the client's portal admins are who has an address on file."""
+    mailbox = _Mailbox()
+    _use_mailbox(monkeypatch, mailbox)
     hub_id, client_id, shop_id, driver_id = await _seed(db_session)
     stop, orders = await _cod_stop(db_session, hub_id, client_id, shop_id, driver_id)
 
@@ -404,36 +439,20 @@ async def test_a_dispute_texts_the_distributor(db_session, real_redis_client):
         session=db_session,
     )
 
-    message = (
-        await db_session.execute(select(Message).where(Message.channel == "shop"))
-    ).scalar_one()
-    assert message.counterparty_phone == "+15125550111"
-    assert "125.00" in message.body
-    assert "did not negotiate" in message.body
+    [(to, _subject, body)] = mailbox.sent
+    assert to.endswith("@partner.example")
+    assert "125.00" in body
+    assert "did not negotiate" in body
     # The customer's own words travel, because a pattern across an account is the signal.
-    assert "says he was quoted 90" in message.body
-
+    assert "says he was quoted 90" in body
     dispute = (await _collections(db_session))[0]
     assert dispute.outcome == OUTCOME_DISPUTED
-    # Not escalated, and correctly so: this deployment has no SMS provider, so the message
-    # was recorded but nobody was actually texted. Marking it escalated would be a lie -
-    # see test_the_report_says_why_nothing_is_escalated.
-    assert dispute.escalated_at is None
+    assert dispute.escalated_at is not None
 
 
-async def test_a_real_send_marks_the_dispute_escalated(
-    db_session, real_redis_client, monkeypatch
-):
-    """With a provider configured, the promise is actually kept."""
-    from app.messaging import cod_notifications
-
-    class _RealEnough:
-        engine_name = "twilio"
-
-        async def send(self, to, body):
-            return "SM-fake-sid"
-
-    monkeypatch.setattr(cod_notifications, "get_sms_client", lambda: _RealEnough())
+async def test_with_no_mail_server_a_dispute_is_not_marked_escalated(db_session, real_redis_client):
+    """Nothing was sent, so marking it escalated would be a lie - see
+    test_the_report_says_why_nothing_is_escalated."""
     hub_id, client_id, shop_id, driver_id = await _seed(db_session)
     stop, _orders = await _cod_stop(db_session, hub_id, client_id, shop_id, driver_id)
 
@@ -441,13 +460,16 @@ async def test_a_real_send_marks_the_dispute_escalated(
         str(stop.id), CodDisputeBody(), driver=_authed(hub_id, driver_id), session=db_session
     )
 
-    assert (await _collections(db_session))[0].escalated_at is not None
+    dispute = (await _collections(db_session))[0]
+    assert dispute.outcome == OUTCOME_DISPUTED
+    assert dispute.escalated_at is None
 
 
-async def test_a_dispute_survives_a_shop_with_no_phone(db_session, real_redis_client):
-    """The dispute is the record; the message is a courtesy on top of it. But it is NOT
+async def test_a_dispute_survives_a_client_with_no_admin(db_session, real_redis_client, monkeypatch):
+    """The dispute is the record; the email is a courtesy on top of it. But it is NOT
     marked escalated, because nobody was told - and that is the state the report surfaces."""
-    hub_id, client_id, shop_id, driver_id = await _seed(db_session, shop_phone=None)
+    _use_mailbox(monkeypatch, _Mailbox())
+    hub_id, client_id, shop_id, driver_id = await _seed(db_session, with_admin=False)
     stop, _orders = await _cod_stop(db_session, hub_id, client_id, shop_id, driver_id)
 
     await raise_cod_dispute(
@@ -459,22 +481,10 @@ async def test_a_dispute_survives_a_shop_with_no_phone(db_session, real_redis_cl
     assert dispute.escalated_at is None
 
 
-async def test_a_dead_sms_gateway_does_not_lose_the_dispute(
-    db_session, real_redis_client, monkeypatch
-):
-    """A driver who has already left must not be blocked by a gateway, and the record must
-    survive it."""
-    from app.messaging import cod_notifications
-
-    class _Exploding:
-        # engine_name = "twilio" so the configured path is taken - the point of this test
-        # is a gateway that fails, not one that isn't there.
-        engine_name = "twilio"
-
-        async def send(self, to, body):
-            raise RuntimeError("twilio is down")
-
-    monkeypatch.setattr(cod_notifications, "get_sms_client", lambda: _Exploding())
+async def test_a_dead_mail_server_does_not_lose_the_dispute(db_session, real_redis_client, monkeypatch):
+    """A driver who has already left must not be blocked by a mail server, and the record
+    must survive it."""
+    _use_mailbox(monkeypatch, _Mailbox(fail=True))
     hub_id, client_id, shop_id, driver_id = await _seed(db_session)
     stop, _orders = await _cod_stop(db_session, hub_id, client_id, shop_id, driver_id)
 
@@ -596,7 +606,7 @@ async def test_disputes_nobody_was_told_about_are_surfaced_separately(
 ):
     """It breaks the promise the feature makes - "one tap escalates" - and folded into a
     total it would disappear."""
-    hub_id, client_id, shop_id, driver_id = await _seed(db_session, shop_phone=None)
+    hub_id, client_id, shop_id, driver_id = await _seed(db_session, with_admin=False)
     stop, _orders = await _cod_stop(db_session, hub_id, client_id, shop_id, driver_id)
 
     await raise_cod_dispute(
@@ -610,7 +620,7 @@ async def test_disputes_nobody_was_told_about_are_surfaced_separately(
 
 
 async def test_the_report_says_why_nothing_is_escalated(db_session, real_redis_client):
-    """**With no SMS provider (B5) every dispute is un-escalated**, and reporting that as
+    """**With no mail server every dispute is un-escalated**, and reporting that as
     N per-account failures would be a metric that cries wolf permanently. One
     deployment-wide fact, said once."""
     hub_id, client_id, shop_id, driver_id = await _seed(db_session)
@@ -621,7 +631,7 @@ async def test_the_report_says_why_nothing_is_escalated(db_session, real_redis_c
 
     report = await cod_dispute_report(str(hub_id), session=db_session, _admin=_admin())
 
-    assert report.sms_configured is False
+    assert report.email_configured is False
     assert report.unescalated_count == 1
 
 

@@ -583,7 +583,7 @@ def build(out: Path) -> None:
         "**Publish the terms.** The signup page records which version an applicant accepted, and no version exists yet. Three clauses depend on the insurance position, the privacy policy, and our posture on training models with customer data - so it is really four documents with one on the critical path. Until it lands the front door cannot open.",
         "**Decide whether we take payment.** FAQ question one. It decides whether a whole workstream exists.",
         "**Confirm the rate card and the service levels for customer #1.** Billing supports more shapes than we need - a base per drop, per mile, per piece, per weight, with a minimum. What do we actually quote? And what did we promise per tier, given a miss now costs us a credit? The times we are running on are derived from our own operating constraints; the credit percentages are a placeholder and they are real money.",
-        "**Provision Twilio and Rippling.** Text messaging carries driver login codes, customer tracking links, shop notifications and payment-dispute escalations. Payroll moves the money. Both are written and tested; neither has an account behind it.",
+        "**Provision Rippling and an email provider.** Payroll moves the money; email carries portal password resets and payment-dispute escalations. Both are written and tested; neither has an account behind it. LMX sends no text messages, so there is no Twilio account to provision.",
     ], start=1):
         _body(doc, f"{i}.  {text}", indent=0.2)
 

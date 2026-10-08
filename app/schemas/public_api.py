@@ -56,3 +56,6 @@ class ApiOrderResult(BaseModel):
     # True when this reference was already on file and no new order was created. The
     # caller's retry succeeded; it just didn't need to do anything.
     duplicate: bool
+    # The recipient's live tracking page, from pickup on - forward it to your
+    # customer. It also shows the code they give our driver. Null before pickup.
+    tracking_url: str | None = None

@@ -55,11 +55,8 @@ OPS_PASSWORD = "demo-password"
 # Addresses are quoted because they contain commas. An unquoted address in a
 # file with other columns shifts every field after it, which the parser then
 # correctly rejects - a realistic failure, but not the one this demo is for.
-# A recipient phone is what decides whether this delivery gets a tracking link:
-# `send_tracking_link_to_recipient` mints the token only when there is a number
-# to text it to, so an order with no phone never gets one. Until the manifest
-# parser learned this column, the CSV path - LMX Link's whole premise - could
-# not produce a customer tracking page for anything.
+# A recipient phone travels with the order so the driver can call ahead. The
+# tracking link no longer depends on it: every order gets one at pickup.
 MANIFEST_CSV = """Ship To Address,Contact Name,Contact Phone,Priority
 "1200 E 6th St, Austin, TX 78702",J. Rivera,+15125550137,HOT SHOT
 "500 Congress Ave, Austin, TX 78701",M. Chen,+15125550164,HOT SHOT

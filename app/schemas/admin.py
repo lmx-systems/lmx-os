@@ -299,6 +299,30 @@ class AdminDriverView(BaseModel):
     deactivated_at: datetime | None
 
 
+class SupportThreadView(BaseModel):
+    """One driver's support thread, as the inbox lists it: newest first, and
+    whether the last word was the driver's, which is what needs an answer."""
+
+    driver_id: str
+    driver_name: str
+    last_body: str
+    last_at: datetime
+    awaiting_reply: bool
+
+
+class SupportMessageView(BaseModel):
+    message_id: str
+    from_driver: bool
+    body: str
+    created_at: datetime
+    # The dispatcher who wrote a reply. Null on the driver's own messages.
+    sent_by: str | None
+
+
+class SupportReplyBody(BaseModel):
+    body: str = Field(min_length=1, max_length=1600)
+
+
 class CodDisputeReportView(BaseModel):
     window_start: datetime
     window_end: datetime
@@ -311,9 +335,9 @@ class CodDisputeReportView(BaseModel):
     # the promise the feature makes ("one tap escalates"), and folded into a total it would
     # disappear.
     unescalated_count: int
-    # Why. With no SMS provider configured (B5) every dispute is un-escalated, and that is
+    # Why. With no mail server configured every dispute is un-escalated, and that is
     # one deployment-wide fact rather than N per-account failures.
-    sms_configured: bool
+    email_configured: bool
 
 
 # ---------------------------------------------------------------------------

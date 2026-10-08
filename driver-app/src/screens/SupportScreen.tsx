@@ -12,11 +12,9 @@ import type { ColorScheme } from '../theme';
 
 const POLL_INTERVAL_MS = 8000;
 
-// Screen 1q, "Contact support" - reaches LMX dispatch, not the customer
-// (see MessageCustomerScreen for that one). If SUPPORT_PHONE_NUMBER isn't
-// configured server-side yet (app/config.py), messages are still saved
-// here but nobody's actually being texted - dispatch should check this
-// with ops before relying on it.
+// Screen 1q, "Contact support" - a thread with the hub's dispatchers, who
+// read and answer it in the ops console's support inbox. Replies appear here
+// on the next poll, and as a push notification where push is set up.
 export function SupportScreen() {
   const colors = useThemeColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);

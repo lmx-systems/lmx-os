@@ -162,6 +162,11 @@ class TrackingView:
     # to nobody at all. Both are here because both are valid proof and the page
     # shows whichever exists.
     pod_signature_url: str | None
+    # The code the recipient gives the driver to prove the delivery reached them
+    # (docs/ROADMAP.md A4, app/messaging/delivery_pin.py). It used to be texted;
+    # now it is here, on a page whose link the client forwards to their
+    # customer. Shown only until the delivery is made, and never to the driver.
+    delivery_pin: str | None
 
 
 class TrackingTokenInvalid(Exception):
@@ -348,6 +353,11 @@ async def resolve_tracking(session: AsyncSession, token: str) -> TrackingView:
         delivered_at=order.delivered_at,
         pod_photo_url=pod_photo_url,
         pod_signature_url=pod_signature_url,
+        delivery_pin=(
+            stop.delivery_pin
+            if stop is not None and stop.status not in ("completed", "failed") and order.delivered_at is None
+            else None
+        ),
         driver_position=position,
         rating=rating,
         is_live=order.status

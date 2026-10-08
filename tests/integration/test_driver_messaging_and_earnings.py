@@ -1,13 +1,8 @@
 """
-Integration coverage for the driver app's Phase 3: masked SMS messaging
-(screens 1p/1q) and the placeholder earnings/trip-history estimate
-(screens 1n/1o). See docs/NEXT_STEPS.md item 14.
-
-No Twilio account is configured in the test environment, so every send
-goes through StubSmsClient (app/messaging/sms_client.py) - twilio_sid is
-always None here. That's the correct behavior to assert, not a gap: it's
-exactly what a real deployment without Twilio credentials configured
-would also do.
+Integration coverage for the driver app's Phase 3: the support thread
+(screens 1p/1q; the console's side is tests/integration/test_support_inbox.py)
+and the placeholder earnings/trip-history estimate (screens 1n/1o). See
+docs/NEXT_STEPS.md item 14.
 
 Calls the route functions directly, same pattern as
 tests/integration/test_driver_app_integration.py, whose _seed/
@@ -17,76 +12,26 @@ with a real Order.delivery_contact_phone attached.
 import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from unittest.mock import patch
-from urllib.parse import urlencode
 
 import pytest
-from fastapi import HTTPException
-from starlette.requests import Request
 
 import app.payroll.hours as payroll_hours
 from app.api.driver_routes import (
     get_my_earnings,
-    list_customer_messages,
     list_my_trips,
     list_support_messages,
-    message_customer,
     message_support,
 )
-from app.api.webhooks import _find_matching_thread, twilio_inbound_sms
-from app.config import settings
 from app.driver_auth.dependencies import AuthedDriver
-from app.messaging.twilio_signature import compute_signature
 from app.models.driver import Driver
 from app.models.driver_shift_event import DriverShiftEvent
 from app.models.hub import Hub
-from app.models.message import Message
 from app.models.route import Route
 from app.models.stop import Stop
 from app.schemas.driver_app import SendMessageBody
-from tests.integration.test_driver_app_integration import _accept_one_offer, _seed
 
 pytestmark = pytest.mark.integration
 
-WEBHOOK_URL = "http://testserver/webhooks/twilio/inbound-sms"
-TEST_AUTH_TOKEN = "test-auth-token"
-
-
-def _fake_twilio_request(form_fields: dict, signature: str | None = None) -> Request:
-    """A minimal real Starlette Request whose .form()/.url a direct
-    (non-HTTP) function call can still exercise - twilio_inbound_sms reads
-    both for signature verification (app/messaging/twilio_signature.py)."""
-    body = urlencode(form_fields).encode()
-    headers = [(b"content-type", b"application/x-www-form-urlencoded")]
-    if signature is not None:
-        headers.append((b"x-twilio-signature", signature.encode()))
-
-    async def receive():
-        return {"type": "http.request", "body": body, "more_body": False}
-
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/webhooks/twilio/inbound-sms",
-        "query_string": b"",
-        "headers": headers,
-        "scheme": "http",
-        "server": ("testserver", 80),
-    }
-    return Request(scope, receive)
-
-
-@pytest.fixture
-def twilio_signs_requests(monkeypatch):
-    """Configure the auth token, so a request signed with it is Twilio's."""
-    monkeypatch.setattr(settings, "twilio_auth_token", TEST_AUTH_TOKEN)
-    monkeypatch.setattr(settings, "twilio_webhook_base_url", None)
-
-
-def _signed_twilio_request(form_fields: dict) -> Request:
-    """What Twilio sends: the form, signed with the account's auth token."""
-    signature = compute_signature(TEST_AUTH_TOKEN, WEBHOOK_URL, form_fields)
-    return _fake_twilio_request(form_fields, signature=signature)
 
 
 async def _seed_driver_only(db_session):
@@ -125,56 +70,7 @@ async def _seed_stop(db_session, hub_id, driver_id, status="arrived"):
     return stop.id
 
 
-async def _outbound(db_session, *, hub_id, driver_id, channel, stop_id, phone, body):
-    message = Message(
-        hub_id=hub_id, driver_id=driver_id, stop_id=stop_id, channel=channel,
-        direction="outbound", body=body, counterparty_phone=phone,
-    )
-    db_session.add(message)
-    await db_session.commit()
-    return message
-
-
-async def _inbound(db_session, *, hub_id, driver_id, channel, stop_id, phone, body):
-    message = Message(
-        hub_id=hub_id, driver_id=driver_id, stop_id=stop_id, channel=channel,
-        direction="inbound", body=body, counterparty_phone=phone,
-    )
-    db_session.add(message)
-    await db_session.commit()
-    return message
-
-
-async def test_message_customer_sends_via_stub_and_stores_thread(db_session, real_redis_client):
-    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
-    authed, _pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
-
-    sent = await message_customer(
-        dropoff.stop_id, SendMessageBody(body="On my way!"), driver=authed, session=db_session
-    )
-    assert sent.channel == "customer"
-    assert sent.direction == "outbound"
-    assert sent.body == "On my way!"
-    # No Twilio account configured in tests -> StubSmsClient -> no real SID.
-    # (Not asserted directly on the response - MessageView deliberately
-    # never exposes it - but confirmed via the thread read below matching
-    # what was actually stored.)
-
-    thread = await list_customer_messages(dropoff.stop_id, driver=authed, session=db_session)
-    assert len(thread) == 1
-    assert thread[0].message_id == sent.message_id
-
-
-async def test_message_customer_rejects_a_pickup_stop(db_session, real_redis_client):
-    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
-    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
-
-    with pytest.raises(HTTPException) as exc_info:
-        await message_customer(pickup.stop_id, SendMessageBody(body="hi"), driver=authed, session=db_session)
-    assert exc_info.value.status_code == 409
-
-
-async def test_message_support_stores_even_when_no_support_number_configured(db_session):
+async def test_a_support_message_is_stored_in_the_drivers_thread(db_session):
     hub_id, driver_id = await _seed_driver_only(db_session)
     authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
 
@@ -198,121 +94,6 @@ async def test_support_messages_are_scoped_per_driver(db_session):
 
     thread_1 = await list_support_messages(driver=authed_1, session=db_session)
     assert [m.body for m in thread_1] == ["From driver 1"]
-
-
-async def test_inbound_webhook_matches_reply_to_most_recent_outbound_thread(
-    db_session, real_redis_client, twilio_signs_requests
-):
-    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
-    authed, _pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
-
-    await message_customer(dropoff.stop_id, SendMessageBody(body="On my way!"), driver=authed, session=db_session)
-
-    fields = {"From": order.delivery_contact_phone, "Body": "Thanks, I'll be here", "MessageSid": "SM_test_123"}
-    await twilio_inbound_sms(
-        request=_signed_twilio_request(fields),
-        From=fields["From"], Body=fields["Body"], MessageSid=fields["MessageSid"], session=db_session,
-    )
-
-    thread = await list_customer_messages(dropoff.stop_id, driver=authed, session=db_session)
-    assert [m.direction for m in thread] == ["outbound", "inbound"]
-    assert thread[-1].body == "Thanks, I'll be here"
-
-
-async def test_inbound_webhook_from_unknown_number_does_not_error(db_session, twilio_signs_requests):
-    # No prior outbound message to this number anywhere - should log and
-    # no-op, not raise, since Twilio doesn't retry cleanly on a 500.
-    fields = {"From": "+19995551234", "Body": "???"}
-    response = await twilio_inbound_sms(
-        request=_signed_twilio_request(fields), From=fields["From"], Body=fields["Body"], MessageSid=None, session=db_session
-    )
-    assert response.status_code == 200
-
-
-async def test_inbound_webhook_refuses_every_request_when_twilio_is_not_configured(db_session):
-    """Without TWILIO_AUTH_TOKEN there is no signature to check, so nothing
-    tells Twilio apart from anyone who can reach the API. This used to
-    accept the request, in production too: anyone could write a "customer
-    reply" into a driver's thread."""
-    fields = {"From": "+19995551234", "Body": "no signature at all"}
-    with pytest.raises(HTTPException) as exc_info:
-        await twilio_inbound_sms(
-            request=_fake_twilio_request(fields, signature=None),
-            From=fields["From"], Body=fields["Body"], MessageSid=None, session=db_session,
-        )
-    assert exc_info.value.status_code == 403
-
-
-async def test_inbound_webhook_accepts_unsigned_requests_in_development(db_session, monkeypatch):
-    """Local development has no Twilio account to sign anything."""
-    monkeypatch.setattr(settings, "environment", "development")
-    fields = {"From": "+19995551234", "Body": "no signature at all"}
-    response = await twilio_inbound_sms(
-        request=_fake_twilio_request(fields, signature=None),
-        From=fields["From"], Body=fields["Body"], MessageSid=None, session=db_session,
-    )
-    assert response.status_code == 200
-
-
-async def test_inbound_webhook_accepts_a_valid_signature_when_configured(db_session):
-    fields = {"From": "+19995551234", "Body": "ok", "MessageSid": "SM1"}
-    signature = compute_signature("test-auth-token", WEBHOOK_URL, fields)
-
-    with patch("app.api.webhooks.settings") as mock_settings:
-        mock_settings.twilio_auth_token = "test-auth-token"
-        mock_settings.twilio_webhook_base_url = None
-        response = await twilio_inbound_sms(
-            request=_fake_twilio_request(fields, signature=signature),
-            From=fields["From"], Body=fields["Body"], MessageSid=fields["MessageSid"], session=db_session,
-        )
-    assert response.status_code == 200
-
-
-async def test_inbound_webhook_rejects_an_invalid_signature_when_configured(db_session):
-    fields = {"From": "+19995551234", "Body": "ok", "MessageSid": "SM1"}
-
-    with patch("app.api.webhooks.settings") as mock_settings:
-        mock_settings.twilio_auth_token = "test-auth-token"
-        mock_settings.twilio_webhook_base_url = None
-        with pytest.raises(HTTPException) as exc_info:
-            await twilio_inbound_sms(
-                request=_fake_twilio_request(fields, signature="not-the-real-signature"),
-                From=fields["From"], Body=fields["Body"], MessageSid=fields["MessageSid"], session=db_session,
-            )
-    assert exc_info.value.status_code == 403
-
-
-async def test_inbound_webhook_rejects_a_missing_signature_when_configured(db_session):
-    fields = {"From": "+19995551234", "Body": "ok", "MessageSid": "SM1"}
-
-    with patch("app.api.webhooks.settings") as mock_settings:
-        mock_settings.twilio_auth_token = "test-auth-token"
-        mock_settings.twilio_webhook_base_url = None
-        with pytest.raises(HTTPException) as exc_info:
-            await twilio_inbound_sms(
-                request=_fake_twilio_request(fields, signature=None),
-                From=fields["From"], Body=fields["Body"], MessageSid=fields["MessageSid"], session=db_session,
-            )
-    assert exc_info.value.status_code == 403
-
-
-async def test_inbound_webhook_uses_the_configured_public_base_url_behind_a_proxy(db_session):
-    """twilio_webhook_base_url overrides scheme+host in the signature
-    computation - the whole reason it exists (see its docstring in
-    app/config.py): request.url reflects this container's internal view,
-    which can differ from the public URL Twilio actually signed."""
-    fields = {"From": "+19995551234", "Body": "behind a proxy"}
-    public_url = "https://api.lmxit.com/webhooks/twilio/inbound-sms"
-    signature = compute_signature("test-auth-token", public_url, fields)
-
-    with patch("app.api.webhooks.settings") as mock_settings:
-        mock_settings.twilio_auth_token = "test-auth-token"
-        mock_settings.twilio_webhook_base_url = "https://api.lmxit.com"
-        response = await twilio_inbound_sms(
-            request=_fake_twilio_request(fields, signature=signature),
-            From=fields["From"], Body=fields["Body"], MessageSid=None, session=db_session,
-        )
-    assert response.status_code == 200
 
 
 async def test_earnings_computes_hours_from_shift_events_not_route_span(db_session):
@@ -441,98 +222,3 @@ async def test_trips_lists_completed_routes_with_stop_counts_regardless_of_week(
     assert earnings.hours_worked == 0.0
 
 
-async def test_reply_matching_prefers_an_unanswered_thread_over_an_already_answered_one(db_session):
-    """The headline bug this hardens: two concurrent conversations to the
-    same phone number no longer collide on 'most recent' alone - an
-    already-answered thread is skipped in favor of one still waiting."""
-    hub_id, driver_id = await _seed_driver_only(db_session)
-    phone = "+15555559000"
-    answered_stop = await _seed_stop(db_session, hub_id, driver_id)
-    unanswered_stop = await _seed_stop(db_session, hub_id, driver_id)
-
-    await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=answered_stop, phone=phone, body="On my way")
-    await _inbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=answered_stop, phone=phone, body="ok thanks")
-    # Sent *after* the already-answered thread's outbound message, so a
-    # naive "most recent outbound" match would still (wrongly) prefer the
-    # answered one only if it ignored the reply above entirely - this
-    # ordering deliberately doesn't help the old bug, it's the "prefer
-    # unanswered" logic that has to do the actual work here.
-    await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=unanswered_stop, phone=phone, body="Almost there")
-
-    matched = await _find_matching_thread(db_session, phone)
-    assert matched.stop_id == unanswered_stop
-
-
-async def test_reply_matching_skips_a_terminal_stop_in_favor_of_an_active_one(db_session):
-    hub_id, driver_id = await _seed_driver_only(db_session)
-    phone = "+15555559001"
-    completed_stop = await _seed_stop(db_session, hub_id, driver_id, status="completed")
-    active_stop = await _seed_stop(db_session, hub_id, driver_id, status="arrived")
-
-    await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=completed_stop, phone=phone, body="delivered")
-    await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=active_stop, phone=phone, body="on my way")
-
-    matched = await _find_matching_thread(db_session, phone)
-    assert matched.stop_id == active_stop
-
-
-async def test_reply_matching_never_crosses_customer_and_support_channels(db_session):
-    with patch("app.api.webhooks.settings") as mock_settings:
-        mock_settings.support_phone_number = "+15555559999"
-
-        hub_id, driver_id = await _seed_driver_only(db_session)
-        stop_id = await _seed_stop(db_session, hub_id, driver_id)
-        # A customer thread that happens to share the support number, and
-        # a real support thread - a reply from the support number must
-        # only ever match the support thread.
-        await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=stop_id, phone="+15555559999", body="customer msg")
-        await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="support", stop_id=None, phone="+15555559999", body="support msg")
-
-        matched = await _find_matching_thread(db_session, "+15555559999")
-    assert matched.channel == "support"
-
-
-async def test_reply_matching_across_two_drivers_sharing_the_support_number(db_session):
-    """The concrete cross-driver collision this hardens: every driver's
-    support message shares the exact same counterparty_phone
-    (settings.support_phone_number) - a reply must go to whichever
-    driver's thread is still unanswered, not just whichever driver
-    texted support most recently."""
-    with patch("app.api.webhooks.settings") as mock_settings:
-        mock_settings.support_phone_number = "+15555558888"
-
-        hub_id, driver_a = await _seed_driver_only(db_session)
-        _hub_id2, driver_b = await _seed_driver_only(db_session)
-
-        await _outbound(db_session, hub_id=hub_id, driver_id=driver_b, channel="support", stop_id=None, phone="+15555558888", body="driver B's question")
-        await _inbound(db_session, hub_id=hub_id, driver_id=driver_b, channel="support", stop_id=None, phone="+15555558888", body="support answered B already")
-        # Driver A's message came *before* B's, chronologically - a naive
-        # "most recent outbound" match would (wrongly) prefer B's thread.
-        await _outbound(db_session, hub_id=hub_id, driver_id=driver_a, channel="support", stop_id=None, phone="+15555558888", body="driver A's question")
-
-        matched = await _find_matching_thread(db_session, "+15555558888")
-    assert matched.driver_id == driver_a
-
-
-async def test_reply_matching_logs_and_still_resolves_a_genuine_ambiguity(db_session):
-    """Two truly concurrent, unanswered threads to the same number - the
-    one real case this can't fully solve without new infrastructure (see
-    _find_matching_thread's docstring). Must not crash, and must surface
-    the ambiguity rather than silently guessing. Mocks the logger directly
-    rather than using pytest's caplog - this codebase's structlog setup
-    (app/logging_config.py) uses PrintLoggerFactory, which writes straight
-    to stdout and never touches stdlib logging handlers caplog hooks into."""
-    hub_id, driver_id = await _seed_driver_only(db_session)
-    phone = "+15555559002"
-    stop_1 = await _seed_stop(db_session, hub_id, driver_id)
-    stop_2 = await _seed_stop(db_session, hub_id, driver_id)
-    await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=stop_1, phone=phone, body="msg 1")
-    await _outbound(db_session, hub_id=hub_id, driver_id=driver_id, channel="customer", stop_id=stop_2, phone=phone, body="msg 2")
-
-    with patch("app.api.webhooks.logger") as mock_logger:
-        matched = await _find_matching_thread(db_session, phone)
-        mock_logger.warning.assert_called_once()
-        assert mock_logger.warning.call_args.args[0] == "inbound_sms_ambiguous_match"
-
-    assert matched is not None
-    assert matched.stop_id in (stop_1, stop_2)

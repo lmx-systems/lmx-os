@@ -123,7 +123,7 @@ app/
   billing/        Rate tables, invoices, SLA-breach credits
   payroll/        Hours, overtime, gig payouts
   geocoding/      Address resolution and cache (Nominatim or Google)
-  messaging/      SMS, email, push, masked voice - each stubs when unconfigured
+  messaging/      Email and push (no SMS: LMX sends no texts) - each stubs when unconfigured
   webhooks/       Outbound status callbacks to client systems
   tracking/       The recipient-facing live tracking page
   legal/          The served terms and privacy policy, plus retention enforcement
@@ -169,7 +169,8 @@ docs/             See below
 ## What is deliberately not real yet
 
 Several integrations are complete, tested code running against a stub because no
-account exists yet — Twilio, Rippling, Stripe Connect, Expo push, S3, AWS. Each
+account exists yet — an email provider, Rippling, Stripe Connect, Expo push, S3,
+AWS. Each
 degrades to a no-op rather than failing, and each is listed in `docs/ROADMAP.md`
 with what it would take to make it real.
 

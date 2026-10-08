@@ -30,7 +30,7 @@ from app.messaging.email_client import get_email_client
 logger = structlog.get_logger(__name__)
 
 
-async def _send(*, to: str, subject: str, body: str) -> bool:
+async def send_best_effort(*, to: str, subject: str, body: str) -> bool:
     """Send, and guarantee no exception reaches the caller.
 
     `EmailClient.send` is documented as never raising and the SMTP client honours
@@ -69,7 +69,7 @@ If anything changes in the meantime, just reply to this message.
 
 — LMX
 """
-    sent = await _send(to=to, subject="We've got your details", body=body)
+    sent = await send_best_effort(to=to, subject="We've got your details", body=body)
     if not sent:
         logger.warning("signup_received_email_not_sent", company=company_name)
     return sent
@@ -96,7 +96,7 @@ Any questions, just reply.
 
 — LMX
 """
-    sent = await _send(
+    sent = await send_best_effort(
         to=to, subject="You're approved — you can start sending deliveries", body=body
     )
     if not sent:
@@ -133,7 +133,7 @@ whoever asked can't see this message.
 
 — LMX
 """
-    sent = await _send(to=to, subject="Reset your LMX password", body=body)
+    sent = await send_best_effort(to=to, subject="Reset your LMX password", body=body)
     if not sent:
         logger.warning("password_reset_email_not_sent", to_hint=to[:3])
     return sent

@@ -135,9 +135,9 @@ def _fake_request(path: str, authorization: str | None = None) -> Request:
     )
 
 
-async def test_middleware_exempts_health_and_driver_client_webhook_paths():
+async def test_middleware_exempts_health_and_driver_and_client_paths():
     middleware = OpsUserAuthMiddleware(app=None)
-    for path in ["/health", "/driver/me", "/client/me", "/webhooks/twilio/inbound-sms", "/ops/auth/login"]:
+    for path in ["/health", "/driver/me", "/client/me", "/ops/auth/login"]:
         response = await middleware.dispatch(_fake_request(path), _ok)
         assert response.status_code == 200
 

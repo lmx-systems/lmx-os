@@ -7,8 +7,8 @@ Learning Loop's nightly job behind a single FastAPI app, per
 LMX_OS_Technical_Design_2.md.
 
 NOT in this phase (see docs/ARCHITECTURE.md for the full breakdown):
-  - OS Shell (orchestrator/client dashboards, driver mobile app, shop SMS)
-  - Twilio / ADP / Gusto wiring
+  - OS Shell (orchestrator/client dashboards, driver mobile app)
+  - ADP / Gusto wiring
 """
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -24,8 +24,6 @@ from app.api.public_routes import router as public_router
 from app.api.driver_routes import router as driver_router
 from app.api.ops_auth_routes import router as ops_auth_router
 from app.api.routes import router as ops_router
-from app.api.webhooks import router as webhooks_router
-from app.api.webhooks import warn_if_twilio_webhook_unauthenticated
 from app.client_auth.tokens import assert_client_jwt_secret_configured
 from app.config import assert_jwt_secrets_are_distinct, settings
 from app.db import engine
@@ -55,7 +53,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     assert_client_jwt_secret_configured()
     assert_ops_jwt_secret_configured()
     assert_jwt_secrets_are_distinct()
-    warn_if_twilio_webhook_unauthenticated()
     async with engine.connect() as conn:
         await conn.run_sync(lambda _: None)
     redis_client = get_client()
@@ -106,7 +103,7 @@ app.add_middleware(OpsUserAuthMiddleware)
 # rate limiting should shed load/abuse before spending an auth check on
 # it, and it applies regardless of which auth path a route uses (ops JWT,
 # driver JWT, client JWT), unlike OpsUserAuthMiddleware's own /driver,
-# /client, /webhooks exemptions.
+# /client exemptions.
 app.add_middleware(GeneralRateLimitMiddleware)
 
 # Every method the console and portal send. They run on other origins than the
@@ -128,7 +125,6 @@ app.include_router(ops_router)
 app.include_router(ops_auth_router)
 app.include_router(ingestion_router)
 app.include_router(driver_router)
-app.include_router(webhooks_router)
 app.include_router(client_router)
 app.include_router(admin_router)
 # The only unauthenticated write surface - see app/api/public_routes.py for what

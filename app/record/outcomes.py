@@ -230,7 +230,7 @@ async def record_delivery_outcomes(
 
     **In the caller's transaction, deliberately.** The file's pattern for payouts
     and notifications is "commit the delivery first, act after", because a failed
-    SMS must never roll back a completed delivery. The ledger is not that: it is
+    notification must never roll back a completed delivery. The ledger is not that: it is
     our own record of the delivery, and a delivered order with no outcome row is
     precisely the state this function exists to make impossible.
     """

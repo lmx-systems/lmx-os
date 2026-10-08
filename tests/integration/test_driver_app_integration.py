@@ -522,76 +522,6 @@ async def test_an_order_with_no_pickup_location_is_refused_not_routed_to_nowhere
     assert "no pickup location" in refused.value.detail
 
 
-async def _shop_messages(db_session, stop_id):
-    result = await db_session.execute(
-        select(Message).where(Message.channel == "shop", Message.stop_id == uuid.UUID(stop_id))
-        .order_by(Message.created_at)
-    )
-    return list(result.scalars().all())
-
-
-async def test_accepting_an_offer_sends_an_en_route_shop_sms(db_session, real_redis_client):
-    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
-    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
-
-    messages = await _shop_messages(db_session, pickup.stop_id)
-    assert len(messages) == 1
-    assert messages[0].direction == "outbound"
-    assert messages[0].counterparty_phone == "+15555550120"
-    assert "Thanks for LMX'ing it!" in messages[0].body
-    assert "Hot Shot" not in messages[0].body  # regular T2 order, not the premium tier
-
-
-async def test_completing_a_pickup_stop_sends_a_picked_up_shop_sms(db_session, real_redis_client):
-    hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
-    authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
-
-    await arrive_at_stop(pickup.stop_id, driver=authed, session=db_session)
-    await scan_parcels(pickup.stop_id, ScanParcelsBody(scanned_count=1), driver=authed, session=db_session)
-    await complete_stop(pickup.stop_id, CompleteStopBody(method="photo", photo_url=POD_PHOTO), driver=authed, session=db_session)
-
-    messages = await _shop_messages(db_session, pickup.stop_id)
-    # The "en route" sent at accept, plus "picked up" sent at completion -
-    # no second "en route" since this route only has the one pickup stop.
-    assert len(messages) == 2
-    assert "picked up" in messages[1].body.lower()
-
-
-async def test_hot_shot_pickup_gets_the_premium_shop_sms_copy(db_session, real_redis_client):
-    hub_id, client_id, shop_id, driver_id, regular_order = await _seed(db_session)
-    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
-
-    now = datetime.now(timezone.utc)
-    hot_order = Order(
-        hub_id=hub_id, client_id=client_id, shop_id=shop_id,
-        external_order_ref="ORD-DRIVER-APP-HOT-SMS", source_system="flat_file", raw_payload={},
-        sla_tier="HOT_SHOT", hold_deadline=now + timedelta(minutes=2), weight_units=1,
-        status=OrderStatus.assigned, requested_at=now,
-        delivery_address="9 Speedway Ln", delivery_lat=34.0540, delivery_lng=-118.2540,
-        delivery_contact_name="A. Cruz", delivery_contact_phone="+15555550177",
-    )
-    db_session.add(hot_order)
-    await db_session.commit()
-
-    offer = RouteOffer(
-        hub_id=hub_id, driver_id=driver_id, status="offered",
-        stop_payload=[
-            {"order_id": str(hot_order.id), "lat": 34.051, "lng": -118.251, "sla_tier": "HOT_SHOT", "shop_name": "Midtown Auto Parts"},
-        ],
-        offered_at=now, expires_at=now + timedelta(minutes=5),
-    )
-    db_session.add(offer)
-    await db_session.commit()
-
-    route = await accept_offer(str(offer.id), driver=authed, session=db_session)
-    pickup = next(s for s in route.stops if s.stop_type == "pickup")
-
-    messages = await _shop_messages(db_session, pickup.stop_id)
-    assert len(messages) == 1
-    assert "Hot Shot" in messages[0].body
-    assert "Thanks for LMX'ing it!" in messages[0].body
-
-
 async def test_flag_stop_sets_failed_and_order_delivery_failed(db_session, real_redis_client):
     hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
     authed, pickup, _dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
@@ -619,10 +549,10 @@ async def test_flag_stop_sets_failed_and_order_delivery_failed(db_session, real_
     assert refreshed_order.failure_reason == "SHOP_CLOSED"
 
 
-async def test_flagging_a_dropoff_notifies_the_shop(db_session, real_redis_client):
-    # R5: a failed *dropoff* is a delivery the shop's customer never got, so
-    # the originating shop gets a one-way SMS. (A flagged pickup doesn't -
-    # nothing was delivered to anyone's customer.)
+async def test_flagging_a_dropoff_tells_the_client_and_texts_nobody(db_session, real_redis_client):
+    # R5: a failed *dropoff* is a delivery the shop's customer never got. The
+    # client hears it from the order's own status - its webhook and the portal -
+    # because LMX sends no texts. It used to be an SMS to the shop.
     hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
     authed, _pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
 
@@ -633,11 +563,10 @@ async def test_flagging_a_dropoff_notifies_the_shop(db_session, real_redis_clien
         session=db_session,
     )
 
-    shop_msgs = await db_session.execute(
-        select(Message).where(Message.channel == "shop", Message.stop_id == uuid.UUID(dropoff.stop_id))
-    )
-    bodies = [m.body for m in shop_msgs.scalars().all()]
-    assert any("weren't able to complete the delivery" in b for b in bodies), bodies
+    order_id = order.id
+    db_session.expire_all()
+    assert (await db_session.get(Order, order_id)).status == OrderStatus.delivery_failed
+    assert (await db_session.execute(select(Message))).scalars().all() == []
 
 
 async def test_flag_stop_rejects_an_already_terminal_stop(db_session, real_redis_client):

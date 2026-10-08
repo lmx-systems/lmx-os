@@ -3,7 +3,7 @@ Secrets management (docs/ROADMAP.md S2) - every credential (DB password,
 JWT secrets, third-party API keys) lives in a plain .env file today. This
 is the extension point for a real vault, without committing this
 codebase to one before an operator has actually picked it - same
-"unconfigured credential -> stub" shape as Twilio/Rippling/Sentry
+"unconfigured credential -> stub" shape as Rippling/Sentry
 elsewhere in this app, just one level up (this is about how the app's
 *own* configuration gets loaded, not a third-party integration the app
 calls out to at request time).

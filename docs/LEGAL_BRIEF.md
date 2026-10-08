@@ -84,7 +84,7 @@ checks.
 | Data | Proposed | Enforced today? |
 |---|---|---|
 | Driver location trail | 90 days | **Yes** — `settings.location_ping_retention_days` |
-| SMS and call records | 2 years | **Yes** — `settings.communication_retention_days`. Metadata only; call content is never recorded |
+| Driver support messages | 2 years | **Yes** — `settings.communication_retention_days`. LMX sends no texts and places no calls since October 2026 |
 | Declined applications | 12 months | **Yes** — `settings.declined_application_retention_days`. Deletes the application and its inactive login |
 | Recipient tracking links | Dead ~24h after delivery | **Yes** — `settings.tracking_link_grace_hours` |
 | Delivery and billing records (incl. recipient name and address) | Account life + 7 years | No mechanism, and none needed — nothing deletes them |
@@ -114,9 +114,9 @@ these two questions one question, and the insurance conversation answers it firs
 Smaller, but each is a bracketed hole in a document nobody can publish around:
 
 - The sub-processor list and where they process. Section 6 of the privacy policy
-  describes them by role — hosting, SMS, mapping and routing, payroll, email, file
-  storage — because two of the six are not provisioned yet (Twilio and Rippling), so
-  naming them would be premature. It needs to name them before it goes live.
+  describes them by role — hosting, mapping and routing, payroll, email, file
+  storage — because payroll (Rippling) and email are not provisioned yet, so naming
+  them would be premature. There is no text-messaging provider: LMX sends no texts. It needs to name them before it goes live.
 - A privacy contact address and email.
 - Governing law and venue for the terms.
 - State-specific privacy rights and response deadlines.

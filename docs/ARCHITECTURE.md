@@ -36,7 +36,7 @@ review flagged, built solidly rather than everything built thinly.
 | 4 | Fleet State Manager | Built — Redis-backed driver state/location |
 | 5 | Dispatch Optimizer | Built — real Google Route Optimization call implemented, unverified against a live Google Cloud project |
 | 6 | Annotation and Learning Loop | Built — pattern detection + nightly-job service; since October 2026 the nightly job infers `hold_window_too_short` from pickup dwell (`app/learning_loop/not_ready.py`), the loop's only flag writer |
-| 7 | OS Shell (dashboards, driver app, shop SMS) | Built — orchestrator dashboard (`dashboard/`); driver app Phases 1–3 (core delivery loop, profile, earnings/messaging); client portal + shop SMS (Phase 8, see below). Driver app earnings/messaging are display-only/stub-backed until a payroll provider and a real Twilio account are provisioned (`docs/NEXT_STEPS.md` items 15/16); shop SMS runs through the same stub until then too |
+| 7 | OS Shell (dashboards, driver app; shop SMS until October 2026) | Built — orchestrator dashboard (`dashboard/`); driver app Phases 1–3 (core delivery loop, profile, earnings/messaging); client portal + shop SMS (Phase 8, see below). Driver app earnings/messaging are display-only/stub-backed until a payroll provider and a real Twilio account are provisioned (`docs/NEXT_STEPS.md` items 15/16); shop SMS runs through the same stub until then too |
 
 ## Data layer
 
@@ -233,6 +233,16 @@ number to compute from yet.
 
 ## Driver app (component 7, Phase 3 — earnings + messaging)
 
+> **Superseded, October 2026: LMX OS no longer depends on Twilio.** Drivers sign
+> in with a code from the ops console (`app/driver_auth/sign_in_codes.py`).
+> Support is a thread between the driver app and the console's support inbox. A
+> driver calls or texts a recipient from their own phone, with the number on the
+> stop. Shops hear about their orders through the client's webhooks and the
+> portal; the recipient's tracking link goes to the client to forward, and the
+> page shows the delivery PIN; a COD dispute is emailed to the client's admins.
+> The SMS and voice clients, the inbound webhook and the call log are gone
+> (migration `0072`). What follows is the record of how it was first built.
+
 Covers screens 1n/1o (earnings, trip history) and 1p/1q (masked SMS
 contact with the customer and with dispatch/support) — the last of the
 screens called out as not-yet-built in Phase 1/2. Three decisions were
@@ -302,6 +312,9 @@ What this closed:
   `SupportScreen` is reachable from Profile.
 
 ## Client portal, Hot Shot tier, tiered billing, shop SMS (component 7, Phase 8)
+
+> **Shop SMS removed, October 2026** with the rest of Twilio; see the note under
+> Phase 3 above. Everything else in this section stands.
 
 Built ahead of Phases 4–7 in `docs/ROADMAP.md`'s sequencing — Sourabh's
 call, since the first client wanted a full client portal, a premium
@@ -409,13 +422,9 @@ swapping in the real thing is a contained change:
   drift "the most common cause of Phase 1 slippage" — confirm against the
   actual client's webhook payload before go-live, and expect to adjust this
   one file.
-- **Twilio**: the client interface now exists (`app/messaging/sms_client.py`,
-  used by driver app Phase 3's messaging) and will send for real once
-  `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM_NUMBER` are set -
-  but no account is provisioned yet, so every send currently goes through
-  `StubSmsClient` (logs, no real SMS). Driver sign-in no longer depends on
-  it: drivers sign in with a code from the ops console. The Twilio webhooks likewise refuse every request outside development
-  until `TWILIO_AUTH_TOKEN` is set. See `docs/NEXT_STEPS.md` item 16.
+- **Twilio**: removed in October 2026. LMX OS sends no texts and places no
+  calls, so there is no Twilio account to provision; see the note under
+  Phase 3 above.
 - **ADP/Gusto**: not wired in at all - no client code exists for either,
   since which provider LMX will use hasn't been decided yet (`docs/
   NEXT_STEPS.md` item 15). Driver app Phase 3's earnings screen is

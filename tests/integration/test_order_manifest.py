@@ -486,10 +486,10 @@ class TestPerRowUrgency:
 class TestARecipientPhoneMakesATrackingLinkPossible:
     """The column the CSV path never had.
 
-    `send_tracking_link_to_recipient` mints a tracking token **only when the
-    order has a `delivery_contact_phone`** - deliberately, so that a credential
-    is created at the moment it is first disclosed rather than for every order
-    that ever existed. `LmxOrderIn` has carried the field all along.
+    The tracking link was texted, so a token was minted **only when the order
+    had a `delivery_contact_phone`**. Every order now gets one at pickup, but the
+    phone still matters: the driver calls ahead with it. `LmxOrderIn` has carried
+    the field all along.
 
     The manifest parser did not, and nothing mapped a phone column. So the CSV
     path - which is LMX Link's whole premise, *"how you send us orders"* - was

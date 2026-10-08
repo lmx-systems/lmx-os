@@ -193,7 +193,7 @@ async def record_dispute(
 ) -> CodCollection:
     """Record that the customer wouldn't pay, and what they said.
 
-    The escalation itself is sent by the caller after commit, so a failed SMS can't roll
+    The escalation itself is sent by the caller after commit, so a failed email can't roll
     back the dispute - the dispute is the record, the message is a courtesy on top of it.
     """
     if order.payer_type != COD_PAYER_TYPE:

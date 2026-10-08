@@ -550,114 +550,78 @@ async def test_the_endpoint_returns_the_position_when_the_rules_allow_it(
 # ---------------------------------------------------------------------------
 # Getting the link to the recipient
 # ---------------------------------------------------------------------------
+#
+# LMX sends no texts. The client sees the link in the portal and the order API
+# and forwards it to their customer; the page carries the delivery PIN.
 
 
-async def test_the_recipient_is_texted_a_working_link_on_pickup(
-    db_session, real_redis_client
-):
-    """Pickup is the trigger because it is the first moment the link is worth
-    opening - there is now a van with their parts on it. Sent earlier it shows
-    "scheduling" for an hour, which teaches people not to click it."""
-    from app.messaging.tracking_notifications import notify_recipient_picked_up
-    from app.models.message import Message
-    from sqlalchemy import select
+async def test_the_client_is_given_a_working_link(db_session, real_redis_client):
+    """The portal's order detail carries the link, and the link resolves."""
+    from app.api.client_routes import get_my_order
+    from app.client_auth.dependencies import AuthedClient
+    from app.tracking.service import ensure_tracking_token, tracking_url
 
-    hub_id, client_id, shop_id, driver_id = await _seed(db_session)
-    order = await _order(db_session, hub_id, client_id, shop_id)
-    order.tracking_token = None
+    hub_id, client_id, shop_id, _driver_id = await _seed(db_session)
+    order = await _order(db_session, hub_id, client_id, shop_id, phone=None)
+    token = await ensure_tracking_token(db_session, order)
     await db_session.commit()
 
-    await notify_recipient_picked_up(
-        db_session,
-        hub_id=hub_id,
-        driver_id=driver_id,
-        stop_id=None,
-        order=order,
+    detail = await get_my_order(
+        str(order.id),
+        client=AuthedClient(client_id=str(client_id), client_user_id=str(uuid.uuid4()), email="c@example.com", name="Counter", role="admin"),
+        session=db_session,
     )
-    await db_session.commit()
 
-    message = (
-        await db_session.execute(select(Message).where(Message.channel == "recipient"))
-    ).scalar_one()
-    assert order.tracking_token, "the token is minted at the moment it is disclosed"
-    assert order.tracking_token in message.body
-    assert message.counterparty_phone == order.delivery_contact_phone
-
-    # And the link in that text actually resolves.
-    view = await resolve_tracking(db_session, order.tracking_token)
+    assert detail.tracking_url == tracking_url(token)
+    view = await resolve_tracking(db_session, token)
     assert view.headline == "Collected"
 
 
-async def test_an_order_with_no_recipient_phone_is_not_an_error(
+async def test_before_pickup_the_client_has_no_link(db_session, real_redis_client):
+    from app.api.client_routes import get_my_order
+    from app.client_auth.dependencies import AuthedClient
+
+    hub_id, client_id, shop_id, _driver_id = await _seed(db_session)
+    order = await _order(db_session, hub_id, client_id, shop_id, status=OrderStatus.assigned)
+    order.tracking_token = None
+    await db_session.commit()
+
+    detail = await get_my_order(
+        str(order.id),
+        client=AuthedClient(client_id=str(client_id), client_user_id=str(uuid.uuid4()), email="c@example.com", name="Counter", role="admin"),
+        session=db_session,
+    )
+
+    assert detail.tracking_url is None
+
+
+async def test_the_page_shows_the_delivery_pin_until_the_delivery_is_made(
     db_session, real_redis_client
 ):
-    """The common case for source systems that never captured one. An order
-    without a recipient phone is a delivery the shop fields questions about
-    themselves, exactly as before this feature existed."""
-    from app.messaging.tracking_notifications import notify_recipient_picked_up
-    from app.models.message import Message
-    from sqlalchemy import func, select
-
-    hub_id, client_id, shop_id, driver_id = await _seed(db_session)
-    order = await _order(db_session, hub_id, client_id, shop_id, phone=None)
-
-    await notify_recipient_picked_up(
-        db_session, hub_id=hub_id, driver_id=driver_id, stop_id=None, order=order
-    )
-    await db_session.commit()
-
-    count = (
-        await db_session.execute(select(func.count()).select_from(Message))
-    ).scalar_one()
-    assert count == 0
-
-
-async def test_a_failing_sms_client_cannot_unwind_a_completed_pickup(
-    db_session, real_redis_client, monkeypatch
-):
-    """The exact assumption that bit app/messaging/client_emails.py once already:
-    SmsClient.send documents a None return for failure, but a client that RAISES
-    must not take down a delivery the driver has already made."""
-    from app.messaging import tracking_notifications
-    from app.messaging.tracking_notifications import notify_recipient_picked_up
-
+    """The code the recipient gives the driver. It used to be texted; now it is on
+    the page whose link the client forwards. Gone once delivered."""
     hub_id, client_id, shop_id, driver_id = await _seed(db_session)
     order = await _order(db_session, hub_id, client_id, shop_id)
-
-    class _Exploding:
-        async def send(self, to, body):
-            raise RuntimeError("twilio is down")
-
-    monkeypatch.setattr(tracking_notifications, "get_sms_client", lambda: _Exploding())
-
-    # Must not raise.
-    await notify_recipient_picked_up(
-        db_session, hub_id=hub_id, driver_id=driver_id, stop_id=None, order=order
+    await _route_with_stops(
+        db_session, hub_id, driver_id, stops=[(order, "pickup", "completed"), (order, "dropoff", "pending")]
     )
-    await db_session.commit()
-
-
-async def test_a_hot_shot_recipient_gets_the_tier_specific_copy(
-    db_session, real_redis_client
-):
-    from app.messaging.tracking_notifications import notify_recipient_picked_up
-    from app.models.message import Message
-    from sqlalchemy import select
-
-    hub_id, client_id, shop_id, driver_id = await _seed(db_session)
-    order = await _order(db_session, hub_id, client_id, shop_id)
-    order.sla_tier = "HOT_SHOT"
-    await db_session.commit()
-
-    await notify_recipient_picked_up(
-        db_session, hub_id=hub_id, driver_id=driver_id, stop_id=None, order=order
-    )
-    await db_session.commit()
-
-    message = (
-        await db_session.execute(select(Message).where(Message.channel == "recipient"))
+    dropoff = (
+        await db_session.execute(
+            select(Stop).join(StopOrder, StopOrder.stop_id == Stop.id)
+            .where(StopOrder.order_id == order.id, Stop.stop_type == "dropoff")
+        )
     ).scalar_one()
-    assert "Hot Shot" in message.body
+    dropoff.delivery_pin = "4821"
+    await db_session.commit()
+
+    assert (await resolve_tracking(db_session, order.tracking_token)).delivery_pin == "4821"
+
+    dropoff.status = "completed"
+    order.status = OrderStatus.delivered
+    order.delivered_at = datetime.now(timezone.utc)
+    await db_session.commit()
+
+    assert (await resolve_tracking(db_session, order.tracking_token)).delivery_pin is None
 
 
 class TestEveryStatusSaysSomethingTrue:

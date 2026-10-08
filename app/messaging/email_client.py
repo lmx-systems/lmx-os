@@ -2,7 +2,7 @@
 Transactional email (docs/ROADMAP.md; LMX Link's first real gap in production).
 
 Same "unconfigured third-party credential -> stub" shape as
-`app/messaging/sms_client.py` and `app/storage/photo_upload_client.py`:
+`app/messaging/push_client.py` and `app/storage/photo_upload_client.py`:
 `SmtpEmailClient` is real and used once SMTP settings exist, and until then
 `StubEmailClient` logs the message so every flow that sends mail is fully
 buildable and testable without an account.

@@ -706,6 +706,24 @@ export interface HubClosure {
  *  `device_id` is a client-generated per-install id held in the app's
  *  SecureStore, not an OS advertising id — so it identifies an installation,
  *  and a reinstall is a new device. */
+/** A driver's support thread in the inbox (GET /admin/hubs/{id}/support). */
+export interface SupportThread {
+  driver_id: string
+  driver_name: string
+  last_body: string
+  last_at: string
+  awaiting_reply: boolean
+}
+
+/** One message in a driver's support thread. */
+export interface SupportMessage {
+  message_id: string
+  from_driver: boolean
+  body: string
+  created_at: string
+  sent_by: string | null
+}
+
 /** One driver on a hub's roster, switched off or not (GET /admin/hubs/{id}/drivers). */
 export interface AdminDriver {
   driver_id: string
@@ -747,7 +765,7 @@ export interface CodDisputeReport {
   unescalated_count: number
   /** With no SMS provider configured every dispute is un-escalated, and that is
    *  one deployment-wide fact rather than N per-account failures. */
-  sms_configured: boolean
+  email_configured: boolean
   shops: ShopDisputeRow[]
 }
 

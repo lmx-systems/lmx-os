@@ -2,9 +2,9 @@
 Push-notification send client for new job offers (docs/ROADMAP.md A1,
 app/messaging/job_offer_notifications.py).
 
-Same "unconfigured -> stub/dev mode" shape as app/messaging/sms_client.py,
-with one real difference: Expo's push service needs no account or
-credential to call in the basic case (unlike Twilio), so there's nothing
+Same "unconfigured -> stub/dev mode" shape as app/messaging/email_client.py,
+with one real difference: Expo's push service needs no API credential to
+call in the basic case (unlike SMTP), so there's nothing
 to gate ExpoPushClient's selection on except a deliberate on/off switch
 (EXPO_PUSH_ENABLED).
 

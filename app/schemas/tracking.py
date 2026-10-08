@@ -73,6 +73,8 @@ class TrackingView(BaseModel):
     # A signature is proof too, with the same history: written since the app got
     # a pad, rendered by nothing. A delivery signed for was proved to nobody.
     pod_signature_url: str | None = None
+    # The code to give the driver, until the delivery is made (docs/ROADMAP.md A4).
+    delivery_pin: str | None = None
 
 
 class SubmitRatingBody(BaseModel):

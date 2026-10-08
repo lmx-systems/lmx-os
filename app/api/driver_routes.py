@@ -22,7 +22,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.config import settings
 from app.db import get_db
 from app.driver_auth.dependencies import AuthedDriver, get_current_driver
 from app.client_ip import client_ip
@@ -40,15 +39,7 @@ import app.payroll.hours as payroll_hours
 from app.payroll import get_payout_provider
 from app.payroll.gig_pricing import estimate_delivery_pay_cents
 from app.redis_client import get_client
-from app.messaging.delivery_pin import MAX_PIN_VERIFICATION_ATTEMPTS, generate_delivery_pin, send_delivery_pin_sms
-from app.messaging.shop_notifications import (
-    notify_shop_delivery_failed,
-    notify_shop_en_route,
-    notify_shop_picked_up,
-)
-from app.messaging.sms_client import get_sms_client
-from app.messaging.voice_client import get_voice_client
-from app.models.call import Call
+from app.messaging.delivery_pin import MAX_PIN_VERIFICATION_ATTEMPTS, generate_delivery_pin
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.gig_platform import service as gig_store
@@ -71,8 +62,8 @@ from app.models.hub import Hub
 from app.models.hub_geofence_event import HubGeofenceEvent
 from app.models.stop_geofence_event import StopGeofenceEvent
 from app.optimizer.event_trigger import dispatch_event_bus
-from app.messaging.cod_notifications import ESCALATION_SENT, notify_shop_of_cod_dispute
-from app.messaging.tracking_notifications import notify_recipient_picked_up
+from app.messaging.cod_notifications import ESCALATION_SENT, notify_client_of_cod_dispute
+from app.tracking.service import ensure_tracking_token
 from app.orders.requeue import requeue_orders_from_offer
 from app.orders.status_service import advance_orders
 from app.record.outcomes import record_delivery_outcomes
@@ -82,7 +73,6 @@ from app.schemas.driver_app import (
     HubGeofenceEventsBody,
     StopGeofenceEventsBody,
     StopGeofenceEventsResult,
-    CallView,
     CodDisputeBody,
     CodObligationView,
     CollectCodBody,
@@ -1129,17 +1119,9 @@ async def accept_offer(
     plan = _planned_visits(offer, set(orders_by_id))
 
     if plan is None:
-        (
-            first_pickup_stop,
-            first_pickup_is_hot_shot,
-            dropoffs_needing_pin_sms,
-        ) = await _build_stops_unplanned(session, route, orders_by_id)
+        await _build_stops_unplanned(session, route, orders_by_id)
     else:
-        (
-            first_pickup_stop,
-            first_pickup_is_hot_shot,
-            dropoffs_needing_pin_sms,
-        ) = await _build_stops_from_plan(session, route, orders_by_id, plan)
+        await _build_stops_from_plan(session, route, orders_by_id, plan)
 
     offer.status = "accepted"
     offer.responded_at = now
@@ -1178,33 +1160,6 @@ async def accept_offer(
     await refresh_route_etas(session, route.id)
 
     await session.commit()
-
-    # Real PIN issuance (docs/ROADMAP.md A4): text each dropoff's PIN to
-    # its customer now that the route above is durably committed.
-    # Best-effort, same reasoning as the shop SMS immediately below.
-    for dropoff, order in dropoffs_needing_pin_sms:
-        await send_delivery_pin_sms(
-            session, hub_id=offer.hub_id, driver_id=offer.driver_id, stop=dropoff, order=order
-        )
-    if dropoffs_needing_pin_sms:
-        await session.commit()
-
-    # Phase 8 shop SMS: the driver is headed to their first pickup the
-    # moment this offer is accepted - notify that shop now. Best-effort:
-    # a shop with no phone on file (or a send failure) shouldn't block the
-    # accept flow, which has already committed above.
-    if first_pickup_stop is not None and first_pickup_stop.shop_id is not None:
-        shop = await session.get(Shop, first_pickup_stop.shop_id)
-        if shop is not None:
-            await notify_shop_en_route(
-                session,
-                hub_id=offer.hub_id,
-                driver_id=offer.driver_id,
-                stop_id=first_pickup_stop.id,
-                shop=shop,
-                is_hot_shot=first_pickup_is_hot_shot,
-            )
-            await session.commit()
 
     return await _load_route_view(session, route.id)
 
@@ -1401,44 +1356,6 @@ async def _stop_view_after_reload(session: AsyncSession, stop: Stop) -> StopView
     return next(s for s in view.stops if s.stop_id == str(stop.id))
 
 
-async def _pickup_stop_is_hot_shot(session: AsyncSession, stop_id: uuid.UUID) -> bool:
-    """
-    A HOT_SHOT pickup stop always carries exactly one order (accept_offer
-    never lets it commingle - see that function's docstring), so checking
-    that stop's order's tier is enough; a regular pickup stop's order(s)
-    are never HOT_SHOT by the same construction.
-    """
-    order_id_result = await session.execute(
-        select(StopOrder.order_id).where(StopOrder.stop_id == stop_id).limit(1)
-    )
-    order_id = order_id_result.scalar_one_or_none()
-    if order_id is None:
-        return False
-    order = await session.get(Order, order_id)
-    return order is not None and order.sla_tier == SLATier.HOT_SHOT
-
-
-async def _notify_shop_for_pickup_stop(
-    session: AsyncSession, *, hub_id: str, driver_id: str, stop: Stop, event: str
-) -> None:
-    """event is "picked_up" or "en_route" - see app/messaging/shop_notifications.py."""
-    if stop.shop_id is None:
-        return
-    shop = await session.get(Shop, stop.shop_id)
-    if shop is None:
-        return
-    is_hot_shot = await _pickup_stop_is_hot_shot(session, stop.id)
-    notify = notify_shop_picked_up if event == "picked_up" else notify_shop_en_route
-    await notify(
-        session,
-        hub_id=uuid.UUID(hub_id),
-        driver_id=uuid.UUID(driver_id),
-        stop_id=stop.id,
-        shop=shop,
-        is_hot_shot=is_hot_shot,
-    )
-
-
 # Stop.status's terminal states - once here, a stop can't transition again.
 # Guards below exist so a stale/retried/out-of-order client call can't skip a
 # step (complete a dropoff whose pickup was never scanned) or re-run a
@@ -1507,25 +1424,6 @@ async def _stop_proof_view(
         photo_subjects=resolved.photo_subjects,
         signature_required=resolved.signature_required,
     )
-
-
-async def _orders_for_recipient_notice(
-    session: AsyncSession, order_ids: list[uuid.UUID]
-) -> list[Order]:
-    """The orders on a just-completed pickup that have a recipient to text.
-
-    Filtered here rather than inside the notifier so a commingled pickup carrying
-    five orders doesn't do five round-trips to discover four of them have no phone
-    number on file (docs/ROADMAP.md F3).
-    """
-    if not order_ids:
-        return []
-    result = await session.execute(
-        select(Order).where(
-            Order.id.in_(order_ids), Order.delivery_contact_phone.is_not(None)
-        )
-    )
-    return list(result.scalars().all())
 
 
 def _assert_stop_not_terminal(stop: Stop, action: str) -> None:
@@ -2067,16 +1965,13 @@ async def raise_cod_dispute(
 
     await session.commit()
 
-    # After the commit, so a dead SMS gateway cannot roll back the dispute: the record is
-    # the thing that must survive, the message is a courtesy on top of it.
+    # After the commit, so a dead mail server cannot roll back the dispute: the record is
+    # the thing that must survive, the email is a courtesy on top of it.
     for dispute, order in disputes:
-        shop = await session.get(Shop, order.shop_id) if order.shop_id else None
-        outcome = await notify_shop_of_cod_dispute(
+        outcome = await notify_client_of_cod_dispute(
             session,
-            hub_id=uuid.UUID(driver.hub_id),
-            driver_id=uuid.UUID(driver.driver_id),
             stop_id=stop.id,
-            shop=shop,
+            client_id=order.client_id,
             delivery_address=order.delivery_address,
             amount_cents=dispute.amount_due_cents,
             reference=order.source_order_ref or order.external_order_ref,
@@ -2503,7 +2398,7 @@ async def complete_stop(
         # back afterwards.
         #
         # Inside the transaction, unlike the payout and the notifications below.
-        # Those are outside because a failed SMS must never roll back a
+        # Those are outside because a failed notification must never roll back a
         # completed delivery; this is our own record of that delivery, and a
         # delivered order with no outcome is the state it exists to prevent.
         if stop.stop_type == "dropoff" and moved:
@@ -2529,12 +2424,23 @@ async def complete_stop(
     if not route_finished:
         await refresh_route_etas(session, stop.route_id)
 
+    # The tracking link exists from the moment the parts are on a van
+    # (docs/ROADMAP.md F3). Every order gets one, and the client sees it in the
+    # portal and the order API and forwards it to their customer; the page also
+    # shows the delivery PIN. Minted inside this transaction, so a failure in the
+    # best-effort work below can't leave a collected order without one - a retry
+    # returns early on the completed stop and would never mint it.
+    if stop.stop_type == "pickup" and order_ids:
+        picked_up = await session.execute(select(Order).where(Order.id.in_(order_ids)))
+        for order_row in picked_up.scalars().all():
+            await ensure_tracking_token(session, order_row)
+
     await session.commit()
 
     # Real per-delivery instant payout for gig-classified drivers
     # (docs/ROADMAP.md A11) - best-effort, same "commit the delivery
-    # first, pay/notify after" pattern as the shop-SMS/PIN-SMS sends
-    # elsewhere in this file: a payout failure must never roll back or
+    # first, pay/notify after" pattern as the other best-effort sends
+    # in this file: a payout failure must never roll back or
     # block a delivery the driver already completed.
     if stop.stop_type == "dropoff" and order_ids:
         driver_row = await _get_driver_row(session, driver)
@@ -2559,48 +2465,6 @@ async def complete_stop(
                 else:
                     state.load_units = max(0.0, state.load_units - total_weight)
                 await fleet_state_manager.upsert_driver_state(state)
-
-    # Phase 8 shop SMS - completing a pickup stop means (1) that shop just
-    # had their order picked up, and (2) whichever pickup stop is next in
-    # sequence on this route (if any, not yet completed) just became the
-    # driver's next stop, i.e. "en route" to that shop now. Best-effort:
-    # runs after the stop-completion commit above, so a shop with no phone
-    # on file or a send failure never blocks completing the stop itself.
-    if stop.stop_type == "pickup":
-        await _notify_shop_for_pickup_stop(
-            session, hub_id=driver.hub_id, driver_id=driver.driver_id, stop=stop, event="picked_up"
-        )
-        next_pickup_result = await session.execute(
-            select(Stop)
-            .where(
-                Stop.route_id == stop.route_id,
-                Stop.stop_type == "pickup",
-                Stop.sequence > stop.sequence,
-                Stop.status.notin_(_TERMINAL_STOP_STATUSES),
-            )
-            .order_by(Stop.sequence)
-            .limit(1)
-        )
-        next_pickup = next_pickup_result.scalar_one_or_none()
-        if next_pickup is not None:
-            await _notify_shop_for_pickup_stop(
-                session, hub_id=driver.hub_id, driver_id=driver.driver_id, stop=next_pickup, event="en_route"
-            )
-
-        # Text each recipient their live tracking link (docs/ROADMAP.md F3).
-        # Pickup is the trigger because it is the first moment the link is worth
-        # opening - there is now a van with their parts on it. Same best-effort
-        # placement as the shop SMS above: after the completion commit, so a
-        # failed send can never unwind a delivery the driver already made.
-        for order_row in await _orders_for_recipient_notice(session, order_ids):
-            await notify_recipient_picked_up(
-                session,
-                hub_id=uuid.UUID(driver.hub_id),
-                driver_id=uuid.UUID(driver.driver_id),
-                stop_id=stop.id,
-                order=order_row,
-            )
-        await session.commit()
 
     if not route_finished:
         # Completing a stop promotes the next one, and that is the moment the driver
@@ -2709,24 +2573,6 @@ async def flag_stop_issue(
                 state.load_units = max(0.0, state.load_units - total_weight)
                 await fleet_state_manager.upsert_driver_state(state)
 
-    # Tell each affected shop their customer's delivery failed (R5) - a
-    # failed *dropoff*, unlike a pickup, is a delivery the shop's customer
-    # never received. One SMS per distinct shop. Shop-facing and best-effort;
-    # ops still gets the event-bus signal below regardless.
-    if stop.stop_type == "dropoff" and order_ids:
-        shop_result = await session.execute(
-            select(Shop).join(Order, Order.shop_id == Shop.id).where(Order.id.in_(order_ids))
-        )
-        for shop in {s.id: s for s in shop_result.scalars().all()}.values():
-            await notify_shop_delivery_failed(
-                session,
-                hub_id=uuid.UUID(driver.hub_id),
-                driver_id=uuid.UUID(driver.driver_id),
-                stop_id=stop.id,
-                shop=shop,
-            )
-        await session.commit()
-
     # Ops notification reuses the existing in-process event bus, same
     # pattern as complete_stop's "stop_completed" - no new SSE/pubsub here,
     # that's a separate mechanism (see the live route-change push feature).
@@ -2736,10 +2582,10 @@ async def flag_stop_issue(
 
 
 # ---------------------------------------------------------------------------
-# Messaging (screens 1p/1q) - masked SMS via app/messaging/sms_client.py.
-# "Masked" means the customer/support side only ever sees LMX's shared
-# Twilio number, and the driver app never receives the real counterparty
-# phone number back (see MessageView, which omits it entirely).
+# Support messaging (screens 1p/1q) - a thread between the driver app and
+# the ops console's support inbox (app/api/admin_routes.py). No phone network
+# is involved. A driver calls or texts a recipient from their own phone, with
+# the number on the stop (StopView.contact_phone).
 # ---------------------------------------------------------------------------
 
 
@@ -2754,67 +2600,16 @@ def _message_view(message: Message) -> MessageView:
     )
 
 
-@router.post("/stops/{stop_id}/message-customer", response_model=MessageView)
-async def message_customer(
-    stop_id: str,
-    body: SendMessageBody,
-    driver: AuthedDriver = Depends(get_current_driver),
-    session: AsyncSession = Depends(get_db),
-) -> MessageView:
-    stop = await _get_owned_stop(session, stop_id, driver)
-    if stop.stop_type != "dropoff":
-        raise HTTPException(status_code=409, detail="Only a dropoff stop has a customer to message")
-
-    order_id_result = await session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == stop.id))
-    order_id = order_id_result.scalar_one_or_none()
-    order = await session.get(Order, order_id) if order_id else None
-    if order is None or not order.delivery_contact_phone:
-        raise HTTPException(status_code=409, detail="No customer contact number on file for this stop")
-
-    twilio_sid = await get_sms_client().send(order.delivery_contact_phone, body.body)
-    message = Message(
-        hub_id=uuid.UUID(driver.hub_id),
-        driver_id=uuid.UUID(driver.driver_id),
-        stop_id=stop.id,
-        channel="customer",
-        direction="outbound",
-        body=body.body,
-        counterparty_phone=order.delivery_contact_phone,
-        twilio_sid=twilio_sid,
-    )
-    session.add(message)
-    await session.commit()
-    return _message_view(message)
-
-
-@router.get("/stops/{stop_id}/messages", response_model=list[MessageView])
-async def list_customer_messages(
-    stop_id: str, driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
-) -> list[MessageView]:
-    stop = await _get_owned_stop(session, stop_id, driver)
-    result = await session.execute(
-        select(Message)
-        .where(Message.stop_id == stop.id, Message.channel == "customer")
-        .order_by(Message.created_at)
-    )
-    return [_message_view(m) for m in result.scalars().all()]
-
-
 @router.post("/me/messages", response_model=MessageView)
 async def message_support(
     body: SendMessageBody,
     driver: AuthedDriver = Depends(get_current_driver),
     session: AsyncSession = Depends(get_db),
 ) -> MessageView:
-    # Unlike message_customer, there's no hard failure if
-    # SUPPORT_PHONE_NUMBER isn't configured (app/config.py) - the message
-    # is still recorded so it's not silently lost, just not actually sent
-    # anywhere yet. Same "unconfigured -> store, don't pretend" pattern the
-    # rest of this pass uses.
-    twilio_sid = None
-    if settings.support_phone_number:
-        twilio_sid = await get_sms_client().send(settings.support_phone_number, body.body)
-
+    """A message to the hub's dispatchers, read and answered in the ops
+    console's support inbox (GET /admin/hubs/{hub_id}/support). It used to be
+    texted to a support phone number, which needed Twilio and left the reply
+    with nowhere to land but an inbound webhook."""
     message = Message(
         hub_id=uuid.UUID(driver.hub_id),
         driver_id=uuid.UUID(driver.driver_id),
@@ -2822,8 +2617,6 @@ async def message_support(
         channel="support",
         direction="outbound",
         body=body.body,
-        counterparty_phone=settings.support_phone_number,
-        twilio_sid=twilio_sid,
     )
     session.add(message)
     await session.commit()
@@ -2840,69 +2633,6 @@ async def list_support_messages(
         .order_by(Message.created_at)
     )
     return [_message_view(m) for m in result.scalars().all()]
-
-
-# ---------------------------------------------------------------------------
-# Masked voice calling (docs/ROADMAP.md A7) - app/messaging/voice_client.py.
-# "Masked" here means two real phone calls bridged by Twilio, not in-app
-# audio: this endpoint places a call to the *driver's* own phone, and once
-# they answer, app/api/webhooks.py's voice_connect tells Twilio to <Dial>
-# the customer with LMX's shared number as caller ID. The customer's real
-# number never reaches the driver app (see CallView, which omits it).
-# ---------------------------------------------------------------------------
-
-
-def _call_view(call: Call) -> CallView:
-    return CallView(
-        call_id=str(call.id),
-        status=call.status,
-        created_at=call.created_at,
-        duration_seconds=call.duration_seconds,
-    )
-
-
-@router.post("/stops/{stop_id}/call", response_model=CallView)
-async def call_customer(
-    stop_id: str,
-    driver: AuthedDriver = Depends(get_current_driver),
-    session: AsyncSession = Depends(get_db),
-) -> CallView:
-    stop = await _get_owned_stop(session, stop_id, driver)
-    if stop.stop_type != "dropoff":
-        raise HTTPException(status_code=409, detail="Only a dropoff stop has a customer to call")
-
-    order_id_result = await session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == stop.id))
-    order_id = order_id_result.scalar_one_or_none()
-    order = await session.get(Order, order_id) if order_id else None
-    if order is None or not order.delivery_contact_phone:
-        raise HTTPException(status_code=409, detail="No customer contact number on file for this stop")
-
-    driver_row = await _get_driver_row(session, driver)
-
-    call = Call(
-        hub_id=uuid.UUID(driver.hub_id),
-        driver_id=uuid.UUID(driver.driver_id),
-        stop_id=stop.id,
-        counterparty_phone=order.delivery_contact_phone,
-        status="initiated",
-    )
-    session.add(call)
-    await session.flush()
-
-    # Twilio needs a publicly-reachable URL to call back into for both the
-    # connect-TwiML and the status callback - same setting webhooks.py's
-    # inbound-signature check uses for the reverse direction (see
-    # settings.twilio_webhook_base_url's docstring). Unset (today's
-    # un-proxied docker-compose dev stack) still lets the stub client run
-    # end-to-end since it never actually dials out.
-    base_url = (settings.twilio_webhook_base_url or "").rstrip("/")
-    call.twilio_call_sid = await get_voice_client().place_masked_call(
-        driver_phone=driver_row.phone,
-        connect_url=f"{base_url}/webhooks/twilio/voice-connect/{call.id}",
-        status_callback_url=f"{base_url}/webhooks/twilio/voice-status/{call.id}",
-    )
-    await session.commit()
-    return _call_view(call)
 
 
 # ---------------------------------------------------------------------------
@@ -3148,26 +2878,23 @@ def _hot_shot_first(
     return hot + rest
 
 
-async def _new_dropoff(
-    session: AsyncSession, route: Route, sequence: int, order: Order
-) -> tuple[Stop, bool]:
-    """A dropoff stop, and whether its PIN needs texting.
+async def _new_dropoff(session: AsyncSession, route: Route, sequence: int, order: Order) -> Stop:
+    """A dropoff stop, with its delivery PIN (docs/ROADMAP.md A4).
 
-    Real PIN issuance (docs/ROADMAP.md A4) - only when there is somewhere real to send
-    it. No contact phone on file means method="pin" simply will not be an option
-    complete_stop accepts for this stop, same as everywhere else in this app that treats
-    "nothing configured" as "can't do this," not "silently succeed."
+    Every dropoff gets one. The PIN used to be texted to the recipient, so only an
+    order with a phone number got one; it is now shown on the tracking page
+    (`app/tracking/service.py`), which the client forwards to their customer. A
+    recipient who never got the link simply has no PIN to give, and the driver
+    proves the delivery with a photo or signature instead.
     """
     dropoff = Stop(
         route_id=route.id, shop_id=None, sequence=sequence, stop_type="dropoff", parcel_count=1
     )
-    needs_pin = bool(order.delivery_contact_phone)
-    if needs_pin:
-        dropoff.delivery_pin = generate_delivery_pin()
+    dropoff.delivery_pin = generate_delivery_pin()
     session.add(dropoff)
     await session.flush()
     session.add(StopOrder(stop_id=dropoff.id, order_id=order.id))
-    return dropoff, needs_pin
+    return dropoff
 
 
 async def _build_stops_from_plan(
@@ -3175,7 +2902,7 @@ async def _build_stops_from_plan(
     route: Route,
     orders_by_id: dict[uuid.UUID, Order],
     plan: list[tuple[uuid.UUID, str]],
-) -> tuple[Stop | None, bool, list[tuple[Stop, Order]]]:
+) -> None:
     """Stops in the order the optimizer planned to drive them.
 
     Commingling survives interleaving: **consecutive** pickup legs at the same shop
@@ -3192,9 +2919,6 @@ async def _build_stops_from_plan(
     ordered = _hot_shot_first(plan, hot_shot_ids)
 
     sequence = 0
-    first_pickup_stop: Stop | None = None
-    first_pickup_is_hot_shot = False
-    dropoffs_needing_pin_sms: list[tuple[Stop, Order]] = []
 
     # The pickup stop currently open for commingling, and the shop it is at. Reset by any
     # intervening dropoff, because a stop the driver has already left cannot gain parcels.
@@ -3207,9 +2931,7 @@ async def _build_stops_from_plan(
             continue
 
         if kind == "delivery":
-            dropoff, needs_pin = await _new_dropoff(session, route, sequence, order)
-            if needs_pin:
-                dropoffs_needing_pin_sms.append((dropoff, order))
+            await _new_dropoff(session, route, sequence, order)
             sequence += 1
             open_pickup = None
             open_pickup_shop = None
@@ -3240,14 +2962,11 @@ async def _build_stops_from_plan(
         session.add(pickup)
         await session.flush()
         session.add(StopOrder(stop_id=pickup.id, order_id=order_id))
-        if first_pickup_stop is None:
-            first_pickup_stop, first_pickup_is_hot_shot = pickup, is_hot_shot
         sequence += 1
         # A hot shot is never open for commingling.
         open_pickup = None if is_hot_shot else pickup
         open_pickup_shop = None if is_hot_shot else order.shop_id
 
-    return first_pickup_stop, first_pickup_is_hot_shot, dropoffs_needing_pin_sms
 
 
 async def _orders_on_stop(session: AsyncSession, stop: Stop) -> list[uuid.UUID]:
@@ -3259,7 +2978,7 @@ async def _orders_on_stop(session: AsyncSession, stop: Stop) -> list[uuid.UUID]:
 
 async def _build_stops_unplanned(
     session: AsyncSession, route: Route, orders_by_id: dict[uuid.UUID, Order]
-) -> tuple[Stop | None, bool, list[tuple[Stop, Order]]]:
+) -> None:
     """Every pickup, then every dropoff, HOT_SHOT first within each block.
 
     The construction used before offers carried a plan (migration 0042). Reached only by
@@ -3293,12 +3012,6 @@ async def _build_stops_unplanned(
         else:
             orders_by_shop.setdefault(order.shop_id, []).append(order.id)
 
-    # Tracks whichever pickup stop lands at sequence 0 - that's the driver's
-    # first stop the moment this offer is accepted, so it gets an
-    # immediate "en route" shop SMS below (Phase 8 shop notifications).
-    first_pickup_stop: Stop | None = None
-    first_pickup_is_hot_shot = False
-
     # HOT_SHOT pickups go first - the premium tier a client is paying extra
     # for shouldn't sit behind a driver's other pickups on the same route.
     for oid in hot_shot_order_ids:
@@ -3316,8 +3029,6 @@ async def _build_stops_unplanned(
         session.add(pickup)
         await session.flush()
         session.add(StopOrder(stop_id=pickup.id, order_id=oid))
-        if first_pickup_stop is None:
-            first_pickup_stop, first_pickup_is_hot_shot = pickup, True
         sequence += 1
 
     for shop_id, shop_order_ids in orders_by_shop.items():
@@ -3334,8 +3045,6 @@ async def _build_stops_unplanned(
         await session.flush()
         for oid in shop_order_ids:
             session.add(StopOrder(stop_id=pickup.id, order_id=oid))
-        if first_pickup_stop is None:
-            first_pickup_stop, first_pickup_is_hot_shot = pickup, False
         sequence += 1
 
     # One dropoff stop per order, in the sequence the optimizer assigned
@@ -3349,26 +3058,16 @@ async def _build_stops_unplanned(
     sorted_order_ids = sorted(
         orders_by_id, key=lambda oid: 0 if oid in hot_shot_id_set else 1
     )
-    # Collected here, sent after the main commit below - same "generate
-    # now, notify best-effort afterward" split as the shop SMS further
-    # down, so a Twilio blip can never roll back a route the driver
-    # already accepted.
-    dropoffs_needing_pin_sms: list[tuple[Stop, Order]] = []
+    # Every dropoff gets its PIN here, inside the accept transaction; the
+    # recipient reads it on the tracking page (app/messaging/delivery_pin.py).
 
     for order_id in sorted_order_ids:
         order = orders_by_id[order_id]
         dropoff = Stop(route_id=route.id, shop_id=None, sequence=sequence, stop_type="dropoff", parcel_count=1)
-        # Real PIN issuance (docs/ROADMAP.md A4) - only when there's
-        # somewhere real to send it. No contact phone on file means
-        # method="pin" simply won't be an option complete_stop accepts
-        # for this stop, same as everywhere else in this app that treats
-        # "nothing configured" as "can't do this," not "silently succeed."
-        if order.delivery_contact_phone:
-            dropoff.delivery_pin = generate_delivery_pin()
-            dropoffs_needing_pin_sms.append((dropoff, order))
+        # Every dropoff gets a PIN; see _new_dropoff.
+        dropoff.delivery_pin = generate_delivery_pin()
         session.add(dropoff)
         await session.flush()
         session.add(StopOrder(stop_id=dropoff.id, order_id=order.id))
         sequence += 1
 
-    return first_pickup_stop, first_pickup_is_hot_shot, dropoffs_needing_pin_sms

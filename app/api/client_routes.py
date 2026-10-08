@@ -12,8 +12,8 @@ from __future__ import annotations
 import secrets
 import uuid
 from dataclasses import dataclass
-from typing import Annotated, Literal
 from datetime import datetime, timezone
+from typing import Annotated, Literal
 
 import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
@@ -22,26 +22,82 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.delivery.eta import order_arrival_estimate, straight_line_delivery_estimate
 from app.batch_queue.store import HoldQueueStore
 from app.billing.invoice_pdf import render_invoice_pdf
 from app.billing.service import invoice_detail_view, invoice_summary_view
+from app.client_auth.dependencies import AuthedClient, get_current_client, require_client_admin
+from app.client_auth.login_rate_limit import LoginRateLimiter, LoginRateLimitExceeded
+from app.client_auth.passwords import hash_password, verify_password
+from app.client_auth.tokens import issue_token
+from app.db import get_db
+from app.delivery.eta import order_arrival_estimate, straight_line_delivery_estimate
 from app.geocoding import get_geocoder
+from app.ingestion.manifest import ManifestUnreadable, parse_manifest
 from app.ingestion.service import (
     DestinationUnresolvableError,
     OriginUnresolvableError,
     ShopNotFoundError,
     ingest_lmx_order,
 )
-from app.client_auth.dependencies import AuthedClient, get_current_client, require_client_admin
-from app.ingestion.manifest import ManifestUnreadable, parse_manifest
-from app.optimizer.event_trigger import dispatch_event_bus
+from app.legal.documents import (
+    DOCUMENTS,
+    acceptance_is_current,
+    current_terms_version,
+    documents_are_published,
+)
+from app.models.client import Client
 from app.models.client_api_key import ClientApiKey, mint_api_key
+from app.models.client_sla_term import ClientSlaTerm
+from app.models.client_user import CLIENT_ADMIN_ROLE, CLIENT_USER_ROLES, ClientUser
 from app.models.client_webhook import (
     ClientWebhookEndpoint,
     WebhookDelivery,
     new_webhook_secret,
 )
+from app.models.delivery_rating import RECIPIENT, DeliveryRating
+from app.models.invoice import Invoice
+from app.models.order import Order, OrderStatus
+from app.models.return_item import ReturnItem
+from app.models.shop import Shop
+from app.models.stop import Stop, StopOrder
+from app.optimizer.event_trigger import dispatch_event_bus
+from app.orders.cancellation import OrderNotCancellable, cancel_before_collection
+from app.reporting.csv_export import stream_client_orders_csv
+from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_client_performance
+from app.returns.service import AWAITING_STATUSES, return_views
+from app.schemas.billing import InvoiceDetailView, InvoiceSummaryView
+from app.schemas.client_auth import (
+    ClientAuthToken,
+    ClientLoginBody,
+    ClientOrderDetailView,
+    ClientOrderPage,
+    ClientOrderSummaryView,
+    ClientPerformanceView,
+    ClientProfileView,
+    ClientShopView,
+    ClientUserCreateBody,
+    ClientUserUpdateBody,
+    ClientUserView,
+    DeliveryProofView,
+    DeliveryRatingView,
+    PerformanceRateView,
+    TermsAcceptanceView,
+)
+from app.schemas.client_order import (
+    MAX_BATCH_ROWS,
+    ClientOrderBatchBody,
+    ClientOrderBatchResult,
+    ClientOrderBatchRow,
+    ClientOrderBatchRowResult,
+    ClientOrderBody,
+    ClientOrderResult,
+    DeadlineChoice,
+    ManifestRowResult,
+    ManifestUploadResult,
+    deadline_payload_flags,
+)
+from app.schemas.lmx_order import LineItem, LMXOrder
+from app.schemas.returns import ReturnFlagBody, ReturnItemView
 from app.schemas.webhooks import (
     ApiKeyBody,
     ApiKeyCreated,
@@ -51,65 +107,10 @@ from app.schemas.webhooks import (
     WebhookEndpointCreated,
     WebhookEndpointView,
 )
-from app.webhooks.url_safety import UnsafeWebhookUrl, validate_webhook_url
-from app.client_auth.login_rate_limit import LoginRateLimitExceeded, LoginRateLimiter
-from app.client_auth.passwords import hash_password, verify_password
-from app.client_auth.tokens import issue_token
-from app.db import get_db
-from app.models.client import Client
-from app.models.client_user import CLIENT_ADMIN_ROLE, CLIENT_USER_ROLES, ClientUser
-from app.models.invoice import Invoice
-from app.reporting.csv_export import stream_client_orders_csv
-from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_client_performance
-from app.legal.documents import (
-    DOCUMENTS,
-    acceptance_is_current,
-    current_terms_version,
-    documents_are_published,
-)
-from app.models.client_sla_term import ClientSlaTerm
-from app.models.delivery_rating import RECIPIENT, DeliveryRating
-from app.models.order import Order, OrderStatus
-from app.orders.cancellation import OrderNotCancellable, cancel_before_collection
-from app.models.stop import Stop, StopOrder
-from app.storage.photo_upload_client import readable_url
 from app.sla.commitment import delivery_commitment, terms_for_client
-from app.models.return_item import ReturnItem
-from app.models.shop import Shop
-from app.returns.service import AWAITING_STATUSES, return_views
-from app.schemas.billing import InvoiceDetailView, InvoiceSummaryView
-from app.schemas.client_order import (
-    ClientOrderBatchBody,
-    ClientOrderBatchResult,
-    ClientOrderBatchRow,
-    ClientOrderBatchRowResult,
-    ClientOrderBody,
-    MAX_BATCH_ROWS,
-    ClientOrderResult,
-    DeadlineChoice,
-    ManifestRowResult,
-    ManifestUploadResult,
-    deadline_payload_flags,
-)
-from app.schemas.lmx_order import LMXOrder, LineItem
-from app.schemas.returns import ReturnFlagBody, ReturnItemView
-from app.schemas.client_auth import (
-    ClientAuthToken,
-    ClientLoginBody,
-    ClientOrderDetailView,
-    ClientOrderPage,
-    ClientOrderSummaryView,
-    ClientPerformanceView,
-    PerformanceRateView,
-    DeliveryProofView,
-    DeliveryRatingView,
-    TermsAcceptanceView,
-    ClientProfileView,
-    ClientShopView,
-    ClientUserCreateBody,
-    ClientUserUpdateBody,
-    ClientUserView,
-)
+from app.storage.photo_upload_client import readable_url
+from app.tracking.service import tracking_url
+from app.webhooks.url_safety import UnsafeWebhookUrl, validate_webhook_url
 
 logger = structlog.get_logger(__name__)
 
@@ -722,6 +723,7 @@ async def get_my_order(
         delivery_address=order.delivery_address,
         delivery_contact_name=order.delivery_contact_name,
         proof=await _delivery_proof(session, order),
+        tracking_url=tracking_url(order.tracking_token) if order.tracking_token else None,
         rating=(
             DeliveryRatingView(
                 score=rating_row.score,

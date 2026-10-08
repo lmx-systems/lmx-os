@@ -24,6 +24,7 @@ import { DriverDocumentsPanel } from './components/DriverDocumentsPanel'
 import { PendingSignupsPanel } from './components/PendingSignupsPanel'
 import { ProposedRulesPanel } from './components/ProposedRulesPanel'
 import { CodDisputesPanel } from './components/CodDisputesPanel'
+import { SupportInboxPanel } from './components/SupportInboxPanel'
 import { DriverDevicesPanel } from './components/DriverDevicesPanel'
 import { GigPathPanel } from './components/GigPathPanel'
 import { ReturnsPanel } from './components/ReturnsPanel'
@@ -233,6 +234,13 @@ function App() {
                       canDispatch={canDispatch}
                       onToast={showToast}
                     />
+                    {/* A driver's message is somebody standing at a locked gate,
+                        so it belongs with the live work, not the record-keeping.
+                        It used to be texted to a support number through Twilio
+                        and never shown here at all. */}
+                    {canDispatch && (
+                      <SupportInboxPanel key={`support-${hubId}`} hubId={hubId} onToast={showToast} />
+                    )}
                     <OrderPipeline summary={summary.data} error={summary.error} loading={summary.loading} />
                     {/* Above the hold queue on purpose: the hold queue is work
                         going to plan and this is work that is not, so a
@@ -293,13 +301,14 @@ function App() {
                     <RecordHealthPanel key={`health-${hubId}`} hubId={hubId} />
                     {/* Recording work rather than dispatching work: a repeat
                         disputer is a conversation to have this month, not this
-                        minute. Deliberately NOT in the tab badge — with no SMS
-                        provider configured every dispute is un-escalated by
+                        minute. Deliberately NOT in the tab badge — with no mail
+                        server configured every dispute is un-escalated by
                         definition, so the count would never fall and a badge that
                         never falls is the "tab nobody opens" failure inverted. */}
                     {/* Its list is a dispatcher's read on the server; a viewer
                         would only see it fail to load. */}
                     {canDispatch && <CodDisputesPanel key={`cod-${hubId}`} hubId={hubId} />}
+
                     {/* Recording work too, and the half of W1 that shipped
                         without a front end: a driver could never collect a core
                         and nobody could close one out. Hides itself when

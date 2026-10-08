@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -20,6 +20,7 @@ import { useOutboxPending } from '../offline/OutboxContext';
 import { outboxManager } from '../offline/outboxManager';
 import { spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
+import { dialable } from '../utils/dialable';
 import { openTurnByTurnNavigation } from '../utils/navigation';
 import { primaryActionForStop, stopLabel } from '../utils/stopStatus';
 
@@ -73,12 +74,6 @@ export function StopDetailScreen({ route, navigation }: Props) {
   // immediately and the driver can ask the customer again.
   const [submittingPin, setSubmittingPin] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
-  // Masked voice calling (docs/ROADMAP.md A7) - the driver's own phone
-  // rings via a real carrier call once this resolves (app/messaging/
-  // voice_client.py bridges it to the customer server-side), so there's
-  // no in-app call UI to show beyond "requested" - just enough state to
-  // disable the button mid-request and surface a failure to place it.
-  const [callingCustomer, setCallingCustomer] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -131,15 +126,19 @@ export function StopDetailScreen({ route, navigation }: Props) {
     });
   }
 
-  async function handleCallCustomer() {
-    setCallingCustomer(true);
-    try {
-      await api.callCustomer(stopId);
-    } catch (err) {
-      Alert.alert('Could not place call', err instanceof ApiError ? err.message : 'Try again in a moment.');
-    } finally {
-      setCallingCustomer(false);
-    }
+  // The recipient is called or texted from the driver's own phone. LMX used
+  // to bridge a masked call through Twilio; with no phone provider, the
+  // phone's own dialer and messages app do it, and the recipient sees the
+  // driver's number.
+  function contactRecipient(scheme: 'tel' | 'sms') {
+    const number = dialable(stop?.contact_phone);
+    if (!number) return;
+    Linking.openURL(`${scheme}:${number}`).catch(() => {
+      Alert.alert(
+        scheme === 'tel' ? 'Could not start a call' : 'Could not open messages',
+        `The number is ${number}.`,
+      );
+    });
   }
 
   // Shown after a dropoff completes, when the server says this dock is due.
@@ -237,15 +236,21 @@ export function StopDetailScreen({ route, navigation }: Props) {
         </View>
       )}
 
-      {stop.stop_type === 'dropoff' && stop.contact_name && (
-        <View style={styles.contactRow}>
-          <Button label="Call" variant="outline" onPress={handleCallCustomer} loading={callingCustomer} />
-          <Button
-            label="Message"
-            variant="outline"
-            onPress={() => navigation.navigate('MessageCustomer', { stopId, contactName: stop.contact_name })}
-          />
-        </View>
+      {stop.stop_type === 'dropoff' && stop.contact_phone && (
+        <>
+          {/* The number as the sender gave it, so the driver can check what the
+              dialer will show - and still has it when it can't be dialled. */}
+          <Text style={styles.contactNumber}>
+            {stop.contact_name ? `${stop.contact_name} · ` : ''}
+            {stop.contact_phone}
+          </Text>
+          {dialable(stop.contact_phone) && (
+            <View style={styles.contactRow}>
+              <Button label="Call" variant="outline" onPress={() => contactRecipient('tel')} />
+              <Button label="Text" variant="outline" onPress={() => contactRecipient('sms')} />
+            </View>
+          )}
+        </>
       )}
 
       <Card style={styles.card}>
@@ -342,6 +347,7 @@ const makeStyles = (colors: ColorScheme) =>
     notes: { ...typography.small, color: colors.textMuted, marginBottom: spacing.md },
     navigateRow: { marginBottom: spacing.lg },
     contactRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
+    contactNumber: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.sm },
     card: { marginBottom: spacing.lg, gap: spacing.sm },
     doneText: { ...typography.body, color: colors.textPrimary, textAlign: 'center' },
     error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },

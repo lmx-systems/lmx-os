@@ -114,6 +114,16 @@ export function TrackingPage({ token }: TrackingPageProps) {
 
       <Arrival view={view} />
 
+      {view.delivery_pin && (
+        <div className="mt-6 rounded-lg border border-slate-200 bg-white px-4 py-3">
+          <p className="text-sm text-slate-600">Your delivery code</p>
+          <p className="mt-1 font-mono text-3xl tracking-[0.3em] text-slate-900">{view.delivery_pin}</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Give this to your driver when they hand over the delivery. It proves it reached you.
+          </p>
+        </div>
+      )}
+
       <RatingPrompt token={token} view={view} onRated={setView} />
 
       {view.driver_position ? (

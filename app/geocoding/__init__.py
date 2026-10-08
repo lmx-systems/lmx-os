@@ -3,8 +3,8 @@ Geocoding: a typed address to coordinates, cached once ever
 (docs/LMX_LINK_PLAN.md §1.2).
 
 Note the difference from every other external dependency in this codebase.
-Twilio, Rippling, Stripe, Expo and S3 all follow "unconfigured -> stub", where
-the stub is a usable degraded mode: an SMS that logs instead of sending still
+SMTP, Rippling, Stripe, Expo and S3 all follow "unconfigured -> stub", where
+the stub is a usable degraded mode: an email that logs instead of sending still
 leaves the app working. **Geocoding has no such mode.** A stub can only fail (no
 order ever routes) or invent coordinates (a driver is sent to a fictional
 address). So the default is a real provider, and it is one that needs no account

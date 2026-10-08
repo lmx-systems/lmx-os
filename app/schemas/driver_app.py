@@ -498,35 +498,22 @@ class DeclineOfferBody(BaseModel):
 
 
 class SendMessageBody(BaseModel):
-    # ~1 SMS segment set's worth - this goes straight to
-    # app.messaging.sms_client.SmsClient.send() (billed per segment) and
-    # into a Text column with no cap otherwise.
-    body: str = Field(max_length=1600)
+    # A support message, kept short enough to read on a dispatcher's screen,
+    # and capped because it goes into a Text column with no limit otherwise.
+    body: str = Field(min_length=1, max_length=1600)
 
 
 class MessageView(BaseModel):
-    """Deliberately has no phone number field anywhere - the whole point of
-    'masked' is that the customer's/support's real number never reaches the
-    driver app. See Message.counterparty_phone's docstring."""
+    """One message in a driver's support thread with the hub's dispatchers."""
 
     message_id: str
-    channel: str  # customer | support
+    channel: str  # support
+    # From the driver's side: outbound is the driver's message, inbound a
+    # dispatcher's reply.
     direction: str  # outbound | inbound
     body: str
     created_at: datetime
     stop_id: str | None = None
-
-
-class CallView(BaseModel):
-    """Deliberately has no phone number field anywhere - same masking rule
-    as MessageView. The driver's own phone rings via a real carrier call
-    (app/messaging/voice_client.py); this view is just the resulting log
-    entry, not anything used to actually place the call client-side."""
-
-    call_id: str
-    status: str  # initiated | connected | completed | failed | no-answer
-    created_at: datetime
-    duration_seconds: int | None = None
 
 
 class EarningsView(BaseModel):

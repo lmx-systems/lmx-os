@@ -6,7 +6,7 @@ proxied through this backend), then submits the returned `final_url` as
 CompleteStopBody.photo_url/signature_url - no schema change needed there,
 since those fields already accept a plain string URL.
 
-Same "unconfigured -> stub" shape as app/messaging/sms_client.py:
+Same "unconfigured -> stub" shape as app/messaging/email_client.py:
 S3PhotoUploadClient is real, used once PHOTO_UPLOAD_BUCKET is configured;
 until then StubPhotoUploadClient issues the same local-capture:// marker
 this app used before this pipeline existed (`requires_upload=False` tells

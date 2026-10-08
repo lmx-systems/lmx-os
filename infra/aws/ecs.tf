@@ -44,9 +44,6 @@ resource "aws_ecs_task_definition" "app" {
       # sign-in and password-reset links in client email - is built from this.
       # Unset, it defaulted to http://localhost:5174.
       { name = "PORTAL_BASE_URL", value = "https://portal.lmxit.com" },
-      # Twilio's status and call callbacks are built from this. Unset, they were
-      # relative URLs. Inert until Twilio credentials exist.
-      { name = "TWILIO_WEBHOOK_BASE_URL", value = "https://api.lmxit.com" },
       # Exactly one trusted proxy: the ALB defined in alb.tf, which is the only
       # thing in front of these tasks. Without this the app defaults to 0 and
       # keys every rate limit on the ALB's own address - one shared bucket for

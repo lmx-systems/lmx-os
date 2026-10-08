@@ -69,6 +69,8 @@ from app.learning_loop.promotion import (
     promote_proposed_rule,
 )
 from app.fleet_state.manager import FleetStateManager
+from app.messaging.support_notifications import notify_driver_of_support_reply
+from app.models.message import Message
 from app.models.ops_user import OpsUser
 from app.models.order import Order
 from app.models.route import Route
@@ -84,6 +86,9 @@ from app.schemas.admin import (
     AdminClientView,
     AdminDriverDeviceView,
     AdminDriverView,
+    SupportMessageView,
+    SupportReplyBody,
+    SupportThreadView,
     DriverSignInCodeIssued,
     DriverSignInCodeView,
     ClientOnboardingBody,
@@ -371,8 +376,7 @@ async def onboard_driver(
     driver able to sign in.
 
     A duplicate phone is a 409 rather than an integrity error, because it is the
-    likeliest mistake here. Phone is how dispatch reaches a driver, and the
-    masked-calling and support paths match on it. Migration `0063` is what
+    likeliest mistake here. Phone is how dispatch reaches a driver. Migration `0063` is what
     actually guarantees it; this is the readable version of the same refusal.
     """
     if body.employment_type not in EMPLOYMENT_TYPES:
@@ -734,6 +738,103 @@ async def admin_reactivate_driver(
         await session.commit()
         logger.info("driver_reactivated", driver_id=str(driver.id), hub_id=str(driver.hub_id))
     return _driver_view(driver)
+
+
+# ---------------------------------------------------------------------------
+# Driver support inbox (screens 1p/1q). The driver writes from the app's support
+# screen; dispatch reads and answers here. It used to go to a support phone
+# number through Twilio, and nothing in the console showed it at all.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/hubs/{hub_id}/support", response_model=list[SupportThreadView])
+async def admin_support_inbox(
+    hub_id: str,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(require_dispatcher),
+) -> list[SupportThreadView]:
+    """Every driver on the hub with a support thread, the one waiting longest
+    for an answer first, then the rest newest first."""
+    latest = (
+        select(Message.driver_id, func.max(Message.created_at).label("last_at"))
+        .where(Message.hub_id == uuid.UUID(hub_id), Message.channel == "support")
+        .group_by(Message.driver_id)
+        .subquery()
+    )
+    rows = (
+        await session.execute(
+            select(Message, Driver.name)
+            .join(latest, (Message.driver_id == latest.c.driver_id) & (Message.created_at == latest.c.last_at))
+            .join(Driver, Driver.id == Message.driver_id)
+            .where(Message.channel == "support")
+        )
+    ).all()
+    threads = [
+        SupportThreadView(
+            driver_id=str(message.driver_id),
+            driver_name=name,
+            last_body=message.body,
+            last_at=message.created_at,
+            awaiting_reply=message.direction == "outbound",
+        )
+        for message, name in rows
+    ]
+    waiting = sorted((t for t in threads if t.awaiting_reply), key=lambda t: t.last_at)
+    answered = sorted((t for t in threads if not t.awaiting_reply), key=lambda t: t.last_at, reverse=True)
+    return waiting + answered
+
+
+@router.get("/drivers/{driver_id}/support", response_model=list[SupportMessageView])
+async def admin_support_thread(
+    driver_id: str,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(require_dispatcher),
+) -> list[SupportMessageView]:
+    driver = await _driver_or_404(session, driver_id)
+    rows = (
+        await session.execute(
+            select(Message, OpsUser.name)
+            .outerjoin(OpsUser, OpsUser.id == Message.ops_user_id)
+            .where(Message.driver_id == driver.id, Message.channel == "support")
+            .order_by(Message.created_at)
+        )
+    ).all()
+    return [_support_view(message, name) for message, name in rows]
+
+
+@router.post("/drivers/{driver_id}/support", response_model=SupportMessageView, status_code=201)
+async def admin_reply_to_driver(
+    driver_id: str,
+    body: SupportReplyBody,
+    session: AsyncSession = Depends(get_db),
+    ops: AuthedOpsUser = Depends(require_dispatcher),
+) -> SupportMessageView:
+    """Answer a driver. The reply appears on the app's support screen, and the
+    driver's phone is nudged by push where push is set up."""
+    driver = await _driver_or_404(session, driver_id)
+    message = Message(
+        hub_id=driver.hub_id,
+        driver_id=driver.id,
+        stop_id=None,
+        channel="support",
+        direction="inbound",
+        body=body.body.strip(),
+        ops_user_id=uuid.UUID(ops.ops_user_id),
+    )
+    session.add(message)
+    await session.commit()
+    await notify_driver_of_support_reply(driver.id, message.body)
+    return _support_view(message, ops.name)
+
+
+def _support_view(message: Message, sent_by: str | None) -> SupportMessageView:
+    return SupportMessageView(
+        message_id=str(message.id),
+        from_driver=message.direction == "outbound",
+        body=message.body,
+        created_at=message.created_at,
+        sent_by=sent_by if message.direction == "inbound" else None,
+    )
 
 
 @router.post("/payroll/{hub_id}/run", response_model=PayrollRunResult)
@@ -1649,7 +1750,7 @@ async def cod_dispute_report(
         collected_count=report.collected_count,
         disputed_amount_cents=report.disputed_amount_cents,
         unescalated_count=report.unescalated_count,
-        sms_configured=report.sms_configured,
+        email_configured=report.email_configured,
         shops=[
             ShopDisputeRowView(
                 shop_id=row.shop_id,

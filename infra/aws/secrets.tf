@@ -10,7 +10,7 @@ Generated here: DATABASE_URL/REDIS_URL (built from this same config, so
 they can never drift from the real RDS/ElastiCache endpoints) and three
 distinct random JWT secrets (assert_jwt_secrets_are_distinct() in
 app/config.py refuses to boot outside development if any two ever
-match). Third-party credentials (Twilio, Rippling, Google Maps, Sentry,
+match). Third-party credentials (Rippling, Google Maps, Sentry,
 Expo push) are placeholders - empty means the app's own existing
 "unconfigured -> stub" fallback applies exactly as it does today, and
 `ignore_changes` on the secret version means a real value someone pastes
@@ -66,10 +66,7 @@ resource "aws_secretsmanager_secret_version" "app" {
     # secretsmanager put-secret-value` once each real account exists
     # (docs/ROADMAP.md B4/B5). Left empty, every one of these already
     # degrades to this app's existing stub/no-op behavior - see
-    # app/messaging/sms_client.py, app/payroll/, app/logging_config.py.
-    TWILIO_ACCOUNT_SID      = ""
-    TWILIO_AUTH_TOKEN       = ""
-    TWILIO_FROM_NUMBER      = ""
+    # app/messaging/email_client.py, app/payroll/, app/logging_config.py.
     GOOGLE_MAPS_API_KEY     = ""
     GOOGLE_CLOUD_PROJECT_ID = ""
     RIPPLING_API_KEY        = ""

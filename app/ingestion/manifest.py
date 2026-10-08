@@ -94,15 +94,13 @@ _COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
         "name",
     ),
     # Without this a manifest could not carry a recipient's number at all, and
-    # `LmxOrderIn` has had the field all along - so the CSV path, which is LMX
-    # Link's whole premise, was the one intake that could never produce a
-    # customer tracking link. `send_tracking_link_to_recipient` mints the token
-    # only when there is a phone to text it to, by design, so no phone meant no
-    # `F3` link for any order a distributor sent as a file.
+    # `LmxOrderIn` has had the field all along. The driver uses it to call
+    # ahead. (It once also decided whether the order got a tracking link, which
+    # was texted; every order now gets one at pickup.)
     #
     # Deliberately not `mobile` alone or `number`: a column headed `number` in a
-    # delivery manifest is as likely to be an order number, and texting a
-    # tracking link to whatever is in it is a disclosure to a stranger.
+    # delivery manifest is as likely to be an order number, and a driver
+    # calling whatever is in it reaches a stranger.
     "drop_contact_phone": (
         "delivery phone",
         "contact phone",
