@@ -192,6 +192,10 @@ class ClientOrderDetailView(ClientOrderSummaryView):
     rating: DeliveryRatingView | None = None
     # How it was proved delivered. Null until it is.
     proof: DeliveryProofView | None = None
+    # The recipient's live tracking page, from pickup on. LMX sends no texts, so
+    # the client forwards this to their customer; the page also shows the code
+    # the customer gives the driver (docs/ROADMAP.md F3, A4).
+    tracking_url: str | None = None
 
 
 class PerformanceRateView(BaseModel):

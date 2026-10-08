@@ -19,7 +19,7 @@ OIDC (no long-lived AWS keys stored anywhere).
 project. Every file here is written and `terraform validate`-clean, but
 nobody has run `terraform apply` against real infrastructure. Same status
 as this codebase's other "real client, unexercised against a live
-account" integrations (Google Route Optimization, Rippling, Twilio) -
+account" integrations (Google Route Optimization, Rippling) -
 see `docs/ROADMAP.md`.
 
 ## Layout

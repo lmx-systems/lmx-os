@@ -8,9 +8,7 @@ export type AuthStackParamList = {
   Server: undefined;
 };
 
-// The job-delivery loop (screens 1d-1m, plus 1p's masked customer
-// messaging - tied to a specific active stop, so it lives here rather
-// than under Profile). Its own stack, separate from Profile - a driver
+// The job-delivery loop (screens 1d-1m). Its own stack, separate from Profile - a driver
 // mid-route shouldn't lose that navigation state by tapping over to the
 // Profile tab and back.
 //
@@ -24,7 +22,6 @@ export type HomeStackParamList = {
   Home: undefined;
   StopDetail: { stopId: string };
   FlagIssue: { stopId: string };
-  MessageCustomer: { stopId: string; contactName: string | null };
 };
 
 // Screen 1r, "Profile" and its sub-screens - vehicle edit, documents,

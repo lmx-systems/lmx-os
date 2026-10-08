@@ -63,12 +63,9 @@ class Settings(BaseSettings):
     # authorize against.
     google_cloud_project_id: str | None = None
     google_maps_api_key: str | None = None
-    twilio_account_sid: str | None = None
-    twilio_auth_token: str | None = None
-    twilio_from_number: str | None = None
 
     # Push notifications for new job offers (docs/ROADMAP.md A1,
-    # app/messaging/push_client.py). Unlike Twilio/Rippling, Expo's push
+    # app/messaging/push_client.py). Unlike Rippling, Expo's push
     # service needs no account/credential to call in the basic case, so there
     # is nothing to gate selection on except this switch.
     #
@@ -94,7 +91,7 @@ class Settings(BaseSettings):
     # barcode images (docs/ROADMAP.md A2/A3, app/storage/photo_upload_client.py)
     # upload to S3 via a presigned PUT URL the driver app requests just
     # before capturing. Unset bucket = same "unconfigured -> stub" status
-    # as Twilio/Rippling/Expo push - the stub issues a local marker URL
+    # as Rippling/Expo push - the stub issues a local marker URL
     # (unchanged from this app's original local-capture:// placeholder
     # shape) instead of a real presigned one, so the rest of the capture
     # flow is fully buildable/testable without a real AWS account. Uses
@@ -121,32 +118,6 @@ class Settings(BaseSettings):
     # on a phone that means the phone. Used to build the upload and final URLs.
     media_base_url: str = "http://localhost:8000"
 
-    # Inbound-webhook signature verification (app/api/webhooks.py,
-    # app/messaging/twilio_signature.py) needs the exact public URL Twilio
-    # was configured to call, scheme+host included - `request.url` as this
-    # app sees it is correct only when nothing sits in front of it. Behind
-    # a future reverse proxy/load balancer (Phase 5's hosting decision),
-    # set this to the real public base URL (e.g.
-    # "https://api.lmxit.com") so the scheme/host used in the signature
-    # computation matches what Twilio actually signed, not this
-    # container's internal view of the request. Unset = use request.url
-    # as-is, correct for today's un-proxied docker-compose deployment.
-    #
-    # Also doubles as the base for the *outbound* URLs masked voice
-    # calling hands Twilio (docs/ROADMAP.md A7, app/api/driver_routes.py's
-    # call_customer) - Twilio needs somewhere public to call back into for
-    # the connect-TwiML and call-status webhooks, and this is the same
-    # "our real public address" value either direction needs.
-    twilio_webhook_base_url: str | None = None
-
-    # Driver app Phase 3 (screens 1p/1q): where a driver's "contact
-    # support" message actually goes. Unset = the message is still stored
-    # (app/models/message.py) so it's not silently lost, but no SMS send
-    # is attempted - there's nowhere real to send it to yet. Same
-    # "unconfigured -> stub/store-only" pattern as everything else in this
-    # file with no credentials yet.
-    support_phone_number: str | None = None
-
     epicor_base_url: str | None = None
     epicor_api_key: str | None = None
 
@@ -155,7 +126,7 @@ class Settings(BaseSettings):
     # at all, so every sentry_sdk.capture_*() call becomes an
     # already-safe no-op (the SDK's own behavior with no client
     # configured) - same "unconfigured credential -> stub" status as
-    # Twilio/Rippling elsewhere in this file. traces_sample_rate defaults
+    # Rippling elsewhere in this file. traces_sample_rate defaults
     # to 0 (no performance-monitoring transactions sent, error tracking
     # only) - deliberately conservative until there's a real account to
     # judge event-volume cost against.
@@ -191,7 +162,7 @@ class Settings(BaseSettings):
     trusted_proxy_count: int = 0
 
     # Transactional email (app/messaging/email_client.py). Same
-    # "unconfigured -> stub" status as Twilio: unset means every notification
+    # "unconfigured -> stub" status as push: unset means every notification
     # logs instead of sending.
     #
     # SMTP rather than a vendor API deliberately - the same credentials point at

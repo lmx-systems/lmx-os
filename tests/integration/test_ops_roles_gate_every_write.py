@@ -36,6 +36,7 @@ DISPATCHER_WRITES = {
     ("post", "/admin/orders/{order_id}/resolve"),
     ("post", "/admin/returns/{return_id}/mark-returned"),
     ("post", "/admin/returns/{return_id}/reschedule"),
+    ("post", "/admin/drivers/{driver_id}/support"),
 }
 
 # Reads a dispatcher's screens load, which were admin-only before the tier existed.
@@ -43,6 +44,8 @@ DISPATCHER_READS = {
     ("get", "/admin/hubs/{hub_id}/returns"),
     ("get", "/admin/hubs/{hub_id}/cod-disputes"),
     ("get", "/admin/dock-log/submissions"),
+    ("get", "/admin/hubs/{hub_id}/support"),
+    ("get", "/admin/drivers/{driver_id}/support"),
 }
 
 

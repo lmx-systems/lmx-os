@@ -11,7 +11,6 @@ import { EarningsScreen } from '../screens/EarningsScreen';
 import { EditVehicleScreen } from '../screens/EditVehicleScreen';
 import { FlagIssueScreen } from '../screens/FlagIssueScreen';
 import { LocationDisclosureScreen } from '../screens/LocationDisclosureScreen';
-import { MessageCustomerScreen } from '../screens/MessageCustomerScreen';
 import { PaymentMethodScreen } from '../screens/PaymentMethodScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { SignInScreen } from '../screens/SignInScreen';
@@ -50,9 +49,7 @@ function AuthNavigator() {
   );
 }
 
-// The job-delivery loop, plus masked customer messaging - tied to
-// whichever stop is active, so it travels with this stack rather than
-// living under Profile. Consolidated per the wireframe redesign: Home
+// The job-delivery loop. Consolidated per the wireframe redesign: Home
 // covers what used to be three screens (offers/route state shown inline,
 // not pushed), StopDetail covers what used to be three more
 // (arrive/scan/POD collapsed into one state-driven screen).
@@ -62,7 +59,6 @@ function HomeNavigator() {
       <HomeStack.Screen name="Home" component={TodayRouteScreen} />
       <HomeStack.Screen name="StopDetail" component={StopDetailScreen} options={{ headerShown: true, title: 'Stop' }} />
       <HomeStack.Screen name="FlagIssue" component={FlagIssueScreen} options={{ headerShown: true, title: 'Flag an issue' }} />
-      <HomeStack.Screen name="MessageCustomer" component={MessageCustomerScreen} options={{ headerShown: true, title: 'Message' }} />
     </HomeStack.Navigator>
   );
 }

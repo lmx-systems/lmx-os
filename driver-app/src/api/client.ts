@@ -2,7 +2,6 @@ import { getApiBaseUrl } from './serverUrl';
 
 import type {
   AuthToken,
-  Call,
   CodMethod,
   DocType,
   DriverCompliance,
@@ -297,17 +296,10 @@ export const api = {
 
   getTrips: () => request<TripSummary[]>('/driver/me/trips'),
 
-  messageCustomer: (stopId: string, body: string) =>
-    request<Message>(`/driver/stops/${stopId}/message-customer`, { method: 'POST', body: JSON.stringify({ body }) }),
-
-  getCustomerMessages: (stopId: string) => request<Message[]>(`/driver/stops/${stopId}/messages`),
-
   messageSupport: (body: string) =>
     request<Message>('/driver/me/messages', { method: 'POST', body: JSON.stringify({ body }) }),
 
   getSupportMessages: () => request<Message[]>('/driver/me/messages'),
-
-  callCustomer: (stopId: string) => request<Call>(`/driver/stops/${stopId}/call`, { method: 'POST' }),
 };
 
 export { ApiError };

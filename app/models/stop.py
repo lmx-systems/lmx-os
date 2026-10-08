@@ -81,14 +81,12 @@ class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # "Left at" field. Free text, not validated against anything.
     pod_left_at: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
-    # Real delivery-PIN issuance (docs/ROADMAP.md A4) - generated and
-    # texted to Order.delivery_contact_phone the moment this dropoff stop
-    # is created (accept_offer, app/api/driver_routes.py), via
-    # app/messaging/delivery_pin.py. Null when no contact phone was on
-    # file to send one to - complete_stop's method="pin" path refuses a
-    # PIN nobody could have been given, same as everywhere else in this
-    # app that treats "no destination configured" as "can't do this," not
-    # "silently succeed anyway."
+    # Delivery PIN (docs/ROADMAP.md A4), generated the moment this dropoff
+    # stop is created (accept_offer, app/api/driver_routes.py) and shown to
+    # the recipient on the tracking page (app/messaging/delivery_pin.py).
+    # Null only on stops created before every dropoff got one -
+    # complete_stop's method="pin" path refuses a PIN nobody could have been
+    # given.
     delivery_pin: Mapped[str | None] = mapped_column(String(8), nullable=True)
     # Caps brute-force guessing of a 4-digit PIN over the API - same
     # "attempts column, no Redis needed" shape as this table's own

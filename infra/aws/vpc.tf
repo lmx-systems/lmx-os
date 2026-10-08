@@ -10,7 +10,7 @@ docker-compose.yml, for real this time.
 Deliberately no NAT Gateway: ECS tasks run in the public subnets instead,
 with public IPs but a security group that only accepts inbound traffic
 from the ALB (see security_groups.tf) - outbound internet access (to
-pull images from ECR, call Twilio/Google/S3/Secrets Manager) works the
+pull images from ECR, call Google/S3/Secrets Manager) works the
 same either way, and a NAT Gateway is a real fixed cost (~$32/mo plus
 per-GB) this stage doesn't need to carry. Move the tasks into the
 isolated subnets and add a NAT Gateway here if that boundary ever

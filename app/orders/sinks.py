@@ -16,8 +16,7 @@ right while it is a surface of this application rather than a consumer of it.
 
 Emission is deliberately best-effort and never fails the caller: a driver
 completing a stop must not see an error because a downstream consumer is down.
-That is the same reasoning behind the fire-and-forget shop SMS in
-`app/messaging/shop_notifications.py`.
+Every best-effort send in this codebase follows the same rule.
 
 **WHY `emit` TAKES A SESSION.** `emit_status_change` is called from inside
 `advance_orders`, *before* the caller commits. A sink that acted on the event

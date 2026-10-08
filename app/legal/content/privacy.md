@@ -51,10 +51,15 @@ made it, and to tell you it is coming.
 it to market anything to you, we do not sell it, and we do not build a profile of
 you across the businesses that use us.
 
-**Tracking links.** If you get a text with a tracking link, that link shows the
-status of your delivery, an estimated time, and — only while your delivery is the
-next one on the driver's route — the vehicle's position. The link stops working
-shortly after your delivery is completed.
+**Tracking links.** If the business sending you a delivery forwards you a tracking
+link, that link shows the status of your delivery, an estimated time, the code to
+give the driver, and — only while your delivery is the next one on the driver's
+route — the vehicle's position. The link stops working shortly after your delivery
+is completed.
+
+**Your phone number.** If the sender gave us your number, the driver can see it and
+may call or text you from their own phone to arrange the delivery. We do not send
+you text messages ourselves.
 
 **How long.** Delivery records, including your name and address, are kept for seven
 years as part of the business record of the delivery. Photographs and signatures
@@ -104,13 +109,12 @@ position period]**. Your licence and insurance documents are kept while you driv
 for us and then for **[DRIVER DOCUMENT RETENTION — pending a storage lifecycle
 rule]**. Delivery and payment records are kept for seven years.
 
-## 4. Text messages and calls
+## 4. Messages
 
-We send text messages for sign-in codes, tracking links, pickup notifications, and
-payment problems, and we keep a record of the messages we sent and to which number.
-Where a call is connected through our system we record that it happened, between
-which numbers, and for how long. **We do not record the content of calls.** These
-records are kept for two years.
+We do not send text messages or place calls. Drivers can message our dispatchers
+from the driver app, and we keep those messages for two years. We email the
+businesses we deliver for about their account and about payment problems on
+delivery.
 
 ## 5. Addresses and mapping
 
@@ -123,8 +127,6 @@ store is keyed on the address itself and is not linked to a person.
 We use other companies to run the service. Each sees only what it needs:
 
 - **Cloud hosting and databases** — where the service runs and data is stored.
-- **A text-messaging provider** — to deliver messages, which means it processes the
-  recipient's number and the message.
 - **A mapping and routing provider** — to convert addresses to coordinates and to
   plan routes, which means it processes addresses.
 - **A payroll and payments provider** — to pay drivers, which means it processes

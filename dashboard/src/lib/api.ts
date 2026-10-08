@@ -12,6 +12,8 @@ import type {
   DriverDevice,
   DriverSignInCode,
   DriverSignInCodeRecord,
+  SupportMessage,
+  SupportThread,
   GigDensityReport,
   GigJob,
   HubClosure,
@@ -427,6 +429,17 @@ export const api = {
 
   reactivateDriver: (driverId: string) =>
     request<AdminDriver>(`/admin/drivers/${driverId}/reactivate`, { method: 'POST' }),
+
+  // Drivers' support messages and the reply (screens 1p/1q). Dispatcher work.
+  supportInbox: (hubId: string) => request<SupportThread[]>(`/admin/hubs/${hubId}/support`),
+
+  supportThread: (driverId: string) => request<SupportMessage[]>(`/admin/drivers/${driverId}/support`),
+
+  replyToDriver: (driverId: string, body: string) =>
+    request<SupportMessage>(`/admin/drivers/${driverId}/support`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    }),
 
   listDriverDevices: (driverId: string) =>
     request<DriverDevice[]>(`/admin/drivers/${driverId}/devices`),

@@ -328,10 +328,9 @@ async def _seed_message(db_session, *, age_days: int):
     msg = Message(
         hub_id=hub_id,
         driver_id=driver_id,
-        channel="driver",
+        channel="support",
         direction="outbound",
-        body="Your code is 123456",
-        counterparty_phone="+15125550142",
+        body="Gate code needed at the back dock",
         created_at=datetime.now(timezone.utc) - timedelta(days=age_days),
     )
     db_session.add(msg)
@@ -340,7 +339,7 @@ async def _seed_message(db_session, *, age_days: int):
 
 
 async def test_old_messages_are_deleted_and_recent_ones_are_not(db_session, monkeypatch):
-    """The policy says two years for what we texted and to which number."""
+    """The policy says two years for a driver's support messages."""
     from app.models.message import Message
 
     monkeypatch.setattr(settings, "communication_retention_days", 730)

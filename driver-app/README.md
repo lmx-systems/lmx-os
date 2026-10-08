@@ -47,27 +47,19 @@ auth - no extra header needed from this app.
   drawable signature pad (`src/media/PhotoCaptureModal.tsx`,
   `SignaturePadModal.tsx`), uploaded via a presigned S3 URL
   (`app/storage/photo_upload_client.py`) - same "unconfigured -> stub"
-  status as Twilio/Rippling until a real bucket is configured. The PIN
-  method is real too now: `app/messaging/delivery_pin.py` issues and
-  texts a real 4-digit PIN to the customer at offer-accept time, and
+  status as Rippling until a real bucket is configured. The PIN
+  method is real too now: `app/messaging/delivery_pin.py` issues a real
+  4-digit PIN at offer-accept time, shown to the recipient on the
+  tracking page whose link the client forwards, and
   `complete_stop` verifies the driver's submission against it server-side
   (with a lockout after too many wrong attempts) - not just recorded.
-- **Messaging (1p/1q)**: real masked SMS - sends via
-  `app/messaging/sms_client.py`'s `TwilioSmsClient` once a Twilio account
-  is provisioned (`TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/
-  `TWILIO_FROM_NUMBER`); until then, every send goes through
-  `StubSmsClient` (logged, not actually delivered) - same "unconfigured ->
-  stub" pattern as OTP codes above. The inbound-reply webhook
-  (`app/api/webhooks.py`) also has no Twilio request-signature
-  verification yet - a real gap to close before pointing a live number at
-  it, not just a formatting note.
-- **Masked calling** (as opposed to messaging): real now too -
-  `app/messaging/voice_client.py` places a Twilio Voice call to the
-  driver's own phone, then bridges to the customer via TwiML
-  (`app/api/webhooks.py`'s `voice_connect`) with LMX's shared number as
-  caller ID - two real bridged phone calls, not in-app audio. The "Call"
-  button on the stop-detail screen calls it for real instead of showing a
-  dead-stub alert.
+- **Support (1p/1q)**: an in-app thread with the hub's dispatchers, who
+  read and answer it in the ops console's support inbox. No phone network
+  is involved.
+- **Calling or texting the recipient**: the stop's Call and Text buttons
+  open the phone's own dialer and messages app with the recipient's
+  number. LMX used to bridge masked calls and texts through Twilio; with
+  no telephony provider, the recipient sees the driver's number.
 - **Navigation (1h)**: real now - a "Navigate" button on the stop-detail
   screen (`src/utils/navigation.ts`) hands off to the device's own native
   maps app for real turn-by-turn, rather than embedding a maps SDK/

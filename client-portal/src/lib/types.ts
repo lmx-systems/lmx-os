@@ -74,6 +74,9 @@ export interface ClientOrderDetailView extends ClientOrderSummaryView {
     signature_url: string | null
     left_at: string | null
   } | null
+  // Your customer's live tracking page, from pickup on. LMX sends no texts, so
+  // forward it to them; it also shows the code they give the driver.
+  tracking_url: string | null
 }
 
 // Mirrors app/schemas/billing.py's response models exactly - shared
@@ -292,6 +295,8 @@ export interface TrackingView {
   driver_position: DriverPositionView | null
   // False on a finished delivery, so a forgotten open tab stops polling.
   is_live: boolean
+  // The code to give the driver at the door, until the delivery is made.
+  delivery_pin: string | null
   // Ratings (docs/ROADMAP.md F13). Both fields are about this reader's own action -
   // whether they may rate, and what they said if they already did.
   rating: {

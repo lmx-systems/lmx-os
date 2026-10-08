@@ -428,6 +428,7 @@ def _public_tracking_view(view: ResolvedTracking) -> TrackingView:
         # object URL opens for nobody.
         pod_photo_url=readable_url(view.pod_photo_url),
         pod_signature_url=readable_url(view.pod_signature_url),
+        delivery_pin=view.delivery_pin,
         driver_position=(
             DriverPositionView(
                 lat=view.driver_position.lat,

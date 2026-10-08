@@ -10,7 +10,7 @@ account. Confirm against Stripe's actual API docs and a sandbox/test-mode
 account before this is ever exercised for real.
 
 Not the official `stripe` SDK - this codebase's third-party HTTP clients
-(sms_client.py, rippling_client.py, voice_client.py) are all small
+(rippling_client.py, google_routes_client.py) are all small
 hand-rolled httpx clients, not vendor SDKs, so this matches that existing
 style. Stripe's API authenticates via HTTP Basic auth with the secret key
 as the username and an empty password, same as `curl -u sk_...: ...`.

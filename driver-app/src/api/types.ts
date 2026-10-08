@@ -206,9 +206,10 @@ export interface TripSummary {
   hours: number;
 }
 
-// Phase 3 (screens 1p/1q) - masked SMS. Deliberately has no phone number
-// field - see MessageView's docstring in app/schemas/driver_app.py.
-export type MessageChannel = 'customer' | 'support';
+// Phase 3 (screens 1p/1q) - the support thread with the hub's dispatchers,
+// answered in the ops console. outbound is the driver's message, inbound a
+// dispatcher's reply.
+export type MessageChannel = 'support';
 export type MessageDirection = 'outbound' | 'inbound';
 
 export interface Message {
@@ -220,18 +221,6 @@ export interface Message {
   stop_id: string | null;
 }
 
-// Masked voice calling (docs/ROADMAP.md A7) - same no-phone-number rule as
-// Message, see CallView's docstring in app/schemas/driver_app.py. The
-// driver's own phone rings via a real carrier call; this is just the
-// resulting log entry, not anything used to place the call client-side.
-export type CallStatus = 'initiated' | 'connected' | 'completed' | 'failed' | 'no-answer';
-
-export interface Call {
-  call_id: string;
-  status: CallStatus;
-  created_at: string;
-  duration_seconds: number | null;
-}
 
 // The driver's own numbers beside their hub's (docs/ROADMAP.md W4). `fleet_median` is
 // null when there are too few colleagues on shift for a team median to point at anyone

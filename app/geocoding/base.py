@@ -15,7 +15,7 @@ coordinate is worse than no coordinate: no coordinate stops an order from being
 dispatched, while a wrong one sends a real van to the wrong place. Callers decide
 what to do with None; they never get a plausible-looking lie.
 
-Unlike Twilio/Rippling/Stripe there is no stub fallback here, and that is
+Unlike SMTP/Rippling/Stripe there is no stub fallback here, and that is
 deliberate too. A stub geocoder can only fail (in which case no order ever
 routes) or invent coordinates (in which case drivers go to fictional addresses).
 Neither is a usable degraded mode, so the default provider is a real one -

@@ -14,8 +14,7 @@ Three sweeps, and what is deliberately absent:
   - **Driver location trails**, ninety days. The only personal record that grows without
     bound - at a 30-second ping interval an on-duty driver writes about 120 rows an hour,
     forever, describing a person's movements.
-  - **Messages and calls**, two years. What we texted, to which number, and that a call
-    happened between two numbers. Never call content, which we do not record.
+  - **Messages**, two years. A driver's support thread with dispatch.
   - **Declined applications**, twelve months. A company that applied and was turned down
     has no ongoing relationship with us, so there is nothing to keep the record for past
     the point of recognising a second application.
@@ -41,7 +40,6 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.call import Call
 from app.models.client import Client
 from app.models.client_api_key import ClientApiKey
 from app.models.client_rate import ClientRate
@@ -110,29 +108,22 @@ async def prune_location_pings(session: AsyncSession, *, now: datetime | None = 
 
 
 # ---------------------------------------------------------------------------
-# 2. Messages and calls
+# 2. Messages
 # ---------------------------------------------------------------------------
 
 
 async def prune_communications(session: AsyncSession, *, now: datetime | None = None) -> dict:
-    """Delete SMS and call records past the retention period.
+    """Delete support messages past the retention period.
 
-    Both in one sweep because the policy states one period for both and they are the same
-    kind of record: that we contacted a number, not what was said. Call *content* is never
-    recorded, so there is nothing else here to delete.
-
-    Keyed on `created_at` rather than a send timestamp, because a message that failed to
-    send has no send timestamp and would otherwise be kept forever - exactly the rows
-    least worth keeping.
+    Keyed on `created_at`. There used to be call records here too; masked calling
+    through Twilio is gone, and the table with it (migration 0072).
     """
     cutoff = _cutoff(settings.communication_retention_days, now)
     messages = await _delete_older_than(session, Message, Message.created_at, cutoff)
-    calls = await _delete_older_than(session, Call, Call.created_at, cutoff)
-    if messages or calls:
+    if messages:
         await session.commit()
     result = {
         "messages_deleted": messages,
-        "calls_deleted": calls,
         "retention_days": settings.communication_retention_days,
         "cutoff": cutoff.isoformat(),
     }

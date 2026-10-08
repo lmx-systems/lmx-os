@@ -9,7 +9,7 @@ side (withholding, net pay, direct deposit) - this system is not, and
 does not try to be, a payroll engine itself.
 
 Same "unconfigured third-party credential -> stub mode" pattern as
-app/messaging/sms_client.py and app/optimizer/google_routes_client.py:
+app/messaging/email_client.py and app/optimizer/google_routes_client.py:
 RipplingPayrollProvider is the real implementation, used once Rippling
 credentials are configured (none exist yet). Until then,
 StubPayrollProvider logs the submission and returns no provider

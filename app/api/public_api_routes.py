@@ -45,11 +45,12 @@ from app.ingestion.service import (
     ingest_lmx_order,
 )
 from app.models.order import Order, OrderStatus
-from app.orders.cancellation import OrderNotCancellable, cancel_before_collection
 from app.optimizer.event_trigger import dispatch_event_bus
+from app.orders.cancellation import OrderNotCancellable, cancel_before_collection
 from app.schemas.lmx_order import LMXOrder
 from app.schemas.public_api import ApiOrderBody, ApiOrderResult
 from app.sla.commitment import delivery_commitment, terms_for_client
+from app.tracking.service import tracking_url
 
 logger = structlog.get_logger(__name__)
 
@@ -239,4 +240,5 @@ async def _result(session: AsyncSession, order: Order, *, duplicate: bool) -> Ap
         collect_by=order.hold_deadline,
         promised_at=delivery_commitment(order, term).promised_delivery_by,
         duplicate=duplicate,
+        tracking_url=tracking_url(order.tracking_token) if order.tracking_token else None,
     )

@@ -31,10 +31,6 @@ EXEMPT_PATHS = frozenset(
 # everything else (the internal ops surface: /fleet, /hubs, /optimizer,
 # /batch-queue, /orders, /learning-loop, /admin, /ops/me).
 #
-# /webhooks: Twilio calls these directly (app/api/webhooks.py) and can't
-# carry an ops Bearer token - that endpoint has its own request-signature
-# verification instead (app/messaging/twilio_signature.py).
-#
 # /public: the client signup form (app/api/public_routes.py). Genuinely
 # unauthenticated - a prospective client has no credential of any kind yet, by
 # design. It is the only write surface here with no auth at all, so it carries
@@ -60,7 +56,7 @@ EXEMPT_PATHS = frozenset(
 # ADD NOTHING HERE THAT DOES NOT AUTHENTICATE ITSELF. That warning applies to every
 # entry above, and this prefix is the one most likely to tempt a future route that
 # "just needs to be reachable".
-EXEMPT_PREFIXES = ("/driver", "/client", "/webhooks", "/public", "/internal", "/api/v1")
+EXEMPT_PREFIXES = ("/driver", "/client", "/public", "/internal", "/api/v1")
 
 
 def _is_exempt(path: str) -> bool:

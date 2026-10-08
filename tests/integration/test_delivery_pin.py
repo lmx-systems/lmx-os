@@ -1,8 +1,8 @@
 """
 Real PIN issuance/verification for proof of delivery (docs/ROADMAP.md A4)
-against real Postgres - accept_offer issues a real PIN (and texts it) to
-every dropoff with a delivery contact phone on file, and complete_stop
-checks the driver's submitted PIN against it for real.
+against real Postgres - accept_offer issues a real PIN to every dropoff,
+shown to the recipient on the tracking page rather than texted, and
+complete_stop checks the driver's submitted PIN against it for real.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -75,7 +75,7 @@ async def _seed_offer(db_session, *, delivery_contact_phone: str | None = "+1555
     return authed, dropoff_stop_id
 
 
-async def test_accept_offer_issues_and_texts_a_real_pin(db_session, real_redis_client):
+async def test_accept_offer_issues_a_real_pin_and_texts_nobody(db_session, real_redis_client):
     _authed, dropoff_stop_id = await _seed_offer(db_session)
 
     result = await db_session.execute(select(Stop).where(Stop.id == uuid.UUID(dropoff_stop_id)))
@@ -83,20 +83,16 @@ async def test_accept_offer_issues_and_texts_a_real_pin(db_session, real_redis_c
     assert stop.delivery_pin is not None
     assert len(stop.delivery_pin) == 4
     assert stop.pin_verification_attempts == 0
-
-    messages_result = await db_session.execute(select(Message).where(Message.stop_id == stop.id))
-    messages = messages_result.scalars().all()
-    assert len(messages) == 1
-    assert messages[0].channel == "delivery_pin"
-    assert stop.delivery_pin in messages[0].body
+    assert (await db_session.execute(select(Message))).scalars().all() == []
 
 
-async def test_no_pin_issued_without_a_delivery_contact_phone(db_session, real_redis_client):
+async def test_a_pin_is_issued_even_with_no_contact_phone(db_session, real_redis_client):
+    """The PIN used to need a phone to be texted to; the tracking page needs none."""
     _authed, dropoff_stop_id = await _seed_offer(db_session, delivery_contact_phone=None)
 
     result = await db_session.execute(select(Stop).where(Stop.id == uuid.UUID(dropoff_stop_id)))
     stop = result.scalar_one()
-    assert stop.delivery_pin is None
+    assert stop.delivery_pin is not None
 
 
 async def test_complete_stop_with_the_correct_pin_succeeds(db_session, real_redis_client):
@@ -129,7 +125,11 @@ async def test_complete_stop_rejects_an_incorrect_pin_without_completing(db_sess
 
 
 async def test_complete_stop_rejects_pin_method_when_none_was_issued(db_session, real_redis_client):
-    authed, dropoff_stop_id = await _seed_offer(db_session, delivery_contact_phone=None)
+    """A stop from before every dropoff got a PIN."""
+    authed, dropoff_stop_id = await _seed_offer(db_session)
+    stop = (await db_session.execute(select(Stop).where(Stop.id == uuid.UUID(dropoff_stop_id)))).scalar_one()
+    stop.delivery_pin = None
+    await db_session.commit()
     await arrive_at_stop(dropoff_stop_id, driver=authed, session=db_session)
 
     with pytest.raises(HTTPException) as exc_info:

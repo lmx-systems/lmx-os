@@ -23,7 +23,7 @@ import type { CodDisputeReport } from '../lib/types'
  *
  * **Un-escalated disputes are shown apart from the total**, because they break
  * the promise the feature makes — *"one tap escalates"* — and folded into a
- * total they would disappear. When no SMS provider is configured every dispute
+ * total they would disappear. When no mail server is configured every dispute
  * is un-escalated by definition: that is one deployment-wide fact, and saying it
  * once is honest where showing it as N pieces of outstanding work is not.
  */
@@ -77,18 +77,18 @@ export function CodDisputesPanel({ hubId }: { hubId: string }) {
       {report.unescalated_count > 0 && (
         <p
           className={`mb-2 text-[12px] ${
-            report.sms_configured ? 'text-[var(--amber)]' : 'text-[var(--text-muted)]'
+            report.email_configured ? 'text-[var(--amber)]' : 'text-[var(--text-muted)]'
           }`}
         >
-          {report.sms_configured ? (
+          {report.email_configured ? (
             <>
               {report.unescalated_count} dispute
               {report.unescalated_count === 1 ? ' was' : 's were'} never sent to the
-              distributor. The feature promises one tap escalates.
+              distributor's portal admins. The feature promises one tap escalates.
             </>
           ) : (
             <>
-              No SMS provider is configured, so all {report.unescalated_count} are
+              No mail server is configured, so all {report.unescalated_count} are
               un-escalated by definition. That is one deployment setting, not{' '}
               {report.unescalated_count} pieces of work.
             </>

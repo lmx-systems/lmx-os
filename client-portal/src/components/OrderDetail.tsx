@@ -127,6 +127,35 @@ export function OrderDetail({ order, onBack, onCancelled }: OrderDetailProps) {
               </dd>
             </div>
           )}
+          {/* The customer's tracking link. LMX sends no texts, so the client is
+              who gets it to their customer; the page also shows the code the
+              customer gives the driver at the door. */}
+          {order.tracking_url && (
+            <div className="col-span-2">
+              <dt className="text-xs text-[var(--text-muted)]">Tracking link for your customer</dt>
+              <dd className="mt-0.5 flex flex-wrap items-center gap-2 text-[var(--text-secondary)]">
+                <a
+                  href={order.tracking_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="break-all text-[var(--accent)] underline"
+                >
+                  {order.tracking_url}
+                </a>
+                <button
+                  type="button"
+                  onClick={() => void navigator.clipboard?.writeText(order.tracking_url ?? '')}
+                  className="rounded-md border border-[var(--border)] px-2 py-0.5 text-xs"
+                >
+                  Copy
+                </button>
+              </dd>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                Send this to your customer. It shows where their delivery is and the
+                code to give the driver.
+              </p>
+            </div>
+          )}
           {/* How the drop-off was proved, for when their customer says it never came.
               Shown only to the recipient, on the tracking page, until now. */}
           {order.proof && (

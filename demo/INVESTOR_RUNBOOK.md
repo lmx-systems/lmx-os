@@ -163,18 +163,14 @@ docker compose exec app python -m demo.run_full_loop --pace 2.5
 you where to look. The terminal is the narration; the product is the windows
 beside it.
 
-**The last beat needs one more command.** A tracking token is disclosed in
-exactly one place — the SMS — and Twilio is stubbed, so nothing tells you the
-URL:
-
-```bash
-docker compose exec app python -m demo.tracking_links
-```
-
-That reads the database directly, which nothing else in `demo/` does. The link
-is a capability: anyone holding it sees the delivery photo, so no API hands one
-out, not even to the client who owns the order. In front of a customer the
-recipient gets it by text.
+**The last beat is in the portal.** The order's page in the client portal shows
+the recipient's tracking link once the parts are collected, with a Copy button:
+LMX sends no texts, so the client is who forwards it. Open it from there. It
+shows the delivery code the recipient gives the driver, the live position while
+this drop is the driver's next stop, and the proof photo afterwards. The client
+already sees that proof on the order page, so handing them the link discloses
+nothing new. `demo/tracking_links.py` still prints the links for every delivered
+order, for a stack with no portal login.
 
 **Open it last.** It is the beat an investor recognises without explanation —
 they have received one of these from a courier — and it is the only screen in
@@ -210,7 +206,8 @@ optimizer uses a nearest-neighbour stub that does not model time, so sequencing
 and ETAs are not what Google would return (`DEC-3`/`E1`). The hold, the
 batching decision and the dispatch are real; the road network is not.
 
-**No SMS goes anywhere.** Shop and recipient notifications hit the Twilio stub.
+**No text message goes anywhere, by design.** LMX sends none: the client gets the
+recipient's tracking link in the portal and forwards it.
 
 **The addresses are Austin and the design partner is not.** Everything in
 `demo/` is invented, deliberately in a state the partner has no presence in, so

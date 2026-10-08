@@ -94,7 +94,8 @@ demo's ops login issues, as a real driver would, so it needs that login.
 
 - **A live routing solve.** The stub does not model time, so sequencing and
   ETAs are not what Google would return (`DEC-3`/`E1`).
-- **Any SMS.** Shop and recipient notifications go to the Twilio stub.
+- **Any text message.** LMX sends none: shops hear through the client's webhook
+  and portal, and the client forwards the recipient's tracking link.
 - **Real geography.** The addresses are Austin; the design partner is not.
 - **A real phone.** The script plays the driver over HTTP. To use the app
   itself, set the server address in the app's Profile - the built-in default is
