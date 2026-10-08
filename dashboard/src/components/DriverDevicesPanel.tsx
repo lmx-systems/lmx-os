@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Card } from './ui/Card'
 import { api } from '../lib/api'
-import type { DriverDevice, DriverState } from '../lib/types'
+import type { AdminDriver, DriverDevice } from '../lib/types'
 
 /**
  * Which devices a driver is signed in on, and revoking one for them
@@ -26,10 +26,14 @@ import type { DriverDevice, DriverState } from '../lib/types'
  * revoked on Tuesday"* are different answers to *"why can't this driver sign
  * in"*, and hiding the second leaves somebody guessing.
  *
- * **The driver list is the hub's fleet state**, which holds off-shift drivers but
- * not somebody who has left. Revoking a departed driver's device is the case
- * this cannot reach, and it is named here rather than discovered: it needs a
- * roster read that does not exist yet.
+ * **The driver list is the hub's roster**, switched-off drivers included. It
+ * used to be the fleet state, which never holds somebody who has left, so the
+ * driver this panel most needed to reach was the one it could not list.
+ *
+ * **Switching a driver off** ends every session at once and refuses any new
+ * sign-in. It is how ops removes somebody who has left; revoking devices one
+ * at a time missed any phone nobody had listed. The server refuses it while
+ * the driver holds a route or an unanswered offer, and says which.
  */
 
 function when(value: string | null): string {
@@ -37,12 +41,13 @@ function when(value: string | null): string {
 }
 
 export function DriverDevicesPanel({
-  drivers,
+  hubId,
   onToast,
 }: {
-  drivers: DriverState[] | null
+  hubId: string
   onToast: (message: string) => void
 }) {
+  const [drivers, setDrivers] = useState<AdminDriver[] | null>(null)
   const [driverId, setDriverId] = useState('')
   const [devices, setDevices] = useState<DriverDevice[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -58,15 +63,66 @@ export function DriverDevicesPanel({
     }
   }
 
+  async function loadRoster() {
+    try {
+      setDrivers(await api.listHubDrivers(hubId))
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  useEffect(() => {
+    setDriverId('')
+    setDrivers(null)
+    void loadRoster()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hubId])
+
   useEffect(() => {
     if (driverId) void load(driverId)
     else setDevices(null)
   }, [driverId])
 
-  async function revoke(device: DriverDevice) {
-    const driver = drivers?.find((d) => d.driver_id === driverId)
+  const selected = drivers?.find((d) => d.driver_id === driverId) ?? null
+
+  async function switchOff(driver: AdminDriver) {
     const confirmed = window.confirm(
-      `Sign ${driver?.name ?? 'this driver'} out of ${device.device_name ?? 'this device'}?\n\n` +
+      `Switch ${driver.name} off?\n\n` +
+        'Every phone they are signed in on stops working on its next request, and ' +
+        'they cannot sign in again until somebody switches them back on. Use this ' +
+        'when a driver leaves.',
+    )
+    if (!confirmed) return
+    setBusy('driver')
+    setError(null)
+    try {
+      await api.deactivateDriver(driver.driver_id)
+      await Promise.all([loadRoster(), load(driver.driver_id)])
+      onToast(`${driver.name} is switched off. Every session has ended.`)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function switchOn(driver: AdminDriver) {
+    setBusy('driver')
+    setError(null)
+    try {
+      await api.reactivateDriver(driver.driver_id)
+      await loadRoster()
+      onToast(`${driver.name} is switched back on. They sign in again on their phone.`)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function revoke(device: DriverDevice) {
+    const confirmed = window.confirm(
+      `Sign ${selected?.name ?? 'this driver'} out of ${device.device_name ?? 'this device'}?\n\n` +
         'They will have to sign in again. If they are mid-shift, they will lose ' +
         'nothing queued — the outbox survives a sign-out — but they cannot send ' +
         'until they are back in.',
@@ -89,8 +145,8 @@ export function DriverDevicesPanel({
   return (
     <Card title="Driver devices" meta="lost phone, stolen phone, ex-driver">
       <p className="mb-2 text-[12px] text-[var(--text-secondary)]">
-        Sign a driver out of a device they can't reach themselves. Drivers on this
-        hub's roster only — somebody who has left does not appear.
+        Sign a driver out of a device they can't reach themselves, or switch off
+        somebody who has left.
       </p>
 
       <select
@@ -101,12 +157,40 @@ export function DriverDevicesPanel({
         <option value="">Choose a driver…</option>
         {(drivers ?? []).map((driver) => (
           <option key={driver.driver_id} value={driver.driver_id}>
-            {driver.name ?? driver.driver_id}
+            {driver.name}
+            {driver.is_active ? '' : ' (switched off)'}
           </option>
         ))}
       </select>
 
       {error && <p className="mb-1.5 text-[12px] text-[var(--red)]">{error}</p>}
+
+      {selected && (
+        <div className="mb-2 flex items-baseline gap-2 text-[12px]">
+          <p className="min-w-0 flex-1 text-[var(--text-secondary)]">
+            {selected.is_active
+              ? 'Active.'
+              : `Switched off ${when(selected.deactivated_at)}. No session works and no sign-in succeeds.`}
+          </p>
+          {selected.is_active ? (
+            <button
+              disabled={busy === 'driver'}
+              onClick={() => switchOff(selected)}
+              className="shrink-0 rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-medium text-[var(--red)] disabled:opacity-40"
+            >
+              Switch off
+            </button>
+          ) : (
+            <button
+              disabled={busy === 'driver'}
+              onClick={() => switchOn(selected)}
+              className="shrink-0 rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-primary)] disabled:opacity-40"
+            >
+              Switch back on
+            </button>
+          )}
+        </div>
+      )}
 
       {driverId && devices === null && !error && (
         <p className="text-[12px] text-[var(--text-muted)]">loading…</p>

@@ -399,7 +399,7 @@ function App() {
                         nothing that could list a driver's devices to an admin,
                         so ops had to already know an id only the driver could
                         give them (docs/ROADMAP_AUDIT_2026-09.md). */}
-                    <DriverDevicesPanel drivers={fleet.data} onToast={showToast} />
+                    <DriverDevicesPanel key={`devices-${hubId}`} hubId={hubId} onToast={showToast} />
                     <UrgencyRulesPanel key={`urgency-${hubId}`} hubId={hubId} onToast={showToast} />
                     <ProposedRulesPanel key={`proposed-${hubId}`} hubId={hubId} onToast={showToast} />
                     {/* Jobs and density in one card: the density report is a

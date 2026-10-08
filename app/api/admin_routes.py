@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,7 +39,6 @@ from app.delivery.resolution import (
     ShopMissingError,
     resolve_failed_order,
 )
-from app.driver_auth.dependencies import revoked_devices_key
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.models.client_sla_term import ClientSlaTerm
@@ -47,6 +46,7 @@ from app.models.dock_log_submission import DockLogSubmission
 from app.models.invoice import Invoice
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.models.driver import EMPLOYMENT_TYPES, VEHICLE_TYPES, Driver
+from app.models.driver_shift_event import DriverShiftEvent
 from app.compliance.driver_documents import evaluate_driver_documents
 from app.reporting.cod_disputes import build_cod_dispute_report
 from app.models.driver_device import DriverDevice
@@ -66,17 +66,21 @@ from app.learning_loop.promotion import (
     dismiss_proposed_rule,
     promote_proposed_rule,
 )
+from app.fleet_state.manager import FleetStateManager
 from app.models.order import Order
+from app.models.route import Route
+from app.models.route_offer import RouteOffer
+from app.optimizer.event_trigger import dispatch_event_bus
 from app.models.return_item import ReturnItem
 from app.models.rules import ActiveRule, ProposedRule
 from app.models.shop import Shop
 from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user, require_admin, require_dispatcher
 from app.payroll import get_payroll_provider
-from app.redis_client import get_client as get_redis_client
 from app.storage.photo_upload_client import readable_url
 from app.schemas.admin import (
     AdminClientView,
     AdminDriverDeviceView,
+    AdminDriverView,
     ClientOnboardingBody,
     ClientOnboardingResult,
     DriverOnboardingBody,
@@ -484,7 +488,156 @@ async def admin_revoke_driver_device(
 
     device.revoked_at = datetime.now(timezone.utc)
     await session.commit()
-    await get_redis_client().sadd(revoked_devices_key(driver_id), device_id)
+
+
+def _driver_view(driver: Driver) -> AdminDriverView:
+    return AdminDriverView(
+        driver_id=str(driver.id),
+        name=driver.name,
+        phone=driver.phone,
+        status=driver.status,
+        is_active=driver.is_active,
+        deactivated_at=driver.deactivated_at,
+    )
+
+
+@router.get("/hubs/{hub_id}/drivers", response_model=list[AdminDriverView])
+async def admin_list_hub_drivers(
+    hub_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[AdminDriverView]:
+    """Every driver on the hub, including those switched off.
+
+    Active first, then by name, so the people on today's roster are at the top
+    and somebody who left last month is still findable below them.
+    """
+    result = await session.execute(
+        select(Driver)
+        .where(Driver.hub_id == uuid.UUID(hub_id))
+        .order_by(Driver.is_active.desc(), Driver.name)
+    )
+    return [_driver_view(driver) for driver in result.scalars().all()]
+
+
+async def _driver_or_404(session: AsyncSession, driver_id: str) -> Driver:
+    try:
+        driver = await session.get(Driver, uuid.UUID(driver_id))
+    except ValueError:
+        driver = None
+    if driver is None:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    return driver
+
+
+@router.post("/drivers/{driver_id}/deactivate", response_model=AdminDriverView)
+async def admin_deactivate_driver(
+    driver_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> AdminDriverView:
+    """Switch a driver off: every session ends, and no sign-in succeeds.
+
+    For somebody who has left. Before this the only lever was revoking one
+    device at a time, and the session on a phone nobody had listed carried on
+    renewing itself.
+
+    **Refused while the driver holds work.** A route that is planned or under
+    way, or an offer waiting for an answer, belongs to somebody who is about to
+    be unable to open the app, so its orders would sit with nobody. Reassign or
+    finish it first; the refusal says which.
+
+    The driver is taken off shift, so dispatch stops offering them anything,
+    and every device is marked revoked, so the console shows the same state
+    the server enforces. Switching back on clears neither: the driver signs in
+    again on a phone ops can see.
+    """
+    driver = await _driver_or_404(session, driver_id)
+    # Locked to the commit, so a dispatch cycle writing an offer for this
+    # driver (app/optimizer/service.py takes a share lock on the same row) and
+    # the driver's own duty switch either finish before the checks below see
+    # them, or wait and then find the driver switched off.
+    await session.refresh(driver, with_for_update=True)
+    if not driver.is_active:
+        # Already off. Still put the fleet state right: a first attempt that
+        # committed and then failed on Redis would otherwise leave the driver
+        # in dispatch's pool for good, with every retry returning here.
+        await _take_off_shift_in_fleet_state(driver)
+        return _driver_view(driver)
+
+    open_routes = await session.scalar(
+        select(func.count())
+        .select_from(Route)
+        .where(Route.driver_id == driver.id, Route.status.in_(("planned", "active")))
+    )
+    pending_offers = await session.scalar(
+        select(func.count())
+        .select_from(RouteOffer)
+        .where(RouteOffer.driver_id == driver.id, RouteOffer.status == "offered")
+    )
+    if open_routes or pending_offers:
+        held = []
+        if open_routes:
+            held.append(f"{open_routes} open route{'s' if open_routes != 1 else ''}")
+        if pending_offers:
+            held.append(f"{pending_offers} unanswered offer{'s' if pending_offers != 1 else ''}")
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{driver.name} still has {' and '.join(held)}. "
+                "Switch them off once that work is finished. To cut their access "
+                "now, revoke their devices below."
+            ),
+        )
+
+    now = datetime.now(timezone.utc)
+    was_on_shift = driver.status != "off_shift"
+    driver.is_active = False
+    driver.deactivated_at = now
+    driver.status = "off_shift"
+    await session.execute(
+        update(DriverDevice)
+        .where(DriverDevice.driver_id == driver.id, DriverDevice.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+    if was_on_shift:
+        session.add(
+            DriverShiftEvent(
+                driver_id=driver.id, hub_id=driver.hub_id, event_type="off_shift", occurred_at=now
+            )
+        )
+    await session.commit()
+
+    await _take_off_shift_in_fleet_state(driver)
+
+    logger.info("driver_deactivated", driver_id=str(driver.id), hub_id=str(driver.hub_id))
+    return _driver_view(driver)
+
+
+async def _take_off_shift_in_fleet_state(driver: Driver) -> None:
+    """Out of dispatch's pool. Dispatch reads the fleet state, not the row."""
+    manager = FleetStateManager()
+    state = await manager.get_driver_state(str(driver.hub_id), str(driver.id))
+    if state is not None and state.status != "off_shift":
+        await manager.upsert_driver_state(state.model_copy(update={"status": "off_shift"}))
+        await dispatch_event_bus.publish(str(driver.hub_id), "driver_status_changed")
+
+
+@router.post("/drivers/{driver_id}/reactivate", response_model=AdminDriverView)
+async def admin_reactivate_driver(
+    driver_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> AdminDriverView:
+    """Switch a driver back on. Their old devices stay revoked: they sign in
+    again, so the phone they use is one the console can see."""
+    driver = await _driver_or_404(session, driver_id)
+    if not driver.is_active:
+        driver.is_active = True
+        driver.deactivated_at = None
+        await session.commit()
+        logger.info("driver_reactivated", driver_id=str(driver.id), hub_id=str(driver.hub_id))
+    return _driver_view(driver)
 
 
 @router.post("/payroll/{hub_id}/run", response_model=PayrollRunResult)

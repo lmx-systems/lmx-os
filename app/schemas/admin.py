@@ -283,6 +283,22 @@ class AdminDriverDeviceView(BaseModel):
     revoked_at: datetime | None
 
 
+class AdminDriverView(BaseModel):
+    """One driver on a hub's roster, switched off or not.
+
+    The console's driver pickers read the hub's fleet state, which holds only
+    drivers who have gone on shift since Redis last started, and never anybody
+    who has left. Switching a driver off, and back on, needs the roster itself.
+    """
+
+    driver_id: str
+    name: str
+    phone: str
+    status: str
+    is_active: bool
+    deactivated_at: datetime | None
+
+
 class CodDisputeReportView(BaseModel):
     window_start: datetime
     window_end: datetime

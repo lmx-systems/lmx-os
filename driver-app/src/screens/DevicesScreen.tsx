@@ -22,7 +22,7 @@ import type { ColorScheme } from '../theme';
  *
  * Worth a screen rather than a support call because revocation lands on the
  * revoked device's **very next request**, not at its next token refresh
- * (`get_current_driver` checks the revoked set). A driver who left a phone in
+ * (`get_current_driver` checks the device's `revoked_at` in the database). A driver who left a phone in
  * a van can end that session before the van arrives anywhere.
  *
  * ## This phone is shown and cannot be signed out from here

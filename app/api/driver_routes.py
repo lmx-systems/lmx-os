@@ -24,7 +24,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.config import settings
 from app.db import get_db
-from app.driver_auth.dependencies import AuthedDriver, get_current_driver, revoked_devices_key
+from app.driver_auth.dependencies import AuthedDriver, get_current_driver
 from app.driver_auth.otp_store import OtpRateLimitExceeded, OtpStore
 from app.driver_auth.tokens import issue_token
 from app.fleet_state.manager import FleetStateManager
@@ -171,6 +171,9 @@ logger = structlog.get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 
+_SWITCHED_OFF = "This driver account has been switched off - talk to your dispatcher"
+
+
 @router.post("/auth/request-otp", response_model=RequestOtpResult)
 async def request_otp(body: RequestOtpBody, session: AsyncSession = Depends(get_db)) -> RequestOtpResult:
     otp_store = OtpStore()
@@ -182,11 +185,14 @@ async def request_otp(body: RequestOtpBody, session: AsyncSession = Depends(get_
     except OtpRateLimitExceeded as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
 
-    result = await session.execute(select(Driver.id).where(Driver.phone == body.phone))
-    if result.scalar_one_or_none() is None:
+    result = await session.execute(select(Driver.is_active).where(Driver.phone == body.phone))
+    is_active = result.scalar_one_or_none()
+    if is_active is None:
         # Drivers are provisioned by ops, not self-registered - see 1a's
         # "Apply to drive" annotation (out of app scope).
         raise HTTPException(status_code=404, detail="No driver registered with this phone number")
+    if not is_active:
+        raise HTTPException(status_code=403, detail=_SWITCHED_OFF)
 
     in_development = settings.environment == "development"
     if not twilio_sms_configured() and not in_development:
@@ -213,6 +219,11 @@ async def verify_otp(body: VerifyOtpBody, session: AsyncSession = Depends(get_db
     driver = result.scalar_one_or_none()
     if driver is None:
         raise HTTPException(status_code=404, detail="No driver registered with this phone number")
+    if not driver.is_active:
+        # Checked here as well as at request-otp: signing in clears a device's
+        # revocation below, so a code issued before the switch-off must not
+        # bring a departed driver's phone back.
+        raise HTTPException(status_code=403, detail=_SWITCHED_OFF)
 
     now = datetime.now(timezone.utc)
     device_result = await session.execute(
@@ -235,8 +246,6 @@ async def verify_otp(body: VerifyOtpBody, session: AsyncSession = Depends(get_db
         device.revoked_at = None
     await session.commit()
 
-    await get_client().srem(revoked_devices_key(str(driver.id)), body.device_id)
-
     return AuthToken(access_token=issue_token(str(driver.id), str(driver.hub_id), body.device_id))
 
 
@@ -246,7 +255,8 @@ async def refresh_token(
 ) -> AuthToken:
     """
     Lets a driver's session slide forward indefinitely on each app open
-    without redoing OTP, as long as their device isn't revoked - the
+    without redoing OTP, as long as their device isn't revoked and the driver
+    hasn't been switched off (both checked by get_current_driver) - the
     existing ~month-long token expiry already outlives any single shift,
     so this isn't fixing a TTL problem, it's what the client calls after a
     successful biometric unlock to keep a long-lived device-bound session
@@ -303,7 +313,6 @@ async def revoke_my_device(
 
     device.revoked_at = datetime.now(timezone.utc)
     await session.commit()
-    await get_client().sadd(revoked_devices_key(driver.driver_id), device_id)
 
 
 @router.post("/me/push-token", status_code=204)
@@ -832,7 +841,21 @@ async def update_my_availability(
     driver: AuthedDriver = Depends(get_current_driver),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    row = await _get_driver_row(session, driver)
+    # Locked to the commit and checked again: a switch-off that landed after
+    # this request was authenticated must win, or the driver goes back on duty
+    # after ops took them off, and payroll keeps counting the hours.
+    row = (
+        await session.execute(
+            select(Driver)
+            .where(Driver.id == uuid.UUID(driver.driver_id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    if not row.is_active:
+        raise HTTPException(status_code=401, detail=_SWITCHED_OFF)
 
     if body.status == "available":
         # **The gate that used to be defeatable two ways** (docs/ROADMAP.md R4).

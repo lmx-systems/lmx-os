@@ -33,6 +33,7 @@ from app.record import record_decision
 from app.record.decisions import MODE_LIVE
 from app.fleet_state.manager import FleetStateManager
 from app.messaging.job_offer_notifications import notify_driver_of_new_offer
+from app.models.driver import Driver
 from app.models.order import Order, OrderStatus
 from app.orders.status_service import advance_orders
 from app.models.route import Route
@@ -349,6 +350,24 @@ class DispatchOptimizerService:
             # persist (app/messaging/job_offer_notifications.py).
             offers_to_notify: list[tuple[str, int]] = []
             async with session_scope() as session:
+                # Dispatch plans from the fleet state in Redis, which does not
+                # know a driver was switched off since this cycle's snapshot.
+                # The row does. Share-locked to the commit, so a switch-off
+                # (which takes the same row for update) either lands first and
+                # is seen here, or waits and then sees this cycle's offer.
+                active_driver_ids = set(
+                    (
+                        await session.execute(
+                            select(Driver.id)
+                            .where(
+                                Driver.id.in_({uuid.UUID(a.driver_id) for a in assignments}),
+                                Driver.is_active.is_(True),
+                            )
+                            .with_for_update(read=True)
+                        )
+                    ).scalars()
+                )
+                switched_off: list[tuple[str, list[dict]]] = []
                 for assignment in assignments:
                     offer_stops = []
                     for stop_id in assignment.stop_ids:
@@ -365,6 +384,9 @@ class DispatchOptimizerService:
                             }
                         )
                     if not offer_stops:
+                        continue
+                    if uuid.UUID(assignment.driver_id) not in active_driver_ids:
+                        switched_off.append((assignment.driver_id, offer_stops))
                         continue
                     # The plan itself, alongside the per-order preview. Only visits for
                     # orders that survived the `stops_by_id` filter above, so the two
@@ -412,6 +434,23 @@ class DispatchOptimizerService:
                                 current_route_id=existing_state.current_route_id,
                             )
                         )
+
+                # A switched-off driver's share of the plan goes back to the
+                # hold queue for the next cycle, the way a declined offer does,
+                # and the driver comes out of the pool so it isn't planned
+                # onto them again.
+                # Imported here: app.orders.requeue imports the event trigger,
+                # which imports this module.
+                from app.orders.requeue import requeue_orders_from_offer
+
+                for driver_id, offer_stops in switched_off:
+                    await requeue_orders_from_offer(session, hub_id, driver_id, offer_stops)
+                    stale = fleet_by_id.get(driver_id)
+                    if stale is not None:
+                        await self._fleet_state.upsert_driver_state(
+                            stale.model_copy(update={"hub_id": hub_id, "status": "off_shift"})
+                        )
+                    logger.info("dispatch_skipped_switched_off_driver", hub_id=hub_id, driver_id=driver_id)
 
             for driver_id, stop_count in offers_to_notify:
                 await notify_driver_of_new_offer(driver_id, stop_count, settings.job_offer_ttl_seconds)
