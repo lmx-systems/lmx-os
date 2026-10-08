@@ -395,8 +395,8 @@ async def onboard_driver(
         raise HTTPException(
             status_code=409,
             detail=(
-                "A driver is already registered with this number. Two drivers "
-                "sharing one would lock both out of the app."
+                "A driver is already registered with this number. Phone is how "
+                "dispatch reaches a driver, so each needs their own."
             ),
         )
 
@@ -460,6 +460,10 @@ async def admin_issue_sign_in_code(
     Refused for a switched-off driver, who could not use it anyway.
     """
     driver = await _driver_or_404(session, driver_id)
+    # Locked like the switch-off, so a code can't be issued in the moment
+    # between a switch-off's check and its commit, and two clicks can't each
+    # leave a live code.
+    await session.refresh(driver, with_for_update=True)
     if not driver.is_active:
         raise HTTPException(
             status_code=409,
@@ -689,6 +693,9 @@ async def admin_deactivate_driver(
         .where(DriverDevice.driver_id == driver.id, DriverDevice.revoked_at.is_(None))
         .values(revoked_at=now)
     )
+    # And any sign-in code nobody has used, so switching the driver back on
+    # doesn't bring an old code - and the phone it would sign in - back too.
+    await sign_in_codes.retire_open_codes(session, driver.id, now)
     if was_on_shift:
         session.add(
             DriverShiftEvent(

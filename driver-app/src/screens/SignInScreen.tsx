@@ -25,7 +25,7 @@ type Props = NativeStackScreenProps<AuthStackParamList, 'SignIn'>;
 // somebody else's server.
 const QR_PREFIX = 'LMX-SIGNIN:';
 
-// Screen 1a, "Sign in". A dispatcher gives the driver a sign-in code from the
+// Screen 1a, "Sign in". The hub's ops team gives the driver a sign-in code from the
 // ops console, as a QR code to scan or ten characters to type. It replaced the
 // texted code, so signing in needs no SMS provider. "Apply to drive" is out of
 // app scope per the wireframe's annotation - drivers are provisioned by ops.
@@ -62,7 +62,7 @@ export function SignInScreen({ navigation }: Props) {
   function handleScanned(data: string) {
     setScanning(false);
     if (!data.toUpperCase().startsWith(QR_PREFIX)) {
-      setError("That isn't a sign-in code. Scan the QR code your dispatcher shows you.");
+      setError("That isn't a sign-in code. Scan the QR code the ops team shows you.");
       return;
     }
     void submit(data);
@@ -103,7 +103,7 @@ export function SignInScreen({ navigation }: Props) {
       />
 
       <Text style={[styles.footerText, styles.centered, styles.footer]}>
-        No code? Your dispatcher can give you one.
+        No code? The ops team at your hub can give you one.
       </Text>
 
       <BarcodeScannerModal

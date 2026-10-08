@@ -49,9 +49,11 @@ CODE_TTL = timedelta(hours=24)
 # that set the server could point a driver's phone at somebody else's.
 QR_PREFIX = "LMX-SIGNIN:"
 
-# Per address. A wrong code is cheap to try and the code space is large, so
-# this is about noise and scripted sweeps rather than the odds of a hit.
-MAX_ATTEMPTS_PER_IP = 10
+# Failed attempts per address. A wrong code is cheap to try and the code space is
+# large, so this is about noise and scripted sweeps rather than the odds of a hit.
+# Only failures count: a hub's drivers often share one network address, and a
+# morning of sign-ins at the depot must not lock them out.
+MAX_FAILED_ATTEMPTS_PER_IP = 20
 ATTEMPT_WINDOW_SECONDS = 15 * 60
 
 
@@ -104,15 +106,7 @@ async def issue_code(
     create the driver and the first code together.
     """
     now = datetime.now(timezone.utc)
-    await session.execute(
-        update(DriverSignInCode)
-        .where(
-            DriverSignInCode.driver_id == driver_id,
-            DriverSignInCode.redeemed_at.is_(None),
-            DriverSignInCode.superseded_at.is_(None),
-        )
-        .values(superseded_at=now)
-    )
+    await retire_open_codes(session, driver_id, now)
     code = _new_code()
     issued = IssuedCode(code=code, expires_at=now + CODE_TTL)
     session.add(
@@ -125,6 +119,19 @@ async def issue_code(
     )
     await session.flush()
     return issued
+
+
+async def retire_open_codes(session: AsyncSession, driver_id: uuid.UUID, now: datetime) -> None:
+    """Every code for this driver that nobody has used stops working."""
+    await session.execute(
+        update(DriverSignInCode)
+        .where(
+            DriverSignInCode.driver_id == driver_id,
+            DriverSignInCode.redeemed_at.is_(None),
+            DriverSignInCode.superseded_at.is_(None),
+        )
+        .values(superseded_at=now)
+    )
 
 
 async def redeem_code(session: AsyncSession, raw: str, device_id: str) -> uuid.UUID | None:
@@ -153,22 +160,33 @@ async def redeem_code(session: AsyncSession, raw: str, device_id: str) -> uuid.U
     return claimed.scalar_one_or_none()
 
 
+def _attempts_key(caller_ip: str) -> str:
+    return f"driver_auth:sign_in_attempts:{caller_ip}"
+
+
 async def charge_attempt(caller_ip: str) -> None:
     """Count one sign-in attempt from this address; refuse past the cap.
 
-    Charged before the code is checked, so a refused attempt costs the same as
-    an accepted one and the limit cannot be used to tell them apart.
+    Charged before the code is checked, so an address over the cap is refused
+    without learning whether its code was good. A successful sign-in then hands
+    the charge back (`refund_attempt`), so only failures accumulate.
     """
-    key = f"driver_auth:sign_in_attempts:{caller_ip}"
+    key = _attempts_key(caller_ip)
     async with timed_operation("driver_auth.sign_in_attempts"):
         pipe = get_client().pipeline(transaction=True)
         pipe.incr(key)
         pipe.expire(key, ATTEMPT_WINDOW_SECONDS, nx=True)
         count, _ = await pipe.execute()
-    if count > MAX_ATTEMPTS_PER_IP:
+    if count > MAX_FAILED_ATTEMPTS_PER_IP:
         raise SignInAttemptsExceeded(
             f"Too many sign-in attempts - try again in {ATTEMPT_WINDOW_SECONDS // 60} minutes"
         )
+
+
+async def refund_attempt(caller_ip: str) -> None:
+    """A sign-in that worked doesn't count against its address."""
+    async with timed_operation("driver_auth.sign_in_attempts"):
+        await get_client().decr(_attempts_key(caller_ip))
 
 
 async def code_history(session: AsyncSession, driver_id: uuid.UUID) -> list[DriverSignInCode]:

@@ -12,10 +12,11 @@ import app.driver_auth.sign_in_codes as sign_in_codes_module
 from app.driver_auth.sign_in_codes import (
     ALPHABET,
     CODE_LENGTH,
-    MAX_ATTEMPTS_PER_IP,
+    MAX_FAILED_ATTEMPTS_PER_IP,
     IssuedCode,
     SignInAttemptsExceeded,
     charge_attempt,
+    refund_attempt,
     code_hmac,
     normalize,
 )
@@ -64,12 +65,24 @@ def test_only_a_keyed_hash_is_stored(monkeypatch):
 async def test_sign_in_attempts_are_capped_per_address(monkeypatch):
     client = fakeredis_aioredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(sign_in_codes_module, "get_client", lambda: client)
-    for _ in range(MAX_ATTEMPTS_PER_IP):
+    for _ in range(MAX_FAILED_ATTEMPTS_PER_IP):
         await charge_attempt("203.0.113.9")
     with pytest.raises(SignInAttemptsExceeded):
         await charge_attempt("203.0.113.9")
     # Another address has its own budget.
     await charge_attempt("203.0.113.10")
+
+
+@pytest.mark.asyncio
+async def test_a_sign_in_that_works_does_not_count(monkeypatch):
+    """A hub's drivers often share one address; a morning of good sign-ins at
+    the depot must not lock the next driver out."""
+    client = fakeredis_aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(sign_in_codes_module, "get_client", lambda: client)
+    for _ in range(MAX_FAILED_ATTEMPTS_PER_IP * 3):
+        await charge_attempt("203.0.113.20")
+        await refund_attempt("203.0.113.20")
+    await charge_attempt("203.0.113.20")
 
 
 def test_issue_and_decode_token_roundtrip():

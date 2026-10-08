@@ -18,7 +18,9 @@ export function SignInCode({ name, code }: { name: string; code: DriverSignInCod
     const qr = qrcode(0, 'M')
     qr.addData(code.qr_payload)
     qr.make()
-    return qr.createDataURL(5, 2)
+    // The default margin is four modules, the quiet zone scanners need; with
+    // less, a phone camera struggles against a dark console theme.
+    return qr.createDataURL(5)
   }, [code.qr_payload])
 
   return (
@@ -26,7 +28,7 @@ export function SignInCode({ name, code }: { name: string; code: DriverSignInCod
       <img
         src={image}
         alt={`Sign-in QR code for ${name}`}
-        className="h-32 w-32 shrink-0 bg-white [image-rendering:pixelated]"
+        className="h-40 w-40 shrink-0 bg-white [image-rendering:pixelated]"
       />
       <div className="min-w-0 text-[12px] text-[var(--text-secondary)]">
         <p className="text-[var(--text-primary)]">Sign-in code for {name}</p>

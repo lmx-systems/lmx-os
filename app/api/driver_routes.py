@@ -169,7 +169,7 @@ logger = structlog.get_logger(__name__)
 # get_current_driver, since its whole point is to produce a token.
 # ---------------------------------------------------------------------------
 
-_SWITCHED_OFF = "This driver account has been switched off - talk to your dispatcher"
+_SWITCHED_OFF = "This driver account has been switched off - talk to the ops team at your hub"
 
 
 @router.post("/auth/sign-in", response_model=AuthToken)
@@ -185,8 +185,9 @@ async def sign_in(
     One answer for every code that does not work - unknown, used, replaced by a
     newer one, or expired - so a guess learns nothing about which.
     """
+    caller_ip = client_ip(request)
     try:
-        await sign_in_codes.charge_attempt(client_ip(request))
+        await sign_in_codes.charge_attempt(caller_ip)
     except sign_in_codes.SignInAttemptsExceeded as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
 
@@ -195,9 +196,12 @@ async def sign_in(
         await session.rollback()
         raise HTTPException(
             status_code=401,
-            detail="That code doesn't work. Ask your dispatcher for a new one.",
+            detail="That code doesn't work. Ask the ops team at your hub for a new one.",
         )
-    driver = await session.get(Driver, driver_id)
+    # Share-locked to the commit, so a switch-off (which locks the row for
+    # update) either lands first and is seen here, or waits and then revokes
+    # the device this sign-in is about to write.
+    driver = await session.get(Driver, driver_id, with_for_update={"read": True})
     if driver is None or not driver.is_active:
         # A code issued before the switch-off must not bring a departed
         # driver's phone back. Rolled back, so the code is not spent either.
@@ -225,6 +229,7 @@ async def sign_in(
         device.revoked_at = None
     await session.commit()
 
+    await sign_in_codes.refund_attempt(caller_ip)
     logger.info("driver_signed_in", driver_id=str(driver.id), device_id=body.device_id)
     return AuthToken(access_token=issue_token(str(driver.id), str(driver.hub_id), body.device_id))
 
