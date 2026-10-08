@@ -1,6 +1,8 @@
 """A driver assigned to a hub."""
 import uuid
-from sqlalchemy import ForeignKey, String
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -51,6 +53,14 @@ class Driver(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     vehicle_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # car | van | bike
     plate_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # Whether this person still drives for the hub. Off means every session
+    # stops on its next request and no sign-in succeeds, which is how ops
+    # removes somebody who has left: before this, a departed driver's phone
+    # kept a session that renewed itself on every open. Rows are kept, never
+    # deleted - routes, pay and the record layer all point at them.
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivery_zone: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     # Profile screen (1r), "Payment method". Last 4 digits only, display

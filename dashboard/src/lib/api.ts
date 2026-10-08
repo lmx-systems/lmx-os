@@ -8,6 +8,7 @@ import type {
   DockLogSubmission,
   ClientOnboardingResult,
   CodDisputeReport,
+  AdminDriver,
   DriverDevice,
   GigDensityReport,
   GigJob,
@@ -400,6 +401,16 @@ export const api = {
   // endpoint existed; nothing could list what to revoke, so the "driver lost
   // their phone and rings dispatch" path it was written for could not be
   // walked (docs/ROADMAP_AUDIT_2026-09.md).
+  // The hub's whole roster, including drivers switched off. The fleet state
+  // holds only drivers who have been on shift, never somebody who has left.
+  listHubDrivers: (hubId: string) => request<AdminDriver[]>(`/admin/hubs/${hubId}/drivers`),
+
+  deactivateDriver: (driverId: string) =>
+    request<AdminDriver>(`/admin/drivers/${driverId}/deactivate`, { method: 'POST' }),
+
+  reactivateDriver: (driverId: string) =>
+    request<AdminDriver>(`/admin/drivers/${driverId}/reactivate`, { method: 'POST' }),
+
   listDriverDevices: (driverId: string) =>
     request<DriverDevice[]>(`/admin/drivers/${driverId}/devices`),
 

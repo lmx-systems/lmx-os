@@ -686,6 +686,16 @@ export interface HubClosure {
  *  `device_id` is a client-generated per-install id held in the app's
  *  SecureStore, not an OS advertising id — so it identifies an installation,
  *  and a reinstall is a new device. */
+/** One driver on a hub's roster, switched off or not (GET /admin/hubs/{id}/drivers). */
+export interface AdminDriver {
+  driver_id: string
+  name: string
+  phone: string
+  status: string
+  is_active: boolean
+  deactivated_at: string | null
+}
+
 export interface DriverDevice {
   device_id: string
   device_name: string | null
