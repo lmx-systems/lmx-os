@@ -12,7 +12,7 @@ reaches a driver and must be unique, and the capacity is what the router reads.
 import uuid
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import text
 
 from app.models.driver import EMPLOYMENT_TYPES, VEHICLE_TYPES, Driver
 from app.models.hub import Hub
@@ -303,20 +303,26 @@ class TestWhoMayProvision:
 
 
 class TestTheDriverCanThenLogIn:
-    async def test_a_provisioned_driver_is_found_by_their_number(self, db_session):
-        """The point of provisioning. Before this the OTP path's 404 - "no
-        driver registered with this phone number" - was the only possible
-        answer, because nothing registered one."""
+    async def test_a_provisioned_driver_signs_in_with_the_code_onboarding_returns(
+        self, db_session, real_redis_client
+    ):
+        """The point of provisioning: onboarding ends with a driver who can sign in.
+        Before it, nothing registered a driver, so no sign-in could succeed."""
         from app.api.admin_routes import onboard_driver
+        from app.api.driver_routes import sign_in
+        from app.driver_auth.tokens import decode_token
+        from app.schemas.driver_auth import SignInBody
+        from tests.integration.conftest import fake_request
 
         hub = await _hub(db_session)
         result = await onboard_driver(
             body=_body(hub, phone="+15555550144"), session=db_session, _admin=ADMIN
         )
-        await db_session.commit()
 
-        found = await db_session.scalar(
-            select(Driver).where(Driver.phone == "+15555550144")
+        token = await sign_in(
+            SignInBody(code=result.sign_in_code.code, device_id="first-phone"),
+            request=fake_request(),
+            session=db_session,
         )
-        assert found is not None
-        assert str(found.id) == result.driver_id
+        driver_id, _hub_id, device_id = decode_token(token.access_token)
+        assert (driver_id, device_id) == (result.driver_id, "first-phone")

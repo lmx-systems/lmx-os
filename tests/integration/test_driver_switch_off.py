@@ -96,13 +96,14 @@ async def test_a_switched_off_driver_cannot_sign_in_again(db_session, real_redis
 
     await admin_deactivate_driver(driver_id=str(driver_id), session=db_session, _admin=admin)
 
+    # The switch-off retired the code, so it reads like any code that doesn't work.
     with pytest.raises(HTTPException) as exc:
         await sign_in(
             SignInBody(code=early.code, device_id="phone-a", device_name="Phone"),
             request=fake_request(),
             session=db_session,
         )
-    assert exc.value.status_code == 403
+    assert exc.value.status_code == 401
     with pytest.raises(HTTPException) as exc:
         await admin_issue_sign_in_code(driver_id=str(driver_id), session=db_session, _admin=admin)
     assert exc.value.status_code == 409
