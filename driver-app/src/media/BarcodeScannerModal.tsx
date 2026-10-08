@@ -10,6 +10,9 @@ interface BarcodeScannerModalProps {
   visible: boolean;
   onScanned: (data: string) => void;
   onCancel: () => void;
+  // What the scan is for, in the driver's words. Defaults to parcels.
+  hint?: string;
+  permissionText?: string;
 }
 
 // Real barcode scanning for "scan next parcel" (docs/ROADMAP.md A2) -
@@ -17,7 +20,13 @@ interface BarcodeScannerModalProps {
 // driver can still fall back to a manual tap (kept in ParcelScanPanel)
 // for a damaged/unreadable barcode - a scanner that can only ever
 // succeed is a worse tool than one with an escape hatch.
-export function BarcodeScannerModal({ visible, onScanned, onCancel }: BarcodeScannerModalProps) {
+export function BarcodeScannerModal({
+  visible,
+  onScanned,
+  onCancel,
+  hint = 'Align the barcode inside the frame',
+  permissionText = 'Camera access is needed to scan parcel barcodes.',
+}: BarcodeScannerModalProps) {
   const colors = useThemeColors();
   const styles = makeStyles(colors);
   const [permission, requestPermission] = useCameraPermissions();
@@ -37,7 +46,7 @@ export function BarcodeScannerModal({ visible, onScanned, onCancel }: BarcodeSca
       <View style={styles.container}>
         {!permission?.granted ? (
           <View style={styles.permissionPrompt}>
-            <Text style={styles.permissionText}>Camera access is needed to scan parcel barcodes.</Text>
+            <Text style={styles.permissionText}>{permissionText}</Text>
             <Button label="Allow camera access" onPress={requestPermission} />
             <Button label="Cancel" variant="outline" onPress={onCancel} />
           </View>
@@ -53,7 +62,7 @@ export function BarcodeScannerModal({ visible, onScanned, onCancel }: BarcodeSca
             />
             <View style={styles.overlay} pointerEvents="none">
               <View style={styles.frame} />
-              <Text style={styles.hint}>Align the barcode inside the frame</Text>
+              <Text style={styles.hint}>{hint}</Text>
             </View>
             <View style={styles.footer}>
               <Button label="Cancel" variant="outline" onPress={onCancel} />

@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 import structlog
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +25,8 @@ from sse_starlette.sse import EventSourceResponse
 from app.config import settings
 from app.db import get_db
 from app.driver_auth.dependencies import AuthedDriver, get_current_driver
-from app.driver_auth.otp_store import OtpRateLimitExceeded, OtpStore
+from app.client_ip import client_ip
+from app.driver_auth import sign_in_codes
 from app.driver_auth.tokens import issue_token
 from app.fleet_state.manager import FleetStateManager
 from app.identity.dock_survey import (
@@ -45,7 +46,7 @@ from app.messaging.shop_notifications import (
     notify_shop_en_route,
     notify_shop_picked_up,
 )
-from app.messaging.sms_client import get_sms_client, twilio_sms_configured
+from app.messaging.sms_client import get_sms_client
 from app.messaging.voice_client import get_voice_client
 from app.models.call import Call
 from app.models.driver import Driver
@@ -122,9 +123,7 @@ from app.schemas.driver_auth import (
     AuthToken,
     DriverDeviceView,
     PushTokenBody,
-    RequestOtpBody,
-    RequestOtpResult,
-    VerifyOtpBody,
+    SignInBody,
 )
 from app.schemas.fleet import DriverLocation, DriverState
 from app.schemas.gig import (
@@ -166,63 +165,43 @@ logger = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Auth (screens 1a/1b) - the only two endpoints in this router that don't
-# require get_current_driver, since their whole point is to produce a token.
+# Auth (screen 1a) - the only endpoint in this router that doesn't require
+# get_current_driver, since its whole point is to produce a token.
 # ---------------------------------------------------------------------------
-
 
 _SWITCHED_OFF = "This driver account has been switched off - talk to your dispatcher"
 
 
-@router.post("/auth/request-otp", response_model=RequestOtpResult)
-async def request_otp(body: RequestOtpBody, session: AsyncSession = Depends(get_db)) -> RequestOtpResult:
-    otp_store = OtpStore()
+@router.post("/auth/sign-in", response_model=AuthToken)
+async def sign_in(
+    body: SignInBody, request: Request, session: AsyncSession = Depends(get_db)
+) -> AuthToken:
+    """Trade a sign-in code from the ops console for a session on this phone.
+
+    Replaces the texted code, so signing in needs no SMS provider. A dispatcher
+    issues the code (`POST /admin/drivers/{id}/sign-in-code`) and the driver
+    scans it or types it; see app/driver_auth/sign_in_codes.py.
+
+    One answer for every code that does not work - unknown, used, replaced by a
+    newer one, or expired - so a guess learns nothing about which.
+    """
     try:
-        # Charged before the existence check below, not after - otherwise
-        # the 404/200 distinction on an unthrottled endpoint is a phone-
-        # number-enumeration oracle for who's a registered driver.
-        await otp_store.check_rate_limit(body.phone)
-    except OtpRateLimitExceeded as exc:
+        await sign_in_codes.charge_attempt(client_ip(request))
+    except sign_in_codes.SignInAttemptsExceeded as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
 
-    result = await session.execute(select(Driver.is_active).where(Driver.phone == body.phone))
-    is_active = result.scalar_one_or_none()
-    if is_active is None:
-        # Drivers are provisioned by ops, not self-registered - see 1a's
-        # "Apply to drive" annotation (out of app scope).
-        raise HTTPException(status_code=404, detail="No driver registered with this phone number")
-    if not is_active:
-        raise HTTPException(status_code=403, detail=_SWITCHED_OFF)
-
-    in_development = settings.environment == "development"
-    if not twilio_sms_configured() and not in_development:
-        # Without SMS the only way out for the code is this response, and
-        # then anyone who knows a driver's number could sign in as them.
-        logger.warning("driver_sign_in_unavailable", reason="Twilio SMS is not configured")
+    driver_id = await sign_in_codes.redeem_code(session, body.code, body.device_id)
+    if driver_id is None:
+        await session.rollback()
         raise HTTPException(
-            status_code=503,
-            detail="Sign-in codes can't be sent right now - let your dispatcher know",
+            status_code=401,
+            detail="That code doesn't work. Ask your dispatcher for a new one.",
         )
-
-    issued = await otp_store.issue(body.phone, skip_rate_limit_check=True)
-    # Local development has no SMS provider, so it's the one place the code comes back.
-    debug_code = issued.code if in_development and not issued.sent_via_sms else None
-    return RequestOtpResult(ok=True, debug_code=debug_code)
-
-
-@router.post("/auth/verify-otp", response_model=AuthToken)
-async def verify_otp(body: VerifyOtpBody, session: AsyncSession = Depends(get_db)) -> AuthToken:
-    if not await OtpStore().verify(body.phone, body.code):
-        raise HTTPException(status_code=401, detail="Invalid or expired code")
-
-    result = await session.execute(select(Driver).where(Driver.phone == body.phone))
-    driver = result.scalar_one_or_none()
-    if driver is None:
-        raise HTTPException(status_code=404, detail="No driver registered with this phone number")
-    if not driver.is_active:
-        # Checked here as well as at request-otp: signing in clears a device's
-        # revocation below, so a code issued before the switch-off must not
-        # bring a departed driver's phone back.
+    driver = await session.get(Driver, driver_id)
+    if driver is None or not driver.is_active:
+        # A code issued before the switch-off must not bring a departed
+        # driver's phone back. Rolled back, so the code is not spent either.
+        await session.rollback()
         raise HTTPException(status_code=403, detail=_SWITCHED_OFF)
 
     now = datetime.now(timezone.utc)
@@ -240,12 +219,13 @@ async def verify_otp(body: VerifyOtpBody, session: AsyncSession = Depends(get_db
     else:
         device.last_seen_at = now
         device.device_name = body.device_name or device.device_name
-        # Re-verifying OTP is itself re-proof of identity - if this device
-        # was previously revoked (e.g. "not my phone anymore" turned out to
-        # be wrong, or a driver got their phone back), a fresh OTP clears it.
+        # A code from ops is itself proof of identity - if this device was
+        # revoked (a phone reported lost and then found), signing in again
+        # with a fresh code clears it. The code history records who issued it.
         device.revoked_at = None
     await session.commit()
 
+    logger.info("driver_signed_in", driver_id=str(driver.id), device_id=body.device_id)
     return AuthToken(access_token=issue_token(str(driver.id), str(driver.hub_id), body.device_id))
 
 
@@ -255,7 +235,7 @@ async def refresh_token(
 ) -> AuthToken:
     """
     Lets a driver's session slide forward indefinitely on each app open
-    without redoing OTP, as long as their device isn't revoked and the driver
+    without a new sign-in code, as long as their device isn't revoked and the driver
     hasn't been switched off (both checked by get_current_driver) - the
     existing ~month-long token expiry already outlives any single shift,
     so this isn't fixing a TTL problem, it's what the client calls after a
@@ -322,7 +302,7 @@ async def register_push_token(
     """Called once per app launch after sign-in (docs/ROADMAP.md A1) so
     app/messaging/job_offer_notifications.py has somewhere real to send a
     new-job-offer push. `body.device_id` must already have a DriverDevice
-    row - verify_otp creates one for every device the moment it signs in,
+    row - sign_in creates one for every device the moment it signs in,
     so a call here for a device that was never signed in is a genuine
     404, not a race to handle."""
     result = await session.execute(

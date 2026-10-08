@@ -18,7 +18,6 @@ import type {
   JobOffer,
   Message,
   PodMethod,
-  RequestOtpResult,
   ReturnItem,
   Route,
   TripSummary,
@@ -85,16 +84,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  requestOtp: (phone: string) =>
-    request<RequestOtpResult>('/driver/auth/request-otp', {
+  // The code a dispatcher issued in the ops console, typed or scanned. No text
+  // message is involved, so signing in needs no SMS provider.
+  signIn: (code: string, deviceId: string, deviceName: string | null) =>
+    request<AuthToken>('/driver/auth/sign-in', {
       method: 'POST',
-      body: JSON.stringify({ phone }),
-    }),
-
-  verifyOtp: (phone: string, code: string, deviceId: string, deviceName?: string) =>
-    request<AuthToken>('/driver/auth/verify-otp', {
-      method: 'POST',
-      body: JSON.stringify({ phone, code, device_id: deviceId, device_name: deviceName }),
+      body: JSON.stringify({ code, device_id: deviceId, device_name: deviceName }),
     }),
 
   refreshToken: () => request<AuthToken>('/driver/auth/refresh', { method: 'POST' }),

@@ -55,6 +55,10 @@ APP = ROOT / "app"
 # stratification. Resolution, merging, node class and the profile store are not
 # called from anywhere an order passes through.
 KNOWN_ORPHANS: dict[str, str] = {
+    # The reference check a client's webhook consumer implements (docs/WEBHOOKS.md);
+    # LMX signs and never verifies. Hidden until October 2026 because the texted
+    # sign-in code's store also had a `verify`, and this check matches by name.
+    "verify": "F4: the consumer-side check docs/WEBHOOKS.md tells clients to implement",
     # REC-3 - the ledger is written now, by `record_delivery_outcomes` from
     # `app/api/driver_routes.py` on every completed dropoff. What remains
     # unwired is the reading and correcting of it.
@@ -289,7 +293,8 @@ def test_the_allowlist_does_not_outlive_the_debt():
 @pytest.mark.parametrize("name,reason", sorted(KNOWN_ORPHANS.items()))
 def test_every_allowlisted_orphan_names_its_roadmap_item(name, reason):
     """A reason without an item is a shrug. The point of writing the debt down
-    is that somebody can find the row it belongs to."""
-    assert re.match(r"^[A-Z]{3}-\d+:", reason), (
+    is that somebody can find the row it belongs to. A 1.5 id (`REC-3`), or a
+    1.0 id (`F4`) for work `docs/ROADMAP.md` still owns."""
+    assert re.match(r"^([A-Z]{2,3}-\d+|[A-Z]\d+):", reason), (
         f"{name}'s reason must start with a roadmap ID, e.g. 'REC-3: ...' - got {reason!r}"
     )

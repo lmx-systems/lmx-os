@@ -11,7 +11,7 @@ import type { ColorScheme } from '../theme';
 // cancelled, or the device is temporarily locked out (too many attempts) -
 // distinct from the sign-in flow, since the driver is already
 // authenticated and this is purely a "prove it's you holding the phone"
-// gate. Always offers a way out (sign out -> phone/OTP) so a failed
+// gate. Always offers a way out (sign out -> sign-in code) so a failed
 // biometric attempt never strands a driver on a dead screen.
 export function BiometricLockScreen() {
   const colors = useThemeColors();

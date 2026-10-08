@@ -1,8 +1,8 @@
 """
-Device-bound driver auth: verify-otp upserts a DriverDevice row and binds
+Device-bound driver auth: sign-in upserts a DriverDevice row and binds
 the issued token's device_id claim; a revoked device's token stops working
 on its very next request (not just at refresh); refresh slides the
-session forward without redoing OTP; re-verifying OTP un-revokes a device.
+session forward without a new code; signing in again un-revokes a device.
 """
 import uuid
 
@@ -14,17 +14,15 @@ from app.api.driver_routes import (
     list_my_devices,
     refresh_token,
     register_push_token,
-    request_otp,
     revoke_my_device,
-    verify_otp,
 )
-from app.config import settings
 from app.driver_auth.dependencies import get_current_driver
 from app.driver_auth.tokens import decode_token
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.hub import Hub
-from app.schemas.driver_auth import PushTokenBody, RequestOtpBody, VerifyOtpBody
+from app.schemas.driver_auth import PushTokenBody
+from tests.integration.conftest import sign_in_driver
 
 pytestmark = pytest.mark.integration
 
@@ -39,20 +37,11 @@ async def _seed_driver(db_session):
 
 
 async def _sign_in(db_session, phone: str, device_id: str) -> str:
-    # Signs in the way local development does: no SMS provider, so the code
-    # comes back in the response. Anywhere else it's only ever texted - see
-    # test_sign_in_code_stays_on_the_server.py.
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(settings, "environment", "development")
-        otp = await request_otp(RequestOtpBody(phone=phone), session=db_session)
-    token = await verify_otp(
-        VerifyOtpBody(phone=phone, code=otp.debug_code, device_id=device_id, device_name="Test Phone"),
-        session=db_session,
-    )
-    return token.access_token
+    driver_id = await db_session.scalar(select(Driver.id).where(Driver.phone == phone))
+    return await sign_in_driver(db_session, driver_id, device_id)
 
 
-async def test_verify_otp_creates_a_driver_device_row(db_session, real_redis_client):
+async def test_signing_in_creates_a_driver_device_row(db_session, real_redis_client):
     hub_id, driver_id = await _seed_driver(db_session)
     await _sign_in(db_session, "+15555550300", "device-a")
 
@@ -93,7 +82,7 @@ async def test_refresh_issues_a_new_token_for_the_same_device(db_session, real_r
     assert reauthed.driver_id == str(driver_id)
 
 
-async def test_reverifying_otp_unrevokes_a_device(db_session, real_redis_client):
+async def test_signing_in_again_unrevokes_a_device(db_session, real_redis_client):
     hub_id, driver_id = await _seed_driver(db_session)
     token = await _sign_in(db_session, "+15555550300", "device-a")
     authed = await get_current_driver(authorization=f"Bearer {token}")
@@ -103,8 +92,8 @@ async def test_reverifying_otp_unrevokes_a_device(db_session, real_redis_client)
         await get_current_driver(authorization=f"Bearer {token}")
 
     # Signing in again with the same device_id (e.g. the driver got their
-    # phone back) clears the revocation - a fresh OTP is itself re-proof
-    # of identity.
+    # phone back) clears the revocation - a fresh code from ops is itself
+    # re-proof of identity.
     new_token = await _sign_in(db_session, "+15555550300", "device-a")
     reauthed = await get_current_driver(authorization=f"Bearer {new_token}")
     assert reauthed.driver_id == str(driver_id)

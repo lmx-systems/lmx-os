@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from dataclasses import replace
 from datetime import date
 
@@ -247,3 +248,46 @@ async def make_driver_compliant(db_session, driver_id, *, expires_in_days: int =
             )
         )
     await db_session.commit()
+
+
+def fake_request(ip: str | None = None):
+    """A bare request for calling a route function that reads the caller's address.
+
+    A fresh address per call by default, so per-address limits never couple one
+    sign-in in a test to another.
+    """
+    from starlette.requests import Request
+
+    if ip is None:
+        n = uuid.uuid4().int
+        ip = f"198.51.{(n >> 8) % 256}.{n % 256}"
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/",
+            "headers": [],
+            "query_string": b"",
+            "client": (ip, 50000),
+        }
+    )
+
+
+async def sign_in_driver(db_session, driver_id, device_id: str, device_name: str = "Test Phone") -> str:
+    """Sign a driver in the way the app does: ops issues a code, the phone redeems it.
+
+    Returns the session token. Replaces the texted-code helpers, which leaned on
+    local development handing the code back in the response.
+    """
+    from app.api.driver_routes import sign_in
+    from app.driver_auth import sign_in_codes
+    from app.schemas.driver_auth import SignInBody
+
+    issued = await sign_in_codes.issue_code(db_session, driver_id, None)
+    await db_session.commit()
+    token = await sign_in(
+        SignInBody(code=issued.code, device_id=device_id, device_name=device_name),
+        request=fake_request(),
+        session=db_session,
+    )
+    return token.access_token

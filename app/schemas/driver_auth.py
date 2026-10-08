@@ -1,27 +1,15 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
-class RequestOtpBody(BaseModel):
-    phone: str
-
-
-class RequestOtpResult(BaseModel):
-    ok: bool
-    # Only ever set in local development with no SMS provider - see
-    # app/driver_auth/otp_store.py's docstring. Any other backend texts the
-    # code or refuses to issue one; it never returns it here.
-    debug_code: str | None = None
-
-
-class VerifyOtpBody(BaseModel):
-    phone: str
-    code: str
+class SignInBody(BaseModel):
+    # The code from the ops console: typed, grouped or not, or the QR payload.
+    code: str = Field(min_length=1, max_length=64)
     # Stable per-install id, generated once client-side and persisted in
     # SecureStore - not an OS advertising id. Lets a specific device's
     # session be revoked later without invalidating every device this
     # driver has ever signed in on.
-    device_id: str
-    device_name: str | None = None
+    device_id: str = Field(min_length=1, max_length=128)
+    device_name: str | None = Field(default=None, max_length=120)
 
 
 class AuthToken(BaseModel):

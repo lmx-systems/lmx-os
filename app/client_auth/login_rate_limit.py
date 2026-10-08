@@ -2,10 +2,9 @@
 Login-attempt rate limiting for the client portal (Phase 8).
 
 Same "Redis counter with an NX-guarded TTL" shape as
-app/driver_auth/otp_store.py's issuance limiter - a client user's email
-is a fixed, guessable target (unlike a driver's rotating 4-digit OTP),
-which makes unthrottled login a more attractive brute-force surface than
-the one that limiter already closes.
+app/driver_auth/sign_in_codes.py's attempt limiter - a client user's email
+is a fixed, guessable target, which makes unthrottled login an attractive
+brute-force surface.
 """
 from __future__ import annotations
 
@@ -30,7 +29,7 @@ class LoginRateLimiter:
     async def check_and_increment(self, email: str) -> None:
         """Raises LoginRateLimitExceeded once `email` has hit the cap
         within the current window. Call before verifying the password,
-        same ordering app/driver_auth/otp_store.py uses for issuance."""
+        same ordering app/driver_auth/sign_in_codes.py uses for sign-in."""
         async with timed_operation("client_auth.login_rate_limit"):
             pipe = self._redis.pipeline(transaction=True)
             pipe.incr(_key(email))

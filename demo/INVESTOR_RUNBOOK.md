@@ -67,8 +67,8 @@ docker compose exec app python -m scripts.create_client_user \
 > up, not by any test.
 
 **The handset:** same wifi, then set the server address in the app's Profile
-screen to `http://<your LAN ip>:8000`. Sign in as the seeded driver; the OTP
-comes back in the response because Twilio is unconfigured.
+screen to `http://<your LAN ip>:8000`. Sign in as the seeded driver by scanning
+the sign-in code from the console's driver devices panel (New sign-in code).
 
 ### Which build, and what each one can show
 

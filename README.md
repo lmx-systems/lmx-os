@@ -131,7 +131,7 @@ app/
   client_api/     Per-client API keys for external order submission
   client_auth/    Client portal accounts, sessions, password reset
   ops_auth/       Internal ops accounts and roles (admin / dispatcher / viewer)
-  driver_auth/    Driver OTP and device-bound sessions
+  driver_auth/    Driver sign-in codes and device-bound sessions
   storage/        Presigned uploads for proof-of-delivery media
   health/         Liveness checks that alerting probes read
   events/         Distributed per-hub event bus (Redis) - triggers dispatch off real

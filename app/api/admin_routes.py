@@ -47,6 +47,8 @@ from app.models.invoice import Invoice
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
 from app.models.driver import EMPLOYMENT_TYPES, VEHICLE_TYPES, Driver
 from app.models.driver_shift_event import DriverShiftEvent
+from app.models.driver_sign_in_code import DriverSignInCode
+from app.driver_auth import sign_in_codes
 from app.compliance.driver_documents import evaluate_driver_documents
 from app.reporting.cod_disputes import build_cod_dispute_report
 from app.models.driver_device import DriverDevice
@@ -67,6 +69,7 @@ from app.learning_loop.promotion import (
     promote_proposed_rule,
 )
 from app.fleet_state.manager import FleetStateManager
+from app.models.ops_user import OpsUser
 from app.models.order import Order
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
@@ -81,6 +84,8 @@ from app.schemas.admin import (
     AdminClientView,
     AdminDriverDeviceView,
     AdminDriverView,
+    DriverSignInCodeIssued,
+    DriverSignInCodeView,
     ClientOnboardingBody,
     ClientOnboardingResult,
     DriverOnboardingBody,
@@ -356,18 +361,19 @@ async def onboard_driver(
     """Provision a driver (`docs/ROADMAP_AUDIT_2026-09.md`).
 
     **Nothing created one before this.** Every `Driver` row was a hand-written
-    insert — while the OTP path's own comment says *"drivers are provisioned by
-    ops, not self-registered"*. The provisioning it refers to did not exist, so
-    the sentence described an intention rather than a route.
+    insert — while the sign-in path's own comment said *"drivers are provisioned
+    by ops, not self-registered"*. The provisioning it referred to did not
+    exist, so the sentence described an intention rather than a route.
 
     Admin, like client onboarding: it creates the identity a person logs in
-    with, and every capacity, payroll and document decision hangs off it.
+    with, and every capacity, payroll and document decision hangs off it. The
+    result carries the driver's first sign-in code, so onboarding ends with the
+    driver able to sign in.
 
     A duplicate phone is a 409 rather than an integrity error, because it is the
-    likeliest mistake here and the consequence is specific: OTP looks a driver
-    up by number with `scalar_one_or_none`, so a second row with the same one
-    locks **both** drivers out. Migration `0063` is what actually guarantees it;
-    this is the readable version of the same refusal.
+    likeliest mistake here. Phone is how dispatch reaches a driver, and the
+    masked-calling and support paths match on it. Migration `0063` is what
+    actually guarantees it; this is the readable version of the same refusal.
     """
     if body.employment_type not in EMPLOYMENT_TYPES:
         raise HTTPException(
@@ -405,6 +411,8 @@ async def onboard_driver(
         hourly_rate_cents=body.hourly_rate_cents,
     )
     session.add(driver)
+    await session.flush()
+    first_code = await sign_in_codes.issue_code(session, driver.id, uuid.UUID(_admin.ops_user_id))
     await session.commit()
 
     logger.info(
@@ -423,7 +431,88 @@ async def onboard_driver(
         # falls back to a placeholder, and a driver paid from a placeholder is
         # a number somebody will later have to defend.
         hourly_rate_is_placeholder=driver.hourly_rate_cents is None,
+        sign_in_code=_issued_view(first_code),
     )
+
+
+def _issued_view(issued: sign_in_codes.IssuedCode) -> DriverSignInCodeIssued:
+    return DriverSignInCodeIssued(
+        code=issued.code,
+        display=issued.display,
+        qr_payload=issued.qr_payload,
+        expires_at=issued.expires_at,
+    )
+
+
+@router.post("/drivers/{driver_id}/sign-in-code", response_model=DriverSignInCodeIssued)
+async def admin_issue_sign_in_code(
+    driver_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> DriverSignInCodeIssued:
+    """A new sign-in code for this driver; any older unused one stops working.
+
+    How a driver signs in on a new phone, or again after a sign-out or a
+    revoked device. Replaces the texted code, so signing in needs no SMS
+    provider. Hand it over in person where you can: whoever holds the code
+    signs in as this driver.
+
+    Refused for a switched-off driver, who could not use it anyway.
+    """
+    driver = await _driver_or_404(session, driver_id)
+    if not driver.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{driver.name} is switched off. Switch them back on first.",
+        )
+    issued = await sign_in_codes.issue_code(session, driver.id, uuid.UUID(_admin.ops_user_id))
+    await session.commit()
+    logger.info("driver_sign_in_code_issued", driver_id=str(driver.id), issued_by=_admin.ops_user_id)
+    return _issued_view(issued)
+
+
+@router.get("/drivers/{driver_id}/sign-in-codes", response_model=list[DriverSignInCodeView])
+async def admin_list_sign_in_codes(
+    driver_id: str,
+    session: AsyncSession = Depends(get_db),
+    _admin: AuthedOpsUser = Depends(require_admin),
+) -> list[DriverSignInCodeView]:
+    """Every code issued for this driver, newest first, without the codes.
+
+    Answers "who let that phone in": each row names who issued the code and
+    which device used it.
+    """
+    driver = await _driver_or_404(session, driver_id)
+    rows = await sign_in_codes.code_history(session, driver.id)
+    issuer_ids = {row.issued_by_ops_user_id for row in rows if row.issued_by_ops_user_id}
+    names: dict[uuid.UUID, str] = {}
+    if issuer_ids:
+        result = await session.execute(
+            select(OpsUser.id, OpsUser.name).where(OpsUser.id.in_(issuer_ids))
+        )
+        names = {row_id: name for row_id, name in result.all()}
+    now = datetime.now(timezone.utc)
+
+    def status(row: DriverSignInCode) -> str:
+        if row.redeemed_at is not None:
+            return "redeemed"
+        if row.superseded_at is not None:
+            return "replaced"
+        if row.expires_at <= now:
+            return "expired"
+        return "open"
+
+    return [
+        DriverSignInCodeView(
+            issued_at=row.created_at,
+            issued_by=names.get(row.issued_by_ops_user_id) if row.issued_by_ops_user_id else None,
+            expires_at=row.expires_at,
+            status=status(row),
+            redeemed_at=row.redeemed_at,
+            redeemed_device_id=row.redeemed_device_id,
+        )
+        for row in rows
+    ]
 
 
 @router.get("/drivers/{driver_id}/devices", response_model=list[AdminDriverDeviceView])

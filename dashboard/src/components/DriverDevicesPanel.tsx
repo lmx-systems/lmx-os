@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Card } from './ui/Card'
 import { api } from '../lib/api'
-import type { AdminDriver, DriverDevice } from '../lib/types'
+import type { AdminDriver, DriverDevice, DriverSignInCode, DriverSignInCodeRecord } from '../lib/types'
+import { SignInCode } from './SignInCode'
 
 /**
  * Which devices a driver is signed in on, and revoking one for them
@@ -50,16 +51,37 @@ export function DriverDevicesPanel({
   const [drivers, setDrivers] = useState<AdminDriver[] | null>(null)
   const [driverId, setDriverId] = useState('')
   const [devices, setDevices] = useState<DriverDevice[] | null>(null)
+  const [issued, setIssued] = useState<DriverSignInCode | null>(null)
+  const [history, setHistory] = useState<DriverSignInCodeRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
   async function load(id: string) {
     setError(null)
     try {
-      setDevices(await api.listDriverDevices(id))
+      const [deviceList, codes] = await Promise.all([
+        api.listDriverDevices(id),
+        api.signInCodeHistory(id),
+      ])
+      setDevices(deviceList)
+      setHistory(codes)
     } catch (e) {
       setError((e as Error).message)
       setDevices(null)
+      setHistory(null)
+    }
+  }
+
+  async function issueCode(driver: AdminDriver) {
+    setBusy('code')
+    setError(null)
+    try {
+      setIssued(await api.issueSignInCode(driver.driver_id))
+      setHistory(await api.signInCodeHistory(driver.driver_id))
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -79,8 +101,14 @@ export function DriverDevicesPanel({
   }, [hubId])
 
   useEffect(() => {
+    // A code belongs to the driver it was issued for; never leave one on
+    // screen under somebody else's name.
+    setIssued(null)
     if (driverId) void load(driverId)
-    else setDevices(null)
+    else {
+      setDevices(null)
+      setHistory(null)
+    }
   }, [driverId])
 
   const selected = drivers?.find((d) => d.driver_id === driverId) ?? null
@@ -172,6 +200,15 @@ export function DriverDevicesPanel({
               ? 'Active.'
               : `Switched off ${when(selected.deactivated_at)}. No session works and no sign-in succeeds.`}
           </p>
+          {selected.is_active && (
+            <button
+              disabled={busy === 'code'}
+              onClick={() => issueCode(selected)}
+              className="shrink-0 rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-primary)] disabled:opacity-40"
+            >
+              New sign-in code
+            </button>
+          )}
           {selected.is_active ? (
             <button
               disabled={busy === 'driver'}
@@ -191,6 +228,8 @@ export function DriverDevicesPanel({
           )}
         </div>
       )}
+
+      {selected && issued && <SignInCode name={selected.name} code={issued} />}
 
       {driverId && devices === null && !error && (
         <p className="text-[12px] text-[var(--text-muted)]">loading…</p>
@@ -236,6 +275,25 @@ export function DriverDevicesPanel({
             </li>
           ))}
         </ul>
+      )}
+      {history && history.length > 0 && (
+        <div className="mt-3">
+          <p className="mb-1 text-[11px] font-medium text-[var(--text-muted)]">Sign-in codes</p>
+          <ul className="space-y-1">
+            {history.map((record) => (
+              <li key={record.issued_at} className="text-[11.5px] text-[var(--text-secondary)]">
+                {when(record.issued_at)} by {record.issued_by ?? 'onboarding'} ·{' '}
+                {record.status === 'redeemed'
+                  ? `used ${when(record.redeemed_at)} on ${record.redeemed_device_id ?? 'a device'}`
+                  : record.status === 'replaced'
+                    ? 'replaced by a newer code'
+                    : record.status === 'expired'
+                      ? 'expired unused'
+                      : `open until ${when(record.expires_at)}`}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </Card>
   )

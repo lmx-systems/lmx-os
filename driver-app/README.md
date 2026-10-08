@@ -33,11 +33,11 @@ auth - no extra header needed from this app.
 
 ## What's real vs. stubbed in this pass
 
-- **Auth**: real phone + OTP + JWT session against the backend. The code
-  is texted through Twilio. Against a backend in local development with no
-  SMS provider, it's shown on-screen instead (`debug_code` in the API
-  response). Any other backend never sends it back, and refuses sign-in
-  until Twilio is configured (see `app/driver_auth/otp_store.py`).
+- **Auth**: a sign-in code from the ops console, scanned as a QR code or
+  typed, traded for a device-bound JWT session (`POST /driver/auth/sign-in`,
+  see `app/driver_auth/sign_in_codes.py`). No text message is involved, so
+  it works the same against any backend. An admin issues the code at
+  onboarding or from the console's driver devices panel.
 - **Scan parcels (1k)**: real `expo-camera` barcode scanning
   (`src/media/BarcodeScannerModal.tsx`), calling the same
   `POST /driver/stops/{id}/scan` endpoint a manual count always did - the

@@ -2,7 +2,7 @@
 
 Same "Redis counter with an NX-guarded TTL" shape as
 `app/client_auth/signup_rate_limit.py`, `login_rate_limit.py` and
-`app/driver_auth/otp_store.py`.
+`app/driver_auth/sign_in_codes.py`.
 
 **This surface deserves it for a reason neither of those does.** Signup fills a
 review queue with rows a person has to dismiss; that is expensive and visible.

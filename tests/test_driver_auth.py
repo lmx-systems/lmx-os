@@ -1,16 +1,24 @@
 """
-OTP store (fakeredis, same pattern as tests/test_fleet_state_and_hold_queue.py)
-and JWT token round-trip - the two pieces of app/driver_auth/ that don't
-need a real Postgres driver row to exercise.
+Sign-in code format and JWT token round-trip - the pieces of app/driver_auth/
+that don't need a real Postgres driver row to exercise. Issuing and redeeming
+codes against the database is tests/integration/test_driver_sign_in_codes.py.
 """
 from unittest.mock import patch
 
 import pytest
 from fakeredis import aioredis as fakeredis_aioredis
 
-import app.driver_auth.otp_store as otp_store_module
-import app.messaging.sms_client as sms_client_module
-from app.driver_auth.otp_store import MAX_ISSUE_ATTEMPTS, MAX_VERIFY_ATTEMPTS, OtpRateLimitExceeded, OtpStore
+import app.driver_auth.sign_in_codes as sign_in_codes_module
+from app.driver_auth.sign_in_codes import (
+    ALPHABET,
+    CODE_LENGTH,
+    MAX_ATTEMPTS_PER_IP,
+    IssuedCode,
+    SignInAttemptsExceeded,
+    charge_attempt,
+    code_hmac,
+    normalize,
+)
 from app.driver_auth.tokens import (
     InvalidDriverToken,
     assert_driver_jwt_secret_configured,
@@ -19,184 +27,49 @@ from app.driver_auth.tokens import (
 )
 
 
-@pytest.fixture
-def fake_redis(monkeypatch):
+def test_a_code_has_about_fifty_bits():
+    """The texted code was four digits: guessable in about a day under its own
+    limits. Ten characters from 31 is not."""
+    assert CODE_LENGTH == 10 and len(ALPHABET) == 31
+    assert len(ALPHABET) ** CODE_LENGTH > 2**49
+
+
+def test_the_alphabet_leaves_out_characters_people_misread():
+    assert not set("01OIL") & set(ALPHABET)
+
+
+def test_new_codes_use_only_the_alphabet_and_differ():
+    codes = {sign_in_codes_module._new_code() for _ in range(200)}
+    assert len(codes) == 200
+    assert all(len(c) == CODE_LENGTH and set(c) <= set(ALPHABET) for c in codes)
+
+
+def test_what_a_driver_types_or_scans_normalizes_to_the_code():
+    issued = IssuedCode(code="ABCDE23456", expires_at=None)  # type: ignore[arg-type]
+    assert issued.display == "ABCDE-23456"
+    for typed in ("ABCDE23456", "abcde-23456", " ABCDE 23456 ", issued.qr_payload, issued.display):
+        assert normalize(typed) == "ABCDE23456"
+
+
+def test_only_a_keyed_hash_is_stored(monkeypatch):
+    """A plain hash of a short code could be reversed by trying every code; the
+    key makes that need the server's secret too."""
+    digest = code_hmac("ABCDE23456")
+    assert "ABCDE23456" not in digest and len(digest) == 64
+    monkeypatch.setattr(sign_in_codes_module.settings, "driver_jwt_secret", "another-secret")
+    assert code_hmac("ABCDE23456") != digest
+
+
+@pytest.mark.asyncio
+async def test_sign_in_attempts_are_capped_per_address(monkeypatch):
     client = fakeredis_aioredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr(otp_store_module, "get_client", lambda: client)
-    return client
-
-
-@pytest.mark.asyncio
-async def test_otp_issue_then_verify_succeeds(fake_redis):
-    store = OtpStore()
-    issued = await store.issue("+15555550100")
-    assert len(issued.code) == 4
-
-    assert await store.verify("+15555550100", issued.code) is True
-
-
-@pytest.mark.asyncio
-async def test_otp_verify_is_single_use(fake_redis):
-    store = OtpStore()
-    issued = await store.issue("+15555550100")
-    assert await store.verify("+15555550100", issued.code) is True
-    # Replaying the same code a second time must fail - the key was deleted.
-    assert await store.verify("+15555550100", issued.code) is False
-
-
-@pytest.mark.asyncio
-async def test_otp_verify_rejects_wrong_code(fake_redis):
-    store = OtpStore()
-    await store.issue("+15555550100")
-    assert await store.verify("+15555550100", "0000") is False
-
-
-@pytest.mark.asyncio
-async def test_otp_verify_unknown_phone_fails_closed(fake_redis):
-    store = OtpStore()
-    assert await store.verify("+15555559999", "1234") is False
-
-
-@pytest.mark.asyncio
-async def test_otp_locks_out_after_max_failed_attempts(fake_redis):
-    store = OtpStore()
-    issued = await store.issue("+15555550100")
-    wrong_code = "0000" if issued.code != "0000" else "1111"
-
-    for _ in range(MAX_VERIFY_ATTEMPTS):
-        assert await store.verify("+15555550100", wrong_code) is False
-
-    # Even the real code no longer works - the key was invalidated after
-    # the attempt cap was hit.
-    assert await store.verify("+15555550100", issued.code) is False
-
-
-@pytest.mark.asyncio
-async def test_otp_issuance_is_rate_limited(fake_redis):
-    store = OtpStore()
-    for _ in range(MAX_ISSUE_ATTEMPTS):
-        await store.issue("+15555550100")
-
-    with pytest.raises(OtpRateLimitExceeded):
-        await store.issue("+15555550100")
-
-
-@pytest.mark.asyncio
-async def test_otp_issuance_rate_limit_is_per_phone_number(fake_redis):
-    store = OtpStore()
-    for _ in range(MAX_ISSUE_ATTEMPTS):
-        await store.issue("+15555550100")
-
-    # A different phone number has its own independent budget.
-    issued = await store.issue("+15555550200")
-    assert len(issued.code) == 4
-
-
-@pytest.mark.asyncio
-async def test_check_rate_limit_can_be_charged_independently_of_issue(fake_redis):
-    """app/api/driver_routes.py's request_otp charges this before checking
-    whether the phone belongs to a real driver, so a phone-number-enumeration
-    attempt against unregistered numbers still burns the same budget."""
-    store = OtpStore()
-    for _ in range(MAX_ISSUE_ATTEMPTS):
-        await store.check_rate_limit("+15555550100")
-
-    with pytest.raises(OtpRateLimitExceeded):
-        await store.check_rate_limit("+15555550100")
-
-
-@pytest.mark.asyncio
-async def test_issue_with_skip_rate_limit_check_does_not_consume_the_budget(fake_redis):
-    store = OtpStore()
-    await store.check_rate_limit("+15555550100")  # 1/3 used
-
-    # Simulates request_otp's real call shape: rate limit already charged
-    # once above, then issue() must not charge it a second time.
-    for _ in range(5):
-        issued = await store.issue("+15555550100", skip_rate_limit_check=True)
-        assert len(issued.code) == 4
-
-
-@pytest.mark.asyncio
-async def test_issue_sends_via_real_sms_client_when_twilio_is_configured(fake_redis, monkeypatch):
-    """Regression test: issue() used to hardcode sent_via_sms=False in its
-    returned result regardless of whether Twilio was actually configured,
-    which meant app/api/driver_routes.py's request_otp always echoed the
-    real OTP back in debug_code - even in production with real Twilio
-    credentials, since no real send ever happened either. Both halves of
-    that bug are covered here: the code must actually be sent, and the
-    result must honestly report that it was."""
-    monkeypatch.setattr(otp_store_module.settings, "twilio_account_sid", "AC-fake")
-    monkeypatch.setattr(otp_store_module.settings, "twilio_auth_token", "fake-token")
-    monkeypatch.setattr(otp_store_module.settings, "twilio_from_number", "+15555550001")
-
-    sent = {}
-
-    class FakeSmsClient:
-        async def send(self, to, body):
-            sent["to"] = to
-            sent["body"] = body
-            return "SM-fake"
-
-    monkeypatch.setattr(otp_store_module, "get_sms_client", lambda: FakeSmsClient())
-
-    store = OtpStore()
-    issued = await store.issue("+15555550100")
-
-    assert issued.sent_via_sms is True
-    assert sent["to"] == "+15555550100"
-    assert issued.code in sent["body"]
-
-
-@pytest.mark.asyncio
-async def test_issue_does_not_send_via_sms_when_twilio_is_unconfigured(fake_redis):
-    store = OtpStore()
-    issued = await store.issue("+15555550100")
-    assert issued.sent_via_sms is False
-
-
-@pytest.mark.parametrize("account_sid", ["AC-fake", None])
-@pytest.mark.parametrize("auth_token", ["fake-token", None])
-@pytest.mark.parametrize("from_number", ["+15555550001", None])
-def test_sign_in_and_the_sms_client_agree_on_whether_a_text_goes_out(
-    monkeypatch, account_sid, auth_token, from_number
-):
-    """request_otp refuses, or hands the code back, on twilio_sms_configured();
-    the text itself goes through get_sms_client(). If they disagreed, a
-    driver would wait for a code nobody sent."""
-    monkeypatch.setattr(sms_client_module.settings, "twilio_account_sid", account_sid)
-    monkeypatch.setattr(sms_client_module.settings, "twilio_auth_token", auth_token)
-    monkeypatch.setattr(sms_client_module.settings, "twilio_from_number", from_number)
-
-    client = sms_client_module.get_sms_client()
-
-    assert sms_client_module.twilio_sms_configured() == (client.engine_name == "twilio")
-
-
-@pytest.mark.asyncio
-async def test_issue_never_logs_the_code_outside_development(fake_redis, monkeypatch):
-    """A deployed log is read by more people than should be able to sign in
-    as a driver, and it used to carry every unsent code. The code is pinned
-    so the check can't match a digit run in the phone number by chance."""
-    monkeypatch.setattr(otp_store_module.secrets, "randbelow", lambda _: 4242)
-    with patch.object(otp_store_module, "logger") as mock_logger:
-        issued = await OtpStore().issue("+15555550100")
-
-    assert issued.code == "4242"
-    assert mock_logger.method_calls, "an unsent code is still worth a log line"
-    assert not any("4242" in str(call) for call in mock_logger.method_calls)
-
-
-@pytest.mark.asyncio
-async def test_issue_logs_the_code_in_development(fake_redis, monkeypatch):
-    """There the log is the developer's own terminal, and the code has no
-    other way to reach them."""
-    monkeypatch.setattr(otp_store_module.settings, "environment", "development")
-    monkeypatch.setattr(otp_store_module.secrets, "randbelow", lambda _: 4242)
-    with patch.object(otp_store_module, "logger") as mock_logger:
-        await OtpStore().issue("+15555550100")
-
-    assert any("4242" in str(call) for call in mock_logger.method_calls)
+    monkeypatch.setattr(sign_in_codes_module, "get_client", lambda: client)
+    for _ in range(MAX_ATTEMPTS_PER_IP):
+        await charge_attempt("203.0.113.9")
+    with pytest.raises(SignInAttemptsExceeded):
+        await charge_attempt("203.0.113.9")
+    # Another address has its own budget.
+    await charge_attempt("203.0.113.10")
 
 
 def test_issue_and_decode_token_roundtrip():
