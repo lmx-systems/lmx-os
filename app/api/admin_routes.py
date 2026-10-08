@@ -553,7 +553,16 @@ async def admin_deactivate_driver(
     again on a phone ops can see.
     """
     driver = await _driver_or_404(session, driver_id)
+    # Locked to the commit, so a dispatch cycle writing an offer for this
+    # driver (app/optimizer/service.py takes a share lock on the same row) and
+    # the driver's own duty switch either finish before the checks below see
+    # them, or wait and then find the driver switched off.
+    await session.refresh(driver, with_for_update=True)
     if not driver.is_active:
+        # Already off. Still put the fleet state right: a first attempt that
+        # committed and then failed on Redis would otherwise leave the driver
+        # in dispatch's pool for good, with every retry returning here.
+        await _take_off_shift_in_fleet_state(driver)
         return _driver_view(driver)
 
     open_routes = await session.scalar(
@@ -576,7 +585,8 @@ async def admin_deactivate_driver(
             status_code=409,
             detail=(
                 f"{driver.name} still has {' and '.join(held)}. "
-                "Finish or reassign that work before switching them off."
+                "Switch them off once that work is finished. To cut their access "
+                "now, revoke their devices below."
             ),
         )
 
@@ -598,14 +608,19 @@ async def admin_deactivate_driver(
         )
     await session.commit()
 
+    await _take_off_shift_in_fleet_state(driver)
+
+    logger.info("driver_deactivated", driver_id=str(driver.id), hub_id=str(driver.hub_id))
+    return _driver_view(driver)
+
+
+async def _take_off_shift_in_fleet_state(driver: Driver) -> None:
+    """Out of dispatch's pool. Dispatch reads the fleet state, not the row."""
     manager = FleetStateManager()
     state = await manager.get_driver_state(str(driver.hub_id), str(driver.id))
     if state is not None and state.status != "off_shift":
         await manager.upsert_driver_state(state.model_copy(update={"status": "off_shift"}))
         await dispatch_event_bus.publish(str(driver.hub_id), "driver_status_changed")
-
-    logger.info("driver_deactivated", driver_id=str(driver.id), hub_id=str(driver.hub_id))
-    return _driver_view(driver)
 
 
 @router.post("/drivers/{driver_id}/reactivate", response_model=AdminDriverView)

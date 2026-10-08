@@ -80,6 +80,20 @@ export class ApiError extends Error {
   }
 }
 
+// The server's own sentence when it sent one. FastAPI answers an HTTPException
+// with {"detail": "..."}; showing that JSON raw put braces and quotes in front
+// of the ops user. A validation error's detail is a list, which stays as text.
+async function failure(response: Response): Promise<ApiError> {
+  const body = await response.text().catch(() => '')
+  try {
+    const parsed = JSON.parse(body) as { detail?: unknown }
+    if (typeof parsed?.detail === 'string') return new ApiError(response.status, parsed.detail)
+  } catch {
+    // Not JSON: fall through to the raw text.
+  }
+  return new ApiError(response.status, body || response.statusText)
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken()
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -96,10 +110,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     clearToken()
   }
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '')
-    throw new ApiError(response.status, body || response.statusText)
-  }
+  if (!response.ok) throw await failure(response)
   return response.json() as Promise<T>
 }
 
@@ -115,10 +126,7 @@ async function requestVoid(path: string, init?: RequestInit): Promise<void> {
     ...init,
   })
   if (response.status === 401) clearToken()
-  if (!response.ok) {
-    const body = await response.text().catch(() => '')
-    throw new ApiError(response.status, body || response.statusText)
-  }
+  if (!response.ok) throw await failure(response)
 }
 
 export const api = {

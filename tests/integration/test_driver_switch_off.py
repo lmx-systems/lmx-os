@@ -19,19 +19,25 @@ from app.api.admin_routes import (
     admin_reactivate_driver,
     admin_revoke_driver_device,
 )
-from app.api.driver_routes import request_otp, verify_otp
+from app.api.driver_routes import request_otp, update_my_availability, verify_otp
+from app.batch_queue.store import HoldQueueStore
 from app.config import settings
-from app.driver_auth.dependencies import get_current_driver
+from app.driver_auth.dependencies import AuthedDriver, get_current_driver
 from app.fleet_state.manager import FleetStateManager
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.hub import Hub
+from app.models.order import OrderStatus
 from app.models.ops_user import OpsUser
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.ops_auth.dependencies import AuthedOpsUser
+from app.optimizer.service import DispatchOptimizerService
 from app.schemas.driver_auth import RequestOtpBody, VerifyOtpBody
+from app.schemas.driver_app import DriverAvailabilityUpdate
 from app.schemas.fleet import DriverState
+from tests.integration import test_driver_app_integration as driver_app
+from tests.integration.queue_helpers import let_the_hold_run_out
 
 pytestmark = pytest.mark.integration
 
@@ -203,3 +209,62 @@ async def test_the_roster_lists_switched_off_drivers_after_active_ones(db_sessio
     roster = await admin_list_hub_drivers(hub_id=str(hub_id), session=db_session, _admin=admin)
 
     assert [(d.name, d.is_active) for d in roster] == [("Zed Q.", True), ("Ana R.", False)]
+
+
+async def test_a_retried_switch_off_puts_dispatchs_pool_right(db_session, real_redis_client):
+    """A first attempt that committed and then failed on Redis left the driver
+    in dispatch's pool, and every retry returned early. The retry now repairs it."""
+    hub_id, driver_id, admin = await _seed(db_session)
+    manager = FleetStateManager()
+    await manager.upsert_driver_state(
+        DriverState(driver_id=str(driver_id), hub_id=str(hub_id), status="available", capacity_units=5, load_units=0)
+    )
+    driver = await db_session.get(Driver, driver_id)
+    driver.is_active = False
+    await db_session.commit()
+
+    await admin_deactivate_driver(driver_id=str(driver_id), session=db_session, _admin=admin)
+
+    state = await manager.get_driver_state(str(hub_id), str(driver_id))
+    assert state is not None and state.status == "off_shift"
+
+
+async def test_the_duty_switch_refuses_a_driver_switched_off_mid_request(db_session, real_redis_client):
+    """Authenticated a moment before the switch-off, the request must still lose:
+    otherwise the driver goes back on duty and payroll keeps counting."""
+    hub_id, driver_id, _ = await _seed(db_session)
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="phone-a")
+    driver = await db_session.get(Driver, driver_id)
+    driver.is_active = False
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        await update_my_availability(
+            DriverAvailabilityUpdate(status="available"), driver=authed, session=db_session
+        )
+
+    assert exc.value.status_code == 401
+    assert await FleetStateManager().get_driver_state(str(hub_id), str(driver_id)) is None
+
+
+async def test_dispatch_offers_nothing_to_a_driver_switched_off_since_its_snapshot(
+    db_session, real_redis_client
+):
+    """Dispatch plans from the fleet state, which can still say available. The
+    row says otherwise, so the work goes back to the queue and the driver
+    comes out of the pool."""
+    hub_id, _client_id, _shop_id, driver_id, order = await driver_app._seed(db_session)
+    driver = await db_session.get(Driver, driver_id)
+    driver.is_active = False
+    await db_session.commit()
+    await let_the_hold_run_out(hub_id)
+
+    await DispatchOptimizerService().run_cycle(str(hub_id))
+
+    offers = (await db_session.scalars(select(RouteOffer).where(RouteOffer.driver_id == driver_id))).all()
+    assert offers == []
+    await db_session.refresh(order)
+    assert order.status == OrderStatus.held
+    assert str(order.id) in {h.order_id for h in await HoldQueueStore().get_all(str(hub_id))}
+    state = await FleetStateManager().get_driver_state(str(hub_id), str(driver_id))
+    assert state is not None and state.status == "off_shift"

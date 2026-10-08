@@ -2,10 +2,10 @@
 Device-bound driver sessions. A driver's JWT (app/driver_auth/tokens.py)
 carries a device_id claim so a specific device's session can be revoked
 (e.g. "my phone was stolen") without invalidating every device a driver
-has ever signed in on, and without needing a server-side session table
-looked up on every request - revocation is a Redis denylist check
-(app/driver_auth/dependencies.py), this table is just the driver-facing
-"which devices am I signed in on" record plus the un-revoke-on-re-OTP path.
+has ever signed in on. This table is the revocation record: every driver
+request checks `revoked_at` here, with the driver's `is_active`
+(app/driver_auth/dependencies.py). It used to be a Redis set, which a flush
+undid. Signing in again on a device clears its revocation.
 """
 import uuid
 from datetime import datetime
@@ -33,8 +33,8 @@ class DriverDevice(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # registered by the driver app once signed in (POST
     # /driver/me/push-token), null until then. A revoked device's token is
     # left in place rather than cleared - revocation is already checked
-    # independently on every request (app/driver_auth/dependencies.py's
-    # Redis denylist); app/messaging/job_offer_notifications.py filters out
+    # independently on every request (app/driver_auth/dependencies.py reads
+    # revoked_at); app/messaging/job_offer_notifications.py filters out
     # revoked devices at send time instead of relying on this column being
     # unset.
     expo_push_token: Mapped[str | None] = mapped_column(String(255), nullable=True)

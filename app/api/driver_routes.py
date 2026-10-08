@@ -841,7 +841,21 @@ async def update_my_availability(
     driver: AuthedDriver = Depends(get_current_driver),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
-    row = await _get_driver_row(session, driver)
+    # Locked to the commit and checked again: a switch-off that landed after
+    # this request was authenticated must win, or the driver goes back on duty
+    # after ops took them off, and payroll keeps counting the hours.
+    row = (
+        await session.execute(
+            select(Driver)
+            .where(Driver.id == uuid.UUID(driver.driver_id))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    if not row.is_active:
+        raise HTTPException(status_code=401, detail=_SWITCHED_OFF)
 
     if body.status == "available":
         # **The gate that used to be defeatable two ways** (docs/ROADMAP.md R4).
