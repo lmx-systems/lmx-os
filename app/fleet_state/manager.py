@@ -84,7 +84,8 @@ _CORRECT_STATUS_IF = """
 if redis.call('hget', KEYS[1], 'status') ~= ARGV[2] then
     return 0
 end
-redis.call('hset', KEYS[1], 'status', ARGV[3], 'current_route_id', '')
+-- Off a route means carrying nothing.
+redis.call('hset', KEYS[1], 'status', ARGV[3], 'current_route_id', '', 'load_units', 0)
 if ARGV[3] == 'available' then
     redis.call('sadd', KEYS[2], ARGV[1])
 else

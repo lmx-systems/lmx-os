@@ -115,7 +115,11 @@ async def run_dispatch_for_all_hubs(session: AsyncSession = Depends(get_db)) -> 
     # Then put back any Redis state that was lost - a flushed or replaced node
     # empties the hold queue and the fleet state, and nothing else restores them
     # (app/optimizer/redis_rebuild.py). Before the cycles, so they see it.
-    rebuilt = await reconcile_redis_state()
+    try:
+        rebuilt: dict | str = await reconcile_redis_state()
+    except Exception as exc:  # noqa: BLE001 - a failed rebuild must not stop dispatch
+        logger.exception("redis_rebuild_in_sweep_failed")
+        rebuilt = f"error: {type(exc).__name__}"
 
     results: dict[str, int | str] = {}
     for hub_id in await _active_hub_ids(session):

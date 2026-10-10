@@ -27,6 +27,7 @@ from app.batch_queue.store import HoldQueueStore
 from app.config import settings
 from app.db import session_scope
 from app.delivery.eta import refresh_route_etas
+from app.events.bus import WAKEUPS_KEY, wakeup_member
 from app.fleet_state.manager import FleetStateManager
 from app.hub_calendar import is_hub_closed_at
 from app.identity.inherited_dwell import service_minutes_at
@@ -83,6 +84,8 @@ def _position_is_stale(recorded_at: str, now: datetime) -> bool:
 # outlived it (a snapshot restore, a write that raced a commit) - and planning it
 # would offer the same order twice.
 _PLANNABLE = frozenset({OrderStatus.held, OrderStatus.queued})
+SKIPPED_ENTRY_RETRY_SECONDS = 10
+_FINISHED = frozenset({OrderStatus.delivered, OrderStatus.cancelled, OrderStatus.returned})
 
 
 async def _order_statuses(held_orders: list[HeldOrder]) -> dict[str, OrderStatus]:
@@ -175,9 +178,31 @@ class DispatchOptimizerService:
         held_orders = await self._hold_queue.get_all(hub_id)
         metrics.HOLD_QUEUE_DEPTH.labels(hub_id=hub_id).set(len(held_orders))
         statuses = await _order_statuses(held_orders)
+        finished = [o for o in held_orders if statuses.get(o.order_id) in _FINISHED]
+        pending = [
+            o
+            for o in held_orders
+            if statuses.get(o.order_id, OrderStatus.held) not in _PLANNABLE
+            and statuses.get(o.order_id) not in _FINISHED
+        ]
         held_orders = [
             o for o in held_orders if statuses.get(o.order_id, OrderStatus.held) in _PLANNABLE
         ]
+        # A finished order's entry is a leftover (a snapshot restore, a raced
+        # write) and goes now.
+        for order in finished:
+            await self._hold_queue.remove(hub_id, order.order_id)
+        # Any other entry is ahead of its order's commit: a declined offer or a
+        # redelivery writes the queue first and commits `held` a moment later.
+        # This cycle can't plan it, and its wake-up and the hub's dirty flag may
+        # already be spent, so look again shortly rather than leave it for the
+        # next unrelated event.
+        if pending:
+            retry_at = (now + timedelta(seconds=SKIPPED_ENTRY_RETRY_SECONDS)).timestamp()
+            await get_client().zadd(
+                WAKEUPS_KEY,
+                {wakeup_member(hub_id, f"recheck:{o.order_id}"): retry_at for o in pending},
+            )
 
         decisions = run_hold_cycle(
             held_orders,

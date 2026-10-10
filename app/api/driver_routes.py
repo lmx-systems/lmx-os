@@ -614,7 +614,9 @@ async def _free_driver_after_route(session: AsyncSession, driver: AuthedDriver) 
             status="available",
             capacity_units=row.vehicle_capacity_units,
         )
-    state.status = "available"
+    # A driver who went on a break or off shift during the route stays there.
+    if state.status not in ("on_break", "off_shift"):
+        state.status = "available"
     state.current_route_id = None
     state.load_units = 0
     await manager.upsert_driver_state(state)

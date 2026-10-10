@@ -102,7 +102,8 @@ async def test_fleet_state_is_derived_from_what_postgres_knows(db_session, real_
     off = uuid.uuid4()
     gone = uuid.uuid4()
     db_session.add_all([
-        Driver(id=on_offer, hub_id=hub_id, name="Offered O.", phone="+15555550301", vehicle_capacity_units=7),
+        Driver(id=on_offer, hub_id=hub_id, name="Offered O.", phone="+15555550301", vehicle_capacity_units=7,
+               status="available"),
         Driver(id=off, hub_id=hub_id, name="Off O.", phone="+15555550302", vehicle_capacity_units=3),
         Driver(id=gone, hub_id=hub_id, name="Gone G.", phone="+15555550303", vehicle_capacity_units=3,
                is_active=False, status="available"),
@@ -133,6 +134,9 @@ async def test_offered_with_no_offer_outstanding_is_put_back(db_session, real_re
     """A cycle that set `offered` and then failed to commit its offer left the
     driver out of the pool until they toggled off and on."""
     hub_id, _client_id, _shop_id, driver_id, _order = await driver_app._seed(db_session)
+    driver = await db_session.get(Driver, driver_id)
+    driver.status = "available"
+    await db_session.commit()
     manager = FleetStateManager()
     await manager.upsert_driver_state(
         DriverState(driver_id=str(driver_id), hub_id=str(hub_id), status="offered", capacity_units=5)
@@ -143,7 +147,7 @@ async def test_offered_with_no_offer_outstanding_is_put_back(db_session, real_re
     assert (await manager.get_driver_state(str(hub_id), str(driver_id))).status == "available"
 
 
-async def test_a_stale_entry_is_never_planned_and_is_pruned(db_session, real_redis_client):
+async def test_a_finished_orders_entry_is_never_planned_and_is_dropped(db_session, real_redis_client):
     """A snapshot restore, or a write that raced a commit, can leave an entry for
     an order that is already delivered."""
     hub_id, _client_id, _shop_id, _driver_id, order = await driver_app._seed(db_session)
@@ -155,9 +159,8 @@ async def test_a_stale_entry_is_never_planned_and_is_pruned(db_session, real_red
                                            sla_tier="T2", hold_deadline=past, held_since=past))
 
     outcome = await DispatchOptimizerService().run_cycle(str(hub_id))
-    assert outcome.assignments == []
 
-    await reconcile_redis_state()
+    assert outcome.assignments == []
     assert await store.order_ids(str(hub_id)) == set()
 
 
@@ -227,3 +230,54 @@ async def test_an_accept_after_a_flush_keeps_the_vehicles_capacity(db_session, r
 
     state = await FleetStateManager().get_driver_state(str(hub_id), str(driver_id))
     assert (state.status, state.capacity_units) == ("en_route", 5)
+
+
+async def test_a_lapsed_but_unswept_offer_still_counts_as_offered(db_session, real_redis_client):
+    """Seeding the driver available while the old offer is still marked offered
+    let a cycle offer them a second job before the first was expired."""
+    hub_id, _client_id, _shop_id, driver_id, _order = await driver_app._seed(db_session)
+    driver = await db_session.get(Driver, driver_id)
+    driver.status = "available"
+    now = datetime.now(timezone.utc)
+    db_session.add(RouteOffer(hub_id=hub_id, driver_id=driver_id, status="offered", stop_payload=[],
+                              offered_at=now - timedelta(minutes=5), expires_at=now - timedelta(minutes=3)))
+    await db_session.commit()
+    await real_redis_client.flushdb()
+
+    await reconcile_redis_state()
+
+    assert (await FleetStateManager().get_driver_state(str(hub_id), str(driver_id))).status == "offered"
+
+
+async def test_a_correction_returns_the_driver_to_their_own_choice_with_no_load(db_session, real_redis_client):
+    hub_id, _client_id, _shop_id, driver_id, _order = await driver_app._seed(db_session)
+    driver = await db_session.get(Driver, driver_id)
+    driver.status = "on_break"
+    route = Route(hub_id=hub_id, driver_id=driver_id, status="completed")
+    db_session.add(route)
+    await db_session.commit()
+    manager = FleetStateManager()
+    await manager.upsert_driver_state(DriverState(driver_id=str(driver_id), hub_id=str(hub_id), status="en_route",
+                                                  capacity_units=5, load_units=3, current_route_id=str(route.id)))
+
+    await reconcile_redis_state()
+
+    state = await manager.get_driver_state(str(hub_id), str(driver_id))
+    assert (state.status, state.load_units, state.current_route_id) == ("on_break", 0, None)
+
+
+async def test_an_entry_ahead_of_its_commit_is_looked_at_again_shortly(db_session, real_redis_client):
+    """A declined offer writes the queue before it commits `held`. The cycle in
+    between can't plan the entry, so it schedules a recheck rather than leaving
+    it for the next unrelated event."""
+    from app.events.bus import WAKEUPS_KEY
+
+    hub_id, _client_id, _shop_id, _driver_id, order = await driver_app._seed(db_session)
+    order.status = OrderStatus.assigned
+    await db_session.commit()
+    await real_redis_client.zrem(WAKEUPS_KEY, f"{hub_id}|{order.id}")
+
+    await DispatchOptimizerService().run_cycle(str(hub_id))
+
+    assert await real_redis_client.zscore(WAKEUPS_KEY, f"{hub_id}|recheck:{order.id}") is not None
+    assert str(order.id) in await HoldQueueStore().order_ids(str(hub_id))

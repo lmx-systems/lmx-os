@@ -73,6 +73,7 @@ from app.schemas.fleet import DriverLocation, DriverState
 logger = structlog.get_logger(__name__)
 
 SENTINEL_KEY = "redis_state:epoch"
+LOSS_SEEN_KEY = "redis_state:loss_seen"
 WATCH_INTERVAL_SECONDS = 30
 _QUEUEABLE = (OrderStatus.held, OrderStatus.queued)
 _PRUNABLE = (OrderStatus.delivered, OrderStatus.cancelled, OrderStatus.returned)
@@ -201,7 +202,6 @@ async def reconcile_fleet_state(session: AsyncSession, hub_id: str, now: datetim
         )
     ).all()
     any_open_offer = {driver_id for driver_id, _ in open_offers}
-    live_offer = {driver_id for driver_id, expires_at in open_offers if expires_at > now}
     loads = await _route_loads(session, list(active_routes.values()))
 
     manager = FleetStateManager()
@@ -234,7 +234,10 @@ async def reconcile_fleet_state(session: AsyncSession, hub_id: str, now: datetim
             status, current_route = "off_shift", None
         elif route_id is not None:
             status, current_route = "en_route", route_id
-        elif driver.id in live_offer:
+        # Any offer still marked offered, lapsed or not: a lapsed one is expired
+        # (and the driver freed) by the next sweep or their own app, and seeding
+        # them available first would let a cycle offer them a second job.
+        elif driver.id in any_open_offer and driver.status == "available":
             status, current_route = "offered", None
         elif driver.status in ("available", "on_break", "off_shift"):
             status, current_route = driver.status, None
@@ -257,11 +260,14 @@ async def reconcile_fleet_state(session: AsyncSession, hub_id: str, now: datetim
         existing = await manager.get_driver_state(hub_id, str(driver.id))
         if existing is None:
             continue
+        # Back to the driver's own choice, not a blanket `available`: one who went
+        # on a break mid-route stays on it.
+        own_choice = driver.status if driver.status in ("available", "on_break", "off_shift") else "available"
         # Offered, with no offer outstanding: a cycle that set `offered` and then
         # failed to commit its offer, or one whose offer Redis forgot was answered.
         if existing.status == "offered" and driver.id not in any_open_offer:
             if await manager.correct_status_if(
-                hub_id, str(driver.id), expect_status="offered", new_status="available"
+                hub_id, str(driver.id), expect_status="offered", new_status=own_choice
             ):
                 corrected += 1
         # On a route that has ended. A route id with no row at all is left: that
@@ -270,7 +276,7 @@ async def reconcile_fleet_state(session: AsyncSession, hub_id: str, now: datetim
             route = await session.get(Route, uuid.UUID(existing.current_route_id))
             if route is not None and route.status != "active":
                 if await manager.correct_status_if(
-                    hub_id, str(driver.id), expect_status="en_route", new_status="available"
+                    hub_id, str(driver.id), expect_status="en_route", new_status=own_choice
                 ):
                     corrected += 1
     return {"drivers_seeded": seeded, "drivers_corrected": corrected}
@@ -281,7 +287,9 @@ async def reconcile_redis_state(now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     redis = get_client()
     lost = not await redis.exists(SENTINEL_KEY)
-    if lost:
+    # Logged once per loss, not on every pass until a pass completes: a hub
+    # that keeps failing would otherwise repeat the alert every 30 seconds.
+    if lost and await redis.set(LOSS_SEEN_KEY, "1", nx=True):
         logger.error(
             "redis_state_lost",
             detail="no rebuild sentinel - Redis was flushed, replaced, or this is a first boot; rebuilding from Postgres",
@@ -311,6 +319,7 @@ async def reconcile_redis_state(now: datetime | None = None) -> dict:
 
     if complete:
         await redis.set(SENTINEL_KEY, json.dumps({"rebuilt_at": now.isoformat()}))
+        await redis.delete(LOSS_SEEN_KEY)
     logger.info("redis_rebuild_complete", lost=lost, complete=complete, hubs=hubs)
     return {"lost": lost, "complete": complete, "hubs": hubs}
 
