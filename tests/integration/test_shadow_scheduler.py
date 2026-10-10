@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select
 
 from app.config import settings
 from app.models.hub import Hub
@@ -16,7 +17,6 @@ from app.models.hub_closure import HubClosure
 from app.models.shadow_decision import ShadowDecision
 from app.redis_client import get_client
 from app.shadow.scheduler import ShadowScheduler, _last_run_key, _lock_key
-from sqlalchemy import select
 
 pytestmark = pytest.mark.integration
 

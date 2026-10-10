@@ -36,6 +36,13 @@ resource "aws_ecs_task_definition" "app" {
     environment = [
       { name = "ENVIRONMENT", value = var.environment },
       { name = "AWS_REGION", value = var.aws_region },
+      # Not a secret, so here rather than in the secret JSON, whose
+      # ignore_changes would keep a stale endpoint after the cache is replaced.
+      # The primary endpoint, never the reader: every path writes.
+      {
+        name  = "REDIS_URL"
+        value = "redis://${aws_elasticache_replication_group.main.primary_endpoint_address}:${aws_elasticache_replication_group.main.port}/0"
+      },
       { name = "SECRETS_MANAGER_SECRET_ID", value = aws_secretsmanager_secret.app.id },
       { name = "PHOTO_UPLOAD_BUCKET", value = aws_s3_bucket.photo_uploads.bucket },
       { name = "PHOTO_UPLOAD_REGION", value = var.aws_region },

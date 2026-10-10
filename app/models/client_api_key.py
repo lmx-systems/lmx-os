@@ -26,9 +26,9 @@ nothing.
 portal after the full value is gone - which is what makes rotation usable, since
 revoking the wrong key is otherwise a coin flip.
 """
-import uuid
 import hashlib
 import secrets
+import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String

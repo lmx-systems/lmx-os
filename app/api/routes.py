@@ -7,46 +7,19 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import metrics
 from app.batch_queue.clustering import cluster_members
 from app.batch_queue.store import HoldQueueStore
 from app.config import settings
 from app.db import get_db
+from app.events.bus import hub_lock
 from app.fleet_state.manager import FleetStateManager
-from app import metrics
-from app.learning_loop.service import run_nightly_job
-from app.models.driver import Driver
-from app.models.hub import Hub
-from app.models.order import Order
-from app.ops_auth.dependencies import (
-    AuthedOpsUser,
-    get_current_ops_user,
-    require_admin,
-    require_dispatcher,
-)
-from app.optimizer.event_trigger import dispatch_event_bus
-from app.optimizer.last_cycle_store import LastCycleStore
-from app.optimizer.service import DispatchOptimizerService
-from app.reporting.lmx_link import build_scorecard
-from app.reporting.credit_exposure import DEFAULT_WINDOW_DAYS as CREDIT_WINDOW_DAYS
-from app.reporting.credit_exposure import build_credit_exposure
-from app.models.dispatcher_override import (
-    ACTION_RELEASE,
-    REASON_CODES,
-    REASON_CODES_REQUIRING_NOTE,
-    REASON_LABELS,
-)
-from app.models.linkage_flag import LinkageFlag
-from app.models.location import Location
-from app.models.receiver_profile import ReceiverProfile
-from app.models.shop import Shop
-from app.models.location_merge import LocationMerge
 from app.identity.merge import (
     confirm_merge,
     merge_scale,
@@ -56,6 +29,30 @@ from app.identity.merge import (
     revert_merge,
 )
 from app.identity.node_class import classification_coverage, set_node_class
+from app.learning_loop.service import run_nightly_job
+from app.models.dispatcher_override import (
+    ACTION_RELEASE,
+    REASON_CODES,
+    REASON_CODES_REQUIRING_NOTE,
+    REASON_LABELS,
+)
+from app.models.driver import Driver
+from app.models.hub import Hub
+from app.models.linkage_flag import LinkageFlag
+from app.models.location import Location
+from app.models.location_merge import LocationMerge
+from app.models.order import Order
+from app.models.receiver_profile import ReceiverProfile
+from app.models.shop import Shop
+from app.ops_auth.dependencies import (
+    AuthedOpsUser,
+    get_current_ops_user,
+    require_admin,
+    require_dispatcher,
+)
+from app.optimizer.event_trigger import dispatch_event_bus
+from app.optimizer.last_cycle_store import LastCycleStore
+from app.optimizer.service import DispatchOptimizerService
 from app.record.consequences import (
     CONSEQUENCE_CREDIT,
     CONSEQUENCE_LABELS,
@@ -66,44 +63,47 @@ from app.record.consequences import (
 from app.record.explain import explain_order
 from app.record.linkage import open_flags, resolve_flag
 from app.record.overrides import OverrideRefused, apply_override
+from app.reporting.credit_exposure import DEFAULT_WINDOW_DAYS as CREDIT_WINDOW_DAYS
+from app.reporting.credit_exposure import build_credit_exposure
 from app.reporting.exceptions import build_exception_queue
-from app.reporting.record_health import build_record_health
+from app.reporting.lmx_link import build_scorecard
 from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_operations_scorecard
+from app.reporting.record_health import build_record_health
 from app.schemas.batch_queue import HeldOrderView
-from app.schemas.reporting import (
-    ClientExposureView,
-    CreditExposureView,
-    DecisionFactView,
-    ExceptionItemView,
-    ExceptionQueueView,
-    LinkScorecardView,
-    MeasurementView,
-    OperationsScorecardView,
-    ConsequenceOptionView,
-    ConsequenceRequest,
-    LateOrderView,
-    LinkageFlagView,
-    OrderExplanationView,
-    OrderLookupPage,
-    OrderLookupRow,
-    AttentionCountsView,
-    ClassificationCoverageView,
-    MergeProposalView,
-    NodeClassRequest,
-    UnlabelledDockView,
-    RecordHealthView,
-    WriterHealthView,
-    OverrideReasonOption,
-    OverrideRequest,
-    OverrideView,
-    RateView,
-    TierExposureView,
-)
 from app.schemas.fleet import DriverLocation, DriverState
 from app.schemas.hub import HubSummary
 from app.schemas.learning_loop import NightlyJobResult, ProposedRuleSummary
 from app.schemas.optimizer import LastCycleSnapshot, OptimizationResult
 from app.schemas.order import OrderStatusSummary
+from app.schemas.reporting import (
+    AttentionCountsView,
+    ClassificationCoverageView,
+    ClientExposureView,
+    ConsequenceOptionView,
+    ConsequenceRequest,
+    CreditExposureView,
+    DecisionFactView,
+    ExceptionItemView,
+    ExceptionQueueView,
+    LateOrderView,
+    LinkageFlagView,
+    LinkScorecardView,
+    MeasurementView,
+    MergeProposalView,
+    NodeClassRequest,
+    OperationsScorecardView,
+    OrderExplanationView,
+    OrderLookupPage,
+    OrderLookupRow,
+    OverrideReasonOption,
+    OverrideRequest,
+    OverrideView,
+    RateView,
+    RecordHealthView,
+    TierExposureView,
+    UnlabelledDockView,
+    WriterHealthView,
+)
 
 router = APIRouter(tags=["ops"])
 
@@ -1166,8 +1166,15 @@ async def run_optimizer_cycle(hub_id: str, _admin: AuthedOpsUser = Depends(requi
     after an out-of-band fleet-state fix). A dispatcher's call (docs/ROADMAP.md
     S1) - a viewer can watch a cycle happen but not force one.
     """
-    service = DispatchOptimizerService()
-    return await service.run_cycle(hub_id)
+    # The lock every cycle shares, so a forced cycle can't interleave with the
+    # event-driven one and offer an order twice.
+    async with hub_lock(hub_id) as acquired:
+        if not acquired:
+            raise HTTPException(
+                status_code=409,
+                detail="A dispatch cycle is already running for this hub. Try again in a moment.",
+            )
+        return await DispatchOptimizerService().run_cycle(hub_id)
 
 
 @router.get("/optimizer/{hub_id}/last-cycle", response_model=LastCycleSnapshot | None)

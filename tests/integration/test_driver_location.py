@@ -20,7 +20,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from tests.integration.queue_helpers import let_the_hold_run_out
 from pydantic import ValidationError
 from sqlalchemy import select
 
@@ -39,6 +38,7 @@ from app.models.shop import Shop
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.driver_app import DriverLocationPingBody
 from app.schemas.fleet import DriverState
+from tests.integration.queue_helpers import let_the_hold_run_out
 
 pytestmark = pytest.mark.integration
 

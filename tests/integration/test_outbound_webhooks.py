@@ -49,9 +49,9 @@ from app.models.shop import Shop
 from app.orders.status_service import advance_orders
 from app.schemas.webhooks import WebhookEndpointBody
 from app.webhooks import delivery as delivery_module
+from app.webhooks import url_safety
 from app.webhooks.delivery import MAX_ATTEMPTS, attempt_delivery, deliver_pending
 from app.webhooks.signing import sign, verify
-from app.webhooks import url_safety
 from app.webhooks.url_safety import UnsafeWebhookUrl, validate_webhook_url
 
 pytestmark = pytest.mark.integration

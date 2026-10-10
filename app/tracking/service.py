@@ -47,9 +47,9 @@ from app.config import settings
 from app.delivery.eta import order_arrival_estimate
 from app.fleet_state.manager import FleetStateManager
 from app.models.order import Order, OrderStatus
-from app.tracking.ratings import RatingState, rating_state
 from app.models.route import Route
 from app.models.stop import Stop, StopOrder
+from app.tracking.ratings import RatingState, rating_state
 
 logger = structlog.get_logger(__name__)
 

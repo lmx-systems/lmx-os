@@ -13,13 +13,14 @@ from app.record.abstention import (
     orders_with_an_abstention,
     record_arm_abstention,
 )
-from app.record.explain import Explanation, Fact, explain_order
-from app.record.overrides import (
-    OverrideOutcome,
-    OverrideRefused,
-    apply_override,
-    labelled_overrides,
-    overrides_for_order,
+from app.record.consequences import (
+    CONSEQUENCES,
+    close_consequence_windows,
+    consequence_label,
+    label_counts,
+    late_orders_awaiting_judgement,
+    record_consequence,
+    record_silence,
 )
 from app.record.cost import (
     DriverDayCost,
@@ -33,14 +34,14 @@ from app.record.decisions import (
     record_decision,
     replay_inputs,
 )
-from app.record.consequences import (
-    CONSEQUENCES,
-    close_consequence_windows,
-    consequence_label,
-    label_counts,
-    late_orders_awaiting_judgement,
-    record_consequence,
-    record_silence,
+from app.record.explain import Explanation, Fact, explain_order
+from app.record.linkage import (
+    flag_duplicates_across_branches,
+    flag_open_returns_on_visits,
+    flag_repeat_visits,
+    open_flags,
+    resolve_flag,
+    run_linkage_detectors,
 )
 from app.record.outcomes import (
     current_outcome,
@@ -49,13 +50,12 @@ from app.record.outcomes import (
     record_outcome,
     supersede_outcome,
 )
-from app.record.linkage import (
-    flag_duplicates_across_branches,
-    flag_open_returns_on_visits,
-    flag_repeat_visits,
-    open_flags,
-    resolve_flag,
-    run_linkage_detectors,
+from app.record.overrides import (
+    OverrideOutcome,
+    OverrideRefused,
+    apply_override,
+    labelled_overrides,
+    overrides_for_order,
 )
 
 __all__ = [

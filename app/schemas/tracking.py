@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.models.delivery_rating import MAX_COMMENT_LENGTH, MAX_SCORE, MIN_SCORE
-
 from pydantic import BaseModel, Field
+
+from app.models.delivery_rating import MAX_COMMENT_LENGTH, MAX_SCORE, MIN_SCORE
 
 
 class DriverPositionView(BaseModel):

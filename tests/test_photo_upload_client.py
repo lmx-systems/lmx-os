@@ -22,7 +22,6 @@ from app.storage.photo_upload_client import (
     get_photo_upload_client,
     readable_url,
 )
-
 from tests.conftest import PHOTO_BUCKET, PHOTO_REGION
 
 OBJECT_URL = (

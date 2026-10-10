@@ -30,9 +30,8 @@ from app.api.driver_routes import (
     update_my_availability,
     update_my_profile,
 )
-from tests.integration.queue_helpers import let_the_hold_run_out
-from app.batch_queue.store import HoldQueueStore
 from app.batch_queue.queue import HeldOrder
+from app.batch_queue.store import HoldQueueStore
 from app.driver_auth.dependencies import AuthedDriver
 from app.driver_auth.tokens import decode_token
 from app.fleet_state.manager import FleetStateManager
@@ -57,8 +56,8 @@ from app.schemas.driver_app import (
     StopFailureReason,
 )
 from app.schemas.fleet import DriverLocation, DriverState
-
 from tests.integration.conftest import make_driver_compliant, sign_in_driver
+from tests.integration.queue_helpers import let_the_hold_run_out
 
 pytestmark = pytest.mark.integration
 

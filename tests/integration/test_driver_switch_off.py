@@ -28,8 +28,8 @@ from app.fleet_state.manager import FleetStateManager
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
 from app.models.hub import Hub
-from app.models.order import OrderStatus
 from app.models.ops_user import OpsUser
+from app.models.order import OrderStatus
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.ops_auth.dependencies import AuthedOpsUser

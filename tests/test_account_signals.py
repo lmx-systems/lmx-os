@@ -14,10 +14,10 @@ import pytest
 from app.identity.account_signals import (
     NAME_SIMILARITY_THRESHOLD,
     RARE_TOKEN_THRESHOLD,
+    STATIC_VOCABULARY,
     TIER_HIGH,
     TIER_REVIEW,
     TIER_WEAK,
-    STATIC_VOCABULARY,
     Vocabulary,
     parse_account_ref,
     why_these_accounts_might_be_one_place,

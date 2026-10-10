@@ -7,13 +7,20 @@ Classified UNCLASSIFIED in `tests/test_architecture_boundaries.py` - see the
 reason recorded there. In short: this is reference data, not an adapter, and
 the dispatch engine is expected to read it once IDN-4 exists.
 """
+from app.identity.inherited_dwell import (
+    MIN_OWN_SAMPLES,
+    DwellEstimate,
+    ImportReport,
+    dwell_estimate,
+    import_inherited_dwell,
+)
 from app.identity.merge import (
     confirm_merge,
     merge_locations,
     pending_merges,
-    recently_applied_merges,
     propose_duplicate_locations,
     propose_merge,
+    recently_applied_merges,
     reject_merge,
     revert_merge,
 )
@@ -23,13 +30,6 @@ from app.identity.node_class import (
     classify_unlabelled_locations,
     infer_node_class,
     set_node_class,
-)
-from app.identity.inherited_dwell import (
-    MIN_OWN_SAMPLES,
-    DwellEstimate,
-    ImportReport,
-    dwell_estimate,
-    import_inherited_dwell,
 )
 from app.identity.profile import (
     profile_for,
@@ -41,8 +41,8 @@ from app.identity.profile import (
 )
 from app.identity.resolution import (
     canonical_location,
-    receiver_key_for,
     link_shop_to_dock,
+    receiver_key_for,
     resolve_location,
 )
 

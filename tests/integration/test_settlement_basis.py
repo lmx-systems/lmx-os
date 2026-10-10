@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select
 
 from app.models.settlement_basis import SIDE_CUSTOMER, SIDE_LMX, SettlementBasis
 from app.settle.basis import (
@@ -24,7 +25,6 @@ from app.settle.basis import (
     sign,
 )
 from app.settle.statement import ArmComparison, ArmSample, SavingsStatement
-from sqlalchemy import select
 
 pytestmark = pytest.mark.integration
 

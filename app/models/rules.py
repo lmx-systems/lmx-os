@@ -7,6 +7,7 @@ proposed_rule into active_rules, at which point the Dispatch Optimizer and
 Batch-Hold Queue start applying it.
 """
 import uuid
+
 from sqlalchemy import ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column

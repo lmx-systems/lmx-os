@@ -8,10 +8,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
-from app.config import settings
 from sqlalchemy import select
 
+from app.config import settings
 from app.models.client import Client
 from app.models.driver import Driver
 from app.models.hub import Hub

@@ -62,6 +62,7 @@ written to avoid. A canary is a scripted request, so it can carry the header.
 | `redis` | Ping fails | Fleet state, the hold queue and every lock live here. Nothing dispatches without it. |
 | `database` | A trivial query fails | Same. |
 | `dispatch_liveness` | A hub has **orders waiting** AND its last dispatch cycle is older than `DISPATCH_STALE_AFTER_SECONDS` | **The reason this exists.** Dispatch runs off an in-process poll loop; if it stops, orders pile up and nothing says so. With one driver, "no offers arrived" and "no orders today" look identical from outside — so this can persist for a day and surface as an angry client. |
+| `hold_queue_matches_postgres` | Orders Postgres says are **waiting** (held or queued, live, over two minutes old) are **missing from the Redis hold queue** | `dispatch_liveness` skips an empty queue, so after Redis lost its data it reported healthy while nothing was dispatched. The app rebuilds the queue from Postgres (`app/optimizer/redis_rebuild.py`) at startup, on every sweep and within 30 seconds of a flush, so this staying red means the rebuild is failing. |
 | `stuck_orders` | Orders are more than `STUCK_ORDER_AFTER_SECONDS` past `promised_at` with **no driver assigned** | Cycles can run perfectly and assign nothing — no driver on shift, every driver full, an unroutable stop. The heartbeat stays fresh the whole time, so liveness reports healthy through the failure that actually costs a client. |
 
 ### The conditions that deliberately do *not* fire
@@ -119,6 +120,7 @@ client phone calls.
 | Failing | Look at |
 |---|---|
 | `dispatch_liveness` | Is at least one app task actually running (`RunningTaskCount` on the ECS service — the `-app-unhealthy-tasks` alarm in `infra/aws/logs.tf` covers this)? Is the scheduled `/internal/dispatch/run-all` job still firing and succeeding? Hit `POST /internal/dispatch/run-all` by hand — if that clears the queue, the poll loop is the problem, not the optimizer. |
+| `hold_queue_matches_postgres` | Search the logs for `redis_rebuild_complete` and `redis_rebuild_hub_failed`. `POST /internal/dispatch/run-all` runs the rebuild before its cycles and returns what it rebuilt per hub. **Never restore a Redis snapshot into the live cluster** to fix this: it brings back hours-old fleet state that the rebuild deliberately won't overwrite. Start from empty and let the rebuild run. |
 | `stuck_orders` | Any drivers on shift with a reported position? `GET /fleet/{hub}/overview` — a driver with a null position is invisible to the optimizer. Then check for unresolvable addresses (`geocode_provider_unavailable` in the logs). |
 | `redis` / `database` | RDS and ElastiCache both available? Connection limit reached? Then the security groups (`infra/aws/security_groups.tf`) — the app's tasks reach both through VPC rules, so a subnet or SG change is a plausible cause of a sudden simultaneous failure of both checks. |
 
@@ -242,6 +244,22 @@ bug upstream, and deleting is the wrong response to a surprise).
 > across replicas already, via the `events:running:{hub_id}` Redis lock in
 > `app/events/bus.py` that lets only one task run a cycle per hub at a time. The
 > scheduled `run-all` above is now redundancy rather than the mechanism.
+
+### Alert on Redis losing its data
+
+A flushed or replaced Redis node is logged once, at error level, as
+`redis_state_lost` (which also reaches Sentry). The app rebuilds from Postgres on
+its own, so this is not a page, but it is worth a metric filter and an email: it
+means a node was replaced or something ran `FLUSHALL`, and either should be
+explained.
+
+```bash
+aws logs put-metric-filter \
+  --log-group-name /ecs/lmx-prod-app \
+  --filter-name redis-state-lost \
+  --filter-pattern '"redis_state_lost"' \
+  --metric-transformations metricName=RedisStateLost,metricNamespace=LMX,metricValue=1
+```
 
 ### 7. Alert on the deployment itself
 

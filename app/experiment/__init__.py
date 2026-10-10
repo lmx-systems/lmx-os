@@ -28,12 +28,6 @@ from app.experiment.arms import (
     verify_assignment,
     withdraw_control_arm,
 )
-from app.experiment.integrity import (
-    Finding,
-    IntegrityReport,
-    check_arm_integrity,
-    wilson_interval,
-)
 from app.experiment.exclusions import (
     ExclusionImpact,
     ReceiverExcluded,
@@ -41,6 +35,12 @@ from app.experiment.exclusions import (
     exclusion_impact,
     is_excluded,
     revoke_exclusion,
+)
+from app.experiment.integrity import (
+    Finding,
+    IntegrityReport,
+    check_arm_integrity,
+    wilson_interval,
 )
 
 __all__ = [

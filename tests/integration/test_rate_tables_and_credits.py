@@ -667,8 +667,8 @@ def test_every_tier_has_a_placeholder_term():
     """An empty table means no breach is assessable and the contract goes unenforced while
     looking fine - a worse kind of wrong than a number that is openly provisional. A tier
     missing from the set would recreate that hole for that tier alone."""
-    from app.sla.engine import DEFAULT_HOLD_WINDOW_MINUTES
     from app.models.client_sla_term import PLACEHOLDER_SLA_TERMS
+    from app.sla.engine import DEFAULT_HOLD_WINDOW_MINUTES
 
     assert {term.sla_tier for term in PLACEHOLDER_SLA_TERMS} == set(
         DEFAULT_HOLD_WINDOW_MINUTES
@@ -683,9 +683,9 @@ def test_each_placeholder_target_clears_the_work_it_cannot_skip():
     Two of the three inputs are themselves placeholders, which is exactly why the targets
     carry headroom rather than sitting on the computed floor.
     """
-    from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES, minutes_for_miles
     from app.models.client_sla_term import PLACEHOLDER_SLA_TERMS
     from app.sla.engine import DEFAULT_HOLD_WINDOW_MINUTES
+    from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES, minutes_for_miles
 
     unavoidable = 2 * PLACEHOLDER_STOP_SERVICE_MINUTES + minutes_for_miles(5.0)
 

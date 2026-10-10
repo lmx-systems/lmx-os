@@ -24,7 +24,7 @@ from app.orders.state_machine import (
     can_transition,
     public_label,
 )
-from app.schemas.lmx_order import LMXOrder, LineItem, ProofRequirements
+from app.schemas.lmx_order import LineItem, LMXOrder, ProofRequirements
 
 NOW = datetime(2026, 8, 7, 14, 0, tzinfo=timezone.utc)
 

@@ -31,11 +31,11 @@ from app.identity import (
     propose_duplicate_locations,
     refresh_hub_dwell_statistics,
 )
-from app.record.consequences import close_consequence_windows
-from app.record.linkage import run_linkage_detectors
 from app.learning_loop.not_ready import LOOKBACK_DAYS, flag_pickups_that_waited
 from app.learning_loop.service import run_nightly_job
 from app.models.hub import Hub
+from app.record.consequences import close_consequence_windows
+from app.record.linkage import run_linkage_detectors
 from app.redis_client import get_client
 
 logger = structlog.get_logger(__name__)

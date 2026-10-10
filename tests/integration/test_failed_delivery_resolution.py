@@ -16,10 +16,10 @@ from app.billing.service import NoBillableOrdersError, generate_invoice
 from app.delivery.resolution import OrderNotFailedError, resolve_failed_order
 from app.models.client import Client
 from app.models.client_sla_term import ClientSlaTerm
-from app.models.rules import ActiveRule
 from app.models.client_webhook import ClientWebhookEndpoint, WebhookDelivery, new_webhook_secret
 from app.models.hub import Hub
 from app.models.order import Order, OrderStatus
+from app.models.rules import ActiveRule
 from app.models.shop import Shop
 from app.schemas.admin import ResolveFailedOrderBody
 

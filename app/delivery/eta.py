@@ -64,9 +64,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.batch_queue.clustering import miles_between
-from app.identity.inherited_dwell import planning_service_minutes, profiles_by_location
-from app.travel import minutes_for_miles
 from app.delivery.routes import try_lock_route_and_stops
+from app.identity.inherited_dwell import planning_service_minutes, profiles_by_location
 from app.models.driver_location_ping import DriverLocationPing
 from app.models.hub import Hub
 from app.models.order import Order, OrderStatus
@@ -74,6 +73,7 @@ from app.models.route import Route
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 from app.redis_client import get_client
+from app.travel import minutes_for_miles
 
 logger = structlog.get_logger(__name__)
 

@@ -7,8 +7,8 @@ regardless of what day the test suite happens to run on.
 """
 import uuid
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import pytest
 

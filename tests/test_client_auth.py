@@ -10,7 +10,11 @@ import pytest
 from fakeredis import aioredis as fakeredis_aioredis
 
 import app.client_auth.login_rate_limit as login_rate_limit_module
-from app.client_auth.login_rate_limit import MAX_LOGIN_ATTEMPTS, LoginRateLimitExceeded, LoginRateLimiter
+from app.client_auth.login_rate_limit import (
+    MAX_LOGIN_ATTEMPTS,
+    LoginRateLimiter,
+    LoginRateLimitExceeded,
+)
 from app.client_auth.passwords import hash_password, verify_password
 from app.client_auth.tokens import (
     InvalidClientToken,

@@ -22,11 +22,6 @@ from sqlalchemy import func, select, text
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
 from app.fleet_state.manager import FleetStateManager
-from app.optimizer.event_trigger import dispatch_event_bus
-from app.optimizer.google_routes_client import RouteOptimizationClient
-from app.optimizer.service import DispatchOptimizerService
-from app.schemas.fleet import DriverLocation, DriverState
-
 from app.models.dispatcher_override import (
     REASON_CODES,
     REASON_CODES_REQUIRING_NOTE,
@@ -35,6 +30,9 @@ from app.models.dispatcher_override import (
 )
 from app.models.hub import Hub
 from app.models.order import Order, OrderStatus
+from app.optimizer.event_trigger import dispatch_event_bus
+from app.optimizer.google_routes_client import RouteOptimizationClient
+from app.optimizer.service import DispatchOptimizerService
 from app.record.decisions import record_decision
 from app.record.explain import explain_order
 from app.record.overrides import (
@@ -43,6 +41,7 @@ from app.record.overrides import (
     labelled_overrides,
     overrides_for_order,
 )
+from app.schemas.fleet import DriverLocation, DriverState
 from app.schemas.optimizer import (
     CyclePlan,
     DriverCandidate,

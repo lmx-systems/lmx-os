@@ -12,7 +12,8 @@ and the service scales to zero when idle, so the loop could simply stop running 
 orders sat in the hold queue. The actual deployment target is ECS Fargate
 (`infra/`), whose tasks do not suspend - and the loop is already safe across replicas
 via the `events:running:{hub_id}` Redis lock in `app/events/bus.py`, which lets only
-one task run a cycle per hub at a time.
+one task run a cycle per hub at a time. The sweep below and the ops run-cycle route
+take the same lock (`hub_lock`); they used to run cycles without it.
 
 So these are now **redundancy rather than the mechanism**: a low-frequency ping that
 guarantees a cycle happens even if every task dies at once, the loop wedges, or a
@@ -50,16 +51,18 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.driver_routes import expire_lapsed_offers
 from app.client_ip import client_ip
 from app.config import settings
 from app.db import get_db
-from app.legal.retention import prune_all
+from app.events.bus import hub_lock
 from app.health.checks import evaluate
-from app.webhooks.delivery import deliver_pending
 from app.learning_loop.service import run_nightly_job
+from app.legal.retention import prune_all
 from app.models.hub import Hub
-from app.api.driver_routes import expire_lapsed_offers
+from app.optimizer.redis_rebuild import reconcile_redis_state
 from app.optimizer.service import DispatchOptimizerService
+from app.webhooks.delivery import deliver_pending
 
 logger = structlog.get_logger(__name__)
 
@@ -109,16 +112,32 @@ async def run_dispatch_for_all_hubs(session: AsyncSession = Depends(get_db)) -> 
     expired = await expire_lapsed_offers(session)
     await session.commit()
 
+    # Then put back any Redis state that was lost - a flushed or replaced node
+    # empties the hold queue and the fleet state, and nothing else restores them
+    # (app/optimizer/redis_rebuild.py). Before the cycles, so they see it.
+    try:
+        rebuilt: dict | str = await reconcile_redis_state()
+    except Exception as exc:  # noqa: BLE001 - a failed rebuild must not stop dispatch
+        logger.exception("redis_rebuild_in_sweep_failed")
+        rebuilt = f"error: {type(exc).__name__}"
+
     results: dict[str, int | str] = {}
     for hub_id in await _active_hub_ids(session):
         try:
-            outcome = await DispatchOptimizerService().run_cycle(hub_id)
-            results[hub_id] = len(outcome.assignments)
+            # The same per-hub lock the event-driven cycle and the rebuild take.
+            # Without it this sweep could run a cycle for a hub mid-way through
+            # another, and offer one order twice.
+            async with hub_lock(hub_id) as acquired:
+                if not acquired:
+                    results[hub_id] = "skipped: a cycle is already running"
+                    continue
+                outcome = await DispatchOptimizerService().run_cycle(hub_id)
+                results[hub_id] = len(outcome.assignments)
         except Exception as exc:  # noqa: BLE001 - one hub must not stop the rest
             logger.exception("scheduled_dispatch_failed", hub_id=hub_id)
             results[hub_id] = f"error: {type(exc).__name__}"
     logger.info("scheduled_dispatch_complete", hubs=len(results), offers_expired=expired)
-    return {"hubs": results, "offers_expired": expired}
+    return {"hubs": results, "offers_expired": expired, "redis_rebuild": rebuilt}
 
 
 @router.post("/learning-loop/run-all", dependencies=[Depends(require_internal_secret)])

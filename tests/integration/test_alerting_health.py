@@ -156,6 +156,7 @@ async def test_a_quiet_healthy_system_reports_ok(db_session, real_redis_client):
         "database",
         "dispatch_liveness",
         "stuck_orders",
+        "hold_queue_matches_postgres",
     ]
 
 
@@ -427,7 +428,7 @@ async def test_every_check_is_reported_even_when_several_fail(
     report = await evaluate()
 
     assert set(report.failing) == {"dispatch_liveness", "stuck_orders"}
-    assert len(report.checks) == 4
+    assert len(report.checks) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -480,6 +481,7 @@ async def test_the_body_explains_every_check(db_session, real_redis_client, conf
         "database",
         "dispatch_liveness",
         "stuck_orders",
+        "hold_queue_matches_postgres",
     }
     assert all(c["detail"] for c in body["checks"])
 
@@ -488,8 +490,9 @@ async def test_the_endpoint_is_behind_the_internal_token(db_session, real_redis_
     """Hub ids, queue depths and late-order counts are operational intelligence.
     Cloud Monitoring uptime checks can send a custom header, so gating it is
     free."""
-    from app.api.internal_routes import require_internal_secret
     from fastapi import HTTPException
+
+    from app.api.internal_routes import require_internal_secret
 
     routes = [
         route

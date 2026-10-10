@@ -1,3 +1,5 @@
+import structlog
+
 from app.config import settings
 from app.payroll.base import PayrollProvider
 from app.payroll.payout_provider import PayoutProvider
@@ -5,8 +7,6 @@ from app.payroll.rippling_client import RipplingPayrollProvider
 from app.payroll.stripe_connect_client import StripeConnectPayoutProvider
 from app.payroll.stub_client import StubPayrollProvider
 from app.payroll.stub_payout_client import StubPayoutProvider
-
-import structlog
 
 logger = structlog.get_logger(__name__)
 

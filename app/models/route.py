@@ -1,5 +1,6 @@
 """A driver's active or completed route for a shift."""
 import uuid
+
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 

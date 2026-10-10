@@ -13,7 +13,7 @@ from app.client_auth.passwords import verify_password
 from app.db import get_db
 from app.models.ops_user import OpsUser
 from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user
-from app.ops_auth.login_rate_limit import LoginRateLimitExceeded, LoginRateLimiter
+from app.ops_auth.login_rate_limit import LoginRateLimiter, LoginRateLimitExceeded
 from app.ops_auth.tokens import issue_token
 from app.schemas.ops_auth import OpsAuthToken, OpsLoginBody, OpsProfileView
 

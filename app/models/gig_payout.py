@@ -9,6 +9,7 @@ already prevents a retried request from reaching this code path at all,
 but this constraint holds even if that ever changes).
 """
 import uuid
+
 from sqlalchemy import ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 

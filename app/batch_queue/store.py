@@ -74,6 +74,29 @@ class HoldQueueStore:
                 {wakeup_member(hub_id, order.order_id): order.hold_deadline.timestamp()},
             )
 
+    async def add_if_absent(self, hub_id: str, order: HeldOrder) -> bool:
+        """Add an order only if it isn't queued already; True if it was added.
+
+        For the rebuild from Postgres (app/optimizer/redis_rebuild.py), which
+        must never overwrite a live entry: that one carries the real
+        `held_since` and wake-up, and may have been written after the rebuild
+        read Postgres.
+        """
+        async with timed_operation("holdqueue.add_if_absent"):
+            added = await self._redis.hsetnx(_queue_key(hub_id), order.order_id, _serialize(order))
+            if added:
+                await self._redis.zadd(
+                    WAKEUPS_KEY,
+                    {wakeup_member(hub_id, order.order_id): order.hold_deadline.timestamp()},
+                    nx=True,
+                )
+        return bool(added)
+
+    async def order_ids(self, hub_id: str) -> set[str]:
+        """Which orders are queued, without reading them."""
+        async with timed_operation("holdqueue.order_ids"):
+            return {as_text(key) for key in await self._redis.hkeys(_queue_key(hub_id))}
+
     async def remove(self, hub_id: str, order_id: str) -> None:
         async with timed_operation("holdqueue.remove"):
             await self._redis.hdel(_queue_key(hub_id), order_id)

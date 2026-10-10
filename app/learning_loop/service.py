@@ -18,10 +18,10 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.learning_loop.detection import FlagRecord, RELEVANT_FLAG_TYPES, detect_patterns
+from app.learning_loop.detection import RELEVANT_FLAG_TYPES, FlagRecord, detect_patterns
+from app.models.route import Route
 from app.models.rules import ActiveRule, ProposedRule
 from app.models.stop import Stop, StopFlag
-from app.models.route import Route
 from app.sla.engine import DEFAULT_HOLD_WINDOW_MINUTES
 
 DEFAULT_LOOKBACK_DAYS = 14

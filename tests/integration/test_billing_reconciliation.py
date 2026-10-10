@@ -11,9 +11,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.billing.reconciliation import (
+    _STILL_MOVING,
     BILLED_ON,
     FEE_UNIT,
-    _STILL_MOVING,
     reconcile_period,
     render,
 )

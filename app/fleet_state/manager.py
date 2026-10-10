@@ -54,6 +54,47 @@ def _all_drivers_set_key(hub_id: str) -> str:
     return f"fleet:{hub_id}:all_drivers"
 
 
+# KEYS: state, available set, all-drivers set.
+# ARGV: driver_id, status, capacity_units, load_units, current_route_id.
+_SEED_IF_ABSENT = """
+if redis.call('exists', KEYS[1]) == 1 then
+    return 0
+end
+redis.call('hset', KEYS[1], 'status', ARGV[2], 'capacity_units', ARGV[3],
+           'load_units', ARGV[4], 'current_route_id', ARGV[5])
+if ARGV[2] == 'available' then
+    redis.call('sadd', KEYS[2], ARGV[1])
+else
+    redis.call('srem', KEYS[2], ARGV[1])
+end
+redis.call('sadd', KEYS[3], ARGV[1])
+return 1
+"""
+
+_SEED_LOCATION_IF_ABSENT = """
+if redis.call('exists', KEYS[1]) == 1 then
+    return 0
+end
+redis.call('hset', KEYS[1], 'lat', ARGV[1], 'lng', ARGV[2], 'recorded_at', ARGV[3])
+return 1
+"""
+
+# KEYS: state, available set. ARGV: driver_id, expected status, new status.
+_CORRECT_STATUS_IF = """
+if redis.call('hget', KEYS[1], 'status') ~= ARGV[2] then
+    return 0
+end
+-- Off a route means carrying nothing.
+redis.call('hset', KEYS[1], 'status', ARGV[3], 'current_route_id', '', 'load_units', 0)
+if ARGV[3] == 'available' then
+    redis.call('sadd', KEYS[2], ARGV[1])
+else
+    redis.call('srem', KEYS[2], ARGV[1])
+end
+return 1
+"""
+
+
 class FleetStateManager:
     def __init__(self) -> None:
         self._redis = get_client()
@@ -79,6 +120,45 @@ class FleetStateManager:
             pipe.sadd(_all_drivers_set_key(state.hub_id), state.driver_id)
             await pipe.execute()
 
+    async def seed_driver_state_if_absent(self, state: DriverState) -> bool:
+        """Write a driver's state only if Redis has none; True if it was written.
+
+        For the rebuild from Postgres (app/optimizer/redis_rebuild.py). One
+        script, so a state the driver's own app writes between the check and the
+        write can't be overwritten by the rebuild's older picture.
+        """
+        async with timed_operation("fleet.seed_driver_state_if_absent"):
+            written = await self._redis.eval(
+                _SEED_IF_ABSENT,
+                3,
+                _state_key(state.hub_id, state.driver_id),
+                _available_set_key(state.hub_id),
+                _all_drivers_set_key(state.hub_id),
+                state.driver_id,
+                state.status,
+                state.capacity_units,
+                state.load_units,
+                state.current_route_id or "",
+            )
+        return bool(written)
+
+    async def correct_status_if(
+        self, hub_id: str, driver_id: str, *, expect_status: str, new_status: str
+    ) -> bool:
+        """Set a driver's status only if it is still `expect_status`, clearing the
+        route; True if it changed. For drift the rebuild proves from Postgres."""
+        async with timed_operation("fleet.correct_status_if"):
+            changed = await self._redis.eval(
+                _CORRECT_STATUS_IF,
+                2,
+                _state_key(hub_id, driver_id),
+                _available_set_key(hub_id),
+                driver_id,
+                expect_status,
+                new_status,
+            )
+        return bool(changed)
+
     async def get_driver_state(self, hub_id: str, driver_id: str) -> DriverState | None:
         async with timed_operation("fleet.get_driver_state"):
             data = _fields(await self._redis.hgetall(_state_key(hub_id, driver_id)))
@@ -103,6 +183,20 @@ class FleetStateManager:
                     "recorded_at": location.recorded_at,
                 },
             )
+
+    async def seed_location_if_absent(self, location: DriverLocation, hub_id: str) -> bool:
+        """Write a position only if Redis has none, so a ping that lands during the
+        rebuild is never replaced by the older one Postgres had."""
+        async with timed_operation("fleet.seed_location_if_absent"):
+            written = await self._redis.eval(
+                _SEED_LOCATION_IF_ABSENT,
+                1,
+                _location_key(hub_id, location.driver_id),
+                location.lat,
+                location.lng,
+                location.recorded_at,
+            )
+        return bool(written)
 
     async def get_driver_location(self, hub_id: str, driver_id: str) -> DriverLocation | None:
         async with timed_operation("fleet.get_driver_location"):

@@ -24,9 +24,9 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.delivery.eta import refresh_route_etas
 from app.api.public_routes import rate_delivery, track_delivery
 from app.config import settings
+from app.delivery.eta import refresh_route_etas
 from app.fleet_state.manager import FleetStateManager
 from app.models.client import Client
 from app.models.driver import Driver

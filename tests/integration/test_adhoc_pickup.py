@@ -15,7 +15,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from tests.integration.queue_helpers import let_the_hold_run_out
 from sqlalchemy import func, select
 
 from app.api.driver_routes import accept_offer, get_my_route, list_my_offers
@@ -36,6 +35,7 @@ from app.models.shop import Shop
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.fleet import DriverLocation, DriverState
 from app.schemas.lmx_order import LMXOrder
+from tests.integration.queue_helpers import let_the_hold_run_out
 
 pytestmark = pytest.mark.integration
 

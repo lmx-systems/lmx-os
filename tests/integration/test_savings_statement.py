@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select
 
+from app.experiment.arms import _draw, block_size
 from app.experiment.exclusions import exclude_receiver
 from app.models.client import Client
 from app.models.driver import Driver
@@ -27,10 +28,9 @@ from app.models.order import Order, OrderStatus
 from app.models.outcome_entry import KIND_COST, SUBJECT_ORDER, OutcomeEntry
 from app.models.route import Route
 from app.models.stop import Stop, StopOrder
-from app.record.cost import RATE_FROM_DRIVER, RATE_PLACEHOLDER, record_costs_for_period
 from app.record.abstention import record_arm_abstention
+from app.record.cost import RATE_FROM_DRIVER, RATE_PLACEHOLDER, record_costs_for_period
 from app.record.outcomes import record_outcome
-from app.experiment.arms import _draw, block_size
 from app.settle.statement import (
     MINIMUM_ARM_DROPS,
     SavingsStatement,

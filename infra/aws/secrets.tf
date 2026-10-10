@@ -6,8 +6,8 @@ os.environ before Settings is ever constructed (see that module's
 docstring). Nothing else about the app needed to change to make this
 real.
 
-Generated here: DATABASE_URL/REDIS_URL (built from this same config, so
-they can never drift from the real RDS/ElastiCache endpoints) and three
+Generated here: DATABASE_URL (built from this same config, so it can never
+drift from the real RDS endpoint) and three
 distinct random JWT secrets (assert_jwt_secrets_are_distinct() in
 app/config.py refuses to boot outside development if any two ever
 match). Third-party credentials (Rippling, Google Maps, Sentry,
@@ -51,7 +51,6 @@ resource "aws_secretsmanager_secret_version" "app" {
 
   secret_string = jsonencode({
     DATABASE_URL = "postgresql+asyncpg://${aws_db_instance.main.username}:${random_password.db_master.result}@${aws_db_instance.main.endpoint}/${aws_db_instance.main.db_name}"
-    REDIS_URL    = "redis://${aws_elasticache_cluster.main.cache_nodes[0].address}:${aws_elasticache_cluster.main.cache_nodes[0].port}/0"
 
     DRIVER_JWT_SECRET = random_password.driver_jwt_secret.result
     CLIENT_JWT_SECRET = random_password.client_jwt_secret.result

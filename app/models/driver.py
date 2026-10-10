@@ -8,7 +8,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 
-
 # Which pay model, document set and onboarding path applies. Stated as a tuple
 # rather than left as literals scattered through the tree, for the reason
 # `NODE_CLASSES` and `CONSEQUENCES` are: `app/api/admin_routes.py` and
