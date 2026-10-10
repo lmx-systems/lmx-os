@@ -55,6 +55,10 @@ resource "aws_ecs_task_definition" "app" {
       # attacker mint a fresh empty bucket per request. See app/client_ip.py.
       # If a CDN is ever put in front of the ALB, this becomes 2.
       { name = "TRUSTED_PROXY_COUNT", value = "1" },
+      # Not secrets: which Google pool trusts this task's AWS role for Route
+      # Optimization (app/optimizer/google_credentials.py). Empty means none.
+      { name = "GOOGLE_WIF_AUDIENCE", value = var.google_wif_audience },
+      { name = "GOOGLE_WIF_SERVICE_ACCOUNT", value = var.google_wif_service_account },
     ]
 
     logConfiguration = {

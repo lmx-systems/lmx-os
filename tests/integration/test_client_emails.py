@@ -264,3 +264,36 @@ async def test_the_stub_reports_that_nothing_was_sent():
     """Returning True would let a caller believe a client was notified when
     nobody was."""
     assert await StubEmailClient().send(to="a@b.com", subject="s", body="b") is False
+
+
+async def test_a_deployed_stub_never_logs_the_body_or_the_address(monkeypatch):
+    """A password-reset email carries a working link. With no mail server, the
+    stub used to write it, and the recipient's address, to the logs - CloudWatch
+    for a month, and Sentry, which gets every warning."""
+    from unittest.mock import patch
+
+    import app.messaging.email_client as email_client
+
+    monkeypatch.setattr(email_client.settings, "environment", "production")
+    with patch.object(email_client, "logger") as logger:
+        await StubEmailClient().send(
+            to="counter.lead@partner.example",
+            subject="Reset your LMX password",
+            body="https://portal.lmxit.com/reset?token=SECRET",
+        )
+
+    logged = repr(logger.warning.call_args)
+    assert "SECRET" not in logged and "counter.lead" not in logged
+    assert "partner.example" in logged and "Reset your LMX password" in logged
+
+
+async def test_in_development_the_stub_shows_the_whole_email(monkeypatch):
+    from unittest.mock import patch
+
+    import app.messaging.email_client as email_client
+
+    monkeypatch.setattr(email_client.settings, "environment", "development")
+    with patch.object(email_client, "logger") as logger:
+        await StubEmailClient().send(to="a@b.com", subject="s", body="the body")
+
+    assert logger.warning.call_args.kwargs["body"] == "the body"

@@ -108,3 +108,19 @@ variable "certificate_arn" {
     rather than anything subtler.
   EOT
 }
+
+# Route Optimization from ECS (docs/E1_ROUTE_OPTIMIZATION_ACCESS.md). Google
+# workload identity federation trusts this task's AWS role, so no Google key
+# file exists. Empty until the Google side is set up; then the app falls back to
+# the built-in planner and says so, rather than failing dispatch.
+variable "google_wif_audience" {
+  description = "Google workload identity pool provider audience, //iam.googleapis.com/projects/NUMBER/locations/global/workloadIdentityPools/POOL/providers/PROVIDER"
+  type        = string
+  default     = ""
+}
+
+variable "google_wif_service_account" {
+  description = "Service account the pool impersonates, if any (route-optimization@PROJECT.iam.gserviceaccount.com)"
+  type        = string
+  default     = ""
+}

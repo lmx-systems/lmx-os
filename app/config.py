@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     # `cloud-platform`. All this needs from us is which project to bill/
     # authorize against.
     google_cloud_project_id: str | None = None
+    # On AWS, where there is no Google identity to inherit: Google workload
+    # identity federation trusting the ECS task's AWS role, so no service-account
+    # key file exists (app/optimizer/google_credentials.py). The pool provider's
+    # audience, e.g. //iam.googleapis.com/projects/NUMBER/locations/global/
+    # workloadIdentityPools/POOL/providers/PROVIDER, and optionally the service
+    # account the pool impersonates. Neither is a secret.
+    google_wif_audience: str | None = None
+    google_wif_service_account: str | None = None
     google_maps_api_key: str | None = None
 
     # Push notifications for new job offers (docs/ROADMAP.md A1,
