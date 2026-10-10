@@ -29,6 +29,12 @@ const POLL_INTERVAL_MS = 20_000
  * it needs no key, adds no bundle weight to a page loaded once over mobile data,
  * and this page shows exactly one marker. If tracking ever needs a route line or
  * clustering, that's the point to reach for a real map.
+ *
+ * **It loads only when the reader asks.** The iframe sends OpenStreetMap the
+ * driver's exact position and the reader's IP address, a transfer to a third
+ * party that loading it on sight would make for everyone who opens a forwarded
+ * link. Until they tap, nothing leaves this page, and the button says what
+ * tapping shares.
  */
 export function TrackingPage({ token }: TrackingPageProps) {
   const [view, setView] = useState<TrackingView | null>(null)
@@ -350,9 +356,30 @@ function Arrival({ view }: { view: TrackingView }) {
 }
 
 function DriverMap({ position }: { position: NonNullable<TrackingView['driver_position']> }) {
+  // Kept for the life of the page, so a poll that moves the marker doesn't put
+  // the button back.
+  const [shown, setShown] = useState(false)
   const { lat, lng } = position
   const span = 0.012
   const bbox = [lng - span, lat - span / 2, lng + span, lat + span / 2].join('%2C')
+  if (!shown) {
+    return (
+      <div className="mt-6 rounded-xl border border-slate-200 px-4 py-3">
+        <p className="text-sm text-slate-700">Your driver is on the way to you.</p>
+        <button
+          type="button"
+          onClick={() => setShown(true)}
+          className="mt-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-800 focus-visible:outline focus-visible:outline-2"
+        >
+          Show the driver on a map
+        </button>
+        <p className="mt-2 text-xs text-slate-500">
+          The map comes from OpenStreetMap, which will see your IP address and the
+          driver&rsquo;s current position.
+        </p>
+      </div>
+    )
+  }
   return (
     <div className="mt-6">
       <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -360,11 +387,13 @@ function DriverMap({ position }: { position: NonNullable<TrackingView['driver_po
           title="Driver location"
           className="h-64 w-full"
           loading="lazy"
+          referrerPolicy="no-referrer"
           src={`https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat}%2C${lng}`}
         />
       </div>
       <p className="mt-2 text-xs text-slate-500">
-        Driver location updated {relativeTime(position.recorded_at)}
+        Driver location updated {relativeTime(position.recorded_at)}. Map &copy;
+        OpenStreetMap contributors.
       </p>
     </div>
   )
