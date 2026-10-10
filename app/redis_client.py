@@ -45,6 +45,13 @@ def get_pool() -> redis.ConnectionPool:
             settings.redis_url,
             max_connections=50,
             decode_responses=True,
+            # Bounded, so a node that dies or fails over turns into an error the
+            # caller handles in seconds, not a request that hangs. The health
+            # check drops a pooled connection to a node that has gone away (a
+            # demoted primary after a failover) before it is handed out.
+            socket_connect_timeout=5,
+            socket_timeout=5,
+            health_check_interval=30,
         )
     return _pool
 

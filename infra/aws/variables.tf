@@ -45,6 +45,12 @@ variable "db_backup_retention_days" {
   default = 7
 }
 
+variable "redis_multi_az" {
+  type        = bool
+  default     = false
+  description = "A standby Redis node in a second zone with automatic failover (about +$12/month on cache.t4g.micro). Off by default to match db_multi_az; flip both when uptime starts to matter. Losing the node loses no orders either way - the app rebuilds Redis from Postgres - this shortens the outage."
+}
+
 variable "redis_node_type" {
   type    = string
   default = "cache.t4g.micro"
