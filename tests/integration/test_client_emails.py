@@ -255,7 +255,7 @@ async def test_a_rejected_applicant_is_not_emailed(db_session, real_redis_client
 
 
 def test_unconfigured_smtp_falls_back_to_the_stub():
-    """Same unconfigured-to-stub convention as Twilio - no SMTP account exists
+    """Same unconfigured-to-stub convention as push - no SMTP account exists
     yet, and every flow has to remain testable without one."""
     assert isinstance(get_email_client(), StubEmailClient)
 

@@ -64,7 +64,7 @@ resource "aws_secretsmanager_secret_version" "app" {
 
     # Placeholders - fill these in via the AWS console or `aws
     # secretsmanager put-secret-value` once each real account exists
-    # (docs/ROADMAP.md B4/B5). Left empty, every one of these already
+    # (docs/ROADMAP.md B4, L12, E1). Left empty, every one of these already
     # degrades to this app's existing stub/no-op behavior - see
     # app/messaging/email_client.py, app/payroll/, app/logging_config.py.
     GOOGLE_MAPS_API_KEY     = ""

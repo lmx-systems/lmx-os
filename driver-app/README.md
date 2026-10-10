@@ -92,24 +92,17 @@ auth - no extra header needed from this app.
 ## Building for TestFlight / Play Store (EAS)
 
 `eas.json` has real `development`/`preview`/`production` build profiles
-and a `submit.production` block, and `eas-cli` is a devDependency - all
-of it `terraform validate`-equivalent (`eas config` reaches the real
-"log in" step, not a parse error) but not yet exercised against a real
-Expo account, since none exists for this project yet (docs/ROADMAP.md
-A6). One-time setup once one does:
+and a `submit.production` block, and `eas-cli` is a devDependency. The Expo
+project exists (owner `sourabhmiglani`, `app.json`'s `extra.eas.projectId`), so
+push tokens can be minted. Building for a store still needs the platform
+accounts (docs/ROADMAP.md A6): the Apple Developer Program for iOS, the Google
+Play Console for an Android release, and FCM credentials uploaded to EAS for
+Android push.
 
 ```bash
 cd driver-app
 npx eas-cli login                # or set EXPO_TOKEN for CI - see .github/workflows/eas-build.yml
-npx eas-cli init                 # creates the real project, writes app.json's extra.eas.projectId
 ```
-
-That second step is also what closes the one open gap from push
-notifications (docs/ROADMAP.md A1) - `Notifications.getExpoPushTokenAsync()`
-needs a real project id to mint a real token, and
-`src/notifications/registerForPushNotifications.ts` already checks for
-exactly this field and no-ops until it's there. No code change needed
-either way; `eas init` is the whole unlock.
 
 After that, fill in `eas.json`'s `submit.production` placeholders
 (`REPLACE_WITH_REAL_...`) once real Apple/Google developer accounts

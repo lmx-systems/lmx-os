@@ -145,11 +145,13 @@ loading the van, before anything had been delivered to anybody.
 - **`DRV-5`'s battery clause.** "Under 4% per 8-hour shift with background on"
   is measured on a real phone over a real shift and cannot be verified from a
   repository. The permission half is done.
-- **Background position.** Foreground-only on purpose: the iOS "always" tier
-  needs an App Store justification and a real developer account
-  (`docs/ROADMAP.md` A6). The practical consequence is honest and worth knowing
-  — position stops updating when the driver backgrounds the app, and job offers
-  still arrive by push.
+- **Background position.** The 30-second position pings are foreground-only on
+  purpose. Only the stop geofences (`DRV-1`) run in the background, and the app
+  asks for the "always" tier for those alone, which on iOS needs an App Store
+  justification and a real developer account (`docs/ROADMAP.md` A6). The
+  practical consequence is honest and worth knowing — the map position stops
+  updating when the driver backgrounds the app, while arrivals and departures
+  are still recorded, and job offers still arrive by push.
 
 ---
 
