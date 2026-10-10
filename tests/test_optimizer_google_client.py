@@ -783,3 +783,56 @@ def test_every_window_lies_inside_the_global_window():
         if window is None:
             continue
         assert start <= window["softEndTime"] <= end, label
+
+
+# ---------------------------------------------------------------------------
+# Credentials: a missing one falls back, and AWS needs no key file
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_missing_google_credentials_fall_back_instead_of_stopping_dispatch():
+    """Credential lookup used to run in the cached factory, before the fallback
+    planner wrapped the client, so a project id with no credentials took every
+    dispatch cycle down. Now the solve fails, and the fallback plans and says so."""
+    import google.auth.exceptions
+
+    with patch("app.optimizer.google_routes_client.settings") as mock_settings, patch(
+        "google.auth.default",
+        side_effect=google.auth.exceptions.DefaultCredentialsError("no credentials"),
+    ):
+        mock_settings.google_cloud_project_id = "lmx-os"
+        client = get_route_optimization_client()
+
+    drivers = [DriverCandidate(driver_id="d1", lat=34.05, lng=-118.25, capacity_remaining_units=5)]
+    stops = [StopCandidate(stop_id="s1", order_ids=["o1"], lat=34.06, lng=-118.24, weight_units=1, sla_tier="T2")]
+    assignments, unassigned = await client.optimize(drivers, stops)
+
+    assert [a.driver_id for a in assignments] == ["d1"] and unassigned == []
+    assert client.engine_name == client.fallback_engine_name
+
+
+def test_on_aws_the_task_role_is_federated_to_google_with_no_key_file():
+    import google.auth.aws
+
+    from app.optimizer import google_credentials
+
+    frozen = MagicMock(access_key="AKIA-TEST", secret_key="secret", token="session")
+    session = MagicMock(region_name="us-east-1")
+    session.get_credentials.return_value.get_frozen_credentials.return_value = frozen
+    with patch.object(google_credentials, "settings") as mock_settings, patch(
+        "app.optimizer.google_credentials.boto3.Session", return_value=session
+    ):
+        mock_settings.google_wif_audience = (
+            "//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/lmx/providers/aws"
+        )
+        mock_settings.google_wif_service_account = "route-opt@lmx-os.iam.gserviceaccount.com"
+        credentials = google_credentials.route_optimization_credentials()
+        supplier = credentials._aws_security_credentials_supplier
+        aws = supplier.get_aws_security_credentials(None, None)
+
+    assert isinstance(credentials, google.auth.aws.Credentials)
+    assert credentials._audience.endswith("/providers/aws")
+    assert "route-opt@lmx-os.iam.gserviceaccount.com" in credentials._service_account_impersonation_url
+    assert (aws.access_key_id, aws.secret_access_key, aws.session_token) == ("AKIA-TEST", "secret", "session")
+    assert supplier.get_aws_region(None, None) == "us-east-1"

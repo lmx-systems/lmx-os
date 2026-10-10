@@ -67,6 +67,42 @@ project, and without one the call fails with an error that does not obviously sa
 is the most likely reason a correctly-granted role still appears not to work, which is
 why it is called out rather than left in a setup list.
 
+## On AWS: federate the task role, still no key
+
+LMX runs on ECS, not Cloud Run, so there is no Google workload identity to inherit.
+Google's workload identity federation covers it without a key: Google trusts the ECS
+task's own AWS role, and the app trades the task's temporary AWS credentials for a
+short-lived Google token (`app/optimizer/google_credentials.py`).
+
+On the Google project, once (AWS_ACCOUNT_ID is ours; the role is `lmx-prod-app-task`, from
+`infra/aws/iam.tf`):
+
+```
+gcloud iam workload-identity-pools create lmx-aws --location=global --project=PROJECT_ID
+gcloud iam workload-identity-pools providers create-aws aws \
+  --workload-identity-pool=lmx-aws --account-id=AWS_ACCOUNT_ID \
+  --location=global --project=PROJECT_ID
+gcloud iam service-accounts create route-optimization --project=PROJECT_ID
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:route-optimization@PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/cloudoptimization.user"
+gcloud iam service-accounts add-iam-policy-binding \
+  route-optimization@PROJECT_ID.iam.gserviceaccount.com \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/lmx-aws/attribute.aws_role/arn:aws:sts::AWS_ACCOUNT_ID:assumed-role/lmx-prod-app-task"
+```
+
+Then set two Terraform variables, neither a secret, and apply:
+
+```
+google_wif_audience        = "//iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/lmx-aws/providers/aws"
+google_wif_service_account = "route-optimization@PROJECT_ID.iam.gserviceaccount.com"
+```
+
+and put `GOOGLE_CLOUD_PROJECT_ID` in the app secret. Until the Google side exists, a
+missing or wrong credential fails the solve, and the fallback planner dispatches and
+records that it did (`app/optimizer/fallback.py`); it no longer stops dispatch.
+
 ## What we do with it
 
 One call, by hand, from a script that exists for this and never runs in CI:

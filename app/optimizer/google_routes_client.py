@@ -22,12 +22,14 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 
 import google.auth
+import google.auth.credentials
 import google.auth.transport.requests
 import httpx
 import structlog
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.config import settings
+from app.optimizer.google_credentials import route_optimization_credentials
 from app.schemas.optimizer import (
     DriverCandidate,
     RouteAssignment,
@@ -51,7 +53,6 @@ class _RetryableRouteOptimizationError(RouteOptimizationError):
     """Same, except a second attempt might work - a timeout, a 429, a 5xx."""
 
 GOOGLE_ROUTE_OPTIMIZATION_ENDPOINT = "https://routeoptimization.googleapis.com/v1/{parent}:optimizeTours"
-CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
 # How far ahead the shipment model looks. This is a single dispatch cycle,
 # not a full driver shift plan - wide enough that a stop released near the
@@ -151,11 +152,20 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
     def __init__(self, project_id: str) -> None:
         self._project_id = project_id
         self._http = httpx.AsyncClient(timeout=4.0)  # leaves headroom inside the 5s cycle budget
-        # Application Default Credentials: a service account JSON at
-        # GOOGLE_APPLICATION_CREDENTIALS, workload identity, or gcloud
-        # user creds in local dev. Route Optimization is a Cloud IAM API,
-        # not an API-key product, so there's no API key to plumb through.
-        self._credentials, _ = google.auth.default(scopes=[CLOUD_PLATFORM_SCOPE])
+        # Application Default Credentials, or workload identity federation from
+        # the ECS task's AWS role (app/optimizer/google_credentials.py). Route
+        # Optimization is a Cloud IAM API, not an API-key product.
+        #
+        # A failure to find credentials is kept and raised on the first solve
+        # rather than here. This runs inside the cached client factory, so
+        # raising here took dispatch down before the fallback planner existed
+        # to catch it; on the solve, the fallback catches it and says so.
+        self._credentials: google.auth.credentials.Credentials | None = None
+        self._credentials_error: Exception | None = None
+        try:
+            self._credentials = route_optimization_credentials()
+        except Exception as exc:  # noqa: BLE001 - surfaced on the first solve
+            self._credentials_error = exc
         self._auth_request = google.auth.transport.requests.Request()
 
     async def _bearer_token(self) -> str:
@@ -163,6 +173,10 @@ class GoogleRouteOptimizationClient(RouteOptimizationClient):
         # endpoint round-trip); keep it off the event loop. `.valid` is
         # false on the first call and once the cached token nears expiry,
         # so most calls skip the refresh entirely.
+        if self._credentials is None:
+            raise RuntimeError(
+                f"No Google credentials for Route Optimization: {self._credentials_error}"
+            )
         if not self._credentials.valid:
             await asyncio.to_thread(self._credentials.refresh, self._auth_request)
         return self._credentials.token

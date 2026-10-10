@@ -105,21 +105,33 @@ class SmtpEmailClient(EmailClient):
 class StubEmailClient(EmailClient):
     """Logs instead of sending.
 
-    Logs the full body deliberately. An email nobody receives is invisible, and
-    during development the body is the only way to check that an approval
-    notification actually says something useful.
+    **The full body only in local development.** There the body is the only way
+    to check that an approval notification says something useful. Anywhere else
+    it is a credential: a password-reset email carries a working reset link, and
+    a deployment with no mail server configured would write it to CloudWatch for
+    a month, and to Sentry, which receives every warning. So a deployed stub logs
+    the subject and the recipient's domain, which is enough to see that mail is
+    not going out, and nothing anyone could use.
     """
 
     engine_name = "stub"
 
     async def send(self, *, to: str, subject: str, body: str) -> bool:
-        logger.warning(
-            "email_not_sent_stub_mode",
-            to=to,
-            subject=subject,
-            body=body,
-            reason="SMTP_HOST/SMTP_FROM_ADDRESS not configured - no mail was sent",
-        )
+        if settings.environment == "development":
+            logger.warning(
+                "email_not_sent_stub_mode",
+                to=to,
+                subject=subject,
+                body=body,
+                reason="SMTP_HOST/SMTP_FROM_ADDRESS not configured - no mail was sent",
+            )
+        else:
+            logger.warning(
+                "email_not_sent_stub_mode",
+                to_domain=to.rpartition("@")[2] or None,
+                subject=subject,
+                reason="SMTP_HOST/SMTP_FROM_ADDRESS not configured - no mail was sent",
+            )
         return False
 
 
