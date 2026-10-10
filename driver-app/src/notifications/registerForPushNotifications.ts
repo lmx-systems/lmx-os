@@ -18,14 +18,13 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// Real push notifications for new job offers (docs/ROADMAP.md A1) need an
-// EAS project id (driver-app/app.json's extra.eas.projectId) for
-// Notifications.getExpoPushTokenAsync() to mint a real, routable token -
-// that's a one-time `eas init` this codebase hasn't run yet (A6, the
-// app-store deployment pipeline, is a separate unstarted item). Until
-// then this deliberately no-ops rather than throwing, same
-// "unconfigured -> skip, don't crash" convention as every other
-// not-yet-provisioned external credential in this app.
+// Real push notifications (docs/ROADMAP.md A1) need an EAS project id
+// (driver-app/app.json's extra.eas.projectId) for
+// Notifications.getExpoPushTokenAsync() to mint a real, routable token. The
+// project exists; a build without the id still no-ops rather than throwing,
+// same "unconfigured -> skip, don't crash" convention as every other
+// external credential in this app. Android delivery also needs FCM
+// credentials uploaded to EAS, and iOS an Apple push key (A6).
 function getEasProjectId(): string | undefined {
   return Constants.expoConfig?.extra?.eas?.projectId as string | undefined;
 }

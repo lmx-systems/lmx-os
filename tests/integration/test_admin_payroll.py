@@ -3,7 +3,7 @@ POST /admin/payroll/{hub_id}/run - submits every driver's most recently
 *completed* pay period to the configured PayrollProvider. No Rippling
 credentials are configured in tests, so this always goes through
 StubPayrollProvider (app/payroll/stub_client.py) - same "unconfigured
-credential -> stub" status as Twilio/Google Routes elsewhere in this
+credential -> stub" status as email/Google Routes elsewhere in this
 codebase.
 """
 import uuid

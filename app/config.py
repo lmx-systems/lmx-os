@@ -216,7 +216,7 @@ class Settings(BaseSettings):
     #
     # A driver's location trail. The only personal record that grows without bound.
     location_ping_retention_days: int = 90
-    # Sent messages and call metadata. Never call content, which is not recorded.
+    # Drivers' support messages with dispatch. LMX sends no texts and places no calls.
     communication_retention_days: int = 730
     # Applications we declined. Long enough to recognise a second application from the
     # same company, short enough that a company we said no to is not on our books

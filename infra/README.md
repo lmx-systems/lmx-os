@@ -167,7 +167,7 @@ infra/
    signup is refused outright when none exists.
 
 7. **Fill in real third-party credentials** once each account exists
-   (`docs/ROADMAP.md` B4/B5, E1): `aws secretsmanager put-secret-value
+   (`docs/ROADMAP.md` B4, L12, E1): `aws secretsmanager put-secret-value
    --secret-id $(terraform output -raw secrets_manager_secret_arn) ...`
    with the updated JSON blob. `secrets.tf`'s `ignore_changes` means a
    future `terraform apply` won't reset these back to placeholders.

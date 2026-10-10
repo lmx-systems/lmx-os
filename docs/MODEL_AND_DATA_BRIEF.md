@@ -399,7 +399,7 @@ The most useful way to think about collection. Labels sort by what they cost us:
 | Class | Labels | Cost | How we get them |
 |---|---|---|---|
 | **Free** | Dwell · arrival · exception type · actual cost · batchability | **Zero — the delivery produces them** | `DRV-1` geofence sensor |
-| **Cheap** | Consequence of lateness | One SMS | One question after a late delivery. The cheapest acquisition of the hardest label here |
+| **Cheap** | Consequence of lateness | One question | One question after a late delivery, recorded by a dispatcher as the order's consequence (`REC-2`). LMX sends no texts since October 2026, so nobody is asked by SMS. The cheapest acquisition of the hardest label here |
 | **Expensive** | The counterfactual · true urgency | A slice of orders done the old way | `EXP-1`, 5–10%, in the contract before the code |
 | **Bought** | Travel time · airspace · rates · weather | Money | Commodity APIs |
 
