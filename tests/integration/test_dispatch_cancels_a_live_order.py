@@ -12,8 +12,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.api.admin_routes import cancel_order_as_dispatch
-from app.batch_queue.clustering import miles_between
 from app.api.driver_routes import accept_offer, arrive_at_stop, get_my_route, list_my_offers
+from app.batch_queue.clustering import miles_between
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
 from app.driver_auth.dependencies import AuthedDriver

@@ -38,13 +38,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from app.batch_queue.clustering import miles_between
 from app.gig_platform.economics import (
     MarginalEconomics,
     evaluate_marginal_economics,
 )
-from app.travel import minutes_for_miles
 from app.models.gig_job import GigJob
-from app.batch_queue.clustering import miles_between
+from app.travel import minutes_for_miles
 
 # Verdict reason codes. Stable strings rather than prose because they are
 # training data: why we passed on a job is as informative as why we took it,

@@ -449,8 +449,8 @@ class TestTheReasonsStayInStep:
 class TestTheEndpoint:
     async def test_it_returns_the_facts_and_the_refusal_flag(self, db_session):
         from app.api.routes import order_explanation
-        from app.ops_auth.dependencies import AuthedOpsUser
         from app.models.ops_user import VIEWER_ROLE
+        from app.ops_auth.dependencies import AuthedOpsUser
 
         hub = await _hub(db_session)
         order = await _order(db_session, hub)
@@ -483,8 +483,8 @@ class TestTheEndpoint:
         needs to see it. A 404 would read as "no such order", which is a
         different problem with a different fix."""
         from app.api.routes import order_explanation
-        from app.ops_auth.dependencies import AuthedOpsUser
         from app.models.ops_user import VIEWER_ROLE
+        from app.ops_auth.dependencies import AuthedOpsUser
 
         hub = await _hub(db_session)
         order = await _order(db_session, hub)

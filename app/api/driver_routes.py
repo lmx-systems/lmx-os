@@ -12,22 +12,38 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-
-import structlog
 from typing import Annotated
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.db import get_db
-from app.driver_auth.dependencies import AuthedDriver, get_current_driver
+import app.payroll.hours as payroll_hours
 from app.client_ip import client_ip
+from app.compliance.driver_documents import evaluate_driver_documents
+from app.db import get_db
+from app.delivery.cod import (
+    CodError,
+    CodNotSettled,
+    assert_cod_settled,
+    cod_obligations,
+    record_collection,
+    record_dispute,
+)
+from app.delivery.en_route import mark_current_stop_en_route
+from app.delivery.eta import refresh_after_ping, refresh_route_etas
+from app.delivery.proof import ProofNotSatisfied, assert_proof_satisfied, resolve_stop_proof
+from app.delivery.routes import lock_route
 from app.driver_auth import sign_in_codes
+from app.driver_auth.dependencies import AuthedDriver, get_current_driver
 from app.driver_auth.tokens import issue_token
 from app.fleet_state.manager import FleetStateManager
+from app.gig_platform import service as gig_store
+from app.gig_platform.accept_gate import evaluate_offer
+from app.hub_calendar import hub_zone
 from app.identity.dock_survey import (
     MAX_SURVEYS_PER_SHIFT,
     dock_needs_survey,
@@ -35,20 +51,18 @@ from app.identity.dock_survey import (
     surveys_recorded_today,
 )
 from app.identity.profile import set_access, set_autonomy_fit
-import app.payroll.hours as payroll_hours
-from app.payroll import get_payout_provider
-from app.payroll.gig_pricing import estimate_delivery_pay_cents
-from app.redis_client import get_client
+from app.messaging.cod_notifications import ESCALATION_SENT, notify_client_of_cod_dispute
 from app.messaging.delivery_pin import MAX_PIN_VERIFICATION_ATTEMPTS, generate_delivery_pin
+from app.models.cod_collection import CodCollection
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
-from app.gig_platform import service as gig_store
-from app.gig_platform.accept_gate import evaluate_offer
-from app.models.driver_document import DriverDocument
+from app.models.driver_document import REQUIRED_DOC_TYPES, REVIEW_PENDING, DriverDocument
 from app.models.driver_location_ping import DriverLocationPing
-from app.models.gig_job import GigJob
 from app.models.driver_shift_event import DriverShiftEvent
+from app.models.gig_job import GigJob
 from app.models.gig_payout import GigPayout
+from app.models.hub import Hub
+from app.models.hub_geofence_event import HubGeofenceEvent
 from app.models.message import Message
 from app.models.order import Order, OrderStatus, SLATier
 from app.models.parcel import Parcel
@@ -57,27 +71,25 @@ from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
-from app.hub_calendar import hub_zone
-from app.models.hub import Hub
-from app.models.hub_geofence_event import HubGeofenceEvent
 from app.models.stop_geofence_event import StopGeofenceEvent
 from app.optimizer.event_trigger import dispatch_event_bus
-from app.messaging.cod_notifications import ESCALATION_SENT, notify_client_of_cod_dispute
-from app.tracking.service import ensure_tracking_token
 from app.orders.requeue import requeue_orders_from_offer
 from app.orders.status_service import advance_orders
+from app.payroll import get_payout_provider
+from app.payroll.gig_pricing import estimate_delivery_pay_cents
 from app.record.outcomes import record_delivery_outcomes
+from app.redis_client import get_client
+from app.reporting.measurement import Measurement
+from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_driver_scorecard
 from app.returns.service import return_views
-from app.schemas.returns import CollectReturnBody, ReturnItemView
 from app.schemas.driver_app import (
-    HubGeofenceEventsBody,
-    StopGeofenceEventsBody,
-    StopGeofenceEventsResult,
     CodDisputeBody,
     CodObligationView,
     CollectCodBody,
     CompleteStopBody,
     DeclineOfferBody,
+    DockSurveyBody,
+    DockSurveyResult,
     DriverAvailabilityUpdate,
     DriverComplianceProblemView,
     DriverComplianceView,
@@ -90,6 +102,7 @@ from app.schemas.driver_app import (
     DriverScorecardView,
     EarningsView,
     FlagStopBody,
+    HubGeofenceEventsBody,
     JobOfferView,
     MessageView,
     OfferStopSummary,
@@ -100,8 +113,8 @@ from app.schemas.driver_app import (
     ScanParcelsBody,
     ScorecardMetricView,
     SendMessageBody,
-    DockSurveyBody,
-    DockSurveyResult,
+    StopGeofenceEventsBody,
+    StopGeofenceEventsResult,
     StopProofRequirementView,
     StopReturnsView,
     StopView,
@@ -123,23 +136,7 @@ from app.schemas.gig import (
     GigJobView,
     MarginalEconomicsView,
 )
-from app.compliance.driver_documents import evaluate_driver_documents
-from app.delivery.cod import (
-    CodError,
-    CodNotSettled,
-    assert_cod_settled,
-    cod_obligations,
-    record_collection,
-    record_dispute,
-)
-from app.delivery.en_route import mark_current_stop_en_route
-from app.delivery.eta import refresh_after_ping, refresh_route_etas
-from app.delivery.routes import lock_route
-from app.reporting.measurement import Measurement
-from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_driver_scorecard
-from app.models.cod_collection import CodCollection
-from app.delivery.proof import ProofNotSatisfied, assert_proof_satisfied, resolve_stop_proof
-from app.models.driver_document import REQUIRED_DOC_TYPES, REVIEW_PENDING
+from app.schemas.returns import CollectReturnBody, ReturnItemView
 from app.storage.document_upload_client import (
     UnsupportedDocumentType,
     create_document_upload,
@@ -149,6 +146,7 @@ from app.storage.photo_upload_client import (
     get_photo_upload_client,
     readable_url,
 )
+from app.tracking.service import ensure_tracking_token
 
 router = APIRouter(prefix="/driver", tags=["driver"])
 logger = structlog.get_logger(__name__)
@@ -597,6 +595,29 @@ async def _profile_view(session: AsyncSession, row: Driver) -> DriverProfileView
         hub_lat=hub.lat if hub else None,
         hub_lng=hub.lng if hub else None,
     )
+
+
+async def _free_driver_after_route(session: AsyncSession, driver: AuthedDriver) -> None:
+    """Back in dispatch's pool once their route is finished.
+
+    Written whether or not Redis still has the driver's state. Skipping a missing
+    one, as this used to, left a driver who finished a route after a Redis flush
+    out of the pool for good.
+    """
+    manager = FleetStateManager()
+    state = await manager.get_driver_state(driver.hub_id, driver.driver_id)
+    if state is None:
+        row = await _get_driver_row(session, driver)
+        state = DriverState(
+            driver_id=driver.driver_id,
+            hub_id=driver.hub_id,
+            status="available",
+            capacity_units=row.vehicle_capacity_units,
+        )
+    state.status = "available"
+    state.current_route_id = None
+    state.load_units = 0
+    await manager.upsert_driver_state(state)
 
 
 async def _get_driver_row(session: AsyncSession, driver: AuthedDriver) -> Driver:
@@ -1134,7 +1155,13 @@ async def accept_offer(
             driver_id=driver.driver_id,
             hub_id=str(offer.hub_id),
             status="en_route",
-            capacity_units=existing_state.capacity_units if existing_state else 1,
+            # The vehicle's own capacity when Redis has no state (a flush since
+            # the offer): a fallback of 1 sent the driver out with one slot.
+            capacity_units=(
+                existing_state.capacity_units
+                if existing_state
+                else (await _get_driver_row(session, driver)).vehicle_capacity_units
+            ),
             load_units=existing_state.load_units if existing_state else 0,
             current_route_id=str(route.id),
         )
@@ -2479,12 +2506,7 @@ async def complete_stop(
         # (app/optimizer/event_trigger.py flagged it as having no producer
         # yet, since the driver app didn't exist) - this is that producer,
         # fired once the whole route wraps so the fleet frees up promptly.
-        manager = FleetStateManager()
-        state = await manager.get_driver_state(driver.hub_id, driver.driver_id)
-        if state:
-            state.status = "available"
-            state.current_route_id = None
-            await manager.upsert_driver_state(state)
+        await _free_driver_after_route(session, driver)
         await dispatch_event_bus.publish(driver.hub_id, "stop_completed")
 
     return await _stop_view_after_reload(session, stop)
@@ -2545,7 +2567,8 @@ async def flag_stop_issue(
         .select_from(Stop)
         .where(Stop.route_id == stop.route_id, Stop.status.notin_(_TERMINAL_STOP_STATUSES))
     )
-    if remaining_result.scalar_one() == 0:
+    route_finished = remaining_result.scalar_one() == 0
+    if route_finished:
         route = await session.get_one(Route, stop.route_id)
         route.status = "completed"
     else:
@@ -2572,6 +2595,11 @@ async def flag_stop_issue(
             if state:
                 state.load_units = max(0.0, state.load_units - total_weight)
                 await fleet_state_manager.upsert_driver_state(state)
+
+    # A route that ends on a flagged stop ends all the same: the driver goes back
+    # in the pool. It used to stay en_route until they toggled off and on.
+    if route_finished:
+        await _free_driver_after_route(session, driver)
 
     # Ops notification reuses the existing in-process event bus, same
     # pattern as complete_stop's "stop_completed" - no new SSE/pubsub here,

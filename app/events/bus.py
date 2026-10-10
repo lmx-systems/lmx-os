@@ -71,6 +71,46 @@ def _lock_key(hub_id: str) -> str:
     return f"events:running:{hub_id}"
 
 
+# Deletes the lock only if it still holds this owner's token. A plain DELETE let
+# a holder whose lock had expired remove the next holder's, and two cycles for
+# one hub could then run at once - the double dispatch the lock exists to stop.
+_RELEASE_IF_OWNER = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+end
+return 0
+"""
+
+
+async def try_acquire_hub_lock(hub_id: str) -> str | None:
+    """Take the hub's dispatch lock. Returns the owner token, or None if busy."""
+    token = uuid.uuid4().hex
+    acquired = await get_client().set(_lock_key(hub_id), token, nx=True, ex=LOCK_TTL_SECONDS)
+    return token if acquired else None
+
+
+async def release_hub_lock(hub_id: str, token: str) -> None:
+    await get_client().eval(_RELEASE_IF_OWNER, 1, _lock_key(hub_id), token)
+
+
+@contextlib.asynccontextmanager
+async def hub_lock(hub_id: str):
+    """One dispatch-shaped run per hub at a time, across every process.
+
+    Yields whether the lock was taken. A caller that didn't get it skips the hub
+    rather than waiting: whoever holds it is already doing the work, and the next
+    event or sweep retries. Every dispatch cycle entry point and the Redis state
+    rebuild (app/optimizer/redis_rebuild.py) take this same lock; a cycle run
+    without it could interleave with another and offer one order twice.
+    """
+    token = await try_acquire_hub_lock(hub_id)
+    try:
+        yield token is not None
+    finally:
+        if token is not None:
+            await release_hub_lock(hub_id, token)
+
+
 def wakeup_member(hub_id: str, token: str) -> str:
     """One wake-up's entry in `WAKEUPS_KEY`. `token` tells one hub's apart -
     the hold queue uses the order id, so re-adding an order moves its wake-up
@@ -119,8 +159,8 @@ class HubEventBus:
         for hub_id in dirty_hub_ids:
             if hub_id in self._local_running:
                 continue  # this process already has a task running for it
-            acquired = await redis.set(_lock_key(hub_id), self._instance_id, nx=True, ex=LOCK_TTL_SECONDS)
-            if not acquired:
+            token = await try_acquire_hub_lock(hub_id)
+            if token is None:
                 continue  # another instance (or another task in this one, from a prior tick) owns it right now
 
             # Consumed the dirty signal we're about to satisfy - a new
@@ -129,7 +169,7 @@ class HubEventBus:
             await redis.srem(DIRTY_HUBS_KEY, hub_id)
 
             self._local_running.add(hub_id)
-            task = asyncio.create_task(self._run_and_release(hub_id))
+            task = asyncio.create_task(self._run_and_release(hub_id, token))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
 
@@ -145,14 +185,14 @@ class HubEventBus:
             if await redis.zrem(WAKEUPS_KEY, member):
                 await redis.sadd(DIRTY_HUBS_KEY, member.split("|", 1)[0])
 
-    async def _run_and_release(self, hub_id: str) -> None:
+    async def _run_and_release(self, hub_id: str, token: str) -> None:
         try:
             await self._handler(hub_id)
         except Exception:
             logger.exception("hub_event_handler_failed", hub_id=hub_id)
         finally:
             self._local_running.discard(hub_id)
-            await get_client().delete(_lock_key(hub_id))
+            await release_hub_lock(hub_id, token)
 
     async def wait_idle(self) -> None:
         """Stop accepting new runs and await every run this *instance*

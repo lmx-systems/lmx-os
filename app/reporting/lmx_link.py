@@ -40,7 +40,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.client import Client
 from app.models.client_webhook import DELIVERY_DELIVERED, WebhookDelivery
 from app.models.order import Order, OrderStatus
-from app.reporting.measurement import Measurement, percentiles as _percentiles
+from app.reporting.measurement import Measurement
+from app.reporting.measurement import percentiles as _percentiles
 
 logger = structlog.get_logger(__name__)
 

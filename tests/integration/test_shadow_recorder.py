@@ -16,11 +16,11 @@ from sqlalchemy import select
 
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
+from app.fleet_state.manager import FleetStateManager
 from app.models.hub import Hub
 from app.models.shadow_decision import ShadowDecision, ShadowOrderDecision
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.fleet import DriverLocation, DriverState
-from app.fleet_state.manager import FleetStateManager
 from app.shadow.recorder import record_shadow_cycle
 
 pytestmark = pytest.mark.integration

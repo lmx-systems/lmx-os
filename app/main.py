@@ -10,6 +10,7 @@ NOT in this phase (see docs/ARCHITECTURE.md for the full breakdown):
   - OS Shell (orchestrator/client dashboards, driver mobile app)
   - ADP / Gusto wiring
 """
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -18,11 +19,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.admin_routes import router as admin_router
 from app.api.client_routes import router as client_router
+from app.api.driver_routes import router as driver_router
 from app.api.internal_routes import router as internal_router
+from app.api.ops_auth_routes import router as ops_auth_router
 from app.api.public_api_routes import router as public_api_router
 from app.api.public_routes import router as public_router
-from app.api.driver_routes import router as driver_router
-from app.api.ops_auth_routes import router as ops_auth_router
 from app.api.routes import router as ops_router
 from app.client_auth.tokens import assert_client_jwt_secret_configured
 from app.config import assert_jwt_secrets_are_distinct, settings
@@ -30,13 +31,14 @@ from app.db import engine
 from app.driver_auth.tokens import assert_driver_jwt_secret_configured
 from app.ingestion.router import router as ingestion_router
 from app.learning_loop.scheduler import learning_loop_scheduler
-from app.shadow.scheduler import shadow_scheduler
 from app.logging_config import configure_logging, get_logger
 from app.ops_auth.middleware import OpsUserAuthMiddleware
 from app.ops_auth.tokens import assert_ops_jwt_secret_configured
 from app.optimizer.event_trigger import dispatch_event_bus
+from app.optimizer.redis_rebuild import reconcile_redis_state, watch_redis_state
 from app.rate_limit import GeneralRateLimitMiddleware
 from app.redis_client import close_pool, get_client
+from app.shadow.scheduler import shadow_scheduler
 
 logger = get_logger(__name__)
 
@@ -58,6 +60,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     redis_client = get_client()
     await redis_client.ping()
 
+    # Put back any Redis state that was lost before the first dispatch cycle reads
+    # it (app/optimizer/redis_rebuild.py). Bounded, and never fatal: a slow or
+    # failed rebuild must not stop the app starting, and the sweep and the watch
+    # below retry it.
+    try:
+        await asyncio.wait_for(reconcile_redis_state(), timeout=20)
+    except Exception:
+        logger.exception("redis_rebuild_at_startup_failed")
+    redis_watch = asyncio.create_task(watch_redis_state())
+
     # Begins the poll loop that lets this instance pick up hub events
     # published by *any* instance, not just itself - app/events/bus.py.
     dispatch_event_bus.start()
@@ -78,6 +90,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Let any event-triggered dispatch cycle in flight finish before the
     # connection pools it depends on go away (app/optimizer/event_trigger.py).
+    redis_watch.cancel()
     await dispatch_event_bus.wait_idle()
     await learning_loop_scheduler.stop()
     await shadow_scheduler.stop()

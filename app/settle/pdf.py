@@ -34,6 +34,8 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
     Image as PdfImage,
+)
+from reportlab.platypus import (
     KeepTogether,
     Paragraph,
     SimpleDocTemplate,

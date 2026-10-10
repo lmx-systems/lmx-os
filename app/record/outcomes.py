@@ -18,8 +18,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.order import Order
-from app.record.decisions import snapshot_that_assigned
-from app.sla.commitment import delivery_commitment, terms_for_client
 from app.models.outcome_entry import (
     KIND_DELIVERED,
     KIND_DISPUTED,
@@ -30,7 +28,8 @@ from app.models.outcome_entry import (
     SUBJECT_TYPES,
     OutcomeEntry,
 )
-from app.sla.commitment import Commitment
+from app.record.decisions import snapshot_that_assigned
+from app.sla.commitment import Commitment, delivery_commitment, terms_for_client
 
 __all__ = [
     "record_outcome",

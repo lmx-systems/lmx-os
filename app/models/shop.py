@@ -1,5 +1,6 @@
 """A shop/store location that places orders on behalf of a client."""
 import uuid
+
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 

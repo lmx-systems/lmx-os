@@ -16,9 +16,9 @@ from app.driver_auth.sign_in_codes import (
     IssuedCode,
     SignInAttemptsExceeded,
     charge_attempt,
-    refund_attempt,
     code_hmac,
     normalize,
+    refund_attempt,
 )
 from app.driver_auth.tokens import (
     InvalidDriverToken,

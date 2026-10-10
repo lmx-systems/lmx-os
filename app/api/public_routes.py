@@ -35,6 +35,7 @@ decision was protecting.
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 
 import structlog
@@ -43,36 +44,23 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import uuid
-
 from app.client_auth.login_rate_limit import LoginRateLimiter
-from app.client_ip import client_ip
 from app.client_auth.password_reset import PasswordResetStore, ResetRequestRateLimitExceeded
 from app.client_auth.passwords import hash_password
 from app.client_auth.signup_rate_limit import SignupRateLimiter, SignupRateLimitExceeded
+from app.client_ip import client_ip
 from app.config import settings
+from app.db import get_db
 from app.identity.dock_log import VocabularyError, stage_submission
 from app.identity.dock_log_rate_limit import DockLogRateLimiter, DockLogRateLimitExceeded
-from app.schemas.dock_log import DockLogSubmissionBody, DockLogSubmissionResult
-from app.db import get_db
+from app.legal.documents import DOCUMENTS, current_terms_version, documents_are_published
+from app.messaging.client_emails import send_password_reset_email, send_signup_received_email
 from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
-from app.messaging.client_emails import send_password_reset_email, send_signup_received_email
 from app.models.hub import Hub
 from app.models.order import Order
-from app.legal.documents import DOCUMENTS, current_terms_version, documents_are_published
-from app.schemas.legal import LegalDocumentBody, LegalDocumentView, LegalDocumentsView
-from app.schemas.tracking import (
-    DriverPositionView,
-    RecipientRatingView,
-    SubmitRatingBody,
-    TrackingView,
-)
-from app.tracking.rate_limit import TrackingRateLimiter, TrackingRateLimitExceeded
-from app.tracking.ratings import RatingNotAllowed, submit_rating
-from app.tracking.service import TrackingTokenInvalid, resolve_tracking
-from app.tracking.service import TrackingView as ResolvedTracking
-from app.storage.photo_upload_client import readable_url
+from app.schemas.dock_log import DockLogSubmissionBody, DockLogSubmissionResult
+from app.schemas.legal import LegalDocumentBody, LegalDocumentsView, LegalDocumentView
 from app.schemas.signup import (
     ClientSignupBody,
     ClientSignupResult,
@@ -80,6 +68,17 @@ from app.schemas.signup import (
     PasswordResetRequestBody,
     PasswordResetResult,
 )
+from app.schemas.tracking import (
+    DriverPositionView,
+    RecipientRatingView,
+    SubmitRatingBody,
+    TrackingView,
+)
+from app.storage.photo_upload_client import readable_url
+from app.tracking.rate_limit import TrackingRateLimiter, TrackingRateLimitExceeded
+from app.tracking.ratings import RatingNotAllowed, submit_rating
+from app.tracking.service import TrackingTokenInvalid, resolve_tracking
+from app.tracking.service import TrackingView as ResolvedTracking
 
 logger = structlog.get_logger(__name__)
 

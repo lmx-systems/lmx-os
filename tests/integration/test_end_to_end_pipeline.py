@@ -13,7 +13,6 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
-from tests.integration.queue_helpers import let_the_hold_run_out
 
 from app.batch_queue.store import HoldQueueStore
 from app.fleet_state.manager import FleetStateManager
@@ -25,6 +24,7 @@ from app.models.order import OrderStatus
 from app.models.shop import Shop
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.fleet import DriverLocation, DriverState
+from tests.integration.queue_helpers import let_the_hold_run_out
 
 pytestmark = pytest.mark.integration
 

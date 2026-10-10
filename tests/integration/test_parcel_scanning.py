@@ -7,7 +7,6 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
-from tests.integration.queue_helpers import let_the_hold_run_out
 from fastapi import HTTPException
 from sqlalchemy import select
 
@@ -26,6 +25,7 @@ from app.models.stop import Stop, StopOrder
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.driver_app import ScanParcelBody
 from app.schemas.fleet import DriverLocation, DriverState
+from tests.integration.queue_helpers import let_the_hold_run_out
 
 pytestmark = pytest.mark.integration
 

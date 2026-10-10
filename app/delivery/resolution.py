@@ -21,12 +21,12 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.batch_queue.clustering import miles_between
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
 from app.models.order import Order, OrderStatus
 from app.models.shop import Shop
 from app.orders.status_service import advance_orders
-from app.batch_queue.clustering import miles_between
 from app.sla.commitment import delivery_commitment, terms_for_client
 from app.sla.engine import latest_safe_hold_deadline, resolve_hold_window_minutes
 from app.sla.overrides import load_hold_window_overrides

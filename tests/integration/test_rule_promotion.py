@@ -15,9 +15,9 @@ from app.api.admin_routes import (
     dismiss_proposed_rule_endpoint,
     list_proposed_rules,
 )
-from app.sla.overrides import load_hold_window_overrides
 from app.models.hub import Hub
 from app.models.rules import ActiveRule, ProposedRule
+from app.sla.overrides import load_hold_window_overrides
 
 pytestmark = pytest.mark.integration
 

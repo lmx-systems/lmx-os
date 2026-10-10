@@ -12,6 +12,7 @@ per client are the whole point - e.g. an accounts-payable contact and an
 operations contact at the same warehouse, the example C4 calls out.
 """
 import uuid
+
 from sqlalchemy import Boolean, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 

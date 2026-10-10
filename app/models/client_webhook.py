@@ -22,16 +22,16 @@ POSTed inline could tell a client an order was delivered on a transaction that
 then rolled back. A row written in the caller's session cannot: if the delivery
 doesn't happen, neither does the notification.
 """
-import uuid
 import secrets
+import uuid
 from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
-    Identity,
     Boolean,
     DateTime,
     ForeignKey,
+    Identity,
     Integer,
     String,
     UniqueConstraint,

@@ -12,8 +12,17 @@ import pytest
 from fakeredis import aioredis as fakeredis_aioredis
 
 import app.ops_auth.login_rate_limit as ops_login_rate_limit_module
-from app.ops_auth.login_rate_limit import MAX_LOGIN_ATTEMPTS, LoginRateLimitExceeded, LoginRateLimiter
-from app.ops_auth.tokens import InvalidOpsToken, assert_ops_jwt_secret_configured, decode_token, issue_token
+from app.ops_auth.login_rate_limit import (
+    MAX_LOGIN_ATTEMPTS,
+    LoginRateLimiter,
+    LoginRateLimitExceeded,
+)
+from app.ops_auth.tokens import (
+    InvalidOpsToken,
+    assert_ops_jwt_secret_configured,
+    decode_token,
+    issue_token,
+)
 
 
 @pytest.fixture

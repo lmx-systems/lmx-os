@@ -30,27 +30,42 @@ from app.billing.service import (
     invoice_summary_view,
 )
 from app.client_auth.passwords import hash_password
+from app.compliance.driver_documents import evaluate_driver_documents
 from app.db import get_db
-from app.identity import link_shop_to_dock
-from app.orders.cancellation import OrderNotCancellable, cancel_live_order
 from app.delivery.resolution import (
     RESOLUTION_ACTIONS,
     OrderNotFailedError,
     ShopMissingError,
     resolve_failed_order,
 )
+from app.driver_auth import sign_in_codes
+from app.fleet_state.manager import FleetStateManager
+from app.gig_platform import service as gig_store
+from app.gig_platform.density import hub_density_report
+from app.hub_calendar import hub_zone
+from app.identity import link_shop_to_dock
+from app.identity.dock_log import (
+    ANSWER_VOCABULARIES,
+    AlreadyImported,
+    DockAlreadySurveyed,
+    NotReviewed,
+    candidate_locations,
+    import_submission,
+)
+from app.learning_loop.promotion import (
+    PENDING,
+    ProposedRuleNotPendingError,
+    dismiss_proposed_rule,
+    promote_proposed_rule,
+)
+from app.messaging.client_emails import send_signup_approved_email
+from app.messaging.support_notifications import notify_driver_of_support_reply
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.models.client_sla_term import ClientSlaTerm
-from app.models.dock_log_submission import DockLogSubmission
-from app.models.invoice import Invoice
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
+from app.models.dock_log_submission import DockLogSubmission
 from app.models.driver import EMPLOYMENT_TYPES, VEHICLE_TYPES, Driver
-from app.models.driver_shift_event import DriverShiftEvent
-from app.models.driver_sign_in_code import DriverSignInCode
-from app.driver_auth import sign_in_codes
-from app.compliance.driver_documents import evaluate_driver_documents
-from app.reporting.cod_disputes import build_cod_dispute_report
 from app.models.driver_device import DriverDevice
 from app.models.driver_document import (
     REVIEW_PENDING,
@@ -58,46 +73,37 @@ from app.models.driver_document import (
     REVIEW_VERIFIED,
     DriverDocument,
 )
-from app.hub_calendar import hub_zone
+from app.models.driver_shift_event import DriverShiftEvent
+from app.models.driver_sign_in_code import DriverSignInCode
 from app.models.hub import US_STATE_CODES, Hub
-from app.payroll.overtime_rules import overtime_rule_for_state
 from app.models.hub_closure import HubClosure
-from app.learning_loop.promotion import (
-    PENDING,
-    ProposedRuleNotPendingError,
-    dismiss_proposed_rule,
-    promote_proposed_rule,
-)
-from app.fleet_state.manager import FleetStateManager
-from app.messaging.support_notifications import notify_driver_of_support_reply
+from app.models.invoice import Invoice
 from app.models.message import Message
 from app.models.ops_user import OpsUser
 from app.models.order import Order
+from app.models.return_item import ReturnItem
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
-from app.optimizer.event_trigger import dispatch_event_bus
-from app.models.return_item import ReturnItem
 from app.models.rules import ActiveRule, ProposedRule
 from app.models.shop import Shop
-from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user, require_admin, require_dispatcher
+from app.ops_auth.dependencies import (
+    AuthedOpsUser,
+    get_current_ops_user,
+    require_admin,
+    require_dispatcher,
+)
+from app.optimizer.event_trigger import dispatch_event_bus
+from app.orders.cancellation import OrderNotCancellable, cancel_live_order
 from app.payroll import get_payroll_provider
-from app.storage.photo_upload_client import readable_url
+from app.payroll.overtime_rules import overtime_rule_for_state
+from app.reporting.cod_disputes import build_cod_dispute_report
+from app.returns.service import AWAITING_STATUSES, return_views
 from app.schemas.admin import (
     AdminClientView,
     AdminDriverDeviceView,
     AdminDriverView,
-    SupportMessageView,
-    SupportReplyBody,
-    SupportThreadView,
-    DriverSignInCodeIssued,
-    DriverSignInCodeView,
     ClientOnboardingBody,
     ClientOnboardingResult,
-    DriverOnboardingBody,
-    DriverOnboardingResult,
-    HubCreateBody,
-    HubUpdateBody,
-    HubView,
     ClientRateBody,
     ClientRateView,
     ClientSlaTermBody,
@@ -105,17 +111,27 @@ from app.schemas.admin import (
     CodDisputeReportView,
     DriverDocumentReviewBody,
     DriverDocumentReviewResult,
+    DriverOnboardingBody,
+    DriverOnboardingResult,
     DriverPayrollSubmission,
+    DriverSignInCodeIssued,
+    DriverSignInCodeView,
     HubClosureBody,
-    PendingDriverDocumentView,
-    ShopDisputeRowView,
     HubClosureView,
+    HubCreateBody,
+    HubUpdateBody,
+    HubView,
     OrderCancellationResult,
     OrderResolutionResult,
     PayrollRunResult,
+    PendingDriverDocumentView,
     ProposedRuleApprovalResult,
     ProposedRuleView,
     ResolveFailedOrderBody,
+    ShopDisputeRowView,
+    SupportMessageView,
+    SupportReplyBody,
+    SupportThreadView,
     UrgencyRuleBody,
     UrgencyRuleUpdateBody,
     UrgencyRuleView,
@@ -128,26 +144,15 @@ from app.schemas.dock_log import (
     DockLogReviewResult,
     DockLogSubmissionView,
 )
-from app.identity.dock_log import (
-    ANSWER_VOCABULARIES,
-    AlreadyImported,
-    DockAlreadySurveyed,
-    NotReviewed,
-    candidate_locations,
-    import_submission,
-)
-from app.gig_platform import service as gig_store
-from app.messaging.client_emails import send_signup_approved_email
-from app.gig_platform.density import hub_density_report
-from app.returns.service import AWAITING_STATUSES, return_views
 from app.schemas.gig import GigDensityReport, GigJobView
+from app.schemas.returns import ReturnItemView
 from app.schemas.signup import (
     ApproveSignupBody,
     PendingSignupView,
     RejectSignupBody,
     SignupDecisionResult,
 )
-from app.schemas.returns import ReturnItemView
+from app.storage.photo_upload_client import readable_url
 
 logger = structlog.get_logger(__name__)
 

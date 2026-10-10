@@ -20,33 +20,34 @@ from datetime import datetime, timedelta, timezone
 import structlog
 from sqlalchemy import func, select
 
+from app import metrics
 from app.batch_queue.clustering import miles_between
 from app.batch_queue.queue import HeldOrder, run_hold_cycle
-from app import metrics
 from app.batch_queue.store import HoldQueueStore
-from app.hub_calendar import is_hub_closed_at
 from app.config import settings
 from app.db import session_scope
 from app.delivery.eta import refresh_route_etas
-from app.identity.inherited_dwell import service_minutes_at
-from app.record import record_decision
-from app.record.decisions import MODE_LIVE
 from app.fleet_state.manager import FleetStateManager
+from app.hub_calendar import is_hub_closed_at
+from app.identity.inherited_dwell import service_minutes_at
 from app.messaging.delivery_pin import generate_delivery_pin
 from app.messaging.job_offer_notifications import notify_driver_of_new_offer
 from app.models.driver import Driver
 from app.models.order import Order, OrderStatus
-from app.orders.status_service import advance_orders
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
-from app.optimizer.google_routes_client import RouteOptimizationClient, get_route_optimization_client
+from app.optimizer.google_routes_client import (
+    RouteOptimizationClient,
+    get_route_optimization_client,
+)
 from app.optimizer.last_cycle_store import LastCycleStore
+from app.orders.status_service import advance_orders
+from app.record import record_decision
+from app.record.decisions import MODE_LIVE
 from app.redis_client import get_client
 from app.schemas.fleet import DriverState
-from app.sla.commitment import delivery_commitment, terms_for_client
-from app.travel import minutes_for_miles
 from app.schemas.optimizer import (
     CyclePlan,
     DriverCandidate,
@@ -55,6 +56,8 @@ from app.schemas.optimizer import (
     OptimizationResult,
     StopCandidate,
 )
+from app.sla.commitment import delivery_commitment, terms_for_client
+from app.travel import minutes_for_miles
 
 logger = structlog.get_logger(__name__)
 
@@ -75,14 +78,22 @@ def _position_is_stale(recorded_at: str, now: datetime) -> bool:
     return now - reported > timedelta(seconds=settings.driver_position_stale_after_seconds)
 
 
-async def _released_by_dispatcher(held_orders: list[HeldOrder]) -> set[str]:
-    """The held orders a dispatcher released (`app/record/overrides.py`).
+# The statuses a queue entry may be planned in. Anything else in the queue is a
+# stale entry - an order assigned, cancelled or delivered whose Redis entry
+# outlived it (a snapshot restore, a write that raced a commit) - and planning it
+# would offer the same order twice.
+_PLANNABLE = frozenset({OrderStatus.held, OrderStatus.queued})
 
-    Read from Postgres rather than copied into the Redis queue. The override
-    commits the order's status together with the reason for it, so the status
-    already is the record, and a copy in Redis would be a second write that can
-    fail on its own. `queued` means exactly this: nothing else writes it, and the
-    order stays in the hold queue until a cycle assigns it.
+
+async def _order_statuses(held_orders: list[HeldOrder]) -> dict[str, OrderStatus]:
+    """Each queued order's status in Postgres, in one read.
+
+    Two uses. `queued` is a dispatcher's release (`app/record/overrides.py`): the
+    override commits the status together with its reason, so the status already
+    is the record and isn't copied into Redis. And an order whose status is past
+    `queued` is skipped this cycle; the Redis rebuild prunes it
+    (app/optimizer/redis_rebuild.py). An entry with no row - a test's synthetic
+    id - is left as it was.
     """
     order_ids = []
     for held in held_orders:
@@ -91,12 +102,10 @@ async def _released_by_dispatcher(held_orders: list[HeldOrder]) -> set[str]:
         except ValueError:
             continue  # no order row could carry a status for it
     if not order_ids:
-        return set()
+        return {}
     async with session_scope() as session:
-        released = await session.scalars(
-            select(Order.id).where(Order.id.in_(order_ids), Order.status == OrderStatus.queued)
-        )
-        return {str(order_id) for order_id in released}
+        rows = await session.execute(select(Order.id, Order.status).where(Order.id.in_(order_ids)))
+        return {str(order_id): status for order_id, status in rows.all()}
 
 
 def _miles(a_lat, a_lng, b_lat, b_lng) -> float | None:
@@ -165,12 +174,18 @@ class DispatchOptimizerService:
         fleet_snapshot = await self._fleet_state.get_fleet_snapshot(hub_id)
         held_orders = await self._hold_queue.get_all(hub_id)
         metrics.HOLD_QUEUE_DEPTH.labels(hub_id=hub_id).set(len(held_orders))
+        statuses = await _order_statuses(held_orders)
+        held_orders = [
+            o for o in held_orders if statuses.get(o.order_id, OrderStatus.held) in _PLANNABLE
+        ]
 
         decisions = run_hold_cycle(
             held_orders,
             available_driver_count=len(fleet_snapshot),
             now=now,
-            released_by_dispatcher=await _released_by_dispatcher(held_orders),
+            released_by_dispatcher={
+                order_id for order_id, status in statuses.items() if status == OrderStatus.queued
+            },
             driver_passing=await self._held_orders_a_driver_is_passing(hub_id, held_orders),
         )
         released_order_ids = {d.order_id for d in decisions if d.action == "release"}

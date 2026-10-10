@@ -35,7 +35,6 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 import app.legal.documents as legal
-from app.geocoding.base import BaseGeocoder, GeocodeResult
 from app.api.client_routes import (
     accept_current_terms,
     get_my_order,
@@ -44,6 +43,7 @@ from app.api.client_routes import (
     submit_order,
 )
 from app.client_auth.dependencies import AuthedClient
+from app.geocoding.base import BaseGeocoder, GeocodeResult
 from app.models.client import Client
 from app.models.client_user import CLIENT_ADMIN_ROLE, CLIENT_MEMBER_ROLE
 from app.models.hub import Hub

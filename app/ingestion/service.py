@@ -20,8 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import metrics
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
-from app.geocoding import BaseGeocoder, get_geocoder, normalize_address, resolve_address
-from app.ingestion.registry import get_adapter
 from app.billing.rates import distance_between, price_drop
 from app.experiment import (
     ARM_CONTROL,
@@ -29,26 +27,28 @@ from app.experiment import (
     assign_arm,
     control_arm_is_live,
 )
+from app.geocoding import BaseGeocoder, get_geocoder, normalize_address, resolve_address
 from app.identity import link_shop_to_dock, receiver_key_for
 from app.identity.resolution import resolve_location
+from app.ingestion.registry import get_adapter
 from app.models.client import Client
 from app.models.client_rate import ClientRate
-from app.record.abstention import record_arm_abstention
 from app.models.order import INTAKE_BACKFILL, INTAKE_LIVE, INTAKE_MODES, Order, OrderStatus, SLATier
 from app.models.parcel import Parcel
 from app.models.return_item import ReturnItem
 from app.models.rules import ActiveRule
 from app.models.shop import Shop
 from app.orders.sinks import emit_status_change
+from app.record.abstention import record_arm_abstention
 from app.schemas.lmx_order import LMXOrder
 from app.schemas.order import NormalizedOrder
 from app.sla.commitment import delivery_commitment, terms_for_client
-from app.sla.overrides import load_hold_window_overrides
 from app.sla.engine import (
     TierOverride,
     classify_order,
     latest_safe_hold_deadline,
 )
+from app.sla.overrides import load_hold_window_overrides
 from app.travel import minutes_for_miles
 
 logger = structlog.get_logger(__name__)

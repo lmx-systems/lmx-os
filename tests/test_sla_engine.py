@@ -4,12 +4,12 @@ import pytest
 
 from app.schemas.order import NormalizedOrder
 from app.sla.engine import (
-    latest_safe_hold_deadline,
     DEFAULT_HOLD_WINDOW_MINUTES,
     HoldWindowOverride,
     TierOverride,
     classify_order,
     classify_tier,
+    latest_safe_hold_deadline,
     resolve_hold_window_minutes,
 )
 

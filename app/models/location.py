@@ -33,6 +33,7 @@ and nothing downstream can detect it. A duplicate is visible; a bad merge is
 not. Per §2.2(c) the founding set is merged by a person for exactly this reason.
 """
 import uuid
+
 from sqlalchemy import Boolean, Float, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 

@@ -13,11 +13,16 @@ from starlette.responses import PlainTextResponse
 
 from app.api.ops_auth_routes import get_my_profile, login
 from app.client_auth.passwords import hash_password
-from app.ops_auth.dependencies import AuthedOpsUser, get_current_ops_user, require_admin, require_dispatcher
+from app.models.ops_user import ADMIN_ROLE, DISPATCHER_ROLE, VIEWER_ROLE, OpsUser
+from app.ops_auth.dependencies import (
+    AuthedOpsUser,
+    get_current_ops_user,
+    require_admin,
+    require_dispatcher,
+)
 from app.ops_auth.login_rate_limit import MAX_LOGIN_ATTEMPTS
 from app.ops_auth.middleware import OpsUserAuthMiddleware
 from app.ops_auth.tokens import issue_token
-from app.models.ops_user import ADMIN_ROLE, DISPATCHER_ROLE, VIEWER_ROLE, OpsUser
 from app.schemas.ops_auth import OpsLoginBody
 
 pytestmark = pytest.mark.integration

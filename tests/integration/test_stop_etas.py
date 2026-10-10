@@ -35,26 +35,26 @@ from app.api.driver_routes import (
     list_my_offers,
     scan_parcels,
 )
+from app.batch_queue.clustering import miles_between
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
-from app.batch_queue.clustering import miles_between
 from app.delivery.eta import refresh_route_etas
 from app.driver_auth.dependencies import AuthedDriver
-from app.identity import resolve_location
-from app.models.receiver_profile import ReceiverProfile
-from app.identity.inherited_dwell import PLANNING_FLOOR_MINUTES
-from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES, minutes_for_miles
 from app.fleet_state.manager import FleetStateManager
+from app.identity import resolve_location
+from app.identity.inherited_dwell import PLANNING_FLOOR_MINUTES
 from app.models.client import Client
 from app.models.driver import Driver
 from app.models.driver_location_ping import DriverLocationPing
 from app.models.hub import Hub
 from app.models.order import Order, OrderStatus
+from app.models.receiver_profile import ReceiverProfile
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 from app.optimizer.service import DispatchOptimizerService
 from app.schemas.driver_app import CompleteStopBody, ScanParcelsBody
 from app.schemas.fleet import DriverLocation, DriverState
+from app.travel import PLACEHOLDER_STOP_SERVICE_MINUTES, minutes_for_miles
 from tests.integration.conftest import make_driver_compliant
 
 pytestmark = pytest.mark.integration

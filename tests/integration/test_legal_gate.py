@@ -36,8 +36,8 @@ from app.legal.retention import (
     prune_location_pings,
 )
 from app.models.client import Client
-from app.models.driver_location_ping import DriverLocationPing
 from app.models.client_user import CLIENT_ADMIN_ROLE, ClientUser
+from app.models.driver_location_ping import DriverLocationPing
 from app.models.hub import Hub
 from app.schemas.signup import ClientSignupBody
 

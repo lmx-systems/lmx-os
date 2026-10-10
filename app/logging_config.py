@@ -20,9 +20,9 @@ import sys
 
 import sentry_sdk
 import structlog
-from structlog.typing import Processor
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
+from structlog.typing import Processor
 
 from app.config import settings
 

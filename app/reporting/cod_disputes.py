@@ -27,8 +27,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.messaging.cod_notifications import email_is_configured
-from app.models.cod_collection import OUTCOME_COLLECTED, OUTCOME_DISPUTED, CodCollection
 from app.models.client import Client
+from app.models.cod_collection import OUTCOME_COLLECTED, OUTCOME_DISPUTED, CodCollection
 from app.models.shop import Shop
 
 logger = structlog.get_logger(__name__)

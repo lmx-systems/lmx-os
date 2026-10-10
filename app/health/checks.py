@@ -58,7 +58,7 @@ from app.config import settings
 from app.db import session_scope
 from app.hub_calendar import is_hub_closed_at
 from app.models.hub import Hub
-from app.models.order import Order, OrderStatus
+from app.models.order import INTAKE_LIVE, Order, OrderStatus
 from app.optimizer.last_cycle_store import LastCycleStore
 from app.redis_client import get_client
 
@@ -218,6 +218,8 @@ async def check_stuck_orders() -> CheckResult:
             .select_from(Order)
             .where(
                 Order.status.in_(PRE_ASSIGNMENT_STATUSES),
+                # A backfilled order is history, held on purpose and never queued.
+                Order.intake_mode == INTAKE_LIVE,
                 deadline.is_not(None),
                 deadline < cutoff,
             )
@@ -234,6 +236,42 @@ async def check_stuck_orders() -> CheckResult:
             ),
         )
     return CheckResult(name="stuck_orders", ok=True, detail="none past promise")
+
+
+async def check_hold_queue_matches_postgres() -> CheckResult:
+    """Orders Postgres says are waiting that the Redis queue doesn't have.
+
+    `dispatch_liveness` skips a hub whose queue is empty, so after Redis lost its
+    data it reported healthy while every held order sat undispatched. This
+    compares the two directly. An order younger than the grace period is left
+    out: intake commits before it adds to the queue, so a fresh one can be in
+    Postgres a moment before Redis. The Redis rebuild
+    (app/optimizer/redis_rebuild.py) is what fixes a failure here.
+    """
+    grace_cutoff = datetime.now(timezone.utc) - timedelta(minutes=2)
+    hold_queue = HoldQueueStore()
+    problems: list[str] = []
+    async with session_scope() as session:
+        rows = await session.execute(
+            select(Order.hub_id, Order.id)
+            .join(Hub, Hub.id == Order.hub_id)
+            .where(
+                Hub.active.is_(True),
+                Order.status.in_((OrderStatus.held, OrderStatus.queued)),
+                Order.intake_mode == INTAKE_LIVE,
+                Order.updated_at < grace_cutoff,
+            )
+        )
+        waiting: dict[str, set[str]] = {}
+        for row_hub, row_order in rows.all():
+            waiting.setdefault(str(row_hub), set()).add(str(row_order))
+    for hub, order_ids in waiting.items():
+        missing = order_ids - await hold_queue.order_ids(hub)
+        if missing:
+            problems.append(f"hub {hub}: {len(missing)} waiting order(s) not in the hold queue")
+    if problems:
+        return CheckResult(name="hold_queue_matches_postgres", ok=False, detail="; ".join(problems))
+    return CheckResult(name="hold_queue_matches_postgres", ok=True, detail="every waiting order is queued")
 
 
 @dataclass(frozen=True)
@@ -263,6 +301,7 @@ async def evaluate() -> HealthReport:
         _guarded("database", check_database()),
         _guarded("dispatch_liveness", check_dispatch_liveness()),
         _guarded("stuck_orders", check_stuck_orders()),
+        _guarded("hold_queue_matches_postgres", check_hold_queue_matches_postgres()),
     )
     report = HealthReport(checks=list(results))
     if not report.ok:

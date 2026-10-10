@@ -13,6 +13,8 @@ precisely so that "unconfigured" never happens.
 `GEOCODER_PROVIDER` exists to make the eventual swap to a keyed provider a config
 change rather than a code change. Today there is one implementation.
 """
+import structlog
+
 from app.config import settings
 from app.geocoding.base import (
     BaseGeocoder,
@@ -23,8 +25,6 @@ from app.geocoding.base import (
 from app.geocoding.cache import resolve_address
 from app.geocoding.google import GoogleGeocoder
 from app.geocoding.nominatim import NominatimGeocoder
-
-import structlog
 
 logger = structlog.get_logger(__name__)
 

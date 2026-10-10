@@ -26,14 +26,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import app.db as db_module
 import app.legal.documents as documents
-import app.redis_client as redis_client_module
-from app.config import settings
-from app.db import Base
 
 # Registers every table on Base.metadata, which the truncate below walks. Three
 # models were missing from this package's imports until a FK to ops_users made
 # the gap visible - see app/models/__init__.py.
 import app.models  # noqa: F401
+import app.redis_client as redis_client_module
+from app.config import settings
+from app.db import Base
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

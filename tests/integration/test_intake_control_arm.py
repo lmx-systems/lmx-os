@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy import select
 
 from app.batch_queue.store import HoldQueueStore
 from app.experiment.arms import _draw, block_size
@@ -28,7 +29,6 @@ from app.models.hub import Hub
 from app.models.outcome_entry import KIND_ARM_ABSTENTION
 from app.models.shop import Shop
 from app.record.outcomes import outcomes_for
-from sqlalchemy import select
 
 pytestmark = pytest.mark.integration
 

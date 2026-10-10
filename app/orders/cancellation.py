@@ -30,8 +30,8 @@ from app.models.order import Order, OrderStatus
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
 from app.models.stop import Stop, StopOrder
-from app.orders.requeue import requeue_orders_from_offer
 from app.optimizer.event_trigger import dispatch_event_bus
+from app.orders.requeue import requeue_orders_from_offer
 from app.orders.status_service import advance_orders
 from app.redis_client import get_client
 

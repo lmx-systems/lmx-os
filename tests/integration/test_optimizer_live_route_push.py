@@ -29,8 +29,8 @@ from app.models.route import Route
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 from app.optimizer.service import DispatchOptimizerService
-from app.schemas.optimizer import StopCandidate
 from app.schemas.fleet import DriverLocation, DriverState
+from app.schemas.optimizer import StopCandidate
 
 pytestmark = pytest.mark.integration
 

@@ -27,13 +27,13 @@ import uuid
 
 import structlog
 
+from app.config import settings
 from app.storage.photo_upload_client import (
     PhotoUploadClient,
     PresignedUpload,
     S3PhotoUploadClient,
     StubPhotoUploadClient,
 )
-from app.config import settings
 
 logger = structlog.get_logger(__name__)
 

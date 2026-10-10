@@ -2,8 +2,8 @@
 An order ingested from a client's POS/DMS. This is the row the Dynamic SLA
 Engine classifies (T1/T2/T3) and the Batch-Hold Queue clusters.
 """
-import uuid
 import enum
+import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String
