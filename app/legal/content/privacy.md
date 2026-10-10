@@ -129,6 +129,9 @@ We use other companies to run the service. Each sees only what it needs:
 - **Cloud hosting and databases** — where the service runs and data is stored.
 - **A mapping and routing provider** — to convert addresses to coordinates and to
   plan routes, which means it processes addresses.
+- **A map provider** — only if you choose to open the map on a tracking page. It
+  then receives your IP address and the driver's current position, which it needs
+  to draw the map.
 - **A payroll and payments provider** — to pay drivers, which means it processes
   driver identity and bank details.
 - **An email provider** — to send account email.

@@ -170,7 +170,7 @@ class TestDwellIsActuallyRefreshed:
     async def _stop_at(self, db_session, hub_id, shop, *, seconds, when=None):
         when = when or datetime.now(timezone.utc) - timedelta(hours=2)
         driver = Driver(
-            hub_id=hub_id, name="Sam D.", phone=f"+1555555{uuid.uuid4().int % 10000:04d}",
+            hub_id=hub_id, name="Sam D.", phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
             vehicle_capacity_units=5,
         )
         db_session.add(driver)
@@ -237,7 +237,7 @@ class TestDwellIsActuallyRefreshed:
         has none, reaching its dock through the order."""
         when = datetime.now(timezone.utc) - timedelta(hours=2)
         driver = Driver(
-            hub_id=hub_id, name="Sam D.", phone=f"+1555555{uuid.uuid4().int % 10000:04d}",
+            hub_id=hub_id, name="Sam D.", phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
             vehicle_capacity_units=5,
         )
         db_session.add(driver)

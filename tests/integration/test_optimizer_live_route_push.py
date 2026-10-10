@@ -68,7 +68,7 @@ async def _seed_active_route(db_session, *, load_units=1.0, ends_at=NEARBY, ends
             ),
             Driver(
                 id=driver_id, hub_id=hub_id, name="Already Driving D.",
-                phone=f"+1555555{uuid.uuid4().int % 10000:04d}", vehicle_capacity_units=5,
+                phone=f"+1555{uuid.uuid4().int % 10**7:07d}", vehicle_capacity_units=5,
             ),
         ]
     )

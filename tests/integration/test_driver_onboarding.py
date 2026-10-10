@@ -43,7 +43,7 @@ def _body(hub, **overrides) -> DriverOnboardingBody:
     payload = dict(
         hub_id=str(hub.id),
         name="Sam Okafor",
-        phone=f"+1555555{uuid.uuid4().int % 10000:04d}",
+        phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
         vehicle_capacity_units=8,
         employment_type="w2",
     )

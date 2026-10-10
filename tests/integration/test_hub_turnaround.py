@@ -38,7 +38,7 @@ async def _hub(db_session) -> Hub:
 async def _driver(db_session, hub) -> Driver:
     driver = Driver(
         hub_id=hub.id, name="Sam O.",
-        phone=f"+1555555{uuid.uuid4().int % 10000:04d}", vehicle_capacity_units=5,
+        phone=f"+1555{uuid.uuid4().int % 10**7:07d}", vehicle_capacity_units=5,
     )
     db_session.add(driver)
     await db_session.flush()
