@@ -37,7 +37,7 @@ async def _seed_hub(db_session, driver_count: int = 1):
         db_session.add(
             Driver(
                 id=driver_id, hub_id=hub_id, name=f"Driver {i}",
-                phone=f"+1512555{uuid.uuid4().int % 10000:04d}", vehicle_capacity_units=5,
+                phone=f"+1512{uuid.uuid4().int % 10**7:07d}", vehicle_capacity_units=5,
             )
         )
         driver_ids.append(driver_id)

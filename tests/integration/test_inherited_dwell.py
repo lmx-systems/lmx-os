@@ -126,7 +126,7 @@ class TestTheImport:
         await import_inherited_dwell(db_session, {"ACCT-3": [500.0]}, source=SOURCE)
 
         driver = Driver(
-            hub_id=hub.id, name="Sam", phone=f"+1555555{uuid.uuid4().int % 10000:04d}",
+            hub_id=hub.id, name="Sam", phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
             vehicle_capacity_units=5,
         )
         db_session.add(driver)

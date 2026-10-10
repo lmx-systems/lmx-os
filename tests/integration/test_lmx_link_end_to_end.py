@@ -184,7 +184,7 @@ async def test_signup_to_delivered(db_session, real_redis_client, monkeypatch):
     db_session.add(
         Driver(
             id=driver_id, hub_id=hub_id, name="Sam O.",
-            phone=f"+1512555{uuid.uuid4().int % 10000:04d}", vehicle_capacity_units=5,
+            phone=f"+1512{uuid.uuid4().int % 10**7:07d}", vehicle_capacity_units=5,
         )
     )
     await db_session.commit()

@@ -93,7 +93,7 @@ async def _seed_available_driver(db_session, hub_id):
             id=driver_id,
             hub_id=hub_id,
             name="Sam O.",
-            phone=f"+1555555{uuid.uuid4().int % 10000:04d}",
+            phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
             vehicle_capacity_units=5,
         )
     )

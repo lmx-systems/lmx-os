@@ -97,7 +97,7 @@ async def _a_delivery(
     await db_session.flush()
     client = Client(hub_id=hub.id, name="Design Partner", pos_system="flat_file")
     driver = Driver(
-        hub_id=hub.id, name="Sam O.", phone=f"+1555555{uuid.uuid4().int % 10000:04d}",
+        hub_id=hub.id, name="Sam O.", phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
         vehicle_capacity_units=5,
     )
     db_session.add_all([client, driver])

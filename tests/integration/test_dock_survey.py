@@ -56,7 +56,7 @@ async def _world(db_session, *, linked=True):
             id=driver_id,
             hub_id=hub_id,
             name="Sam O.",
-            phone=f"+1555555{uuid.uuid4().int % 10000:04d}",
+            phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
             vehicle_capacity_units=5,
         )
     )
@@ -278,7 +278,7 @@ class TestWhenToAsk:
                 id=somebody_else,
                 hub_id=hub,
                 name="Another driver",
-                phone=f"+1555555{uuid.uuid4().int % 10000:04d}",
+                phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
                 vehicle_capacity_units=5,
             )
         )
