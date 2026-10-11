@@ -141,9 +141,22 @@ async def db_session(db_engine):
         yield session
         await session.rollback()
 
-    table_names = ", ".join(f'"{t.name}"' for t in reversed(Base.metadata.sorted_tables))
+    table_names = ", ".join(
+        f'"{t.name}"' for t in reversed(Base.metadata.sorted_tables) if t.name not in _MIGRATION_SEEDS
+    )
     async with db_engine.begin() as conn:
         await conn.execute(text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE"))
+        for table, seeded in _MIGRATION_SEEDS.items():
+            await conn.execute(text(f'DELETE FROM "{table}" WHERE NOT ({seeded})'))
+
+
+# Reference rows a migration inserts, which every deployed database has: a
+# truncate would leave every test after the first without them. Each test's own
+# rows are still removed, by the condition that matches only the seed.
+_MIGRATION_SEEDS = {
+    # 0073: the assumed machine limits every label must cite (DE-2).
+    "machine_limits": "recorded_by = 'DE-2 seed'",
+}
 
 
 @pytest.fixture
