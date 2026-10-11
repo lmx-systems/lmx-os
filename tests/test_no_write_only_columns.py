@@ -63,7 +63,6 @@ KNOWN_UNWRITTEN: dict[str, str] = {
     "photo_stop_point": _GOLDEN_RECORD,
     "reason_codes": _GOLDEN_RECORD,
     "scorer_id": _GOLDEN_RECORD,
-    "setting": _GOLDEN_RECORD,
     "steps_or_ramps": _GOLDEN_RECORD,
     "stop_lat": _GOLDEN_RECORD,
     "stop_legal": _GOLDEN_RECORD,

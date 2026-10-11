@@ -154,6 +154,7 @@ OPERATIONAL_SCRIPTS: dict[str, str] = {
     "control_arm.py": "enrol a customer in the control arm, and exclude a receiver",
     "create_client_user.py": "onboarding a client's first portal login",
     "create_ops_user.py": "onboarding an ops user",
+    "freeze_test_sites.py": "draw a region's frozen test sites before collecting there",
     "import_inherited_dwell.py": "import a previous operator's dwell for a new customer",
     "machine_limits.py": "record a new machine-limits version when an operator confirms one",
     "reconcile_billing.py": "check every ingested order reached an invoice",
