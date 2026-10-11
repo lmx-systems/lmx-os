@@ -19,6 +19,20 @@ install cleanly and then fail at `import` — their wheels link against
 `@rpath/libomp.dylib`, which is not in the wheel. `brew install libomp`, or
 conda-forge's `llvm-openmp`. scikit-learn, numpy and pandas are unaffected.
 
+## Modality — which machine could have made a delivery
+
+`ROADMAP_1.5.md` `DE-8` onwards. Standard library. Reads only what the app exports, because
+nothing here may import `app/`:
+
+```bash
+python scripts/machine_limits.py export --out ml/out/machine_limits.json   # DE-2
+python scripts/freeze_test_sites.py export --out ml/out/test_sites.json    # DE-8
+```
+
+| Module | What it is |
+|---|---|
+| `ml/modality/splits.py` | `DE-8` — train/test on the frozen test sites, never a per-run hash; a training set holding a test site raises |
+
 ## M2 — true urgency
 
 `MODEL_AND_DATA_BRIEF.md` §M2: *P(a consequence occurs | this order is late)*,

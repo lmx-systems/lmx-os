@@ -41,6 +41,7 @@ from app.models.route_offer import RouteOffer
 from app.models.rules import ActiveRule, ProposedRule
 from app.models.settlement_basis import SettlementBasis
 from app.models.shadow_decision import ShadowDecision, ShadowOrderDecision
+from app.models.site_draw import SiteDraw
 from app.models.shop import Shop
 from app.models.site_address_share import SiteAddressShare
 from app.models.stop import Stop, StopFlag, StopOrder
@@ -60,6 +61,7 @@ __all__ = [
     "HandoffPoint",
     "MachineLabel",
     "MachineLimit",
+    "SiteDraw",
     "SiteAddressShare",
     "LinkageFlag",
     "LocationMerge",
