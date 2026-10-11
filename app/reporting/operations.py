@@ -458,6 +458,10 @@ async def _hold_window_flag_rate(session: AsyncSession, since: datetime) -> Rate
                 Stop.stop_type == "dropoff",
                 Stop.status == "completed",
                 Stop.completed_at >= since,
+                # Deliveries LMX ran. A historical record imported for the
+                # golden record (DE-3) was never held, so it cannot have been
+                # held wrong, and counting it would dilute the rate.
+                Stop.record_source == "lmx_app",
             )
         )
     ).scalar_one()

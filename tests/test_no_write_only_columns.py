@@ -40,7 +40,6 @@ _GOLDEN_RECORD = "DE-1: golden-record schema; written by DE-3 (import), DE-4/DE-
 
 # Columns nothing writes, with why. Each is a real gap or a stated hold.
 KNOWN_UNWRITTEN: dict[str, str] = {
-    "collected_by": _GOLDEN_RECORD,
     "collected_on": _GOLDEN_RECORD,
     "continuous_sidewalk": _GOLDEN_RECORD,
     "dock_height_cm": _GOLDEN_RECORD,
@@ -49,7 +48,6 @@ KNOWN_UNWRITTEN: dict[str, str] = {
     "door_width_cm": _GOLDEN_RECORD,
     "drone_ground_distance_m": _GOLDEN_RECORD,
     "drone_open_ground": _GOLDEN_RECORD,
-    "handoff_point_id": _GOLDEN_RECORD,
     "handoff_type": _GOLDEN_RECORD,
     "is_blind_second": _GOLDEN_RECORD,
     "item_description": _GOLDEN_RECORD,
@@ -64,11 +62,7 @@ KNOWN_UNWRITTEN: dict[str, str] = {
     "photo_path": _GOLDEN_RECORD,
     "photo_stop_point": _GOLDEN_RECORD,
     "reason_codes": _GOLDEN_RECORD,
-    "record_source": _GOLDEN_RECORD,
     "scorer_id": _GOLDEN_RECORD,
-    "shares_address": _GOLDEN_RECORD,
-    "shares_with_location_id": _GOLDEN_RECORD,
-    "site_source": _GOLDEN_RECORD,
     "steps_or_ramps": _GOLDEN_RECORD,
     "stop_lat": _GOLDEN_RECORD,
     "stop_legal": _GOLDEN_RECORD,

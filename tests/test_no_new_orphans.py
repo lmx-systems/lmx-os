@@ -176,6 +176,7 @@ ONE_OFF_SCRIPTS: dict[str, str] = {
     "build_review_docx.py": "renders a document",
     "docx_house_style.py": "a helper for the document renderers",
     "generate_m2_corpus.py": "generates a synthetic corpus for the M2 harness",
+    "import_experiment_0.py": "loads the Experiment 0 workbook as golden records, once (DE-3)",
     "load_identity_from_export.py": "one-off identity seed from a historical export",
     "mypy_baseline.py": (
         "a CI gate, not an app caller - it runs mypy and fails when a file's "

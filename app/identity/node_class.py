@@ -22,10 +22,11 @@ below 2% - is measured by `classification_coverage`, not asserted.
 """
 import re
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.location import Location
+from app.models.order import Order
 from app.models.shop import Shop
 
 NODE_CLASS_SHOP = "shop"
@@ -162,7 +163,17 @@ async def classify_unlabelled_locations(
     unlabelled = list(
         await session.scalars(
             select(Location)
-            .where(Location.node_class.is_(None), Location.merged_into_id.is_(None))
+            .where(
+                Location.node_class.is_(None),
+                Location.merged_into_id.is_(None),
+                # Shop names are all this reads, so a dock no shop points at can
+                # never be labelled here. Left in, those docks - drop-off docks
+                # reached only by orders, and sites imported for the golden
+                # record (DE-3) - would sit in the first `limit` rows every night
+                # and push out docks it could label.
+                exists().where(Shop.location_id == Location.id),
+            )
+            .order_by(Location.created_at, Location.id)
             .limit(limit)
         )
     )
@@ -200,6 +211,20 @@ async def classify_unlabelled_locations(
         "labelled": labelled,
         "still_unlabelled": len(unlabelled) - labelled,
     }
+
+
+def is_a_served_dock() -> ColumnElement[bool]:
+    """A dock LMX picks up from or delivers to: a shop points at it, or an order
+    is delivered there.
+
+    The labelling queue is for those. A site imported for the golden record
+    (`DE-3`) is a `locations` row too, in a region LMX does not serve, and a
+    dispatcher has no reason to label it.
+    """
+    return or_(
+        exists().where(Shop.location_id == Location.id),
+        exists().where(Order.delivery_location_id == Location.id),
+    )
 
 
 def set_node_class(location: Location, node_class: str) -> Location:
