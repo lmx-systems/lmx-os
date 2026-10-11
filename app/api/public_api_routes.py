@@ -42,7 +42,7 @@ from app.ingestion.service import (
     DestinationUnresolvableError,
     OriginUnresolvableError,
     ShopNotFoundError,
-    ingest_lmx_order,
+    ingest_or_find,
 )
 from app.models.order import Order, OrderStatus
 from app.optimizer.event_trigger import dispatch_event_bus
@@ -74,7 +74,8 @@ async def submit_order(
 
     The uniqueness is enforced by `uq_orders_source_ref` in Postgres, so it holds even
     for two retries racing each other - the check below is the fast path, the
-    constraint is the guarantee.
+    constraint is the guarantee, and the request that loses the race gets the
+    winner's order with `duplicate: true` rather than a 500.
 
     422 when the pickup address can't be resolved, and that is deliberately a refusal
     rather than a best guess: `app/geocoding/base.py` explains why a wrong coordinate
@@ -108,7 +109,7 @@ async def submit_order(
     )
 
     try:
-        order = await ingest_lmx_order(
+        ingested = await ingest_or_find(
             session, HoldQueueStore(), lmx, geocoder=get_geocoder()
         )
     except OriginUnresolvableError as exc:
@@ -132,6 +133,12 @@ async def submit_order(
         ) from exc
     except ShopNotFoundError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    order = ingested.order
+    if ingested.replayed:
+        # A twin of this request inserted it between the check above and our
+        # insert: the same answer a retry gets, not a second order or a 500.
+        return await _result(session, order, duplicate=True)
 
     # Same trigger the portal's order submission uses, so an API order is dispatched
     # on exactly the same path rather than waiting for the next scheduled cycle.
