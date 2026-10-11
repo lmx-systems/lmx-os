@@ -27,11 +27,16 @@ nothing here may import `app/`:
 ```bash
 python scripts/machine_limits.py export --out ml/out/machine_limits.json   # DE-2
 python scripts/freeze_test_sites.py export --out ml/out/test_sites.json    # DE-8
+python scripts/export_golden_records.py --out ml/out/records.jsonl         # the records
+python scripts/run_checklist_baseline.py --fallback-cost <dollars>         # DE-10 and DE-11
 ```
 
 | Module | What it is |
 |---|---|
 | `ml/modality/splits.py` | `DE-8` — train/test on the frozen test sites, never a per-run hash; a training set holding a test site raises |
+| `ml/modality/checklist.py` | `DE-10` — checklist v0.1 against one limits version: yes, no or can't tell, the reasons, and the missing facts |
+| `ml/modality/baseline.py` | `DE-10` — the checklist over every record, by machine and group, test sites and training apart |
+| `ml/modality/scorecard.py` | `DE-11` — yes accuracy and its one-sided 95% bound, coverage, lift, wrong-yes cost, scorer agreement |
 
 ## Illustrative analytics — `DE-16`
 

@@ -175,6 +175,7 @@ ONE_OFF_SCRIPTS: dict[str, str] = {
     "build_legal_brief_docx.py": "renders a document",
     "build_review_docx.py": "renders a document",
     "docx_house_style.py": "a helper for the document renderers",
+    "export_golden_records.py": "writes the golden records to a file for the modality harness",
     "generate_m2_corpus.py": "generates a synthetic corpus for the M2 harness",
     "illustrative_pack.py": "builds DE-16's illustrative charts from the Experiment 0 workbook",
     "import_experiment_0.py": "loads the Experiment 0 workbook as golden records, once (DE-3)",
@@ -187,6 +188,7 @@ ONE_OFF_SCRIPTS: dict[str, str] = {
         "of a tool that only reads types"
     ),
     "run_m2_harness.py": "runs the M2 calibration harness",
+    "run_checklist_baseline.py": "runs DE-10's checklist baseline offline",
     "seed_austin_world.py": "seeds a development database",
     "train_m1_dwell.py": "runs M1's release gate offline",
     "verify_route_optimization.py": "one live call against a real Google project",
