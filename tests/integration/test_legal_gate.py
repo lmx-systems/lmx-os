@@ -233,7 +233,7 @@ async def _seed_driver_with_pings(db_session, ages_in_days: list[int]) -> uuid.U
     hub_id = await _seed_hub(db_session)
     driver_id = uuid.uuid4()
     db_session.add(
-        Driver(id=driver_id, hub_id=hub_id, name="Sam Okafor", phone=f"+1512555{uuid.uuid4().int % 9000:04d}")
+        Driver(id=driver_id, hub_id=hub_id, name="Sam Okafor", phone=f"+1555{uuid.uuid4().int % 10**7:07d}")
     )
     await db_session.flush()
 
@@ -321,7 +321,7 @@ async def _seed_message(db_session, *, age_days: int):
             id=driver_id,
             hub_id=hub_id,
             name="Sam Okafor",
-            phone=f"+1512555{uuid.uuid4().int % 9000:04d}",
+            phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
         )
     )
     await db_session.flush()

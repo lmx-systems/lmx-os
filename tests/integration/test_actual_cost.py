@@ -46,7 +46,7 @@ async def _hub(db_session) -> Hub:
 
 async def _driver(db_session, hub, *, rate: int | None = RATE) -> Driver:
     driver = Driver(
-        hub_id=hub.id, name="Driver", phone=f"+1512555{uuid.uuid4().hex[:4]}",
+        hub_id=hub.id, name="Driver", phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
         hourly_rate_cents=rate,
     )
     db_session.add(driver)

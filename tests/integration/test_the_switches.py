@@ -136,7 +136,7 @@ class TestTheEnrolmentSwitch:
 class TestTheCostingSwitch:
     async def _driver_day(self, db_session, hub, *, rate=3000):
         driver = Driver(
-            hub_id=hub.id, name="Driver", phone=f"+1512555{uuid.uuid4().hex[:4]}",
+            hub_id=hub.id, name="Driver", phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
             hourly_rate_cents=rate,
         )
         db_session.add(driver)
@@ -257,7 +257,7 @@ class TestTheCostingSwitch:
         hub = await _hub(db_session)
         costed_driver, _orders = await self._driver_day(db_session, hub)
         idle_driver = Driver(
-            hub_id=hub.id, name="Driver", phone=f"+1512555{uuid.uuid4().hex[:4]}",
+            hub_id=hub.id, name="Driver", phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
             hourly_rate_cents=3000,
         )
         db_session.add(idle_driver)

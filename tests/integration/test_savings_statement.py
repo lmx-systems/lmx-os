@@ -128,7 +128,7 @@ async def _delivered_on(db_session, hub, client, *, at: datetime, timed: bool = 
     with both taps recorded - everything costing needs, and nothing more.
     `timed=False` drops the arrival tap, the case completion leaves."""
     driver = Driver(
-        hub_id=hub.id, name="Driver", phone=f"+1512555{uuid.uuid4().hex[:4]}",
+        hub_id=hub.id, name="Driver", phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
         hourly_rate_cents=3_000,
     )
     order = Order(
@@ -440,7 +440,7 @@ class TestItCarriesItsBasis:
             db_session, hub, client, docks=35,
             control_cents=lambda i: 1000 + i, treatment_cents=lambda i: 700 + i,
         )
-        driver = Driver(hub_id=hub.id, name="Driver", phone=f"+1512555{uuid.uuid4().hex[:4]}")
+        driver = Driver(hub_id=hub.id, name="Driver", phone=f"+1555{uuid.uuid4().int % 10**7:07d}")
         order = Order(
             id=control_ids[0], hub_id=hub.id, external_order_ref=f"PO-{uuid.uuid4().hex[:8]}",
             source_system="flat_file", raw_payload={}, sla_tier="T2",

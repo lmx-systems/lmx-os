@@ -71,7 +71,7 @@ async def _hub_client_driver(db_session):
             id=driver_id,
             hub_id=hub_id,
             name="Sam O.",
-            phone=f"+1512555{uuid.uuid4().int % 9000:04d}",
+            phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
         )
     )
     await db_session.commit()
@@ -600,7 +600,7 @@ async def _driver_in(db_session, hub_id, name="Extra"):
             id=driver_id,
             hub_id=hub_id,
             name=name,
-            phone=f"+1512555{uuid.uuid4().int % 9000:04d}",
+            phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
         )
     )
     await db_session.commit()
