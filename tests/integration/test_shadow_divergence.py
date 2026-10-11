@@ -44,7 +44,7 @@ async def _hub(db_session) -> Hub:
 
 
 async def _driver(db_session, hub, name="Driver") -> Driver:
-    driver = Driver(hub_id=hub.id, name=name, phone=f"+1512555{uuid.uuid4().hex[:4]}")
+    driver = Driver(hub_id=hub.id, name=name, phone=f"+1555{uuid.uuid4().int % 10**7:07d}")
     db_session.add(driver)
     await db_session.flush()
     return driver

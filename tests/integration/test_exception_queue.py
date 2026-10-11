@@ -69,7 +69,7 @@ async def _order(
 
 
 async def _flag(db_session, hub, order, *, flag_type="shop_closed", note="Shut early"):
-    driver = Driver(hub_id=hub.id, name="D", phone=f"+1512555{uuid.uuid4().hex[:4]}")
+    driver = Driver(hub_id=hub.id, name="D", phone=f"+1555{uuid.uuid4().int % 10**7:07d}")
     db_session.add(driver)
     await db_session.flush()
     route = Route(hub_id=hub.id, driver_id=driver.id, status="active")

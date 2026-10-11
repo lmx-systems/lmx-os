@@ -378,7 +378,7 @@ async def test_the_route_aware_eta_wins_once_the_order_is_on_a_route(db_session)
             id=driver_id,
             hub_id=hub_id,
             name="Sam O.",
-            phone=f"+1512555{uuid.uuid4().int % 9000:04d}",
+            phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
         )
     )
     await db_session.flush()
@@ -535,7 +535,7 @@ async def test_the_collection_commitment_becomes_checkable(db_session):
             id=driver_id,
             hub_id=hub_id,
             name="Sam O.",
-            phone=f"+1512555{uuid.uuid4().int % 9000:04d}",
+            phone=f"+1555{uuid.uuid4().int % 10**7:07d}",
         )
     )
     await db_session.flush()

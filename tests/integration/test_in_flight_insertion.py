@@ -42,7 +42,7 @@ async def _driver_route(db_session, hub, *, created_at=PLANNED_AT) -> Route:
     from app.models.driver import Driver
 
     driver = Driver(
-        hub_id=hub.id, name="Driver", phone=f"+1512555{uuid.uuid4().hex[:4]}"
+        hub_id=hub.id, name="Driver", phone=f"+1555{uuid.uuid4().int % 10**7:07d}"
     )
     db_session.add(driver)
     await db_session.flush()
