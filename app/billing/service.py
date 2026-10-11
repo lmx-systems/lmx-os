@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.credits import assess_credits
+from app.config import settings
 from app.hub_calendar import hub_day_bounds
 from app.models.client import Client
 from app.models.hub import Hub
@@ -40,6 +41,25 @@ logger = structlog.get_logger(__name__)
 
 class NoBillableOrdersError(Exception):
     pass
+
+
+def _billed_in_period(event: str, start: datetime, end: datetime) -> tuple:
+    """Which orders a period bills, by the configured billing event (`ING-2`).
+
+    An order is billed at most once either way: it carries one `invoice_id`, and
+    only orders without one are candidates. A replayed order is one order
+    (`ingest_or_find`), so it is one billable event under either key.
+    """
+    if event == "order_ingested":
+        # Windowed on the ingest, as the month-end reconciliation is.
+        return (Order.requested_at >= start, Order.requested_at < end)
+    if event == "order_delivered":
+        return (
+            Order.status == OrderStatus.delivered,
+            Order.delivered_at >= start,
+            Order.delivered_at < end,
+        )
+    raise ValueError(f"unknown billing event {event!r}")
 
 
 async def generate_invoice(
@@ -69,10 +89,8 @@ async def generate_invoice(
     candidates_result = await session.execute(
         select(Order).where(
             Order.client_id == client_id,
-            Order.status == OrderStatus.delivered,
             Order.invoice_id.is_(None),
-            Order.delivered_at >= period_start_dt,
-            Order.delivered_at < period_end_dt,
+            *_billed_in_period(settings.billing_event, period_start_dt, period_end_dt),
             # Backfilled history is never billed (`ING-3`, migration `0061`).
             # An imported historical delivery matches every other clause here
             # exactly - delivered, in period, no invoice - so without this an
@@ -100,7 +118,8 @@ async def generate_invoice(
 
     if not billable:
         raise NoBillableOrdersError(
-            f"No delivered, priced orders for client {client_id} between {period_start} and {period_end}"
+            f"No billable, priced orders ({settings.billing_event}) for client {client_id} "
+            f"between {period_start} and {period_end}"
         )
 
     # `billable` holds only priced orders; the filter just says so to the type checker.

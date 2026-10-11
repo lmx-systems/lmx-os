@@ -7,6 +7,8 @@ live here so they're never hardcoded in business logic.
 """
 from functools import lru_cache
 
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.secrets_provider import load_secrets_into_environment
@@ -278,6 +280,20 @@ class Settings(BaseSettings):
     # making one every few minutes, per hub, around the clock, is a cost that
     # would arrive as an invoice instead of as a decision.
     shadow_scheduler_enabled: bool = False
+    #
+    # What an invoice bills (docs/ROADMAP_1.5.md ING-2, decision 2.2(d)): an
+    # order once it is delivered, or an order once it is taken in. The fee unit
+    # is decision 0.5, and 2.3 reopens the licence beside it, so the key is
+    # configuration rather than an assumption baked into `generate_invoice` -
+    # the one abstraction on the books with a single caller, taken on purpose.
+    # Collapse it to a constant when 0.5 and the licence are settled.
+    #   order_delivered  delivered in the period (what has always been billed)
+    #   order_ingested   taken in during the period, whatever became of it -
+    #                    a cancelled or failed order is billable
+    # Change it at a period boundary: an order taken in under one key and
+    # delivered under the other can fall between the two, and the month-end
+    # reconciliation (`scripts/reconcile_billing.py`) is what lists it.
+    billing_event: Literal["order_delivered", "order_ingested"] = "order_delivered"
     #
     # The cadence, and it is load-bearing rather than a tuning knob: the
     # dispatch lead DEC-0 measures is bounded below by how often the cycle

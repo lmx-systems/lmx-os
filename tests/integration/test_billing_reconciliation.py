@@ -12,7 +12,7 @@ import pytest
 
 from app.billing.reconciliation import (
     _STILL_MOVING,
-    BILLED_ON,
+    billed_on,
     FEE_UNIT,
     reconcile_period,
     render,
@@ -138,7 +138,7 @@ class TestTheUnitMismatch:
         await _order(db_session, client, status=OrderStatus.cancelled)
         text = render(report := await _reconcile(db_session, client))
         assert FEE_UNIT in text
-        assert BILLED_ON in text
+        assert billed_on() in text
         assert report.summary()["fee_unit"] == "order ingested"
         assert report.summary()["billed_on"] == "order delivered"
 

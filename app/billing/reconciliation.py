@@ -8,7 +8,8 @@ compounding, and in whichever direction nobody is watching.
 ## The unit mismatch this exists to surface
 
 Decision 0.5 sets the fee unit at **per order ingested**. `generate_invoice`
-bills **per order delivered**: its candidates are `status == delivered` with a
+bills whatever `settings.billing_event` says (`ING-2`), and by default that is
+**per order delivered**: its candidates are `status == delivered` with a
 `delivered_at` inside the period. Those are different populations, and the gap
 between them is orders we took in and never charged for - a cancelled order, a
 failed delivery, an order still moving when the period closed.
@@ -43,6 +44,7 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.hub_calendar import hub_zone
 from app.models.client import Client
 from app.models.hub import Hub
@@ -53,7 +55,11 @@ from app.models.order import Order, OrderStatus
 # `generate_invoice` actually bills for. Named rather than implied so the
 # mismatch is legible in the code that measures it.
 FEE_UNIT = "order ingested"
-BILLED_ON = "order delivered"
+
+
+def billed_on() -> str:
+    """What `generate_invoice` bills, from the configured billing event (`ING-2`)."""
+    return {"order_delivered": "order delivered", "order_ingested": "order ingested"}[settings.billing_event]
 
 # Statuses an order can still reach delivery from. An order sitting in one of
 # these when the period closed is not missing revenue - it is in flight, and
@@ -117,7 +123,7 @@ class Reconciliation:
         return {
             "client_id": str(self.client_id),
             "fee_unit": FEE_UNIT,
-            "billed_on": BILLED_ON,
+            "billed_on": billed_on(),
             "ingested": self.ingested,
             "billed": self.billed,
             "unbilled": self.unbilled,
@@ -243,11 +249,16 @@ def render(report: Reconciliation) -> str:
             f"    {len(report.unpriced)} delivered with no rate configured for their "
             "tier at ingestion, so nothing could bill them"
         )
-    if report.not_delivered:
+    if report.not_delivered and billed_on() == FEE_UNIT:
+        lines.append(
+            f"    {len(report.not_delivered)} never delivered and on no invoice, though "
+            f"the invoice bills per {FEE_UNIT!r} - generate the period's invoice"
+        )
+    elif report.not_delivered:
         lines.append(
             f"    {len(report.not_delivered)} never delivered. Free today, and "
             f"billable if the fee unit is the {FEE_UNIT!r} that 0.5 says it is - "
-            f"the invoice bills per {BILLED_ON!r}. That gap is a commercial "
+            f"the invoice bills per {billed_on()!r}. That gap is a commercial "
             "decision rather than a defect, and this is the number to make it on"
         )
     if report.billed_without_ingest:
