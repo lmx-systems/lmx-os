@@ -33,6 +33,11 @@ python scripts/freeze_test_sites.py export --out ml/out/test_sites.json    # DE-
 |---|---|
 | `ml/modality/splits.py` | `DE-8` — train/test on the frozen test sites, never a per-run hash; a training set holding a test site raises |
 
+## Illustrative analytics — `DE-16`
+
+`python scripts/illustrative_pack.py pack <workbook>` writes the pack to `ml/out/illustrative/`. Every chart is
+stamped illustrative (D-SIM). `ml/analytics/illustrative.py` holds the arithmetic and the SVG.
+
 ## M2 — true urgency
 
 `MODEL_AND_DATA_BRIEF.md` §M2: *P(a consequence occurs | this order is late)*,

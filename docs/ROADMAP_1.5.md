@@ -443,7 +443,7 @@ order — and the four switches are days of work, not weeks.
 |---|---|---|---|
 | **TEN-1** | Three-level tenancy — source → customer → location | `RESHAPE` | `client`/`client_user` models exist. Every read and write carries a tenant scope; none can be omitted |
 | **TEN-2** | Pooling consent model | `NEW` | A customer can name who they will and will not be pooled with |
-| **TEN-3** | Leak tests as a blocking CI gate | `NEW` | A cross-tenant read fails the build, not review |
+| **TEN-3** | Leak tests as a blocking CI gate | `BUILT · BETWEEN CLIENTS; TENANCY LEVELS WAIT FOR TEN-1` | A cross-tenant read fails the build, not review. **Holds between clients:** `tests/integration/test_no_cross_client_reads.py` takes every route under `/client/` and `/api/v1/` from the OpenAPI schema, as the ops-role gate takes its writes, so a new route is covered without anyone adding it. Two clients on one hub, each with one of everything a client owns. A route naming a resource is called as A with B's id and must answer 403 or 404, say nothing of B, and leave B's row unchanged; a path parameter the test cannot fill with B's resource fails until it can, which is the gate for a new kind of resource. Every other route must not mention B's ids, references, names or addresses. A 422 fails rather than passes, and each id route is also called with A's own id and must answer 200, so a 404 means "not yours" and not a broken path. **Proved by breaking it:** removing the ownership check from `GET /client/orders/{order_id}`, and the client filter from `GET /client/orders`, each fails the gate. It runs in CI's integration job, which fails the build. The source → customer → location levels are `TEN-1`'s, and get their cases when that model exists |
 | **TEN-4** | Cross-tenant batching under consent | `NEW` | Two consenting customers ride one route with correct cost attribution |
 | **TEN-5** | Per-tenant audit log and export | `NEW` | A customer can see and take everything recorded about them |
 | **ONB-1** | Self-serve feed onboarding | `RESHAPE` | The ingestion adapter registry is the foundation. A new order stream live in days |
@@ -521,14 +521,14 @@ Merged in v1.4 from the 6 October addendum. Definitions come from the definition
 | ID | Feature | Status | Done when |
 |---|---|---|---|
 | **DE-15** | **Desk pre-fill agent** — public sources into Site and Handoff-point fields, with source `desk` and tier bronze at most | `NEW` | The ~160 NJ addresses are pre-filled, and technicians confirm rather than capture. Commercial addresses are filtered first (Census). Open data is preferred: Overture, OpenStreetMap, Microsoft building footprints, Mapillary, USGS lidar, county parcels. Google Street View and Places wait on counsel. An edge agent in §2.1's sense, next to `AGT-3`'s cold-start prior |
-| **DE-16** | **Illustrative analytics pack** (Rich, 5 Oct) | `NEW` | From Experiment 0: deliveries by hour of day, the share of drop-offs within a drone radius of a hub, and the spread of distances. Every chart is stamped *illustrative* (D-SIM) and is never quoted as model accuracy |
+| **DE-16** | **Illustrative analytics pack** (Rich, 5 Oct) | `BUILT · HOUR OF DAY RUN; RADIUS AND DISTANCE WAIT FOR A HUB` | From Experiment 0: deliveries by hour of day, the share of drop-offs within a drone radius of a hub, and the spread of distances. Every chart is stamped *illustrative* (D-SIM) and is never quoted as model accuracy. `scripts/illustrative_pack.py` (`pack`, `geocode`) + `ml/analytics/illustrative.py`, drop-offs only (the supplier rows are pickups, `DE-3`); `tests/test_illustrative_pack.py`. Single-series SVG bars in the house green, the stamp in every chart, a tooltip on every bar. **Run on the real workbook:** 3,063 drop-offs, 2 Jan to 3 Apr 2026; the busiest hour starts at 10:00 (14%), and nothing is delivered before 07:00 or after 17:00. **The radius share and the distance spread are built and not run**: Experiment 0 names no depot and LMX has no New Jersey hub, so the hub's location and the drone's radius have no default and are printed on the charts that use them. `geocode` resolves the sites with the app's geocoder into a gitignored file of site ids and coordinates |
 
 ### Build order
 
 | Order | Items | Needs a person first? |
 |---|---|---|
 | 1 | `DE-1` (schema built), `DE-2` (built, limits assumed), `DE-3` (built), `DE-8` (built, nothing drawn) | No |
-| 2 | `DE-10`, `DE-11`, `DE-16` on Experiment 0 data | No |
+| 2 | `DE-10`, `DE-11`, `DE-16` on Experiment 0 data (built; `DE-16` needs a hub and a radius for two of its three readings) | No |
 | 3 | `DE-4`, `DE-5`, `DE-6` | The AWS deploy (Sourabh); 0.4 (Matan) for pilot drivers; the visit grading call for `DE-6` |
 | 4 | `DE-9`, then the re-drive (about 300 records), then `DE-12` | Two scorers; Rich for the final machine limits |
 | 5 | `DE-13`, `DE-14` | Records flowing from the app |
