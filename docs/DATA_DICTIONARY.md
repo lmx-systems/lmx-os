@@ -87,7 +87,36 @@ One row per door, bay or counter a delivery can use. A site can have several.
 | `confidence` | The scorer's confidence, where given | 0 to 1. Optional |
 | `scorer_id` | Who scored it | — |
 | `is_blind_second` | Whether this is the blind second scorer, who cannot see the first | yes, no |
-| `machine_limits_version` | Which machine limits the verdict was scored against | Required once `DE-2` lands |
+| `machine_limits_version` | Which machine limits the verdict was scored against | Required. A version with a row for this machine (below) |
+
+### Machine limits
+
+What each machine can carry and where it can go (`machine_limits`, `DE-2`). A
+verdict is only meaningful against the limits it was scored with, and those are
+not settled, so they are versioned: one row per machine per version, and a
+version is never edited. A confirmed limit arrives as a new version
+(`scripts/machine_limits.py`).
+
+| Field | Meaning | Values |
+|---|---|---|
+| `version` | The version's name. Every label cites one | `v1` is the seed |
+| `machine` | Which machine | `drone`, `sidewalk_robot`, `car` |
+| `max_weight_kg` | The heaviest item it takes, inclusive | Kilograms, above zero |
+| `max_size_class` | The largest size class it takes | `envelope`, `small`, `medium`, `large`, `oversize` |
+| `hazmat_or_liquid_allowed` | Whether it may carry a hazardous or liquid item | yes, no |
+| `needs_step_free_path` | Whether the handoff point must have no steps | yes, no |
+| `needs_continuous_sidewalk` | Whether a sidewalk must run all the way to the door | yes, no |
+| `needs_open_ground` | Whether it needs open, flat ground near the door to set down | yes, no |
+| `max_walk_distance_m` | How far the stop may be from the door | Metres; empty means no limit |
+| `basis` | How the row is known | `assumed`, `operator_reported`, `measured` |
+| `source` | Where the figures came from, in words | — |
+
+**`v1` is assumed throughout.** Drone: 2.5 kg, small, needs open ground. Sidewalk
+robot: 9 kg, medium, step-free and a continuous sidewalk. Car: 25 kg, large,
+stop within 50 m of the door. None takes a hazardous or liquid item. Our own
+documents disagree on the drone's payload (2.5 kg against about 9 lb), and where
+a limit is unknown it is set strict, because a wrong "yes" costs more than a
+wrong "no".
 
 ---
 

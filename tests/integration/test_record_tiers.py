@@ -154,6 +154,7 @@ async def _a_delivery(
                     verdict="no" if machine == "drone" else "yes",
                     reason_codes=["overhead"] if machine == "drone" else [],
                     scorer_id=scorer,
+                    machine_limits_version="v1",
                 )
             )
     await db_session.commit()

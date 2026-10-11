@@ -11,15 +11,17 @@ agreement between the two is what lets a record count toward a test pool
 (`DE-9`). The first scorer's verdicts are the ones the tier reads.
 
 `machine_limits_version` names the machine limits the verdict was scored against
-(the drone weight limit is still open). Nullable until `DE-2` adds the versioned
-limits table and makes it required.
+(`machine_limits`, `DE-2`). It is required, and the foreign key is on (version,
+machine): a verdict cannot be saved without a version, nor cite one that has no
+row for its machine. The limits themselves are still largely assumed - the drone
+weight limit is open - which is why the version travels with every label.
 
 Named `machine_labels` rather than the addendum's `labels`: the console already
 "labels" docks with a node class (`IDN-3`), and the two must not be confused.
 """
 import uuid
 
-from sqlalchemy import Boolean, Float, ForeignKey, String
+from sqlalchemy import Boolean, Float, ForeignKey, ForeignKeyConstraint, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,6 +34,13 @@ VERDICTS = ("yes", "no", "cant_tell")
 
 class MachineLabel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "machine_labels"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["machine_limits_version", "machine"],
+            ["machine_limits.version", "machine_limits.machine"],
+            name="fk_machine_labels_limits",
+        ),
+    )
 
     # The record: one delivery or visit, which is a stop.
     stop_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("stops.id"), nullable=False, index=True)
@@ -46,4 +55,4 @@ class MachineLabel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     reason_codes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     scorer_id: Mapped[str] = mapped_column(String(64), nullable=False)
     is_blind_second: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    machine_limits_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    machine_limits_version: Mapped[str] = mapped_column(String(32), nullable=False)

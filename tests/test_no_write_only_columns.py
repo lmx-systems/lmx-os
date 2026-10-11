@@ -57,7 +57,6 @@ KNOWN_UNWRITTEN: dict[str, str] = {
     "item_size_class": _GOLDEN_RECORD,
     "item_weight_kg": _GOLDEN_RECORD,
     "kind_of_site": _GOLDEN_RECORD,
-    "machine": _GOLDEN_RECORD,
     "machine_limits_version": _GOLDEN_RECORD,
     "obstructions": _GOLDEN_RECORD,
     "overhead": _GOLDEN_RECORD,

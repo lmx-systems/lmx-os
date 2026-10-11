@@ -28,6 +28,7 @@ from app.models.linkage_flag import LinkageFlag
 from app.models.location import Location
 from app.models.location_merge import LocationMerge
 from app.models.machine_label import MachineLabel
+from app.models.machine_limit import MachineLimit
 from app.models.message import Message
 from app.models.ops_user import OpsUser
 from app.models.order import Order
@@ -58,6 +59,7 @@ __all__ = [
     "Location",
     "HandoffPoint",
     "MachineLabel",
+    "MachineLimit",
     "SiteAddressShare",
     "LinkageFlag",
     "LocationMerge",
