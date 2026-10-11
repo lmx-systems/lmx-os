@@ -224,6 +224,44 @@ async def test_resubmitting_the_same_reference_does_not_create_a_second_order(
     assert count == 1
 
 
+async def test_a_retry_that_loses_the_race_gets_the_winners_order(
+    db_session, real_redis_client, monkeypatch
+):
+    """Two retries of one order, both past the fast-path check before either
+    commits. The constraint stops the second row; this pins down what the loser
+    is told. It was a 500 - an IntegrityError nothing caught - and this API's
+    docs tell clients to retry a 5xx."""
+    import app.api.public_api_routes as routes
+    import app.ingestion.service as service
+
+    _hub_id, client_id = await _seed_client(db_session)
+    token = await _key_for(db_session, client_id)
+    body = _order_body()
+    winner = await submit_order(body, api_client=await _authed(db_session, token), session=db_session)
+
+    # The loser looked before the winner committed: both of its lookups miss
+    # once, so its insert is the one that meets the constraint.
+    async def _not_yet(*_args, **_kwargs):
+        return None
+
+    lookups = []
+    real_find = service.find_existing_order
+
+    async def _find_after_the_race(session, lmx):
+        lookups.append(lmx.source_order_ref)
+        return None if len(lookups) == 1 else await real_find(session, lmx)
+
+    monkeypatch.setattr(routes, "_existing_order", _not_yet)
+    monkeypatch.setattr(service, "find_existing_order", _find_after_the_race)
+
+    loser = await submit_order(body, api_client=await _authed(db_session, token), session=db_session)
+
+    assert (loser.order_id, loser.duplicate) == (winner.order_id, True)
+    assert len(lookups) == 2  # the miss, then the winner
+    count = (await db_session.execute(select(func.count()).select_from(Order))).scalar_one()
+    assert count == 1
+
+
 async def test_two_clients_may_use_the_same_reference(db_session, real_redis_client):
     """Internal numbering is theirs, and it collides across companies. Without the
     client scope on the lookup, one client could read - and idempotently "recover" -

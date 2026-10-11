@@ -11,10 +11,12 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import metrics
@@ -450,7 +452,16 @@ async def find_existing_order(session: AsyncSession, lmx: LMXOrder) -> Order | N
     return (await session.scalars(query.limit(1))).first()
 
 
-async def ingest_lmx_order(
+@dataclass(frozen=True)
+class Ingested:
+    """An intake's result: the order, and whether it was already here (a replay,
+    or a twin request that inserted it first)."""
+
+    order: Order
+    replayed: bool
+
+
+async def ingest_or_find(
     session: AsyncSession,
     hold_queue: HoldQueueStore,
     lmx: LMXOrder,
@@ -458,7 +469,7 @@ async def ingest_lmx_order(
     geocoder: BaseGeocoder,
     payload: dict | None = None,
     mode: str = INTAKE_LIVE,
-) -> Order:
+) -> Ingested:
     """The one ingestion path (docs/LMX_LINK_PLAN.md §1.1).
 
     Every source - adapters today, the client portal and later the CSV drop and
@@ -488,7 +499,7 @@ async def ingest_lmx_order(
 
     existing = await find_existing_order(session, lmx)
     if existing is not None:
-        return existing
+        return Ingested(existing, replayed=True)
 
     shop = await _resolve_or_create_shop(session, lmx, geocoder=geocoder)
 
@@ -565,8 +576,24 @@ async def ingest_lmx_order(
         delivery_location_id=delivery_location_id,
         intake_mode=mode,
     )
-    session.add(order)
-    await session.flush()  # assigns order.id without committing
+    # The fast path above misses a twin that is still in flight: two retries of
+    # one order both find nothing and both insert. `uq_orders_source_ref`
+    # stops the second row, and here the loser hands back the winner's order
+    # rather than escaping as a 500. In a savepoint, so the rollback undoes the
+    # insert and nothing else this request has done.
+    try:
+        async with session.begin_nested():
+            session.add(order)
+            await session.flush()  # assigns order.id without committing
+    except IntegrityError as exc:
+        if "uq_orders_source_ref" not in str(exc.orig):
+            raise
+        winner = await find_existing_order(session, lmx)
+        if winner is None:
+            raise
+        logger.info("order_replay_raced", order_id=str(winner.id), source_system=lmx.source_system)
+        await session.commit()
+        return Ingested(winner, replayed=True)
 
     # Package identity (docs/ROADMAP.md W10): one Parcel per physical box,
     # so scan-at-pickup can verify against the expected order later.
@@ -714,7 +741,7 @@ async def ingest_lmx_order(
             hub_id=lmx.hub_id,
             source_system=lmx.source_system,
         )
-        return order
+        return Ingested(order, replayed=False)
 
     await hold_queue.add(
         lmx.hub_id,
@@ -744,7 +771,22 @@ async def ingest_lmx_order(
         sla_tier=sla_tier,
         reason=reason,
     )
-    return order
+    return Ingested(order, replayed=False)
+
+
+async def ingest_lmx_order(
+    session: AsyncSession,
+    hold_queue: HoldQueueStore,
+    lmx: LMXOrder,
+    *,
+    geocoder: BaseGeocoder,
+    payload: dict | None = None,
+    mode: str = INTAKE_LIVE,
+) -> Order:
+    """`ingest_or_find`, for callers that treat a replay like any other order."""
+    return (
+        await ingest_or_find(session, hold_queue, lmx, geocoder=geocoder, payload=payload, mode=mode)
+    ).order
 
 
 def _lmx_to_normalized_for_classification(lmx: LMXOrder, shop: Shop) -> NormalizedOrder:
