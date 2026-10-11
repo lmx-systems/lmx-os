@@ -521,14 +521,14 @@ Merged in v1.4 from the 6 October addendum. Definitions come from the definition
 | ID | Feature | Status | Done when |
 |---|---|---|---|
 | **DE-15** | **Desk pre-fill agent** — public sources into Site and Handoff-point fields, with source `desk` and tier bronze at most | `NEW` | The ~160 NJ addresses are pre-filled, and technicians confirm rather than capture. Commercial addresses are filtered first (Census). Open data is preferred: Overture, OpenStreetMap, Microsoft building footprints, Mapillary, USGS lidar, county parcels. Google Street View and Places wait on counsel. An edge agent in §2.1's sense, next to `AGT-3`'s cold-start prior |
-| **DE-16** | **Illustrative analytics pack** (Rich, 5 Oct) | `NEW` | From Experiment 0: deliveries by hour of day, the share of drop-offs within a drone radius of a hub, and the spread of distances. Every chart is stamped *illustrative* (D-SIM) and is never quoted as model accuracy |
+| **DE-16** | **Illustrative analytics pack** (Rich, 5 Oct) | `BUILT · HOUR OF DAY RUN; RADIUS AND DISTANCE WAIT FOR A HUB` | From Experiment 0: deliveries by hour of day, the share of drop-offs within a drone radius of a hub, and the spread of distances. Every chart is stamped *illustrative* (D-SIM) and is never quoted as model accuracy. `scripts/illustrative_pack.py` (`pack`, `geocode`) + `ml/analytics/illustrative.py`, drop-offs only (the supplier rows are pickups, `DE-3`); `tests/test_illustrative_pack.py`. Single-series SVG bars in the house green, the stamp in every chart, a tooltip on every bar. **Run on the real workbook:** 3,063 drop-offs, 2 Jan to 3 Apr 2026; the busiest hour starts at 10:00 (14%), and nothing is delivered before 07:00 or after 17:00. **The radius share and the distance spread are built and not run**: Experiment 0 names no depot and LMX has no New Jersey hub, so the hub's location and the drone's radius have no default and are printed on the charts that use them. `geocode` resolves the sites with the app's geocoder into a gitignored file of site ids and coordinates |
 
 ### Build order
 
 | Order | Items | Needs a person first? |
 |---|---|---|
 | 1 | `DE-1` (schema built), `DE-2` (built, limits assumed), `DE-3` (built), `DE-8` | No |
-| 2 | `DE-10`, `DE-11`, `DE-16` on Experiment 0 data | No |
+| 2 | `DE-10`, `DE-11`, `DE-16` on Experiment 0 data (built; `DE-16` needs a hub and a radius for two of its three readings) | No |
 | 3 | `DE-4`, `DE-5`, `DE-6` | The AWS deploy (Sourabh); 0.4 (Matan) for pilot drivers; the visit grading call for `DE-6` |
 | 4 | `DE-9`, then the re-drive (about 300 records), then `DE-12` | Two scorers; Rich for the final machine limits |
 | 5 | `DE-13`, `DE-14` | Records flowing from the app |
