@@ -33,7 +33,7 @@ missing, and a missing element lowers the tier.
 
 | Field | Meaning | Values |
 |---|---|---|
-| `locations.kind_of_site` | What kind of business is at the address | Taxonomy code. Overlaps `node_class` (seven classes); the two are not reconciled yet |
+| `locations.kind_of_site` | What kind of business is at the address | Taxonomy code: `independent_repair_or_tire`, `body_shop`, `dealership_counter`, `parts_store_counter`, `fleet_or_transport_yard`; outside taxonomy v0.1 so far, `municipal_fleet_garage` and `gas_station_with_bays`. Overlaps `node_class` (seven classes); the two are not reconciled yet |
 | `locations.setting` | Whether the site is in a city core or a suburb | `city_core`, `suburb` |
 | `locations.region` | The region the record belongs to. New Jersey records never count toward a Texas test pool (D-NJ) | e.g. `TX`, `NJ` |
 | `locations.shares_address` | Whether other businesses share this address. Null until somebody checked | yes, no |
@@ -69,7 +69,7 @@ One row per door, bay or counter a delivery can use. A site can have several.
 | Field | Meaning | Values |
 |---|---|---|
 | `stops.handoff_point_id` | The handoff point this delivery used | — |
-| `stops.record_source` | Where the record came from. Every record has one | `lmx_app` by default; e.g. `import`, `off_platform`, `desk` |
+| `stops.record_source` | Where the record came from. Every record has one | `lmx_app` by default; `import_route_export` and `import_site_counts` for Experiment 0 (`DE-3`); later e.g. `off_platform`, `desk` |
 | `stops.collected_by` | Who collected the record | A driver, technician or scorer id |
 | `orders.item_description` | What was carried | Free text |
 | `orders.item_weight_kg` | The item's real weight. Separate from dispatch's `weight_units`, which is a unitless capacity number that defaults to 1.0 | Kilograms, zero or more |

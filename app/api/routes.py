@@ -28,7 +28,7 @@ from app.identity.merge import (
     reject_merge,
     revert_merge,
 )
-from app.identity.node_class import classification_coverage, set_node_class
+from app.identity.node_class import classification_coverage, is_a_served_dock, set_node_class
 from app.learning_loop.service import run_nightly_job
 from app.models.dispatcher_override import (
     ACTION_RELEASE,
@@ -233,7 +233,7 @@ async def attention_counts(
     unlabelled = await session.scalar(
         select(func.count())
         .select_from(Location)
-        .where(Location.node_class.is_(None), Location.merged_into_id.is_(None))
+        .where(Location.node_class.is_(None), Location.merged_into_id.is_(None), is_a_served_dock())
     )
     return AttentionCountsView(
         late_orders=late,
@@ -266,7 +266,7 @@ async def unlabelled_docks(
         await session.execute(
             select(Location, ReceiverProfile)
             .outerjoin(ReceiverProfile, ReceiverProfile.location_id == Location.id)
-            .where(Location.node_class.is_(None), Location.merged_into_id.is_(None))
+            .where(Location.node_class.is_(None), Location.merged_into_id.is_(None), is_a_served_dock())
             .order_by(ReceiverProfile.inherited_dwell_sample_count.desc().nulls_last())
             .limit(limit)
         )

@@ -219,9 +219,13 @@ async def client_signup(
     # Provisional hub. Hubs have no service-area model, so a signup cannot be
     # routed automatically - ops assigns the real one at approval, reading
     # `service_area`. Earliest hub by creation, which at pilot scale is the only
-    # hub. Harmless because a pending client cannot do anything with it.
+    # hub. Harmless because a pending client cannot do anything with it. Active
+    # hubs only: the golden-record import (DE-3) keeps its historical records
+    # in an inactive hub, which on a fresh database can be the oldest.
     hub = (
-        await session.execute(select(Hub).order_by(Hub.created_at).limit(1))
+        await session.execute(
+            select(Hub).where(Hub.active.is_(True)).order_by(Hub.created_at).limit(1)
+        )
     ).scalar_one_or_none()
     if hub is None:
         # No hubs configured at all - a deployment problem, not the applicant's.
