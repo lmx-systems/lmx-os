@@ -40,6 +40,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.hub_calendar import hub_day_bounds, hub_local_date
+from app.identity.handoff_capture import handoff_point_for, is_captured
 from app.identity.profile import profile_for
 from app.models.driver import Driver
 from app.models.hub import Hub
@@ -141,6 +142,13 @@ async def dock_needs_survey(
     location = await location_for_stop(session, stop)
     if location is None:
         return False
+
+    # `DE-4`: the survey is now the golden handoff capture, offered at every
+    # drop-off whose handoff point is not captured yet - no shift cap, because a
+    # door that is never captured never reaches gold. The year and the cap below
+    # apply once it is.
+    if not is_captured(await handoff_point_for(session, location, create=False)):
+        return True
 
     if await surveys_recorded_today(session, driver_id) >= MAX_SURVEYS_PER_SHIFT:
         return False

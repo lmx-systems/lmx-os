@@ -202,7 +202,9 @@ export interface Route {
 
 export type PodMethod = 'photo' | 'signature' | 'pin';
 
-export type UploadKind = 'photo' | 'signature' | 'scan';
+// `handoff`: one of the four guided photos of the handoff point (DE-4).
+export type UploadKind = 'photo' | 'signature' | 'scan' | 'handoff';
+export type HandoffPhotoSlot = 'approach' | 'stop_point' | 'path' | 'handoff';
 export type UploadContentType = 'image/jpeg' | 'image/png' | 'image/webp';
 
 export interface UploadUrlResult {
@@ -313,6 +315,16 @@ export interface DockSurveyBody {
   landing_surface?: string | null;
   appointment_required?: boolean | null;
   photo_url?: string | null;
+  // The golden handoff capture (DE-4). Vocabularies: app/models/handoff_point.py.
+  handoff_type?: string | null;
+  handoff_stop_type?: string | null;
+  stop_legal?: boolean | null;
+  steps_or_ramps?: string | null;
+  continuous_sidewalk?: boolean | null;
+  // An empty list is "looked, nothing there"; left out is unknown.
+  obstructions?: string[] | null;
+  overhead?: string[] | null;
+  drone_open_ground?: boolean | null;
 }
 
 export interface DockSurveyResult {

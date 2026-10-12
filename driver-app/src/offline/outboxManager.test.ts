@@ -14,6 +14,7 @@ jest.mock('./outboxStore', () => ({
   saveOutbox: jest.fn(async () => undefined),
 }));
 jest.mock('../auth/token', () => ({ adoptAuthToken: jest.fn(async () => undefined) }));
+jest.mock('./handoffPhotos', () => ({ sendHandoffPhoto: jest.fn() }));
 jest.mock('../api/client', () => ({
   ...jest.requireActual('../api/client'),
   api: {
@@ -28,6 +29,7 @@ jest.mock('../api/client', () => ({
 }));
 
 import { ApiError, api } from '../api/client';
+import { sendHandoffPhoto } from './handoffPhotos';
 import { isPermanentFailure, OutboxManager } from './outboxManager';
 import type { OutboxItem } from './types';
 
@@ -225,6 +227,28 @@ describe('the queue on a shift', () => {
       ['s1', 'o1', { item_weight_kg: 5 }], // the attempt that failed
       ['s1', 'o1', { item_weight_kg: 4.2 }], // the correction, not the first entry again
       ['s1', 'o2', { item_size_class: 'small' }],
+    ]);
+    expect(itemsOf(queue)).toEqual([]);
+  });
+
+  // DE-4: a retaken photo replaces the unsent one for its slot.
+  it('sends the retaken photo for a slot, and every slot its own', async () => {
+    const send = sendHandoffPhoto as jest.Mock;
+    send.mockReset();
+    send.mockRejectedValueOnce(new ApiError(503, 'unavailable')).mockResolvedValue(undefined);
+    const queue = new OutboxManager();
+
+    await queue.enqueue('handoff-photo', 's1', { slot: 'path', uri: 'file:///a.jpg', contentType: 'image/jpeg' });
+    await settle();
+    await queue.enqueue('handoff-photo', 's1', { slot: 'path', uri: 'file:///b.jpg', contentType: 'image/jpeg' });
+    await settle();
+    await queue.enqueue('handoff-photo', 's1', { slot: 'handoff', uri: 'file:///c.jpg', contentType: 'image/jpeg' });
+    await settle();
+
+    expect(send.mock.calls).toEqual([
+      ['s1', 'path', 'file:///a.jpg', 'image/jpeg'], // the attempt that failed
+      ['s1', 'path', 'file:///b.jpg', 'image/jpeg'], // the retake, not the first again
+      ['s1', 'handoff', 'file:///c.jpg', 'image/jpeg'],
     ]);
     expect(itemsOf(queue)).toEqual([]);
   });

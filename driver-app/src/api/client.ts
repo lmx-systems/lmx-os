@@ -4,6 +4,7 @@ import type {
   ItemFactsBody,
   OrderItemView,
   ParcelView,
+  HandoffPhotoSlot,
   AuthToken,
   CodMethod,
   DocType,
@@ -188,7 +189,13 @@ export const api = {
 
   getMyRoute: () => request<Route | null>('/driver/me/route'),
 
-  arriveAtStop: (stopId: string) => request<Route['stops'][number]>(`/driver/stops/${stopId}/arrive`, { method: 'POST' }),
+  // The stop pin rides along when the phone has one (DE-4); an empty body is a
+  // plain arrival.
+  arriveAtStop: (stopId: string, pin?: { lat?: number; lng?: number; accuracy_m?: number | null }) =>
+    request<Route['stops'][number]>(`/driver/stops/${stopId}/arrive`, {
+      method: 'POST',
+      body: JSON.stringify(pin ?? {}),
+    }),
 
   // DRV-1. A batch because DRV-4's outbox is the caller and a dead zone
   // flushes several crossings at once; the endpoint is idempotent on
@@ -204,7 +211,13 @@ export const api = {
 
   recordGeofenceEvents: (
     stopId: string,
-    events: { kind: 'enter' | 'exit'; occurred_at: string; accuracy_m?: number | null }[],
+    events: {
+      kind: 'enter' | 'exit';
+      occurred_at: string;
+      accuracy_m?: number | null;
+      lat?: number;
+      lng?: number;
+    }[],
   ) =>
     request<{ accepted: number; duplicates: number; rejected: number }>(
       `/driver/stops/${stopId}/geofence-events`,
@@ -264,6 +277,13 @@ export const api = {
       body: JSON.stringify(facts),
     }),
 
+  // DE-4: one guided photo of the handoff point, once its upload has landed.
+  recordHandoffPhoto: (stopId: string, slot: HandoffPhotoSlot, url: string) =>
+    request<DockSurveyResult>(`/driver/stops/${stopId}/handoff-photo`, {
+      method: 'POST',
+      body: JSON.stringify({ slot, url }),
+    }),
+
   createUploadUrl: (stopId: string, kind: UploadKind, contentType: UploadContentType) =>
     request<UploadUrlResult>(`/driver/stops/${stopId}/upload-url`, {
       method: 'POST',
@@ -298,6 +318,10 @@ export const api = {
       photo_url?: string;
       signature_url?: string;
       pin?: string;
+      // The door pin (DE-4), when the phone had a recent fix.
+      door_lat?: number;
+      door_lng?: number;
+      door_accuracy_m?: number;
       left_at?: string;
     },
   ) =>

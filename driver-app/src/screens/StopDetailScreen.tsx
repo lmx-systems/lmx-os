@@ -21,6 +21,7 @@ import { useOutboxPending } from '../offline/OutboxContext';
 import { outboxManager } from '../offline/outboxManager';
 import { spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
+import { currentPin, doorPin } from '../location/currentPin';
 import { dialable } from '../utils/dialable';
 import { openTurnByTurnNavigation } from '../utils/navigation';
 import { primaryActionForStop, stopLabel } from '../utils/stopStatus';
@@ -112,7 +113,9 @@ export function StopDetailScreen({ route, navigation }: Props) {
   }, [pending.length, load]);
 
   async function handleArrive() {
-    await outboxManager.enqueue('arrive', stopId, {});
+    // The stop pin, when the phone has a recent fix (DE-4). Never waited for.
+    const pin = await currentPin();
+    await outboxManager.enqueue('arrive', stopId, pin ? { ...pin } : {});
   }
 
   async function handleScanNext() {
@@ -174,7 +177,7 @@ export function StopDetailScreen({ route, navigation }: Props) {
   const [surveying, setSurveying] = useState(false);
 
   async function handlePickupComplete() {
-    await outboxManager.enqueue('complete', stopId, { method: 'photo' });
+    await outboxManager.enqueue('complete', stopId, { method: 'photo', ...doorPin(await currentPin()) });
     navigation.navigate('Home');
   }
 
@@ -192,11 +195,13 @@ export function StopDetailScreen({ route, navigation }: Props) {
   }
 
   async function handleDropoffComplete() {
+    // The door pin: where the item changed hands (DE-4).
+    const door = doorPin(await currentPin());
     if (method === 'pin') {
       setSubmittingPin(true);
       setPinError(null);
       try {
-        await api.completeStop(stopId, { method: 'pin', pin, left_at: leftAt.trim() || undefined });
+        await api.completeStop(stopId, { method: 'pin', pin, left_at: leftAt.trim() || undefined, ...door });
         leaveTheDoor();
       } catch (err) {
         setPinError(err instanceof ApiError ? err.message : 'Could not verify PIN. Try again.');
@@ -215,6 +220,7 @@ export function StopDetailScreen({ route, navigation }: Props) {
       photo_urls: photoUrls.length > 0 ? photoUrls : undefined,
       signature_url: signatureUrl ?? undefined,
       left_at: leftAt.trim() || undefined,
+      ...door,
     });
 
     leaveTheDoor();

@@ -32,6 +32,7 @@ from app.identity.dock_survey import (
 from app.identity.profile import profile_for
 from app.models.client import Client
 from app.models.driver import Driver
+from app.models.handoff_point import HandoffPoint
 from app.models.hub import Hub
 from app.models.location import Location
 from app.models.order import Order, OrderStatus
@@ -143,6 +144,22 @@ def _authed(driver_id, hub_id):
     return AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="sim")
 
 
+async def _captured_door(db_session, location):
+    """The dock's handoff point, fully captured (`DE-4`). The year and the shift
+    cap apply only once a door is; until then the capture is asked at every
+    drop-off (`tests/integration/test_handoff_capture.py`)."""
+    db_session.add(
+        HandoffPoint(
+            location_id=location.id, source="lmx_app", handoff_type="counter",
+            door_lat=30.26, door_lng=-97.74, stop_lat=30.2601, stop_lng=-97.7401,
+            stop_type="lot", stop_legal=True, walk_distance_m=14.0, steps_or_ramps="none",
+            continuous_sidewalk=True, obstructions=[], drone_open_ground=False, overhead=[],
+            photo_approach="a.jpg", photo_stop_point="b.jpg", photo_path="c.jpg", photo_handoff="d.jpg",
+        )
+    )
+    await db_session.commit()
+
+
 class TestWhenToAsk:
     async def test_an_unsurveyed_dock_is_asked_about(self, db_session):
         hub, client, shop, driver, location = await _world(db_session)
@@ -180,6 +197,7 @@ class TestWhenToAsk:
 
     async def test_a_freshly_surveyed_dock_is_left_alone(self, db_session):
         hub, client, shop, driver, location = await _world(db_session)
+        await _captured_door(db_session, location)
         stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
         await record_dock_survey(
             str(stop.id),
@@ -263,6 +281,7 @@ class TestWhenToAsk:
             )
             await db_session.commit()
 
+        await _captured_door(db_session, location)
         stop = await _dropoff(db_session, hub, client, shop, driver, dock=location)
 
         assert await dock_needs_survey(db_session, stop, driver) is False

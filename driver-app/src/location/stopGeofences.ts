@@ -1,4 +1,6 @@
 import * as Location from 'expo-location';
+
+import { currentPin } from './currentPin';
 import * as TaskManager from 'expo-task-manager';
 
 import { outboxManager } from '../offline/outboxManager';
@@ -60,9 +62,14 @@ type Crossing = 'enter' | 'exit';
  * onto the reconnect.
  */
 async function queueCrossing(stopId: string, kind: Crossing, at: Date): Promise<void> {
+  // An entry carries where the phone was (DE-4): the stop pin, when the driver
+  // does not tap Arrived with one. Never waited for - a crossing with no fix is
+  // still a crossing.
+  const pin = kind === 'enter' ? await currentPin() : null;
   await outboxManager.enqueue('geofence', stopId, {
     kind,
     occurred_at: at.toISOString(),
+    ...(pin ? { lat: pin.lat, lng: pin.lng, accuracy_m: pin.accuracy_m } : {}),
   });
 }
 
