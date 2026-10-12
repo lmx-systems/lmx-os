@@ -6,7 +6,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
@@ -85,6 +85,12 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Raw payload as received, kept verbatim for debugging/replay.
     raw_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # What intake noticed and did not refuse (docs/ROADMAP_1.5.md §2.5, D-UNK and
+    # D-DUP): `unknown_fields` and `defaulted_fields` from the source's adapter,
+    # and `possible_duplicate` for an order with no reference of its own that
+    # matches one the same client sent minutes earlier. Each is a dict with a
+    # `kind`. Shown to dispatch and the client; never acted on automatically.
+    intake_flags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
 
     sla_tier: Mapped[SLATier | None] = mapped_column(Enum(SLATier, name="sla_tier"), nullable=True)
     # Explicit timezone=True is required here - without it, SQLAlchemy

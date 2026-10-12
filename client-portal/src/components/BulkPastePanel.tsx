@@ -256,6 +256,11 @@ function BatchReport({
                   <span className="truncate">{row.drop_address}</span>
                   <span className="shrink-0 font-mono text-[12px] text-[var(--text-muted)]">
                     {row.order!.reference}
+                    {row.order!.possible_duplicate_of && (
+                      <span className="ml-2 text-[var(--text-primary)]">
+                        repeat of {row.order!.possible_duplicate_of}?
+                      </span>
+                    )}
                   </span>
                 </li>
               ))}

@@ -182,6 +182,9 @@ export interface ClientOrderResult {
   estimated_delivery_by: string | null
   fee_cents: number | null
   dispatchable: boolean
+  // The reference of an order this looks like a repeat of: same pickup and
+  // drop-off, minutes apart, no reference given (D-DUP). Both are kept.
+  possible_duplicate_of: string | null
 }
 
 // Public signup (LMX_LINK_PLAN.md). Mirrors app/schemas/signup.py.

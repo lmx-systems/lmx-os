@@ -307,6 +307,13 @@ async def explain_order(
             )
         )
 
+    # What intake noticed and did not refuse (D-UNK, D-DUP). The order cites
+    # itself: the flag is on its own row, not in a decision record.
+    for flag in order.intake_flags or []:
+        explanation.facts.append(
+            Fact(at=order.created_at, statement=_intake_statement(flag), snapshot_id=order.id, engine="intake")
+        )
+
     explanation.facts.sort(key=lambda fact: fact.at)
 
     if not explanation.facts:
@@ -329,3 +336,19 @@ async def explain_order(
                 )
             )
     return explanation
+
+
+def _intake_statement(flag: dict) -> str:
+    kind = flag.get("kind")
+    if kind == "unknown_fields":
+        return (
+            "taken in with fields the source's field map does not know: "
+            + ", ".join(flag.get("fields", []))
+            + " - kept in the raw payload, not read"
+        )
+    if kind == "defaulted_fields":
+        defaults = ", ".join(f"{name} = {value}" for name, value in (flag.get("fields") or {}).items())
+        return f"taken in without {', '.join(flag.get('fields') or {})}, so it was assumed: {defaults}"
+    if kind == "possible_duplicate":
+        return f"looks like a repeat of {flag.get('of_reference')}, sent minutes earlier with no reference of its own"
+    return f"flagged at intake: {kind}"

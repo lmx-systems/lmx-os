@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.ingestion.adapters.base import BaseIngestionAdapter, IngestionAdapterError
+from app.ingestion.adapters.base import BaseIngestionAdapter, IngestionAdapterError, field_flags
 from app.schemas.order import NormalizedOrder
 
 REQUIRED_FIELDS = ("order_ref", "shop_ref", "shop_lat", "shop_lng", "requested_at")
+OPTIONAL_DEFAULTS = {"weight_units": 1.0}
 
 
 class GenericFlatFileAdapter(BaseIngestionAdapter):
@@ -40,4 +41,5 @@ class GenericFlatFileAdapter(BaseIngestionAdapter):
             weight_units=float(payload.get("weight_units", 1.0)),
             requested_at=requested_at,
             raw_payload=payload,
+            intake_flags=field_flags(payload, known=REQUIRED_FIELDS, defaults=OPTIONAL_DEFAULTS),
         )

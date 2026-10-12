@@ -41,6 +41,7 @@ const KIND_LABEL: Record<ExceptionItem['kind'], string> = {
   delivery_failed: 'Failed',
   past_promise: 'Past promise',
   released_but_unplaced: 'Nobody has it',
+  possible_duplicate: 'Sent twice?',
 }
 
 // The order the backend ranks ties in, mirrored so the filter chips read in the
@@ -51,6 +52,7 @@ const KINDS: (ExceptionItem['kind'] | 'all')[] = [
   'delivery_failed',
   'past_promise',
   'released_but_unplaced',
+  'possible_duplicate',
 ]
 
 // An hour past the promise is where a delivery stops being late and starts
