@@ -34,6 +34,10 @@ from app.schemas.driver_app import (
 )
 from tests.integration.test_dock_survey import _authed, _dropoff, _world
 
+# Every test takes `real_redis_client`: arriving and completing a stop reach
+# Redis through the app's shared pool, and the fixture is what resets that pool
+# between tests. Without it the pool outlives this test's event loop and the next
+# test that uses the fixture fails at setup with "Event loop is closed".
 pytestmark = pytest.mark.integration
 
 STOP_PIN = (30.26000, -97.74000)
@@ -49,7 +53,7 @@ async def _pinned_dropoff(db_session):
     return hub, driver, location, stop
 
 
-async def test_the_stop_pin_is_the_first_arrival_and_is_never_moved(db_session):
+async def test_the_stop_pin_is_the_first_arrival_and_is_never_moved(db_session, real_redis_client):
     hub, client, shop, driver, location = await _world(db_session)
     stop = await _dropoff(db_session, hub, client, shop, driver, dock=location, status="en_route")
 
@@ -60,7 +64,7 @@ async def test_the_stop_pin_is_the_first_arrival_and_is_never_moved(db_session):
     assert (stop.arrived_lat, stop.arrived_lng, stop.arrived_accuracy_m) == (30.1, -97.1, 6)
 
 
-async def test_an_arrival_with_no_position_still_arrives(db_session):
+async def test_an_arrival_with_no_position_still_arrives(db_session, real_redis_client):
     hub, client, shop, driver, location = await _world(db_session)
     stop = await _dropoff(db_session, hub, client, shop, driver, dock=location, status="en_route")
 
@@ -69,7 +73,7 @@ async def test_an_arrival_with_no_position_still_arrives(db_session):
     assert view.status == "arrived"
 
 
-async def test_a_geofence_entry_pins_the_stop_when_the_tap_did_not(db_session):
+async def test_a_geofence_entry_pins_the_stop_when_the_tap_did_not(db_session, real_redis_client):
     hub, client, shop, driver, location = await _world(db_session)
     stop = await _dropoff(db_session, hub, client, shop, driver, dock=location, status="en_route")
     now = datetime.now(timezone.utc)
@@ -84,7 +88,7 @@ async def test_a_geofence_entry_pins_the_stop_when_the_tap_did_not(db_session):
     assert (stop.arrived_lat, stop.arrived_lng) == (30.2, -97.2)
 
 
-async def test_the_door_pin_is_taken_when_the_stop_completes(db_session):
+async def test_the_door_pin_is_taken_when_the_stop_completes(db_session, real_redis_client):
     hub, client, shop, driver, location = await _world(db_session)
     stop = await _dropoff(db_session, hub, client, shop, driver, dock=location, status="arrived")
     stop.stop_type, stop.parcel_count, stop.scanned_count = "pickup", 1, 1
@@ -99,7 +103,7 @@ async def test_the_door_pin_is_taken_when_the_stop_completes(db_session):
     assert (stop.completed_lat, stop.completed_lng, stop.completed_accuracy_m) == (30.3, -97.3, 4)
 
 
-async def test_the_survey_writes_the_handoff_point_from_answers_and_pins(db_session):
+async def test_the_survey_writes_the_handoff_point_from_answers_and_pins(db_session, real_redis_client):
     hub, driver, location, stop = await _pinned_dropoff(db_session)
 
     await record_dock_survey(
@@ -123,7 +127,7 @@ async def test_the_survey_writes_the_handoff_point_from_answers_and_pins(db_sess
     assert stop.handoff_point_id == point.id
 
 
-async def test_an_explicit_answer_wins_and_an_unmappable_one_stays_unknown(db_session):
+async def test_an_explicit_answer_wins_and_an_unmappable_one_stays_unknown(db_session, real_redis_client):
     hub, driver, location, stop = await _pinned_dropoff(db_session)
 
     await record_dock_survey(
@@ -139,7 +143,7 @@ async def test_an_explicit_answer_wins_and_an_unmappable_one_stays_unknown(db_se
     assert point.steps_or_ramps is None
 
 
-async def test_an_answer_outside_the_vocabulary_is_refused(db_session):
+async def test_an_answer_outside_the_vocabulary_is_refused(db_session, real_redis_client):
     hub, driver, location, stop = await _pinned_dropoff(db_session)
 
     with pytest.raises(HTTPException) as refused:
@@ -149,7 +153,7 @@ async def test_an_answer_outside_the_vocabulary_is_refused(db_session):
     assert refused.value.status_code == 422
 
 
-async def test_the_four_photos_complete_the_capture(db_session):
+async def test_the_four_photos_complete_the_capture(db_session, real_redis_client):
     hub, driver, location, stop = await _pinned_dropoff(db_session)
     await record_dock_survey(
         str(stop.id),
@@ -172,7 +176,7 @@ async def test_the_four_photos_complete_the_capture(db_session):
     assert is_captured(point)
 
 
-async def test_an_uncaptured_door_is_asked_about_past_the_shift_cap(db_session):
+async def test_an_uncaptured_door_is_asked_about_past_the_shift_cap(db_session, real_redis_client):
     hub, client, shop, driver, location = await _world(db_session)
     for _ in range(MAX_SURVEYS_PER_SHIFT):
         other = Location(normalized_address=f"o{uuid.uuid4().hex}", address="elsewhere", lat=30.2, lng=-97.7)
