@@ -306,7 +306,8 @@ export class OutboxManager {
   private send(item: OutboxItem): Promise<unknown> {
     switch (item.type) {
       case 'arrive':
-        return api.arriveAtStop(item.stopId);
+        // The payload is the stop pin, or empty (DE-4).
+        return api.arriveAtStop(item.stopId, item.payload as { lat?: number; lng?: number; accuracy_m?: number | null });
       case 'scan':
         return api.scanParcels(item.stopId, item.payload.scannedCount as number);
       case 'item-facts':
@@ -339,7 +340,7 @@ export class OutboxManager {
         // de-duplicates on (stop, kind, occurred_at), so a retry after a
         // response we never saw is a no-op rather than a second arrival.
         return api.recordGeofenceEvents(item.stopId, [
-          item.payload as { kind: 'enter' | 'exit'; occurred_at: string },
+          item.payload as { kind: 'enter' | 'exit'; occurred_at: string; lat?: number; lng?: number },
         ]);
       case 'collect-return':
         // Safe to retry. The server recognises an identical ad-hoc manifest on

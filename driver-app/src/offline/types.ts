@@ -28,7 +28,9 @@ export interface OutboxItem {
   id: string;
   type: OutboxActionType;
   stopId: string;
-  // arrive: {}; scan: {scannedCount}; scan-parcel: {barcode}; item-facts: {orderId, facts}; complete: CompleteStopBody-shaped;
+  // arrive: {} or a stop pin; scan: {scannedCount}; scan-parcel: {barcode};
+  // item-facts: {orderId, facts}; handoff-photo: {slot, uri, contentType};
+  // complete: CompleteStopBody-shaped;
   // flag: {reason, note?}; geofence: {kind, occurred_at};
   // hub_geofence: {kind, occurred_at}; collect-return: {manifest?};
   // return-not-ready: {}; return-to-shop: {} - kept loose here since each

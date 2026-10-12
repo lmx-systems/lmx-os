@@ -119,6 +119,92 @@ const QUESTIONS: Question[] = [
   },
 ];
 
+/**
+ * The golden handoff capture's questions (docs/ROADMAP_1.5.md DE-4) - the facts
+ * the handoff point needs that the questions above do not settle. The server
+ * maps the survey's own answers where they mean one thing (`stop_point` to where
+ * the van stood and whether that was legal, `door_path` to steps,
+ * `obstruction` to what is in the way), so a follow-up appears only when the
+ * answer above could not say.
+ */
+interface HandoffQuestion {
+  key: 'handoff_type' | 'handoff_stop_type' | 'steps_or_ramps' | 'continuous_sidewalk' | 'obstructions' | 'overhead';
+  prompt: string;
+  kind: 'single' | 'yesno' | 'multi';
+  options: { value: string; label: string }[];
+  when?: (answers: DockSurveyBody) => boolean;
+}
+
+const HANDOFF_QUESTIONS: HandoffQuestion[] = [
+  {
+    key: 'handoff_type',
+    prompt: 'Where did it change hands?',
+    kind: 'single',
+    options: [
+      { value: 'counter', label: 'Counter' },
+      { value: 'roll_up_bay', label: 'Roll-up bay' },
+      { value: 'loading_dock', label: 'Loading dock' },
+      { value: 'side_door', label: 'Side door' },
+      { value: 'job_site_trailer', label: 'Site trailer' },
+      { value: 'mailroom', label: 'Mailroom' },
+    ],
+  },
+  {
+    key: 'handoff_stop_type',
+    prompt: 'Where did you stop anyway?',
+    kind: 'single',
+    options: [
+      { value: 'curb', label: 'Kerb' },
+      { value: 'lot', label: 'Car park' },
+      { value: 'alley', label: 'Alley' },
+      { value: 'loading_zone', label: 'Loading zone' },
+      { value: 'dock_apron', label: 'Dock apron' },
+    ],
+    when: (a) => a.stop_point === 'none_legal',
+  },
+  {
+    key: 'steps_or_ramps',
+    prompt: 'Any steps on the way to the door?',
+    kind: 'single',
+    options: [
+      { value: 'none', label: 'None' },
+      { value: 'steps', label: 'Steps' },
+      { value: 'ramp', label: 'Ramp' },
+      { value: 'steps_and_ramp', label: 'Both' },
+    ],
+    when: (a) => a.door_path === 'loading_dock' || a.door_path === 'freight_lift',
+  },
+  {
+    key: 'continuous_sidewalk',
+    prompt: 'A pavement all the way from the stop to the door?',
+    kind: 'yesno',
+    options: [],
+  },
+  {
+    key: 'obstructions',
+    prompt: 'Which of these were in the way? Tick all, or none.',
+    kind: 'multi',
+    options: [
+      { value: 'gate', label: 'Gate' },
+      { value: 'fence', label: 'Fence' },
+      { value: 'code_or_buzzer', label: 'Code or buzzer' },
+      { value: 'parked_vehicles', label: 'Parked vehicles' },
+    ],
+    when: (a) =>
+      a.obstruction === 'security_desk' || a.obstruction === 'narrow_access' || a.obstruction === 'overhead_limit',
+  },
+  {
+    key: 'overhead',
+    prompt: 'Anything overhead near the door? Tick all, or none.',
+    kind: 'multi',
+    options: [
+      { value: 'wires', label: 'Wires' },
+      { value: 'canopy', label: 'Canopy' },
+      { value: 'trees', label: 'Trees' },
+    ],
+  },
+];
+
 export function DockSurveyModal({
   visible,
   stopId,
@@ -149,6 +235,7 @@ export function DockSurveyModal({
     }
   }
 
+  // An empty list ("None") is an answer.
   const answered = Object.values(answers).filter((v) => v !== null && v !== undefined).length;
 
   return (
@@ -157,8 +244,8 @@ export function DockSurveyModal({
         <View style={styles.header}>
           <Text style={styles.title}>About this dock</Text>
           <Text style={styles.subtitle}>
-            Eight taps, once a year. Skip anything you did not see — a blank answer is
-            better than a guess.
+            A few taps at a door we have not fully captured yet, then once a year. Skip
+            anything you did not see — a blank answer is better than a guess.
           </Text>
         </View>
 
@@ -181,6 +268,79 @@ export function DockSurveyModal({
                     </Pressable>
                   );
                 })}
+              </View>
+            </View>
+          ))}
+
+          {HANDOFF_QUESTIONS.filter((q) => !q.when || q.when(answers)).map((question) => (
+            <View key={question.key} style={styles.question}>
+              <Text style={styles.prompt}>{question.prompt}</Text>
+              <View style={styles.options}>
+                {question.kind === 'yesno' &&
+                  [
+                    { value: true, label: 'Yes' },
+                    { value: false, label: 'No' },
+                  ].map((option) => {
+                    const chosen = answers[question.key] === option.value;
+                    return (
+                      <Pressable
+                        key={String(option.value)}
+                        onPress={() => setAnswers((prev) => ({ ...prev, [question.key]: chosen ? null : option.value }))}
+                        style={[styles.option, chosen && styles.optionChosen]}
+                      >
+                        <Text style={[styles.optionLabel, chosen && styles.optionLabelChosen]}>{option.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                {question.kind === 'single' &&
+                  question.options.map((option) => {
+                    const chosen = answers[question.key] === option.value;
+                    return (
+                      <Pressable
+                        key={option.value}
+                        onPress={() => setAnswers((prev) => ({ ...prev, [question.key]: chosen ? null : option.value }))}
+                        style={[styles.option, chosen && styles.optionChosen]}
+                      >
+                        <Text style={[styles.optionLabel, chosen && styles.optionLabelChosen]}>{option.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                {question.kind === 'multi' && (
+                  <>
+                    {question.options.map((option) => {
+                      const list = (answers[question.key] as string[] | null | undefined) ?? null;
+                      const chosen = !!list && list.includes(option.value);
+                      return (
+                        <Pressable
+                          key={option.value}
+                          onPress={() =>
+                            setAnswers((prev) => {
+                              const current = (prev[question.key] as string[] | null | undefined) ?? [];
+                              const next = chosen ? current.filter((v) => v !== option.value) : [...current, option.value];
+                              return { ...prev, [question.key]: next };
+                            })
+                          }
+                          style={[styles.option, chosen && styles.optionChosen]}
+                        >
+                          <Text style={[styles.optionLabel, chosen && styles.optionLabelChosen]}>{option.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                    {(() => {
+                      // "None" is an answer - an empty list - not the same as skipping.
+                      const list = answers[question.key] as string[] | null | undefined;
+                      const chosen = Array.isArray(list) && list.length === 0;
+                      return (
+                        <Pressable
+                          onPress={() => setAnswers((prev) => ({ ...prev, [question.key]: chosen ? null : [] }))}
+                          style={[styles.option, chosen && styles.optionChosen]}
+                        >
+                          <Text style={[styles.optionLabel, chosen && styles.optionLabelChosen]}>None</Text>
+                        </Pressable>
+                      );
+                    })()}
+                  </>
+                )}
               </View>
             </View>
           ))}
