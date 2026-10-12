@@ -50,7 +50,8 @@ from app.identity.dock_survey import (
     location_for_stop,
     surveys_recorded_today,
 )
-from app.identity.profile import set_access, set_autonomy_fit
+from app.identity.handoff_capture import CaptureRefused, capture_handoff, record_handoff_photo
+from app.identity.profile import profile_for, set_access, set_autonomy_fit
 from app.messaging.cod_notifications import ESCALATION_SENT, notify_client_of_cod_dispute
 from app.messaging.delivery_pin import MAX_PIN_VERIFICATION_ATTEMPTS, generate_delivery_pin
 from app.models.cod_collection import CodCollection
@@ -88,7 +89,9 @@ from app.schemas.driver_app import (
     CollectCodBody,
     CompleteStopBody,
     DeclineOfferBody,
+    ArriveBody,
     DockSurveyBody,
+    HandoffPhotoBody,
     DockSurveyResult,
     DriverAvailabilityUpdate,
     DriverComplianceProblemView,
@@ -1528,7 +1531,10 @@ async def _pay_out_gig_delivery(
 
 @router.post("/stops/{stop_id}/arrive", response_model=StopView)
 async def arrive_at_stop(
-    stop_id: str, driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
+    stop_id: str,
+    body: ArriveBody | None = None,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
 ) -> StopView:
     stop = await _get_owned_stop(session, stop_id, driver)
     _assert_stop_not_terminal(stop, "mark arrived")
@@ -1537,6 +1543,9 @@ async def arrive_at_stop(
     # so a re-marked arrival can't overwrite the real one.
     if stop.arrived_at is None:
         stop.arrived_at = datetime.now(timezone.utc)
+    # The stop pin (`DE-4`), first arrival only for the same reason.
+    if body is not None and body.lat is not None and body.lng is not None and stop.arrived_lat is None:
+        stop.arrived_lat, stop.arrived_lng, stop.arrived_accuracy_m = body.lat, body.lng, body.accuracy_m
     # An arrival is the strongest signal there is about where this route actually is, so
     # the remaining stops are re-estimated from it. This stop's own ETA is left alone -
     # it is finished as a prediction, and `planned_eta` preserves what it was.
@@ -1675,6 +1684,15 @@ async def record_geofence_events(
                 "accuracy_m": event.accuracy_m,
             }
         )
+
+    # The stop pin from the earliest entry that carries a position, when the
+    # driver's Arrived tap did not give one (`DE-4`).
+    entries = sorted(
+        (e for e in body.events if e.kind == "enter" and e.lat is not None and e.lng is not None),
+        key=lambda e: e.occurred_at,
+    )
+    if entries and stop.arrived_lat is None:
+        stop.arrived_lat, stop.arrived_lng, stop.arrived_accuracy_m = entries[0].lat, entries[0].lng, entries[0].accuracy_m
 
     accepted = 0
     if rows:
@@ -2161,12 +2179,54 @@ async def record_dock_survey(
         # problem, and the message names the field and the allowed set.
         raise HTTPException(status_code=422, detail=str(bad_value)) from bad_value
 
+    # The same visit, as the golden record's handoff point (`DE-4`): the survey's
+    # answers that map, the new questions, and the stop's pins.
+    try:
+        await capture_handoff(
+            session, stop, location, body.model_dump(),
+            driver_id=driver.driver_id, hub=await session.get(Hub, uuid.UUID(driver.hub_id)),
+        )
+    except CaptureRefused as bad_value:
+        raise HTTPException(status_code=422, detail=str(bad_value)) from bad_value
+
     await session.commit()
     remaining = MAX_SURVEYS_PER_SHIFT - await surveys_recorded_today(session, driver_uuid)
     return DockSurveyResult(
         location_id=str(location.id),
         is_surveyed=profile.is_surveyed,
         surveyed_at=profile.surveyed_at,
+        surveys_remaining_today=max(0, remaining),
+    )
+
+
+@router.post("/stops/{stop_id}/handoff-photo", response_model=DockSurveyResult)
+async def record_handoff_photo_route(
+    stop_id: str,
+    body: HandoffPhotoBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> DockSurveyResult:
+    """One of the four guided photos of the handoff point (`DE-4`), once its
+    upload has landed: the approach, the stop point, the path, the handoff.
+
+    Idempotent by overwrite, like the survey: the outbox retries, and a retake
+    replaces the photo for its slot.
+    """
+    stop = await _get_owned_stop(session, stop_id, driver)
+    location = await location_for_stop(session, stop)
+    if location is None:
+        raise HTTPException(
+            status_code=409,
+            detail="This stop's delivery address is not linked to a dock, so there is nothing to photograph against",
+        )
+    await record_handoff_photo(session, stop, location, slot=body.slot, url=body.url)
+    await session.commit()
+    profile = await profile_for(session, location, create=False)
+    remaining = MAX_SURVEYS_PER_SHIFT - await surveys_recorded_today(session, uuid.UUID(driver.driver_id))
+    return DockSurveyResult(
+        location_id=str(location.id),
+        is_surveyed=bool(profile and profile.is_surveyed),
+        surveyed_at=profile.surveyed_at if profile else None,
         surveys_remaining_today=max(0, remaining),
     )
 
@@ -2366,6 +2426,9 @@ async def complete_stop(
 
     _assert_stop_not_terminal(stop, "complete")  # still 409s on status == "failed" - a genuine conflict
     _assert_arrived(stop, "completing it")
+    # The door pin (`DE-4`). Only on the completion that lands, so a refused
+    # attempt does not pin a door the delivery never reached.
+    door_pin = (body.door_lat, body.door_lng, body.door_accuracy_m) if body.door_lat is not None and body.door_lng is not None else None
     if stop.stop_type == "pickup" and stop.scanned_count < stop.parcel_count:
         raise HTTPException(
             status_code=409,
@@ -2463,6 +2526,8 @@ async def complete_stop(
 
     now = datetime.now(timezone.utc)
     stop.status = "completed"
+    if door_pin is not None and stop.completed_lat is None:
+        stop.completed_lat, stop.completed_lng, stop.completed_accuracy_m = door_pin
     stop.completed_at = now
     # Proof fields on a dropoff only. Recording `pod_method="photo"` on a pickup
     # with no photo is the "proof that proves nothing" app/delivery/proof.py was

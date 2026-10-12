@@ -333,6 +333,36 @@ class DockSurveyBody(BaseModel):
     # plates or paperwork - stated on the screen that asks for it.
     photo_url: str | None = Field(default=None, max_length=500)
 
+    # The golden handoff capture (`DE-4`): the questions the handoff point needs
+    # that the survey above does not settle. Taps, all optional, validated
+    # against app/models/handoff_point.py's vocabularies.
+    handoff_type: str | None = None
+    handoff_stop_type: str | None = None
+    stop_legal: bool | None = None
+    steps_or_ramps: str | None = None
+    continuous_sidewalk: bool | None = None
+    # Lists: an empty one is "looked, nothing there", left out is unknown.
+    obstructions: list[str] | None = Field(default=None, max_length=8)
+    overhead: list[str] | None = Field(default=None, max_length=8)
+    drone_open_ground: bool | None = None
+
+
+class ArriveBody(BaseModel):
+    """Where the phone was at the Arrived tap - the stop pin (`DE-4`). Optional,
+    and the body itself may be empty: an arrival never waits on a fix."""
+
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lng: float | None = Field(default=None, ge=-180, le=180)
+    accuracy_m: float | None = Field(default=None, ge=0)
+
+
+class HandoffPhotoBody(BaseModel):
+    """One of the four guided photos of the handoff point (`DE-4`), after its
+    upload. No faces or number plates - said on the screen that takes it."""
+
+    slot: Literal["approach", "stop_point", "path", "handoff"]
+    url: str = Field(min_length=1, max_length=500)
+
 
 class DockSurveyResult(BaseModel):
     """What was recorded, so the app can stop asking."""
@@ -358,6 +388,10 @@ class StopGeofenceEventBody(BaseModel):
     kind: Literal["enter", "exit"]
     occurred_at: datetime
     accuracy_m: float | None = Field(default=None, ge=0)
+    # Where the phone was (`DE-4`). An entry's position is the stop pin when the
+    # driver did not tap Arrived with one.
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lng: float | None = Field(default=None, ge=-180, le=180)
 
 
 class StopGeofenceEventsBody(BaseModel):
@@ -426,7 +460,8 @@ class OrderItemView(BaseModel):
 
 
 class UploadUrlRequestBody(BaseModel):
-    kind: Literal["photo", "signature", "scan"]
+    # `handoff`: one of the four guided photos of the handoff point (`DE-4`).
+    kind: Literal["photo", "signature", "scan", "handoff"]
     # An explicit, closed allowlist - not an arbitrary string - since a
     # presigned PUT's ContentType is otherwise a driver-controlled value
     # written straight into an S3 request (docs/ROADMAP.md A2/A3,
@@ -455,6 +490,11 @@ class CompleteStopBody(BaseModel):
     signature_url: str | None = None
     pin: str | None = None
     left_at: str | None = None
+    # Where the phone was at Delivered - the door pin (`DE-4`). Optional: a
+    # completion never waits on a position fix.
+    door_lat: float | None = Field(default=None, ge=-90, le=90)
+    door_lng: float | None = Field(default=None, ge=-180, le=180)
+    door_accuracy_m: float | None = Field(default=None, ge=0)
 
     @property
     def all_photo_urls(self) -> list[str]:

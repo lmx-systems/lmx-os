@@ -5,7 +5,7 @@ multiple commingled orders per Section 8's multi-client commingling design).
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, text
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -117,6 +117,16 @@ class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         String(24), nullable=False, default="lmx_app", server_default="lmx_app"
     )
     collected_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Where the phone was at this stop (`DE-4`): at the Arrived tap or on
+    # entering the stop's geofence - the stop pin - and at Delivered - the door
+    # pin. Recorded whether or not the driver answers the survey; the handoff
+    # capture copies them onto the handoff point. Never typed.
+    arrived_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    arrived_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    arrived_accuracy_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    completed_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    completed_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    completed_accuracy_m: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class StopOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin):
