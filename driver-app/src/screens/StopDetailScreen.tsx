@@ -9,6 +9,7 @@ import { Card } from '../components/Card';
 import { ParcelScanPanel } from '../components/ParcelScanPanel';
 import { CodPanel } from '../components/CodPanel';
 import { ReturnsPanel } from '../components/ReturnsPanel';
+import { ItemFactsPanel } from '../components/ItemFactsPanel';
 import { DockSurveyModal } from '../components/DockSurveyModal';
 import { PodCapture } from '../components/PodCapture';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -117,6 +118,34 @@ export function StopDetailScreen({ route, navigation }: Props) {
   async function handleScanNext() {
     if (!stop || stop.scanned_count >= stop.parcel_count) return;
     await outboxManager.enqueue('scan', stopId, { scannedCount: stop.scanned_count + 1 });
+  }
+
+  // Whether this pickup's orders came with barcodes to check a scan against
+  // (DE-5) - the source's own, not ones LMX minted, which no label carries.
+  // Most sources send none, and then a barcode can only be counted; offline,
+  // or when the list will not load, the count is the safe fallback.
+  const [expectsBarcodes, setExpectsBarcodes] = useState(false);
+  const scanning = stop?.stop_type === 'pickup' && stop.scanned_count < stop.parcel_count;
+  useEffect(() => {
+    if (!scanning) return;
+    let live = true;
+    api
+      .stopParcels(stopId)
+      .then((parcels) => live && setExpectsBarcodes(parcels.some((p) => p.from_source)))
+      .catch(() => live && setExpectsBarcodes(false));
+    return () => {
+      live = false;
+    };
+  }, [scanning, stopId]);
+
+  async function handleBarcode(barcode: string) {
+    if (!expectsBarcodes) {
+      await handleScanNext();
+      return;
+    }
+    // Checked against the stop's orders on the server; a wrong part comes
+    // back rejected, and SyncStatusPill says so.
+    await outboxManager.enqueue('scan-parcel', stopId, { barcode });
   }
 
   function handleNavigate() {
@@ -257,7 +286,12 @@ export function StopDetailScreen({ route, navigation }: Props) {
         {action.kind === 'arrive' && <Button label="Arrived" onPress={handleArrive} />}
 
         {action.kind === 'scan' && (
-          <ParcelScanPanel scannedCount={stop.scanned_count} total={stop.parcel_count} onScanNext={handleScanNext} />
+          <ParcelScanPanel
+            scannedCount={stop.scanned_count}
+            total={stop.parcel_count}
+            onScanned={handleBarcode}
+            onConfirmManually={handleScanNext}
+          />
         )}
 
         {/* Cores before the completion controls, in that order and for the same
@@ -277,6 +311,12 @@ export function StopDetailScreen({ route, navigation }: Props) {
 
         {stop.returns && (
           <ReturnsPanel stop={stop} onDone={() => setLoadToken((t) => t + 1)} />
+        )}
+
+        {/* DE-5: before the confirmation, while the parts are on the counter.
+            Optional - collection never waits on it. */}
+        {action.kind === 'confirmDelivery' && stop.stop_type === 'pickup' && stop.order_ids.length > 0 && (
+          <ItemFactsPanel stopId={stopId} orderIds={stop.order_ids} />
         )}
 
         {action.kind === 'confirmDelivery' && stop.stop_type === 'pickup' && (

@@ -10,7 +10,14 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.api.driver_routes import accept_offer, list_my_offers, list_stop_parcels, scan_parcel
+from app.api.driver_routes import (
+    accept_offer,
+    list_my_offers,
+    list_stop_items,
+    list_stop_parcels,
+    record_item_facts,
+    scan_parcel,
+)
 from app.batch_queue.store import HoldQueueStore
 from app.driver_auth.dependencies import AuthedDriver
 from app.fleet_state.manager import FleetStateManager
@@ -23,7 +30,7 @@ from app.models.route import Route
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 from app.optimizer.service import DispatchOptimizerService
-from app.schemas.driver_app import ScanParcelBody
+from app.schemas.driver_app import ItemFactsBody, ScanParcelBody
 from app.schemas.fleet import DriverLocation, DriverState
 from tests.integration.queue_helpers import let_the_hold_run_out
 
@@ -130,6 +137,21 @@ async def test_rescanning_the_same_barcode_is_idempotent(db_session, real_redis_
     assert again.scanned_count == 1  # not 2 - same parcel
 
 
+async def test_a_barcode_scan_never_lowers_a_count_confirmed_by_hand(db_session, real_redis_client):
+    """A label that will not scan is confirmed by hand (the count path), so it is
+    counted but not stamped. The next barcode must not drop the count back to
+    the stamped rows alone (DE-5)."""
+    hub_id, client_id, shop_id = await _seed_hcs(db_session)
+    order = await _ingest(db_session, hub_id, client_id, parcels=["A1", "A2", "A3"])
+    authed, stop = await _arrived_pickup(db_session, hub_id, shop_id, order, parcel_count=3)
+    stop.scanned_count = 2  # two confirmed by hand
+    await db_session.commit()
+
+    view = await scan_parcel(str(stop.id), ScanParcelBody(barcode="A3"), driver=authed, session=db_session)
+
+    assert view.scanned_count == 2
+
+
 async def test_an_unknown_barcode_is_rejected_as_wrong_part(db_session, real_redis_client):
     hub_id, client_id, shop_id = await _seed_hcs(db_session)
     order = await _ingest(db_session, hub_id, client_id, parcels=["A1"])
@@ -164,6 +186,65 @@ async def test_list_stop_parcels_shows_scan_progress(db_session, real_redis_clie
     parcels = await list_stop_parcels(str(stop.id), driver=authed, session=db_session)
     by_barcode = {p.barcode: p.scanned for p in parcels}
     assert by_barcode == {"A1": True, "A2": False}
+
+
+async def test_the_parcel_list_says_which_barcodes_a_label_carries(db_session, real_redis_client):
+    """Minted barcodes are on no box yet, so the app counts rather than checks (DE-5)."""
+    hub_id, client_id, shop_id = await _seed_hcs(db_session)
+    sourced = await _ingest(db_session, hub_id, client_id, ref="ORD-S", parcels=["PT-1"])
+    minted = await _ingest(db_session, hub_id, client_id, ref="ORD-M", parcel_count=1)
+    authed, stop = await _arrived_pickup(db_session, hub_id, shop_id, sourced, parcel_count=2)
+    db_session.add(StopOrder(stop_id=stop.id, order_id=minted.id))
+    await db_session.commit()
+
+    parcels = await list_stop_parcels(str(stop.id), driver=authed, session=db_session)
+
+    assert {p.barcode: p.from_source for p in parcels if p.barcode == "PT-1"} == {"PT-1": True}
+    assert [p.from_source for p in parcels if p.barcode != "PT-1"] == [False]
+
+
+# --- item capture at pickup (DE-5) ---
+
+async def test_a_driver_records_what_each_order_carries(db_session, real_redis_client):
+    hub_id, client_id, shop_id = await _seed_hcs(db_session)
+    order = await _ingest(db_session, hub_id, client_id, parcels=["A1"])
+    authed, stop = await _arrived_pickup(db_session, hub_id, shop_id, order, parcel_count=1)
+
+    view = await record_item_facts(
+        str(stop.id), str(order.id),
+        ItemFactsBody(item_weight_kg=4.2, item_size_class="small", item_hazmat_or_liquid=False),
+        driver=authed, session=db_session,
+    )
+
+    assert (view.item_weight_kg, view.item_size_class, view.item_hazmat_or_liquid) == (4.2, "small", False)
+    # A later correction of one field leaves the others as they were.
+    view = await record_item_facts(
+        str(stop.id), str(order.id), ItemFactsBody(item_weight_kg=3.9), driver=authed, session=db_session
+    )
+    assert (view.item_weight_kg, view.item_size_class) == (3.9, "small")
+    [listed] = await list_stop_items(str(stop.id), driver=authed, session=db_session)
+    assert listed.item_weight_kg == 3.9
+    # Dispatch's capacity number is untouched: it is not a weight.
+    await db_session.refresh(order)
+    assert float(order.weight_units) == 1.0
+
+
+async def test_an_order_not_on_the_pickup_is_refused(db_session, real_redis_client):
+    hub_id, client_id, shop_id = await _seed_hcs(db_session)
+    on_stop = await _ingest(db_session, hub_id, client_id, ref="ORD-ON")
+    other = await _ingest(db_session, hub_id, client_id, ref="ORD-OFF")
+    authed, stop = await _arrived_pickup(db_session, hub_id, shop_id, on_stop, parcel_count=1)
+
+    with pytest.raises(HTTPException) as refused:
+        await record_item_facts(
+            str(stop.id), str(other.id), ItemFactsBody(item_weight_kg=1.0), driver=authed, session=db_session
+        )
+    assert refused.value.status_code == 404
+
+
+async def test_a_weight_past_any_van_is_a_typo(db_session, real_redis_client):
+    with pytest.raises(ValueError):
+        ItemFactsBody(item_weight_kg=25000)
 
 
 # --- pickup parcel_count reconciliation through the real accept flow ---

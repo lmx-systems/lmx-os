@@ -89,6 +89,15 @@ describe('showing a queued action before it sends', () => {
     expect(result.scanned_count).toBe(3);
   });
 
+  it('counts each queued barcode, never past what the stop expects', () => {
+    const base = stop({ status: 'arrived', parcel_count: 2, scanned_count: 1 });
+    const queued = [
+      item({ type: 'scan-parcel', payload: { barcode: 'P-2' } }),
+      item({ type: 'scan-parcel', payload: { barcode: 'P-3' } }),
+    ];
+    expect(applyPendingToStop(base, queued).scanned_count).toBe(2);
+  });
+
   it('applies a whole queue in order', () => {
     const result = applyPendingToStop(stop({ status: 'pending' }), [
       item({ id: 'a', type: 'arrive' }),

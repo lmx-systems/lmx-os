@@ -37,7 +37,7 @@ from app.ingestion.registry import get_adapter
 from app.models.client import Client
 from app.models.client_rate import ClientRate
 from app.models.order import INTAKE_BACKFILL, INTAKE_LIVE, INTAKE_MODES, Order, OrderStatus, SLATier
-from app.models.parcel import Parcel
+from app.models.parcel import LMX_BARCODE_PREFIX, Parcel
 from app.models.return_item import ReturnItem
 from app.models.rules import ActiveRule
 from app.models.shop import Shop
@@ -129,7 +129,7 @@ def _parcel_barcodes(payload: dict) -> list[str]:
         n = max(1, int(count)) if count is not None else 1
     except (TypeError, ValueError):
         n = 1
-    return [f"LMX-{secrets.token_hex(5)}" for _ in range(n)]
+    return [f"{LMX_BARCODE_PREFIX}{secrets.token_hex(5)}" for _ in range(n)]
 
 
 def _expected_return_manifest(payload: dict) -> str | None:

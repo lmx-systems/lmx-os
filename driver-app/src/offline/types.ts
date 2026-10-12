@@ -1,6 +1,13 @@
 export type OutboxActionType =
   | 'arrive'
   | 'scan'
+  // One real barcode (DE-5). Not coalesced like 'scan': each barcode is its
+  // own check against the stop's orders, and the server is idempotent per
+  // barcode, so a retry is a no-op rather than a second count.
+  | 'scan-parcel'
+  // DE-5: one order's item at the pickup counter. The latest edit to an order
+  // replaces an unsent earlier one; the server overwrites, so a retry is safe.
+  | 'item-facts'
   | 'complete'
   | 'flag'
   | 'geofence'
@@ -21,7 +28,7 @@ export interface OutboxItem {
   id: string;
   type: OutboxActionType;
   stopId: string;
-  // arrive: {}; scan: {scannedCount}; complete: CompleteStopBody-shaped;
+  // arrive: {}; scan: {scannedCount}; scan-parcel: {barcode}; item-facts: {orderId, facts}; complete: CompleteStopBody-shaped;
   // flag: {reason, note?}; geofence: {kind, occurred_at};
   // hub_geofence: {kind, occurred_at}; collect-return: {manifest?};
   // return-not-ready: {}; return-to-shop: {} - kept loose here since each

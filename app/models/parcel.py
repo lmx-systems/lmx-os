@@ -44,3 +44,14 @@ class Parcel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # "3 of 5 collected" is a count of non-null scanned_at across an order's
     # parcels, auditable rather than self-reported.
     scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# The prefix of a barcode LMX minted because the source sent none
+# (app/ingestion/service.py). Nothing prints these yet - W10's open decision -
+# so no box carries one, which is how the driver app knows to count rather
+# than check a scan against the order (DE-5).
+LMX_BARCODE_PREFIX = "LMX-"
+
+
+def is_lmx_minted(barcode: str) -> bool:
+    return barcode.startswith(LMX_BARCODE_PREFIX)

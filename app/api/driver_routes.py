@@ -65,7 +65,7 @@ from app.models.hub import Hub
 from app.models.hub_geofence_event import HubGeofenceEvent
 from app.models.message import Message
 from app.models.order import Order, OrderStatus, SLATier
-from app.models.parcel import Parcel
+from app.models.parcel import Parcel, is_lmx_minted
 from app.models.return_item import ReturnItem
 from app.models.route import Route
 from app.models.route_offer import RouteOffer
@@ -106,6 +106,8 @@ from app.schemas.driver_app import (
     JobOfferView,
     MessageView,
     OfferStopSummary,
+    ItemFactsBody,
+    OrderItemView,
     ParcelView,
     PaymentMethodUpdate,
     RouteView,
@@ -1765,7 +1767,10 @@ async def scan_parcel(
         .select_from(Parcel)
         .where(Parcel.order_id.in_(order_ids), Parcel.scanned_at.is_not(None))
     )
-    stop.scanned_count = int(scanned_result.scalar_one())
+    # Never lower: a parcel confirmed by hand (its label would not scan) is in
+    # the count but not stamped, so the stamped rows can be fewer than what the
+    # driver has already counted (DE-5).
+    stop.scanned_count = max(stop.scanned_count, int(scanned_result.scalar_one()))
     await session.commit()
     return await _stop_view_after_reload(session, stop)
 
@@ -1785,7 +1790,85 @@ async def list_stop_parcels(
     result = await session.execute(
         select(Parcel).where(Parcel.order_id.in_(order_ids)).order_by(Parcel.barcode)
     )
-    return [ParcelView(barcode=p.barcode, scanned=p.scanned_at is not None) for p in result.scalars().all()]
+    return [
+        ParcelView(barcode=p.barcode, scanned=p.scanned_at is not None, from_source=not is_lmx_minted(p.barcode))
+        for p in result.scalars().all()
+    ]
+
+
+def _order_item_view(order: Order) -> OrderItemView:
+    return OrderItemView(
+        order_id=str(order.id),
+        reference=order.external_order_ref,
+        item_description=order.item_description,
+        item_weight_kg=float(order.item_weight_kg) if order.item_weight_kg is not None else None,
+        item_size_class=order.item_size_class,
+        item_hazmat_or_liquid=order.item_hazmat_or_liquid,
+    )
+
+
+@router.get("/stops/{stop_id}/items", response_model=list[OrderItemView])
+async def list_stop_items(
+    stop_id: str,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> list[OrderItemView]:
+    """The orders on a pickup and what is known about each item (`DE-5`), so the
+    driver sees what is already recorded before weighing anything again."""
+    stop = await _get_owned_stop(session, stop_id, driver)
+    order_ids = await _stop_order_ids(session, stop.id)
+    if not order_ids:
+        return []
+    orders = (
+        await session.scalars(select(Order).where(Order.id.in_(order_ids)).order_by(Order.external_order_ref))
+    ).all()
+    return [_order_item_view(order) for order in orders]
+
+
+@router.put("/stops/{stop_id}/orders/{order_id}/item", response_model=OrderItemView)
+async def record_item_facts(
+    stop_id: str,
+    order_id: str,
+    body: ItemFactsBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> OrderItemView:
+    """Record an order's item at the pickup counter (`DE-5`): its weight in kg,
+    its size class, whether it is hazardous or a liquid, what it is.
+
+    The golden record's item element, and nothing else writes it: no intake path
+    carries a real weight, and `weight_units` is dispatch's capacity number, not
+    a weight. An overwrite of the fields given, so a retry from the outbox
+    writes the same values again; a field left out is left as it was.
+
+    Its own request rather than part of completing the pickup, so a refused
+    completion cannot take the measurements with it.
+    """
+    stop = await _get_owned_stop(session, stop_id, driver)
+    if stop.stop_type != "pickup":
+        raise HTTPException(status_code=409, detail="Items are recorded at the pickup")
+    _assert_arrived(stop, "recording what is being collected")
+    try:
+        order_uuid = uuid.UUID(order_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="That order is not on this pickup") from None
+    if order_uuid not in await _stop_order_ids(session, stop.id):
+        raise HTTPException(status_code=404, detail="That order is not on this pickup")
+    order = await session.get(Order, order_uuid)
+    if order is None:
+        raise HTTPException(status_code=404, detail="That order is not on this pickup")
+    given = body.model_dump(exclude_unset=True)
+    if "item_description" in given:
+        order.item_description = given["item_description"]
+    if "item_weight_kg" in given:
+        order.item_weight_kg = given["item_weight_kg"]
+    if "item_size_class" in given:
+        order.item_size_class = given["item_size_class"]
+    if "item_hazmat_or_liquid" in given:
+        order.item_hazmat_or_liquid = given["item_hazmat_or_liquid"]
+    await session.commit()
+    await session.refresh(order)
+    return _order_item_view(order)
 
 
 async def _stop_returns_view(

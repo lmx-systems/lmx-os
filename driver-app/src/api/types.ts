@@ -85,6 +85,34 @@ export interface JobOffer {
 export type StopType = 'pickup' | 'dropoff';
 export type StopStatus = 'pending' | 'en_route' | 'arrived' | 'completed' | 'failed';
 
+export type ItemSizeClass = 'envelope' | 'small' | 'medium' | 'large' | 'oversize';
+
+/** Mirrors app/schemas/driver_app.py ItemFactsBody (DE-5). Omitted = unchanged. */
+export interface ItemFactsBody {
+  item_description?: string;
+  item_weight_kg?: number;
+  item_size_class?: ItemSizeClass;
+  item_hazmat_or_liquid?: boolean;
+}
+
+/** Mirrors app/schemas/driver_app.py OrderItemView. Null = not known yet. */
+export interface OrderItemView {
+  order_id: string;
+  reference: string;
+  item_description: string | null;
+  item_weight_kg: number | null;
+  item_size_class: ItemSizeClass | null;
+  item_hazmat_or_liquid: boolean | null;
+}
+
+/** Mirrors app/schemas/driver_app.py ParcelView. */
+export interface ParcelView {
+  barcode: string;
+  scanned: boolean;
+  // False for a barcode LMX minted, which no label carries yet (DE-5).
+  from_source: boolean;
+}
+
 export interface Stop {
   stop_id: string;
   sequence: number;

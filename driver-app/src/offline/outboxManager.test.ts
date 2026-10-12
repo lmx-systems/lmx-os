@@ -19,6 +19,8 @@ jest.mock('../api/client', () => ({
   api: {
     arriveAtStop: jest.fn(),
     scanParcels: jest.fn(),
+    scanParcel: jest.fn(),
+    recordItemFacts: jest.fn(),
     completeStop: jest.fn(),
     flagStop: jest.fn(),
     refreshToken: jest.fn(),
@@ -30,7 +32,7 @@ import { isPermanentFailure, OutboxManager } from './outboxManager';
 import type { OutboxItem } from './types';
 
 const mockApi = api as unknown as Record<
-  'arriveAtStop' | 'scanParcels' | 'completeStop' | 'flagStop',
+  'arriveAtStop' | 'scanParcels' | 'scanParcel' | 'recordItemFacts' | 'completeStop' | 'flagStop',
   jest.Mock
 >;
 
@@ -155,6 +157,75 @@ describe('the queue on a shift', () => {
     await settle();
 
     expect(mockApi.scanParcels).toHaveBeenLastCalledWith('s1', 2);
+    expect(itemsOf(queue)).toEqual([]);
+  });
+
+  // DE-5: a barcode is its own action, unlike the coalesced count.
+  it('sends every barcode, not just the last', async () => {
+    mockApi.scanParcel.mockResolvedValue({});
+    const queue = new OutboxManager();
+
+    await queue.enqueue('scan-parcel', 's1', { barcode: 'P-1' });
+    await settle();
+    await queue.enqueue('scan-parcel', 's1', { barcode: 'P-2' });
+    await settle();
+
+    expect(mockApi.scanParcel.mock.calls).toEqual([
+      ['s1', 'P-1'],
+      ['s1', 'P-2'],
+    ]);
+    expect(itemsOf(queue)).toEqual([]);
+  });
+
+  it('keeps a wrong part rejected while the right ones go through', async () => {
+    mockApi.scanParcel.mockImplementation(async (_stop: string, barcode: string) => {
+      if (barcode === 'WRONG') throw new ApiError(422, "This barcode isn't for an order on this pickup");
+      return {};
+    });
+    const queue = new OutboxManager();
+
+    await queue.enqueue('scan-parcel', 's1', { barcode: 'WRONG' });
+    await settle();
+    await queue.enqueue('scan-parcel', 's1', { barcode: 'P-1' });
+    await settle();
+
+    expect(mockApi.scanParcel).toHaveBeenLastCalledWith('s1', 'P-1');
+    expect(itemsOf(queue)).toMatchObject([
+      { type: 'scan-parcel', payload: { barcode: 'WRONG' }, permanentlyFailed: true },
+    ]);
+  });
+
+  it('does not queue the same barcode twice while it waits', async () => {
+    mockApi.scanParcel.mockRejectedValue(new ApiError(503, 'unavailable'));
+    const queue = new OutboxManager();
+
+    await queue.enqueue('scan-parcel', 's1', { barcode: 'P-1' });
+    await settle();
+    await queue.enqueue('scan-parcel', 's1', { barcode: 'P-1' });
+    await settle();
+
+    expect(itemsOf(queue).filter((i) => i.type === 'scan-parcel')).toHaveLength(1);
+  });
+
+  // DE-5: a correction to an order's weight replaces the unsent first entry.
+  it('sends the corrected weight, once, and each order its own', async () => {
+    mockApi.recordItemFacts.mockRejectedValueOnce(new ApiError(503, 'unavailable')).mockResolvedValue({});
+    const queue = new OutboxManager();
+
+    await queue.enqueue('item-facts', 's1', { orderId: 'o1', facts: { item_weight_kg: 5 } });
+    await settle();
+    // Still queued after the 503: the correction takes its place.
+    expect(itemsOf(queue).filter((i) => i.type === 'item-facts')).toHaveLength(1);
+    await queue.enqueue('item-facts', 's1', { orderId: 'o1', facts: { item_weight_kg: 4.2 } });
+    await settle();
+    await queue.enqueue('item-facts', 's1', { orderId: 'o2', facts: { item_size_class: 'small' } });
+    await settle();
+
+    expect(mockApi.recordItemFacts.mock.calls).toEqual([
+      ['s1', 'o1', { item_weight_kg: 5 }], // the attempt that failed
+      ['s1', 'o1', { item_weight_kg: 4.2 }], // the correction, not the first entry again
+      ['s1', 'o2', { item_size_class: 'small' }],
+    ]);
     expect(itemsOf(queue)).toEqual([]);
   });
 

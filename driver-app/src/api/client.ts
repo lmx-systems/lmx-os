@@ -1,6 +1,9 @@
 import { getApiBaseUrl } from './serverUrl';
 
 import type {
+  ItemFactsBody,
+  OrderItemView,
+  ParcelView,
   AuthToken,
   CodMethod,
   DocType,
@@ -238,6 +241,27 @@ export const api = {
     request<Route['stops'][number]>(`/driver/stops/${stopId}/scan`, {
       method: 'POST',
       body: JSON.stringify({ scanned_count: scannedCount }),
+    }),
+
+  // One real barcode, checked against the stop's orders (W10, DE-5): a 422 is
+  // "not a parcel on this pickup - possible wrong part".
+  scanParcel: (stopId: string, barcode: string) =>
+    request<Route['stops'][number]>(`/driver/stops/${stopId}/scan-parcel`, {
+      method: 'POST',
+      body: JSON.stringify({ barcode }),
+    }),
+
+  // The parcels a pickup expects. Empty when the order's source sent no
+  // barcodes, which is most of them - the count is all there is to check.
+  stopParcels: (stopId: string) => request<ParcelView[]>(`/driver/stops/${stopId}/parcels`),
+
+  // DE-5: what each order on a pickup carries, as known so far.
+  stopItems: (stopId: string) => request<OrderItemView[]>(`/driver/stops/${stopId}/items`),
+
+  recordItemFacts: (stopId: string, orderId: string, facts: ItemFactsBody) =>
+    request<OrderItemView>(`/driver/stops/${stopId}/orders/${orderId}/item`, {
+      method: 'PUT',
+      body: JSON.stringify(facts),
     }),
 
   createUploadUrl: (stopId: string, kind: UploadKind, contentType: UploadContentType) =>
