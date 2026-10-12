@@ -9,6 +9,7 @@ import { Card } from '../components/Card';
 import { ParcelScanPanel } from '../components/ParcelScanPanel';
 import { CodPanel } from '../components/CodPanel';
 import { ReturnsPanel } from '../components/ReturnsPanel';
+import { ItemFactsPanel } from '../components/ItemFactsPanel';
 import { DockSurveyModal } from '../components/DockSurveyModal';
 import { PodCapture } from '../components/PodCapture';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -120,8 +121,9 @@ export function StopDetailScreen({ route, navigation }: Props) {
   }
 
   // Whether this pickup's orders came with barcodes to check a scan against
-  // (DE-5). Most sources send none, and then a barcode can only be counted;
-  // offline, or when the list will not load, the count is the safe fallback.
+  // (DE-5) - the source's own, not ones LMX minted, which no label carries.
+  // Most sources send none, and then a barcode can only be counted; offline,
+  // or when the list will not load, the count is the safe fallback.
   const [expectsBarcodes, setExpectsBarcodes] = useState(false);
   const scanning = stop?.stop_type === 'pickup' && stop.scanned_count < stop.parcel_count;
   useEffect(() => {
@@ -129,7 +131,7 @@ export function StopDetailScreen({ route, navigation }: Props) {
     let live = true;
     api
       .stopParcels(stopId)
-      .then((parcels) => live && setExpectsBarcodes(parcels.length > 0))
+      .then((parcels) => live && setExpectsBarcodes(parcels.some((p) => p.from_source)))
       .catch(() => live && setExpectsBarcodes(false));
     return () => {
       live = false;
@@ -309,6 +311,12 @@ export function StopDetailScreen({ route, navigation }: Props) {
 
         {stop.returns && (
           <ReturnsPanel stop={stop} onDone={() => setLoadToken((t) => t + 1)} />
+        )}
+
+        {/* DE-5: before the confirmation, while the parts are on the counter.
+            Optional - collection never waits on it. */}
+        {action.kind === 'confirmDelivery' && stop.stop_type === 'pickup' && stop.order_ids.length > 0 && (
+          <ItemFactsPanel stopId={stopId} orderIds={stop.order_ids} />
         )}
 
         {action.kind === 'confirmDelivery' && stop.stop_type === 'pickup' && (

@@ -392,6 +392,37 @@ class StopGeofenceEventsResult(BaseModel):
 class ParcelView(BaseModel):
     barcode: str
     scanned: bool
+    # True when the barcode came from the order's source - a label the driver
+    # can actually find on the box. False for one LMX minted, which no label
+    # carries yet (DE-5).
+    from_source: bool = True
+
+
+ItemSizeClass = Literal["envelope", "small", "medium", "large", "oversize"]
+
+
+class ItemFactsBody(BaseModel):
+    """What the driver can see or weigh at the counter (`DE-5`). Every field is
+    optional: a field left out is left as it was, and unknown stays null rather
+    than being guessed."""
+
+    item_description: str | None = Field(default=None, min_length=1, max_length=255)
+    # A van scale is assumed. 2,000 kg is past anything a van takes - a bound on
+    # a typo, not a capacity.
+    item_weight_kg: float | None = Field(default=None, ge=0, le=2000)
+    item_size_class: ItemSizeClass | None = None
+    item_hazmat_or_liquid: bool | None = None
+
+
+class OrderItemView(BaseModel):
+    """One order on a pickup stop, and what is known about what it carries."""
+
+    order_id: str
+    reference: str
+    item_description: str | None
+    item_weight_kg: float | None
+    item_size_class: str | None
+    item_hazmat_or_liquid: bool | None
 
 
 class UploadUrlRequestBody(BaseModel):

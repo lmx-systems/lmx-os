@@ -1,6 +1,8 @@
 import { getApiBaseUrl } from './serverUrl';
 
 import type {
+  ItemFactsBody,
+  OrderItemView,
   ParcelView,
   AuthToken,
   CodMethod,
@@ -252,6 +254,15 @@ export const api = {
   // The parcels a pickup expects. Empty when the order's source sent no
   // barcodes, which is most of them - the count is all there is to check.
   stopParcels: (stopId: string) => request<ParcelView[]>(`/driver/stops/${stopId}/parcels`),
+
+  // DE-5: what each order on a pickup carries, as known so far.
+  stopItems: (stopId: string) => request<OrderItemView[]>(`/driver/stops/${stopId}/items`),
+
+  recordItemFacts: (stopId: string, orderId: string, facts: ItemFactsBody) =>
+    request<OrderItemView>(`/driver/stops/${stopId}/orders/${orderId}/item`, {
+      method: 'PUT',
+      body: JSON.stringify(facts),
+    }),
 
   createUploadUrl: (stopId: string, kind: UploadKind, contentType: UploadContentType) =>
     request<UploadUrlResult>(`/driver/stops/${stopId}/upload-url`, {

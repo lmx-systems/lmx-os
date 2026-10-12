@@ -1,7 +1,7 @@
 import NetInfo from '@react-native-community/netinfo';
 import { AppState } from 'react-native';
 
-import type { DockSurveyBody } from '../api/types';
+import type { DockSurveyBody, ItemFactsBody } from '../api/types';
 import { api, ApiError } from '../api/client';
 import { adoptAuthToken } from '../auth/token';
 import { loadOutbox, saveOutbox } from './outboxStore';
@@ -107,10 +107,23 @@ export class OutboxManager {
       i.stopId === stopId &&
       // A barcode is its own action: a second parcel is not a repeat of the
       // first, and a rejected barcode is redone only by scanning that barcode.
-      (type !== 'scan-parcel' || i.payload.barcode === payload.barcode);
+      (type !== 'scan-parcel' || i.payload.barcode === payload.barcode) &&
+      (type !== 'item-facts' || i.payload.orderId === payload.orderId);
     this.items = this.items.filter((i) => !(i.permanentlyFailed && sameAction(i)));
 
-    if (type === 'scan') {
+    if (type === 'item-facts') {
+      // The driver corrected a weight before it went: the correction replaces
+      // it, rather than two writes racing to be last.
+      const idx = this.items.findIndex(sameAction);
+      if (idx !== -1) {
+        this.items = this.items.map((i, n) =>
+          n === idx ? { ...i, payload, nextAttemptAt: new Date().toISOString() } : i,
+        );
+        await this.persistAndNotify();
+        this.flush();
+        return;
+      }
+    } else if (type === 'scan') {
       // Coalesce: only the latest absolute scanned_count matters, so
       // several rapid taps while offline collapse into one queued item
       // instead of N separate requests once connectivity returns.
@@ -296,6 +309,12 @@ export class OutboxManager {
         return api.arriveAtStop(item.stopId);
       case 'scan':
         return api.scanParcels(item.stopId, item.payload.scannedCount as number);
+      case 'item-facts':
+        return api.recordItemFacts(
+          item.stopId,
+          item.payload.orderId as string,
+          item.payload.facts as ItemFactsBody,
+        );
       case 'scan-parcel':
         // Safe to retry: the server stamps the parcel once, and a re-scan of
         // the same barcode changes nothing. A 422 is a wrong part, kept as

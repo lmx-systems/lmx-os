@@ -12,6 +12,7 @@ const ACTION_NAME: Record<OutboxActionType, string> = {
   arrive: 'Your arrival',
   scan: 'Your parcel scan',
   'scan-parcel': 'The barcode you scanned',
+  'item-facts': 'The weight and size you recorded',
   complete: 'Completing this stop',
   flag: 'Your problem report',
   geofence: 'The automatic arrival',
