@@ -304,7 +304,7 @@ export interface CreditExposure {
 
 /** One thing worth a dispatcher's attention (docs/ROADMAP_1.5.md CON-4). */
 export interface ExceptionItem {
-  kind: 'flagged_by_driver' | 'delivery_failed' | 'past_promise' | 'released_but_unplaced'
+  kind: 'flagged_by_driver' | 'delivery_failed' | 'past_promise' | 'released_but_unplaced' | 'possible_duplicate'
   order_id: string
   client_id: string | null
   external_ref: string

@@ -12,10 +12,10 @@ import hashlib
 import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,7 @@ from app.experiment import (
 from app.geocoding import BaseGeocoder, get_geocoder, normalize_address, resolve_address
 from app.identity import link_shop_to_dock, receiver_key_for
 from app.identity.resolution import resolve_location
+from app.ingestion.adapters.base import UNKNOWN_FIELDS
 from app.ingestion.registry import get_adapter
 from app.models.client import Client
 from app.models.client_rate import ClientRate
@@ -423,6 +424,7 @@ def _lmx_from_normalized(normalized: NormalizedOrder, payload: dict) -> LMXOrder
         total_weight_units=normalized.weight_units,
         received_at=normalized.requested_at,
         raw_payload=normalized.raw_payload or payload,
+        intake_flags=normalized.intake_flags,
     )
 
 
@@ -450,6 +452,61 @@ async def find_existing_order(session: AsyncSession, lmx: LMXOrder) -> Order | N
         else query.where(Order.client_id.is_(None))
     )
     return (await session.scalars(query.limit(1))).first()
+
+
+# D-DUP (docs/ROADMAP_1.5.md §2.5): how far back an order with no reference of
+# its own is compared with the same client's orders. A form submitted twice is
+# submitted within minutes; a genuine second order to the same door an hour
+# later is not a duplicate.
+DUPLICATE_WINDOW = timedelta(minutes=10)
+POSSIBLE_DUPLICATE = "possible_duplicate"
+
+
+async def _intake_flags(
+    session: AsyncSession, lmx: LMXOrder, *, shop_id, delivery_location_id
+) -> list[dict]:
+    """The adapter's flags, plus a likely duplicate when there is one.
+
+    Flagged, never merged (D-DUP): two identical orders minutes apart are
+    usually one form sent twice and occasionally two real orders, and only the
+    client can say which. Dispatch sees the flag in the exception queue
+    (`app/reporting/exceptions.py`) while the order can still be cancelled.
+    """
+    flags = list(lmx.intake_flags)
+    unknown = [f for f in flags if f.get("kind") == UNKNOWN_FIELDS]
+    if unknown:
+        logger.warning(
+            "ingest_unknown_fields", source_system=lmx.source_system, fields=unknown[0]["fields"]
+        )
+    if not lmx.reference_generated or not lmx.client_id:
+        return flags
+    query = select(Order).where(
+        Order.client_id == uuid.UUID(lmx.client_id),
+        Order.shop_id == shop_id,
+        Order.created_at >= datetime.now(timezone.utc) - DUPLICATE_WINDOW,
+        Order.status != OrderStatus.cancelled,
+    )
+    if delivery_location_id is not None:
+        query = query.where(Order.delivery_location_id == delivery_location_id)
+    elif lmx.drop_address_raw:
+        query = query.where(func.lower(Order.delivery_address) == lmx.drop_address_raw.strip().lower())
+    else:
+        return flags
+    twin = (await session.scalars(query.order_by(Order.created_at.desc()).limit(1))).first()
+    if twin is not None:
+        flags.append(
+            {"kind": POSSIBLE_DUPLICATE, "of_order_id": str(twin.id), "of_reference": twin.external_order_ref}
+        )
+    return flags
+
+
+def possible_duplicate_of(order: Order) -> str | None:
+    """The reference of the order this one looks like a repeat of, if intake
+    flagged one (D-DUP)."""
+    for flag in order.intake_flags or []:
+        if flag.get("kind") == POSSIBLE_DUPLICATE:
+            return flag.get("of_reference")
+    return None
 
 
 @dataclass(frozen=True)
@@ -575,6 +632,9 @@ async def ingest_or_find(
         delivery_notes=lmx.access_notes,
         delivery_location_id=delivery_location_id,
         intake_mode=mode,
+    )
+    order.intake_flags = await _intake_flags(
+        session, lmx, shop_id=shop.id, delivery_location_id=delivery_location_id
     )
     # The fast path above misses a twin that is still in flight: two retries of
     # one order both find nothing and both insert. `uq_orders_source_ref`

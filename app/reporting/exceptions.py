@@ -58,13 +58,24 @@ KIND_FLAGGED = "flagged_by_driver"
 KIND_FAILED = "delivery_failed"
 KIND_PAST_PROMISE = "past_promise"
 KIND_UNPLACED = "released_but_unplaced"
-KINDS = (KIND_FLAGGED, KIND_FAILED, KIND_PAST_PROMISE, KIND_UNPLACED)
+KIND_POSSIBLE_DUPLICATE = "possible_duplicate"
+KINDS = (KIND_FLAGGED, KIND_FAILED, KIND_PAST_PROMISE, KIND_UNPLACED, KIND_POSSIBLE_DUPLICATE)
+
+# Before the driver collects it, a repeat order costs a phone call to cancel;
+# after, it costs a wasted run. So a likely duplicate is listed only until then.
+_NOT_YET_COLLECTED = (
+    OrderStatus.received,
+    OrderStatus.held,
+    OrderStatus.queued,
+    OrderStatus.assigned,
+)
 
 _NEXT_ACTION = {
     KIND_FLAGGED: "read the driver's note and decide: retry, reschedule, or call the customer",
     KIND_FAILED: "resolve it (retry, return to shop, or cancel) - the parts are on a van going nowhere",
     KIND_PAST_PROMISE: "check the route is moving, then tell the customer before they ask",
     KIND_UNPLACED: "nobody has this order - assign it or put it back in the queue",
+    KIND_POSSIBLE_DUPLICATE: "ask the client whether it was sent twice; cancel the repeat if so",
 }
 
 
@@ -224,6 +235,31 @@ async def build_exception_queue(
                 KIND_UNPLACED, order, now,
                 detail="released from the hold queue and not assigned to a route",
             )
+        )
+
+    # An order with no reference of its own that matches one the same client sent
+    # minutes earlier (D-DUP, app/ingestion/service.py). Flagged at intake and never
+    # merged: only the client knows whether it was sent twice.
+    repeats = list(
+        await session.scalars(
+            _scope(
+                select(Order).where(
+                    Order.intake_flags.contains([{"kind": KIND_POSSIBLE_DUPLICATE}]),
+                    Order.status.in_(_NOT_YET_COLLECTED),
+                )
+            )
+        )
+    )
+    for order in repeats:
+        if order.id in seen:
+            continue
+        seen.add(order.id)
+        original = next(
+            (f.get("of_reference") for f in order.intake_flags if f.get("kind") == KIND_POSSIBLE_DUPLICATE),
+            None,
+        )
+        queue.items.append(
+            _item(KIND_POSSIBLE_DUPLICATE, order, now, detail=f"looks like a repeat of {original}")
         )
 
     # Worst wait first, flagged stops lifted on a tie. See the module docstring:

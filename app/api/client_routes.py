@@ -38,6 +38,7 @@ from app.ingestion.service import (
     OriginUnresolvableError,
     ShopNotFoundError,
     ingest_lmx_order,
+    possible_duplicate_of,
 )
 from app.legal.documents import (
     DOCUMENTS,
@@ -1024,8 +1025,10 @@ async def submit_orders_batch(
     results: list[ClientOrderBatchRowResult] = []
 
     for index, row in enumerate(body.rows):
-        reference = (row.reference or "").strip() or _generated_reference()
+        given = (row.reference or "").strip()
+        reference = given or _generated_reference()
         lmx = LMXOrder(
+            reference_generated=not given,
             source_system="client_portal",
             source_order_ref=reference,
             hub_id=str(client_row.hub_id),
@@ -1087,6 +1090,7 @@ async def submit_orders_batch(
                     estimated_delivery_by=await straight_line_delivery_estimate(session, order),
                     fee_cents=order.fee_cents,
                     dispatchable=order.delivery_lat is not None and order.delivery_lng is not None,
+                    possible_duplicate_of=possible_duplicate_of(order),
                 ),
             )
         )
@@ -1144,9 +1148,11 @@ async def submit_order(
         session, client_row, shop_id=body.pickup_shop_id, typed_address=body.pickup_address
     )
 
-    reference = (body.reference or "").strip() or _generated_reference()
+    given = (body.reference or "").strip()
+    reference = given or _generated_reference()
 
     lmx = LMXOrder(
+        reference_generated=not given,
         source_system="client_portal",
         source_order_ref=reference,
         hub_id=str(client_row.hub_id),
@@ -1209,6 +1215,7 @@ async def submit_order(
         estimated_delivery_by=await straight_line_delivery_estimate(session, order),
         fee_cents=order.fee_cents,
         dispatchable=order.delivery_lat is not None and order.delivery_lng is not None,
+        possible_duplicate_of=possible_duplicate_of(order),
     )
 
 

@@ -195,6 +195,15 @@ class LMXOrder(BaseModel):
 
     raw_payload: dict = Field(default_factory=dict)
 
+    # What intake noticed about this order without refusing it (D-UNK, D-DUP):
+    # fields an adapter did not know or had to default, and a likely duplicate.
+    # Stored on the order as `intake_flags`.
+    intake_flags: list[dict] = Field(default_factory=list)
+    # True when LMX made up `source_order_ref` because the client gave none. Such
+    # an order cannot be deduplicated on its reference, so intake checks it
+    # against the client's recent orders instead (D-DUP).
+    reference_generated: bool = False
+
     # ------------------------------------------------------------------
     # Validation
     # ------------------------------------------------------------------

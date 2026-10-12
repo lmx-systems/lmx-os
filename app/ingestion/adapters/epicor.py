@@ -6,18 +6,22 @@ configuration (the peer review calls this out as "the most common cause of
 Phase 1 slippage"). The field names below are a reasonable placeholder
 shape for a parts-order webhook, not verified against a specific Epicor
 tenant. Before onboarding a real Epicor client, confirm the actual payload
-against that client's Epicor config and adjust EPICOR_FIELD_MAP /
-`normalize` accordingly - the goal of isolating this in one small class is
+against that client's Epicor config and adjust REQUIRED_FIELDS /
+OPTIONAL_DEFAULTS and `normalize` accordingly. Until then a field this
+class does not know is accepted and flagged on the order (D-UNK), so the gap
+shows up on the first real orders rather than as silently missing data - the goal of isolating this in one small class is
 so that reconciliation is a one-file change.
 """
 from __future__ import annotations
 
 from datetime import datetime
 
-from app.ingestion.adapters.base import BaseIngestionAdapter, IngestionAdapterError
+from app.ingestion.adapters.base import BaseIngestionAdapter, IngestionAdapterError, field_flags
 from app.schemas.order import NormalizedOrder
 
 REQUIRED_FIELDS = ("OrderNum", "ShipToNum", "ShipToLat", "ShipToLng", "OrderDate")
+# Optional fields this adapter reads, and what an order gets without them.
+OPTIONAL_DEFAULTS = {"Weight": 1.0, "PriorityCode": "not rush", "ShipVia": "not will-call"}
 
 
 class EpicorAdapter(BaseIngestionAdapter):
@@ -51,4 +55,5 @@ class EpicorAdapter(BaseIngestionAdapter):
             weight_units=float(payload.get("Weight", 1.0)),
             requested_at=requested_at,
             raw_payload={**payload, **raw_flags},
+            intake_flags=field_flags(payload, known=REQUIRED_FIELDS, defaults=OPTIONAL_DEFAULTS),
         )

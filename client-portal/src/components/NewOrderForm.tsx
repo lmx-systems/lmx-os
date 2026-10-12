@@ -222,6 +222,13 @@ function OrderConfirmation({ result, onNext }: { result: ClientOrderResult; onNe
         )}
       </div>
 
+      {result.possible_duplicate_of && (
+        <p className="rounded-[var(--radius)] border border-[var(--amber)] bg-[var(--amber-dim)] px-3 py-2 text-[13px] text-[var(--text-primary)]">
+          This looks like a repeat of {result.possible_duplicate_of}, booked a few minutes ago to
+          the same address. If it was sent twice, cancel one from Orders. We've booked both.
+        </p>
+      )}
+
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[13px]">
         <dt className="text-[var(--text-muted)]">Reference</dt>
         <dd className="text-right font-mono text-[var(--text-primary)]">{result.reference}</dd>

@@ -26,6 +26,9 @@ class NormalizedOrder(BaseModel):
     weight_units: float = 1.0
     requested_at: datetime
     raw_payload: dict = Field(default_factory=dict)
+    # What the adapter did not understand or had to assume (D-UNK); stored on
+    # the order as `intake_flags`.
+    intake_flags: list[dict] = Field(default_factory=list)
 
 
 class ClassifiedOrder(BaseModel):

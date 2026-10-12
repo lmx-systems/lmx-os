@@ -125,6 +125,10 @@ class ClientOrderResult(BaseModel):
     # accepted (§2.2 principle 7 - never block on a missing field) but cannot be
     # planned until they resolve.
     dispatchable: bool
+    # The reference of an order this one looks like a repeat of: same pickup,
+    # same drop-off, minutes apart, and no reference given (D-DUP). Both are
+    # kept; the client cancels one if it was sent twice.
+    possible_duplicate_of: str | None = None
 
 
 # A dispatcher with six orders pastes six lines (§2.2 principle 5). Capped
