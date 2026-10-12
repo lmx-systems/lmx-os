@@ -28,7 +28,7 @@ nothing here may import `app/`:
 python scripts/machine_limits.py export --out ml/out/machine_limits.json   # DE-2
 python scripts/freeze_test_sites.py export --out ml/out/test_sites.json    # DE-8
 python scripts/export_golden_records.py --out ml/out/records.jsonl         # the records
-python scripts/run_checklist_baseline.py --fallback-cost <dollars>         # DE-10 and DE-11
+python scripts/run_checklist_baseline.py                                   # DE-10 and DE-11 (D-COST: $35)
 ```
 
 | Module | What it is |

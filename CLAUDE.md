@@ -54,8 +54,13 @@ day.
 in the sandbox; the previous rule here ("Claude cannot push. No SSH keys or
 credentials in the sandbox") was stale and was corrected in August 2026 after a
 push to a feature branch succeeded. Push feature branches freely. **Never push
-to `main`**, never force-push, never merge — a change reaches `main` through a
-PR that a human reviews. Never assume a commit reached the remote: confirm with
+to `main`** and never force-push — a change reaches `main` through a PR.
+**Merging is allowed once every check is green on the expected head commit**
+(Sourabh, 5 Oct 2026, confirmed 12 Oct): squash-merge with
+`gh pr merge --squash --match-head-commit <sha>`, so a commit pushed after the
+checks ran cannot ride in unchecked. To bring a pushed branch up to date, merge
+`main` into it rather than rebasing it, since rebasing would need a force-push.
+Never assume a commit reached the remote: confirm with
 `git rev-parse HEAD origin/<branch>` and hand over the PR link.
 
 ## Where things live
