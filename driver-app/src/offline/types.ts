@@ -8,6 +8,9 @@ export type OutboxActionType =
   // DE-5: one order's item at the pickup counter. The latest edit to an order
   // replaces an unsent earlier one; the server overwrites, so a retry is safe.
   | 'item-facts'
+  // DE-4: one guided handoff photo, kept as a file until it is sent. A retake
+  // of the same slot replaces an unsent one.
+  | 'handoff-photo'
   | 'complete'
   | 'flag'
   | 'geofence'

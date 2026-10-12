@@ -3,6 +3,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 
 import type { DockSurveyBody } from '../api/types';
 import { outboxManager } from '../offline/outboxManager';
+import { HandoffPhotosPanel } from './HandoffPhotosPanel';
 import { radius, spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
 
@@ -344,6 +345,8 @@ export function DockSurveyModal({
               </View>
             </View>
           ))}
+
+          <HandoffPhotosPanel stopId={stopId} />
 
           <View style={styles.question}>
             <Text style={styles.prompt}>Did you need an appointment or booking?</Text>

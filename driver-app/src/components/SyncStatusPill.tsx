@@ -13,6 +13,7 @@ const ACTION_NAME: Record<OutboxActionType, string> = {
   scan: 'Your parcel scan',
   'scan-parcel': 'The barcode you scanned',
   'item-facts': 'The weight and size you recorded',
+  'handoff-photo': 'A photo of the door',
   complete: 'Completing this stop',
   flag: 'Your problem report',
   geofence: 'The automatic arrival',

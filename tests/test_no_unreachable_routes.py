@@ -126,10 +126,6 @@ NOT_A_FEATURE: frozenset[str] = frozenset(
 )
 
 KNOWN_UNREACHABLE: dict[str, str] = {
-    "POST /driver/stops/{stop_id}/handoff-photo": (
-        "DE-4 - the four guided handoff photos; the app's capture screen and its "
-        "offline photo queue are the next phase of the same item"
-    ),
     "GET /driver/me/gig-jobs": "G3 - the app has no gig screen",
     "POST /driver/me/gig-jobs": "G3 - same",
     "PATCH /driver/me/gig-jobs/{gig_job_id}": "G3 - same",

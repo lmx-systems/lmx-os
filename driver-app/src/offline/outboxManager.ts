@@ -1,9 +1,10 @@
 import NetInfo from '@react-native-community/netinfo';
 import { AppState } from 'react-native';
 
-import type { DockSurveyBody, ItemFactsBody } from '../api/types';
+import type { DockSurveyBody, HandoffPhotoSlot, ItemFactsBody, UploadContentType } from '../api/types';
 import { api, ApiError } from '../api/client';
 import { adoptAuthToken } from '../auth/token';
+import { sendHandoffPhoto } from './handoffPhotos';
 import { loadOutbox, saveOutbox } from './outboxStore';
 import type { OutboxActionType, OutboxItem } from './types';
 
@@ -108,10 +109,13 @@ export class OutboxManager {
       // A barcode is its own action: a second parcel is not a repeat of the
       // first, and a rejected barcode is redone only by scanning that barcode.
       (type !== 'scan-parcel' || i.payload.barcode === payload.barcode) &&
-      (type !== 'item-facts' || i.payload.orderId === payload.orderId);
+      (type !== 'item-facts' || i.payload.orderId === payload.orderId) &&
+      (type !== 'handoff-photo' || i.payload.slot === payload.slot);
     this.items = this.items.filter((i) => !(i.permanentlyFailed && sameAction(i)));
 
-    if (type === 'item-facts') {
+    if (type === 'item-facts' || type === 'handoff-photo') {
+      // An item-facts correction, or a photo retaken for its slot, replaces the
+      // unsent one.
       // The driver corrected a weight before it went: the correction replaces
       // it, rather than two writes racing to be last.
       const idx = this.items.findIndex(sameAction);
@@ -315,6 +319,15 @@ export class OutboxManager {
           item.stopId,
           item.payload.orderId as string,
           item.payload.facts as ItemFactsBody,
+        );
+      case 'handoff-photo':
+        // Safe to retry from the start: a fresh upload URL each time, and the
+        // slot is overwritten. The kept file is deleted once the server has it.
+        return sendHandoffPhoto(
+          item.stopId,
+          item.payload.slot as HandoffPhotoSlot,
+          item.payload.uri as string,
+          item.payload.contentType as UploadContentType,
         );
       case 'scan-parcel':
         // Safe to retry: the server stamps the parcel once, and a re-scan of
