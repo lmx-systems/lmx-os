@@ -10,8 +10,8 @@ Writes `<out>.json` and `<out>.md`: per machine and group, the checklist's yes,
 no and can't tell, its reasons for no, and the missing facts behind every can't
 tell - on the frozen test sites and on the rest, apart - and `<out>.scorecard.*`,
 `DE-11`'s scorecard of those verdicts against the labels. `--fallback-cost` is
-what one wrong yes costs to put right, in dollars; it is assumed, and has no
-default. The test-site file is optional only while nothing has been drawn;
+what one wrong yes costs to put right, in dollars: $35 by decision D-COST,
+assumed rather than measured. The test-site file is optional only while nothing has been drawn;
 without it every record is training, and the report says there are no test sites.
 """
 from __future__ import annotations
@@ -36,7 +36,9 @@ def main() -> int:
     parser.add_argument("--limits", type=Path, default=Path("ml/out/machine_limits.json"))
     parser.add_argument("--test-sites", type=Path, default=Path("ml/out/test_sites.json"))
     parser.add_argument("--out", type=Path, default=Path("ml/out/checklist_baseline"))
-    parser.add_argument("--fallback-cost", type=float, required=True, help="dollars per wrong yes; assumed")
+    # D-COST (ROADMAP_1.5.md §2.5, 12 Oct 2026): about 45 minutes of a human
+    # re-drive at $45/hr loaded. Assumed; the scorecard prints it beside the figure.
+    parser.add_argument("--fallback-cost", type=float, default=35.0, help="dollars per wrong yes; assumed (D-COST)")
     args = parser.parse_args()
 
     records = [json.loads(line) for line in args.records.read_text().splitlines() if line.strip()]

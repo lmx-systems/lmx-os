@@ -7,10 +7,10 @@
 
 `DE-8`, decision D-TEST. Run `draw` before the visits that collect a region's
 records, and again whenever new sites arrive: a site is drawn once, ever, so a
-second run only draws the sites the first did not reach. **The share has no
-default.** How many sites a region holds back is a trade between how tightly a
-test can be read and how much is left to train on, and it is set by whoever runs
-the first draw; every later draw in the region must use the same one.
+second run only draws the sites the first did not reach. **The share is 0.2**
+(decision D-SHARE, 12 Oct 2026) and is still typed, not defaulted: a region's
+first draw fixes it for good, so it should be stated on purpose. Every later
+draw in the region must use the same one.
 
 `export` writes the test sites in the form `ml/modality/splits.py` reads, so a
 training set can refuse them. New Jersey cannot be drawn (D-NJ).
@@ -78,7 +78,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     draw = sub.add_parser("draw")
     draw.add_argument("--region", required=True)
-    draw.add_argument("--share", type=float, required=True, help="0 to 0.5; no default, see above")
+    draw.add_argument("--share", type=float, required=True, help="0.2 by decision D-SHARE; required, see above")
     draw.add_argument("--by", required=True, help="who is running the draw")
     status = sub.add_parser("status")
     status.add_argument("--region", required=True)
