@@ -3,6 +3,8 @@ import {
   isStopTerminal,
   primaryActionForStop,
   primaryActionLabel,
+  stopLabel,
+  stopTypeLabel,
 } from './stopStatus';
 
 /**
@@ -87,5 +89,20 @@ describe('what the one button offers', () => {
         stop({ status: 'failed', stop_type: 'pickup', parcel_count: 3, scanned_count: 1 }),
       ),
     ).toEqual({ kind: 'done' });
+  });
+});
+
+describe('a technician visit (DE-6)', () => {
+  it('asks a visit to arrive, then to capture its door - never to confirm a delivery', () => {
+    expect(primaryActionForStop(stop({ stop_type: 'visit', status: 'pending' }))).toEqual({ kind: 'arrive' });
+    const atTheSite = primaryActionForStop(stop({ stop_type: 'visit', status: 'arrived', parcel_count: 0 }));
+    expect(atTheSite).toEqual({ kind: 'captureDoor' });
+    expect(primaryActionLabel(atTheSite)).toBe('Capture the door');
+  });
+
+  it('names a visit as one, and labels it by its address', () => {
+    expect(stopTypeLabel({ stop_type: 'visit' })).toBe('Site visit');
+    expect(stopLabel(stop({ stop_type: 'visit', address: '9 Mill Rd' }))).toBe('9 Mill Rd');
+    expect(stopLabel(stop({ stop_type: 'visit', address: undefined }))).toBe('Site visit');
   });
 });

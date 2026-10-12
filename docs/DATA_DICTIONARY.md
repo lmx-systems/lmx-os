@@ -69,7 +69,8 @@ One row per door, bay or counter a delivery can use. A site can have several.
 | Field | Meaning | Values |
 |---|---|---|
 | `stops.handoff_point_id` | The handoff point this delivery used | — |
-| `stops.record_source` | Where the record came from. Every record has one | `lmx_app` by default; `import_route_export` and `import_site_counts` for Experiment 0 (`DE-3`); later e.g. `off_platform`, `desk` |
+| `stops.stop_type` | What the stop is. A record is a drop-off or a visit | `pickup`, `dropoff`, `visit` (a technician at a site, no delivery: `DE-6`) |
+| `stops.record_source` | Where the record came from. Every record has one | `lmx_app` by default; `import_route_export` and `import_site_counts` for Experiment 0 (`DE-3`); `redrive` for a technician's visit (`DE-6`); later e.g. `off_platform`, `desk` |
 | `stops.collected_by` | Who collected the record | A driver, technician or scorer id |
 | `orders.item_description` | What was carried | Free text |
 | `orders.item_weight_kg` | The item's real weight. Separate from dispatch's `weight_units`, which is a unitless capacity number that defaults to 1.0 | Kilograms, zero or more |
@@ -148,6 +149,15 @@ A handoff point on a location that was merged into another reads its site
 facts from the location it was merged into, following the chain as identity
 resolution does.
 
-**Open:** a visit has no order, so as defined here it is missing pickup, item
-and delivery profile and grades reference. The data-engine addendum expected a
-visit to grade silver. `DE-6` needs that settled before it is built.
+**A visit is graded on its door (D-VISIT, 12 Oct).** A technician's visit
+(`DE-6`) has no order, so its pickup, item and delivery profile are not
+applicable: null in `record_tiers`, and not counted as missing. Its drop-off end
+is the handoff point captured and the site's kind, setting and shared-address
+answer - not receiving hours or who receives, which a technician who hands
+nothing over cannot learn and records as unknown.
+
+| Visit tier | Has |
+|---|---|
+| Gold | Drop-off end and autonomy qualifier |
+| Silver | Drop-off end |
+| Reference | No drop-off end |

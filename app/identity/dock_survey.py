@@ -30,6 +30,8 @@ remaining docks wait for the next visit, which is what a standing survey is for.
 **Only at a delivery that actually happened.** Never a pickup - the dock being
 surveyed is the *receiver's*, and a shop's own yard is not it. Never a failed
 stop, because a driver who could not deliver may not have reached the door.
+A technician's visit (`DE-6`) is the exception that proves it: a visit is the
+capture, so it is always asked, with no cap.
 """
 from __future__ import annotations
 
@@ -42,6 +44,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.hub_calendar import hub_day_bounds, hub_local_date
 from app.identity.handoff_capture import handoff_point_for, is_captured
 from app.identity.profile import profile_for
+from app.identity.resolution import canonical_location
+from app.models.handoff_point import HandoffPoint
 from app.models.driver import Driver
 from app.models.hub import Hub
 from app.models.location import Location
@@ -69,7 +73,16 @@ async def location_for_stop(session: AsyncSession, stop: Stop) -> Location | Non
     named no place gets no dock deliberately, because the alternative was every
     such address collapsing into one shared fictional dock. Orders from before
     the column existed have none either.
+
+    A visit (`DE-6`) has no order: it is at the site of the handoff point it was
+    planned against (app/record/visits.py), as the place that site is now.
     """
+    if stop.stop_type == "visit":
+        if stop.handoff_point_id is None:
+            return None
+        point = await session.get(HandoffPoint, stop.handoff_point_id)
+        site = await session.get(Location, point.location_id) if point is not None else None
+        return await canonical_location(session, site) if site is not None else None
     location_id = (
         await session.execute(
             select(Order.delivery_location_id)
@@ -134,10 +147,13 @@ async def dock_needs_survey(
     `today`: a year is a date boundary, and a test that happens to run on the
     day a fixture ages out would pass or fail depending on the clock.
     """
-    if stop.stop_type != "dropoff":
+    if stop.stop_type not in ("dropoff", "visit"):
         return False
     if stop.status == "failed":
         return False
+    # A visit is the capture: a technician sent to a door is always asked about it.
+    if stop.stop_type == "visit":
+        return await location_for_stop(session, stop) is not None
 
     location = await location_for_stop(session, stop)
     if location is None:

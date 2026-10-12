@@ -30,7 +30,9 @@ class Stop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # The actual delivery workflow also needs customer dropoff stops -
     # see docs/NEXT_STEPS.md item 12 for why this wasn't modeled until now.
     stop_type: Mapped[str] = mapped_column(String(16), default="pickup", nullable=False)
-    # pickup | dropoff
+    # pickup | dropoff | visit (checked, migration 0077). A visit is a technician
+    # at a site with no delivery (`DE-6`, app/record/visits.py): no orders, and
+    # the record is the door it captures.
 
     # Parcel scan progress (screen 1k, "Scan parcels") - a running count,
     # not a per-parcel ledger. A real barcode/parcel model (individual

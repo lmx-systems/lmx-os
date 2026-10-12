@@ -82,7 +82,8 @@ export interface JobOffer {
   estimated_pay_cents: number | null;
 }
 
-export type StopType = 'pickup' | 'dropoff';
+// `visit`: a technician at a site with no delivery, capturing its door (DE-6).
+export type StopType = 'pickup' | 'dropoff' | 'visit';
 export type StopStatus = 'pending' | 'en_route' | 'arrived' | 'completed' | 'failed';
 
 export type ItemSizeClass = 'envelope' | 'small' | 'medium' | 'large' | 'oversize';

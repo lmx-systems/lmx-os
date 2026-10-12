@@ -7,13 +7,27 @@ export function isStopTerminal(stop: Stop): boolean {
 }
 
 export function stopLabel(stop: Stop): string {
-  return stop.stop_type === 'pickup' ? stop.shop_name || 'Pickup' : stop.address || 'Drop-off';
+  if (stop.stop_type === 'pickup') return stop.shop_name || 'Pickup';
+  return stop.address || stopTypeLabel(stop);
+}
+
+export function stopTypeLabel(stop: Pick<Stop, 'stop_type'>): string {
+  switch (stop.stop_type) {
+    case 'pickup':
+      return 'Pickup';
+    case 'visit':
+      return 'Site visit';
+    default:
+      return 'Drop-off';
+  }
 }
 
 export type StopAction =
   | { kind: 'arrive' }
   | { kind: 'scan'; scanned: number; total: number }
   | { kind: 'confirmDelivery' }
+  // A visit (DE-6): nothing to hand over; the door is the job.
+  | { kind: 'captureDoor' }
   | { kind: 'done' };
 
 // Drives StopDetailScreen's single action button (and a label preview on
@@ -40,6 +54,7 @@ export function primaryActionForStop(stop: Stop): StopAction {
   if (isStopTerminal(stop)) return { kind: 'done' };
   if (isBeforeArrival(stop)) return { kind: 'arrive' };
   // status === 'arrived'
+  if (stop.stop_type === 'visit') return { kind: 'captureDoor' };
   if (stop.stop_type === 'pickup' && stop.scanned_count < stop.parcel_count) {
     return { kind: 'scan', scanned: stop.scanned_count, total: stop.parcel_count };
   }
@@ -54,6 +69,8 @@ export function primaryActionLabel(action: StopAction): string {
       return `Scan (${action.scanned}/${action.total})`;
     case 'confirmDelivery':
       return 'Confirm delivery';
+    case 'captureDoor':
+      return 'Capture the door';
     case 'done':
       return 'Done';
   }

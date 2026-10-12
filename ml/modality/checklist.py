@@ -19,6 +19,11 @@ Questions 10 (appointment or signature) and 11 (one building, or the right one
 clear) have no field in the golden record yet, so they are not asked; a "yes"
 here is a yes on the nine that are.
 
+**A technician's visit carries no item** (`DE-6`, D-VISIT), so questions 1-3
+are not asked of one: its verdict is about the door - could this machine serve
+it with an item within its limits - and an item it never had is not a fact to
+go and collect.
+
 **The weakest answer wins.** One "no" makes the verdict no; otherwise one
 unknown makes it can't tell; otherwise yes. A "no" carries the reasons that
 failed. Missing facts are reported apart from real noes, as the design says,
@@ -85,17 +90,18 @@ def score(record: Mapping, machine: str, limits: Mapping) -> Verdict:
         elif not ok:
             reasons.append(reason)
 
-    # 1-3: the item.
-    weight = item.get("weight_kg")
-    check(not _blank(weight), weight is not None and weight <= limits["max_weight_kg"], WEIGHT_UNKNOWN, TOO_HEAVY)
-    size = item.get("size_class")
-    check(
-        size in SIZE_ORDER,
-        size in SIZE_ORDER and SIZE_ORDER.index(size) <= SIZE_ORDER.index(limits["max_size_class"]),
-        SIZE_UNKNOWN, TOO_BIG,
-    )
-    hazmat = item.get("hazmat_or_liquid")
-    check(not _blank(hazmat), not hazmat or limits["hazmat_or_liquid_allowed"], HAZMAT_UNKNOWN, HAZARDOUS)
+    # 1-3: the item. A visit has none.
+    if record.get("stop_type") != "visit":
+        weight = item.get("weight_kg")
+        check(not _blank(weight), weight is not None and weight <= limits["max_weight_kg"], WEIGHT_UNKNOWN, TOO_HEAVY)
+        size = item.get("size_class")
+        check(
+            size in SIZE_ORDER,
+            size in SIZE_ORDER and SIZE_ORDER.index(size) <= SIZE_ORDER.index(limits["max_size_class"]),
+            SIZE_UNKNOWN, TOO_BIG,
+        )
+        hazmat = item.get("hazmat_or_liquid")
+        check(not _blank(hazmat), not hazmat or limits["hazmat_or_liquid_allowed"], HAZMAT_UNKNOWN, HAZARDOUS)
 
     # 4-5: a vehicle that stops and is met there.
     if limits["max_walk_distance_m"] is not None:

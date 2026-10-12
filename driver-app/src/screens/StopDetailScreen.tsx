@@ -24,7 +24,7 @@ import type { ColorScheme } from '../theme';
 import { currentPin, doorPin } from '../location/currentPin';
 import { dialable } from '../utils/dialable';
 import { openTurnByTurnNavigation } from '../utils/navigation';
-import { primaryActionForStop, stopLabel } from '../utils/stopStatus';
+import { primaryActionForStop, stopLabel, stopTypeLabel } from '../utils/stopStatus';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'StopDetail'>;
 
@@ -194,6 +194,15 @@ export function StopDetailScreen({ route, navigation }: Props) {
     navigation.navigate('Home');
   }
 
+  // A visit (DE-6): the technician is at the door with nothing to hand over.
+  // Completing it takes the door pin, then the capture opens - the same survey
+  // and four photos as a drop-off, without the questions only a delivery can
+  // answer.
+  async function handleVisitComplete() {
+    await outboxManager.enqueue('complete', stopId, { method: 'photo', ...doorPin(await currentPin()) });
+    leaveTheDoor();
+  }
+
   async function handleDropoffComplete() {
     // The door pin: where the item changed hands (DE-4).
     const door = doorPin(await currentPin());
@@ -259,7 +268,7 @@ export function StopDetailScreen({ route, navigation }: Props) {
 
   return (
     <ScreenContainer>
-      <Text style={styles.stopTypeLabel}>{stop.stop_type === 'pickup' ? 'Pickup' : 'Drop-off'}</Text>
+      <Text style={styles.stopTypeLabel}>{stopTypeLabel(stop)}</Text>
       <Text style={styles.title}>{stopLabel(stop)}</Text>
       {stop.stop_type === 'dropoff' && stop.notes && <Text style={styles.notes}>{stop.notes}</Text>}
 
@@ -309,6 +318,7 @@ export function StopDetailScreen({ route, navigation }: Props) {
         <DockSurveyModal
           visible={surveying}
           stopId={stopId}
+          visit={stop.stop_type === 'visit'}
           onClose={() => {
             setSurveying(false);
             navigation.navigate('Home');
@@ -371,6 +381,15 @@ export function StopDetailScreen({ route, navigation }: Props) {
           />
         )}
 
+        {action.kind === 'captureDoor' && (
+          <>
+            <Text style={styles.visitText}>
+              Stand at the door a delivery would use, then capture it. Nothing is handed over at a visit.
+            </Text>
+            <Button label="At the door - capture it" onPress={handleVisitComplete} />
+          </>
+        )}
+
         {action.kind === 'done' && <Text style={styles.doneText}>Stop complete</Text>}
       </Card>
 
@@ -396,5 +415,6 @@ const makeStyles = (colors: ColorScheme) =>
     contactNumber: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.sm },
     card: { marginBottom: spacing.lg, gap: spacing.sm },
     doneText: { ...typography.body, color: colors.textPrimary, textAlign: 'center' },
+    visitText: { ...typography.small, color: colors.textSecondary },
     error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
   });

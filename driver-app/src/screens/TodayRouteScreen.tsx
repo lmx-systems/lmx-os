@@ -20,7 +20,7 @@ import type { RouteChangeEvent } from '../realtime/routeEventsClient';
 import { useRouteEvents } from '../realtime/useRouteEvents';
 import { spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
-import { isStopTerminal, primaryActionForStop, primaryActionLabel, stopLabel } from '../utils/stopStatus';
+import { isStopTerminal, primaryActionForStop, primaryActionLabel, stopLabel, stopTypeLabel } from '../utils/stopStatus';
 import { etaLabel } from '../utils/etaLabel';
 import { useTodayRoute } from './useTodayRoute';
 import { LocationDisclosureScreen } from './LocationDisclosureScreen';
@@ -186,7 +186,7 @@ export function TodayRouteScreen({ navigation }: Props) {
 
       {route && currentStop && (
         <Card style={styles.currentCard} onPress={() => navigation.navigate('StopDetail', { stopId: currentStop.stop_id })}>
-          <Text style={styles.stopTypeLabel}>{currentStop.stop_type === 'pickup' ? 'Pickup' : 'Drop-off'}</Text>
+          <Text style={styles.stopTypeLabel}>{stopTypeLabel(currentStop)}</Text>
           <Text style={styles.stopBodyText}>{stopLabel(currentStop)}</Text>
           {etaLabel(currentStop) && <Text style={styles.cardSmall}>{etaLabel(currentStop)}</Text>}
           <Button
