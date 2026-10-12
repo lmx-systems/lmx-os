@@ -41,6 +41,7 @@ from app.models.hub import Hub
 from app.models.linkage_flag import LinkageFlag
 from app.models.location import Location
 from app.models.location_merge import LocationMerge
+from app.models.machine_label import MACHINES, MISSING_DATA, NO_REASONS
 from app.models.order import Order
 from app.models.receiver_profile import ReceiverProfile
 from app.models.shop import Shop
@@ -61,7 +62,15 @@ from app.record.consequences import (
     record_consequence,
 )
 from app.record.explain import explain_order
+from app.record.labelling import (
+    AGREEMENT_GATE,
+    LabelRefused,
+    labelling_queue,
+    save_verdicts,
+    scorer_agreement,
+)
 from app.record.linkage import open_flags, resolve_flag
+from app.record.machine_limits import machine_limits
 from app.record.overrides import OverrideRefused, apply_override
 from app.reporting.credit_exposure import DEFAULT_WINDOW_DAYS as CREDIT_WINDOW_DAYS
 from app.reporting.credit_exposure import build_credit_exposure
@@ -69,6 +78,14 @@ from app.reporting.exceptions import build_exception_queue
 from app.reporting.lmx_link import build_scorecard
 from app.reporting.operations import DEFAULT_WINDOW_DAYS, build_operations_scorecard
 from app.reporting.record_health import build_record_health
+from app.schemas.labelling import (
+    AgreementCellView,
+    AgreementView,
+    LabellingQueuePage,
+    LabellingRecordView,
+    LabelSavedView,
+    LabelVerdictsBody,
+)
 from app.schemas.batch_queue import HeldOrderView
 from app.schemas.fleet import DriverLocation, DriverState
 from app.schemas.hub import HubSummary
@@ -293,6 +310,85 @@ async def unlabelled_docks(
             )
         )
     return views
+
+
+@router.get("/operations/labelling/queue", response_model=LabellingQueuePage)
+async def labelling_queue_page(
+    region: Annotated[str | None, Query(max_length=16)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    session: AsyncSession = Depends(get_db),
+    ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> LabellingQueuePage:
+    """The records this person has not scored and fewer than two people have
+    (`DE-9`), most complete first, with the limits they are scored against.
+
+    Never anybody's verdicts: the second scorer is blind, and a queue that showed
+    the first would make agreement measure copying.
+    """
+    limits = await machine_limits(session)
+    records = await labelling_queue(session, scorer_id=ops.ops_user_id, region=region, limit=limit)
+    return LabellingQueuePage(
+        machine_limits_version=next(iter(limits.values())).version if limits else None,
+        machines=list(MACHINES),
+        no_reasons=list(NO_REASONS),
+        missing_data=list(MISSING_DATA),
+        records=[
+            LabellingRecordView(
+                **{
+                    **record,
+                    "stop_id": str(record["stop_id"]),
+                    "item_weight_kg": float(record["item_weight_kg"]) if record["item_weight_kg"] is not None else None,
+                }
+            )
+            for record in records
+        ],
+    )
+
+
+@router.post("/operations/labelling/{stop_id}", response_model=LabelSavedView)
+async def label_record(
+    stop_id: uuid.UUID,
+    body: LabelVerdictsBody,
+    session: AsyncSession = Depends(get_db),
+    ops: AuthedOpsUser = Depends(require_dispatcher),
+) -> LabelSavedView:
+    """One person's verdict on a record for all three machines (`DE-9`).
+
+    A dispatcher's call, like naming a dock: the people who know the doors label
+    them. Says nothing back about anyone else's verdict.
+    """
+    try:
+        labels = await save_verdicts(
+            session,
+            stop_id=stop_id,
+            scorer_id=ops.ops_user_id,
+            verdicts={machine: given.model_dump() for machine, given in body.verdicts.items()},
+            machine_limits_version=body.machine_limits_version,
+        )
+    except LabelRefused as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    return LabelSavedView(stop_id=str(stop_id), saved=len(labels))
+
+
+@router.get("/operations/labelling/agreement", response_model=AgreementView)
+async def labelling_agreement(
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> AgreementView:
+    """First scorer against blind second, per machine and group (`DE-9`). Under
+    85% a question is too subjective to train on."""
+    report = await scorer_agreement(session)
+    return AgreementView(
+        gate=AGREEMENT_GATE,
+        cells=[
+            AgreementCellView(
+                machine=c.machine, group=c.group, both_scored=c.both_scored,
+                agreement=c.rate, under_gate=c.under_gate,
+            )
+            for c in report.cells
+        ],
+    )
 
 
 @router.post("/operations/docks/{location_id}/node-class", response_model=UnlabelledDockView)
