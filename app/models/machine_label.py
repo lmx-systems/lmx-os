@@ -31,6 +31,35 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 MACHINES = ("drone", "sidewalk_robot", "car")
 VERDICTS = ("yes", "no", "cant_tell")
 
+# Why a verdict is not a yes: checklist v0.1's reasons for a "no", and its
+# missing-data codes for a "can't tell" (model, dataset and autonomy design,
+# 25 Sep 2026). The checklist baseline in `ml/modality/checklist.py` uses the
+# same words; `tests/test_labelling_vocabulary.py` keeps the two in step.
+NO_REASONS = (
+    "too_heavy",
+    "too_big",
+    "hazardous_or_liquid",
+    "no_legal_stop",
+    "stop_too_far_from_door",
+    "steps_at_entrance",
+    "no_sidewalk_route",
+    "no_safe_set_down_spot",
+    "gated_or_obstructed",
+    "nobody_to_receive",
+    "signature_or_appointment_needed",
+    "building_unclear",
+    "outside_operator_area",
+)
+MISSING_DATA = (
+    "weight_unknown",
+    "size_unknown",
+    "hazmat_unknown",
+    "stop_point_unknown",
+    "door_unknown",
+    "hours_unknown",
+)
+REASON_CODES = NO_REASONS + MISSING_DATA
+
 
 class MachineLabel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "machine_labels"

@@ -1,5 +1,8 @@
 import { clearToken, getToken } from './auth'
 import type {
+  LabellingAgreement,
+  LabellingQueuePage,
+  MachineVerdictInput,
   AdminClient,
   ClientOnboardingBody,
   ClientInvoice,
@@ -273,6 +276,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ node_class: nodeClass }),
     }),
+
+  labellingQueue: (limit = 10, region?: string) =>
+    request<LabellingQueuePage>(
+      `/operations/labelling/queue?limit=${limit}${region ? `&region=${encodeURIComponent(region)}` : ''}`,
+    ),
+
+  labelRecord: (stopId: string, version: string, verdicts: Record<string, MachineVerdictInput>) =>
+    request<{ stop_id: string; saved: number }>(`/operations/labelling/${stopId}`, {
+      method: 'POST',
+      body: JSON.stringify({ machine_limits_version: version, verdicts }),
+    }),
+
+  labellingAgreement: () => request<LabellingAgreement>('/operations/labelling/agreement'),
 
   classificationCoverage: () =>
     request<ClassificationCoverage>('/operations/classification-coverage'),

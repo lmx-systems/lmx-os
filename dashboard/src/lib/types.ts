@@ -528,6 +528,58 @@ export interface UnlabelledDock {
   inherited_dwell_p50_seconds: number | null
 }
 
+/** One record in the labelling queue (DE-9) - never anybody's verdict. */
+export interface LabellingRecord {
+  stop_id: string
+  tier: string
+  elements_missing: number
+  record_source: string | null
+  recorded_at: string | null
+  address: string | null
+  region: string | null
+  kind_of_site: string | null
+  setting: string | null
+  handoff_type: string | null
+  stop_type: string | null
+  stop_legal: boolean | null
+  walk_distance_m: number | null
+  steps_or_ramps: string | null
+  continuous_sidewalk: boolean | null
+  obstructions: string[] | null
+  drone_open_ground: boolean | null
+  overhead: string[] | null
+  photo_approach: string | null
+  photo_stop_point: string | null
+  photo_path: string | null
+  photo_handoff: string | null
+  item_description: string | null
+  item_weight_kg: number | null
+  item_size_class: string | null
+  item_hazmat_or_liquid: boolean | null
+  receiving_hours: Record<string, string[][]> | null
+  who_receives: string | null
+}
+
+export interface LabellingQueuePage {
+  machine_limits_version: string | null
+  machines: string[]
+  no_reasons: string[]
+  missing_data: string[]
+  records: LabellingRecord[]
+}
+
+export type MachineVerdict = 'yes' | 'no' | 'cant_tell'
+
+export interface MachineVerdictInput {
+  verdict: MachineVerdict
+  reason_codes: string[]
+}
+
+export interface LabellingAgreement {
+  gate: number
+  cells: { machine: string; group: string; both_scored: number; agreement: number | null; under_gate: boolean | null }[]
+}
+
 /** How far IDN-3 is from its done-when. */
 export interface ClassificationCoverage {
   shops: number

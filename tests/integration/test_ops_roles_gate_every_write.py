@@ -29,6 +29,7 @@ DISPATCHER_WRITES = {
     ("post", "/orders/{order_id}/override"),
     ("post", "/orders/{order_id}/consequence"),
     ("post", "/operations/docks/{location_id}/node-class"),
+    ("post", "/operations/labelling/{stop_id}"),
     ("post", "/operations/linkage-flags/{flag_id}/resolve"),
     ("post", "/optimizer/{hub_id}/run-cycle"),
     ("post", "/ingestion/{hub_id}/{client_id}/{source_system}"),

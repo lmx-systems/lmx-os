@@ -6,6 +6,7 @@ import { HoldQueueTable } from './components/HoldQueueTable'
 import { ExceptionsPanel } from './components/ExceptionsPanel'
 import { Tabs } from './components/ui/Tabs'
 import { DockLabellingPanel } from './components/DockLabellingPanel'
+import { LabellingQueuePanel } from './components/LabellingQueuePanel'
 import { DockLogReviewPanel } from './components/DockLogReviewPanel'
 import { HubSettingsPanel } from './components/HubSettingsPanel'
 import { CreateHubPanel } from './components/CreateHubPanel'
@@ -289,6 +290,10 @@ function App() {
                     {/* Also not hub-scoped: a dock is a physical place and its
                         class does not change with which hub serves it (IDN-3). */}
                     <DockLabellingPanel canDispatch={canDispatch} />
+                    {/* Not hub-scoped either: the golden record's labels are about
+                        a place and a machine, and the re-drive's records are not
+                        in any hub the dropdown lists (DE-9). */}
+                    <LabellingQueuePanel canDispatch={canDispatch} />
                     {/* Beside dock labelling because it is the same act on the
                         same rows - deciding what a dock is. This queue is why
                         dock_log_submissions exists as a separate table: a
