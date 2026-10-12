@@ -126,14 +126,6 @@ NOT_A_FEATURE: frozenset[str] = frozenset(
 )
 
 KNOWN_UNREACHABLE: dict[str, str] = {
-    "POST /driver/stops/{stop_id}/scan-parcel": (
-        "W1 - per-parcel scanning. The app calls /driver/stops/{id}/scan, which "
-        "takes a count; this takes one parcel at a time and no screen does"
-    ),
-    "GET /driver/stops/{stop_id}/parcels": (
-        "W10 - the per-parcel list, sibling of scan-parcel above and unreachable "
-        "for the same reason: the app scans a count, not parcels"
-    ),
     "GET /driver/me/gig-jobs": "G3 - the app has no gig screen",
     "POST /driver/me/gig-jobs": "G3 - same",
     "PATCH /driver/me/gig-jobs/{gig_job_id}": "G3 - same",

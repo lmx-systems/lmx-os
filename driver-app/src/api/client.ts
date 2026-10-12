@@ -1,6 +1,7 @@
 import { getApiBaseUrl } from './serverUrl';
 
 import type {
+  ParcelView,
   AuthToken,
   CodMethod,
   DocType,
@@ -239,6 +240,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ scanned_count: scannedCount }),
     }),
+
+  // One real barcode, checked against the stop's orders (W10, DE-5): a 422 is
+  // "not a parcel on this pickup - possible wrong part".
+  scanParcel: (stopId: string, barcode: string) =>
+    request<Route['stops'][number]>(`/driver/stops/${stopId}/scan-parcel`, {
+      method: 'POST',
+      body: JSON.stringify({ barcode }),
+    }),
+
+  // The parcels a pickup expects. Empty when the order's source sent no
+  // barcodes, which is most of them - the count is all there is to check.
+  stopParcels: (stopId: string) => request<ParcelView[]>(`/driver/stops/${stopId}/parcels`),
 
   createUploadUrl: (stopId: string, kind: UploadKind, contentType: UploadContentType) =>
     request<UploadUrlResult>(`/driver/stops/${stopId}/upload-url`, {

@@ -102,9 +102,13 @@ export class OutboxManager {
     // the rejection, so the new attempt replaces the rejected one. Matched as a
     // duplicate below, the redo was silently dropped, and a rejected scan kept
     // every later count for its stop from being sent.
-    this.items = this.items.filter(
-      (i) => !(i.permanentlyFailed && i.type === type && i.stopId === stopId),
-    );
+    const sameAction = (i: OutboxItem) =>
+      i.type === type &&
+      i.stopId === stopId &&
+      // A barcode is its own action: a second parcel is not a repeat of the
+      // first, and a rejected barcode is redone only by scanning that barcode.
+      (type !== 'scan-parcel' || i.payload.barcode === payload.barcode);
+    this.items = this.items.filter((i) => !(i.permanentlyFailed && sameAction(i)));
 
     if (type === 'scan') {
       // Coalesce: only the latest absolute scanned_count matters, so
@@ -119,7 +123,7 @@ export class OutboxManager {
         this.flush();
         return;
       }
-    } else if (this.items.some((i) => i.type === type && i.stopId === stopId)) {
+    } else if (this.items.some(sameAction)) {
       // arrive/complete/flag are one-shot state transitions - don't queue
       // the same transition twice for the same stop. Persisted anyway, in case
       // the filter above removed a rejected one.
@@ -292,6 +296,11 @@ export class OutboxManager {
         return api.arriveAtStop(item.stopId);
       case 'scan':
         return api.scanParcels(item.stopId, item.payload.scannedCount as number);
+      case 'scan-parcel':
+        // Safe to retry: the server stamps the parcel once, and a re-scan of
+        // the same barcode changes nothing. A 422 is a wrong part, kept as
+        // rejected so the driver sees it.
+        return api.scanParcel(item.stopId, item.payload.barcode as string);
       case 'complete':
         // Safe to retry blindly - app/api/driver_routes.py's complete_stop
         // is idempotent (a retry after a successful completion returns

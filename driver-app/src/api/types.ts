@@ -85,6 +85,12 @@ export interface JobOffer {
 export type StopType = 'pickup' | 'dropoff';
 export type StopStatus = 'pending' | 'en_route' | 'arrived' | 'completed' | 'failed';
 
+/** Mirrors app/schemas/driver_app.py ParcelView. */
+export interface ParcelView {
+  barcode: string;
+  scanned: boolean;
+}
+
 export interface Stop {
   stop_id: string;
   sequence: number;

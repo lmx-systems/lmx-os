@@ -11,6 +11,7 @@ import type { ColorScheme } from '../theme';
 const ACTION_NAME: Record<OutboxActionType, string> = {
   arrive: 'Your arrival',
   scan: 'Your parcel scan',
+  'scan-parcel': 'The barcode you scanned',
   complete: 'Completing this stop',
   flag: 'Your problem report',
   geofence: 'The automatic arrival',

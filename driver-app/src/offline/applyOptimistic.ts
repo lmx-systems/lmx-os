@@ -25,6 +25,9 @@ export function applyPendingToStop(stop: Stop, pending: OutboxItem[]): Stop {
     } else if (item.type === 'scan') {
       const scannedCount = item.payload.scannedCount as number;
       next = { ...next, scanned_count: Math.max(next.scanned_count, scannedCount) };
+    } else if (item.type === 'scan-parcel') {
+      // One more parcel per queued barcode, never past what the stop expects.
+      next = { ...next, scanned_count: Math.min(next.parcel_count, next.scanned_count + 1) };
     } else if (item.type === 'complete') {
       next = { ...next, status: 'completed' };
     } else if (item.type === 'flag') {

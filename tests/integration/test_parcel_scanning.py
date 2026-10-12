@@ -130,6 +130,21 @@ async def test_rescanning_the_same_barcode_is_idempotent(db_session, real_redis_
     assert again.scanned_count == 1  # not 2 - same parcel
 
 
+async def test_a_barcode_scan_never_lowers_a_count_confirmed_by_hand(db_session, real_redis_client):
+    """A label that will not scan is confirmed by hand (the count path), so it is
+    counted but not stamped. The next barcode must not drop the count back to
+    the stamped rows alone (DE-5)."""
+    hub_id, client_id, shop_id = await _seed_hcs(db_session)
+    order = await _ingest(db_session, hub_id, client_id, parcels=["A1", "A2", "A3"])
+    authed, stop = await _arrived_pickup(db_session, hub_id, shop_id, order, parcel_count=3)
+    stop.scanned_count = 2  # two confirmed by hand
+    await db_session.commit()
+
+    view = await scan_parcel(str(stop.id), ScanParcelBody(barcode="A3"), driver=authed, session=db_session)
+
+    assert view.scanned_count == 2
+
+
 async def test_an_unknown_barcode_is_rejected_as_wrong_part(db_session, real_redis_client):
     hub_id, client_id, shop_id = await _seed_hcs(db_session)
     order = await _ingest(db_session, hub_id, client_id, parcels=["A1"])

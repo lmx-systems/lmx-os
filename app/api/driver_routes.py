@@ -1765,7 +1765,10 @@ async def scan_parcel(
         .select_from(Parcel)
         .where(Parcel.order_id.in_(order_ids), Parcel.scanned_at.is_not(None))
     )
-    stop.scanned_count = int(scanned_result.scalar_one())
+    # Never lower: a parcel confirmed by hand (its label would not scan) is in
+    # the count but not stamped, so the stamped rows can be fewer than what the
+    # driver has already counted (DE-5).
+    stop.scanned_count = max(stop.scanned_count, int(scanned_result.scalar_one()))
     await session.commit()
     return await _stop_view_after_reload(session, stop)
 
