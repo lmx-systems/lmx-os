@@ -1279,6 +1279,29 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     ),
                 )
             )
+        elif stop.stop_type == "visit":
+            # A technician's visit (`DE-6`): a site and its door, nothing to carry
+            # and nobody to hand anything to.
+            site = await location_for_stop(session, stop)
+            stop_views.append(
+                StopView(
+                    stop_id=str(stop.id),
+                    sequence=stop.sequence,
+                    stop_type=stop.stop_type,
+                    status=stop.status,
+                    lat=site.lat if site is not None and site.lat is not None else 0.0,
+                    lng=site.lng if site is not None and site.lng is not None else 0.0,
+                    address=site.address if site is not None else None,
+                    parcel_count=stop.parcel_count,
+                    scanned_count=stop.scanned_count,
+                    order_ids=[],
+                    eta=stop.eta,
+                    completed_at=stop.completed_at,
+                    failure_reason=stop.failure_reason,
+                    flag_note=stop.flag_note,
+                    dock_needs_survey=await dock_needs_survey(session, stop, route.driver_id),
+                )
+            )
         else:
             order = orders_by_id.get(order_ids[0]) if order_ids else None
             stop_views.append(
@@ -2155,11 +2178,15 @@ async def record_dock_survey(
         )
 
     driver_uuid = uuid.UUID(driver.driver_id)
+    # At a visit (`DE-6`) access is unknown: a technician who hands nothing over
+    # cannot learn who receives or whether a booking is needed, so neither is
+    # written from one, whatever is sent.
+    visit = stop.stop_type == "visit"
     try:
         await set_access(
             session,
             location,
-            appointment_required=body.appointment_required,
+            appointment_required=None if visit else body.appointment_required,
             walk_distance_band=body.walk_distance_band,
         )
         profile = await set_autonomy_fit(
@@ -2169,7 +2196,7 @@ async def record_dock_survey(
             curb_access=body.curb_access,
             door_path=body.door_path,
             obstruction=body.obstruction,
-            who_receives=body.who_receives,
+            who_receives=None if visit else body.who_receives,
             stop_point=body.stop_point,
             surveyed_by_driver_id=driver_uuid,
         )

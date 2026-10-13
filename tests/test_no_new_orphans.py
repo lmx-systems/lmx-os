@@ -157,6 +157,7 @@ OPERATIONAL_SCRIPTS: dict[str, str] = {
     "freeze_test_sites.py": "draw a region's frozen test sites before collecting there",
     "import_inherited_dwell.py": "import a previous operator's dwell for a new customer",
     "machine_limits.py": "record a new machine-limits version when an operator confirms one",
+    "plan_visit_day.py": "plan a technician's re-drive day of site visits (DE-6)",
     "reconcile_billing.py": "check every ingested order reached an invoice",
     "set_client_sla_terms.py": "record what a client was promised",
     "set_driver_rate.py": "record what a driver is paid",

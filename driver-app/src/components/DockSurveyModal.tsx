@@ -206,13 +206,19 @@ const HANDOFF_QUESTIONS: HandoffQuestion[] = [
   },
 ];
 
+// Only somebody who handed something over can answer these. At a technician's
+// visit (DE-6) access is recorded as unknown, so they are not asked.
+const DELIVERY_ONLY: (keyof DockSurveyBody)[] = ['who_receives', 'appointment_required'];
+
 export function DockSurveyModal({
   visible,
   stopId,
+  visit = false,
   onClose,
 }: {
   visible: boolean;
   stopId: string;
+  visit?: boolean;
   onClose: () => void;
 }) {
   const colors = useThemeColors();
@@ -243,15 +249,16 @@ export function DockSurveyModal({
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
         <View style={styles.header}>
-          <Text style={styles.title}>About this dock</Text>
+          <Text style={styles.title}>{visit ? 'This site\'s door' : 'About this dock'}</Text>
           <Text style={styles.subtitle}>
-            A few taps at a door we have not fully captured yet, then once a year. Skip
-            anything you did not see — a blank answer is better than a guess.
+            {visit
+              ? 'The door a delivery would use, as you see it from outside. Skip anything you cannot see — a blank answer is better than a guess.'
+              : 'A few taps at a door we have not fully captured yet, then once a year. Skip anything you did not see — a blank answer is better than a guess.'}
           </Text>
         </View>
 
         <ScrollView contentContainerStyle={styles.body}>
-          {QUESTIONS.map((question) => (
+          {QUESTIONS.filter((q) => !visit || !DELIVERY_ONLY.includes(q.key)).map((question) => (
             <View key={question.key as string} style={styles.question}>
               <Text style={styles.prompt}>{question.prompt}</Text>
               <View style={styles.options}>
@@ -348,33 +355,35 @@ export function DockSurveyModal({
 
           <HandoffPhotosPanel stopId={stopId} />
 
-          <View style={styles.question}>
-            <Text style={styles.prompt}>Did you need an appointment or booking?</Text>
-            <View style={styles.options}>
-              {[
-                { value: true, label: 'Yes' },
-                { value: false, label: 'No' },
-              ].map((option) => {
-                const chosen = answers.appointment_required === option.value;
-                return (
-                  <Pressable
-                    key={String(option.value)}
-                    onPress={() =>
-                      setAnswers((prev) => ({
-                        ...prev,
-                        appointment_required: chosen ? null : option.value,
-                      }))
-                    }
-                    style={[styles.option, chosen && styles.optionChosen]}
-                  >
-                    <Text style={[styles.optionLabel, chosen && styles.optionLabelChosen]}>
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
+          {!visit && (
+            <View style={styles.question}>
+              <Text style={styles.prompt}>Did you need an appointment or booking?</Text>
+              <View style={styles.options}>
+                {[
+                  { value: true, label: 'Yes' },
+                  { value: false, label: 'No' },
+                ].map((option) => {
+                  const chosen = answers.appointment_required === option.value;
+                  return (
+                    <Pressable
+                      key={String(option.value)}
+                      onPress={() =>
+                        setAnswers((prev) => ({
+                          ...prev,
+                          appointment_required: chosen ? null : option.value,
+                        }))
+                      }
+                      style={[styles.option, chosen && styles.optionChosen]}
+                    >
+                      <Text style={[styles.optionLabel, chosen && styles.optionLabelChosen]}>
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </View>
-          </View>
+          )}
         </ScrollView>
 
         <View style={styles.footer}>

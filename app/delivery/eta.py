@@ -131,11 +131,17 @@ async def _points(session: AsyncSession, route_id: uuid.UUID) -> list[_Point]:
     A pickup's location is its shop's. A dropoff has no coordinates of its own - they
     live on the order being delivered, reached through `StopOrder`. That asymmetry is
     also why `driver_routes.py` builds its stop views in two branches.
+
+    A technician's visit (`DE-6`) is left out: nobody is waiting for it and it
+    promises no time, and its route's hub is a container at no coordinates, so
+    a walk anchored there would be a number about nothing.
     """
     stops = (
         (
             await session.execute(
-                select(Stop).where(Stop.route_id == route_id).order_by(Stop.sequence)
+                select(Stop)
+                .where(Stop.route_id == route_id, Stop.stop_type != "visit")
+                .order_by(Stop.sequence)
             )
         )
         .scalars()

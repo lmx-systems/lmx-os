@@ -253,7 +253,7 @@ class StopReturnsView(BaseModel):
 class StopView(BaseModel):
     stop_id: str
     sequence: int
-    stop_type: str  # pickup | dropoff
+    stop_type: str  # pickup | dropoff | visit (`DE-6`: a site, no delivery)
     status: str
     lat: float
     lng: float

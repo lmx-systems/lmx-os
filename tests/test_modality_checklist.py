@@ -119,6 +119,19 @@ def test_an_imported_record_is_cant_tell_everywhere_and_lists_the_collection():
     assert "stop_point_unknown" in verdicts["car"].missing
 
 
+def test_a_visit_is_judged_on_its_door_and_never_asked_for_an_item():
+    # DE-6: a technician's visit carries nothing, so the item is not a missing
+    # fact - and a door that stops the robot still stops it.
+    visit = dict(_record(handoff__steps_or_ramps="steps"), stop_type="visit", item={})
+
+    verdicts = score_record(visit, LIMITS)
+
+    assert {m: v.verdict for m, v in verdicts.items()} == {"drone": YES, "sidewalk_robot": NO, "car": YES}
+    assert all(WEIGHT_UNKNOWN not in v.missing for v in verdicts.values())
+    # The same empty item on a delivery is still the first thing to collect.
+    assert WEIGHT_UNKNOWN in score_record(dict(GOLD, item={}), LIMITS)["car"].missing
+
+
 def test_the_run_reports_test_sites_and_training_apart():
     records = [GOLD, _record(item__weight_kg=None), dict(GOLD, location_id="site-2", group=[None, None])]
 
