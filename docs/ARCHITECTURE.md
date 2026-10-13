@@ -203,8 +203,11 @@ This closed three real gaps, not just "add some endpoints":
   withdraws the offer. **Orders a failed cycle left `assigned` to nobody**
   are sent back by the scheduled sweep, under the hub lock, once they have
   sat past `stranded_assignment_grace_seconds`
-  (`return_stranded_assignments`, `app/orders/requeue.py`); it wakes no
-  cycle, so a failure that recurs costs one round trip per sweep.
+  (`return_stranded_assignments`, `app/orders/requeue.py`). It counts only
+  stops still to be done, so a redelivery's finished first attempt doesn't
+  hide it, and it wakes no cycle - not even through the hold queue's wake-up
+  at a deadline already past - so a failure that recurs costs one round trip
+  per sweep.
 
   **Lock order**, for anyone adding a writer:
   - the hub lock (Redis) before any row - the cycle, the sweep, the assign;
@@ -213,11 +216,25 @@ This closed three real gaps, not just "add some endpoints":
     share, under the hub lock, so never beside a cycle);
   - an offer row before its orders (accept, decline, expiry, cancel's
     withdrawal);
-  - stops before their orders and their route (`complete_stop`,
-    `flag_stop_issue`, dispatch's cancel - which now reads the stops locked);
-  - the one exception, an order before its stops: a cancel that found no
-    offer and no stop locks the order and then looks again, which can only
-    find stops an in-flight insertion has just added and no driver has reached;
+  - **a route before any of its stops, and its stops before their orders.**
+    Every path that changes a live route writes the ETAs of its *other*
+    stops, so the route row (`lock_route`, `app/delivery/routes.py`) is the
+    one lock they all queue on: `arrive_at_stop`, `complete_stop` and
+    `flag_stop_issue` lock the route and then their stop
+    (`_get_owned_stop_on_locked_route`); dispatch's cancel finds the order's
+    route unlocked, locks it, then its stops; `mark_current_stop_en_route` and
+    `refresh_route_etas` take it themselves (free when held). Holding a stop
+    while waiting for the route deadlocked a cancel against a driver's
+    complete. The location-ping refresh takes route then stops with `NOWAIT`;
+    accepting an offer locks a route nobody else can see yet;
+  - an order before a route only for an order on no route yet: the in-flight
+    insertion writes the order (`only_from` held or queued), then locks the
+    route it is joining. Nothing holding that route waits on that order;
+  - and a cancel that found no offer and no stop locks the order and looks
+    again, then takes the route **without waiting** (`try_lock_route`) and
+    refuses with "try again" if a driver is busy on it - a driver's complete
+    holds the route and then waits for its stop's orders, which may include
+    this one;
   - an order before an offer only without waiting: a cancel that found
     nothing and then locked the order looks for the offer with `SKIP LOCKED`,
     and refuses with "try again" when a driver is answering it.

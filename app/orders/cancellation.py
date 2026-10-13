@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.batch_queue.store import HoldQueueStore
 from app.delivery.en_route import mark_current_stop_en_route
 from app.delivery.eta import refresh_route_etas
-from app.delivery.routes import lock_route
+from app.delivery.routes import lock_route, try_lock_route
 from app.fleet_state.manager import FleetStateManager
 from app.models.order import Order, OrderStatus
 from app.models.route import Route
@@ -132,7 +132,7 @@ async def cancel_live_order(
     that is a return, not a cancellation.
     """
     if order.status in CANCELLABLE_STATUSES:
-        await cancel_before_collection(session, hold_queue, order)
+        await _cancel_before_collection_for_dispatch(session, hold_queue, order)
         return BEFORE_COLLECTION
     if order.status not in LIVE_CANCELLABLE_STATUSES:
         raise OrderNotCancellable(why_dispatch_cannot_cancel(order))
@@ -158,7 +158,7 @@ async def cancel_live_order(
             if order.status in CANCELLABLE_STATUSES:
                 # The cycle's offer to a driver it found taken or switched off
                 # sent the order back while this waited.
-                await cancel_before_collection(session, hold_queue, order)
+                await _cancel_before_collection_for_dispatch(session, hold_queue, order)
                 return BEFORE_COLLECTION
             # Without waiting on the offer: holding the order now, waiting on a
             # driver who is answering (and so writing this order) deadlocks.
@@ -166,10 +166,10 @@ async def cancel_live_order(
             if withdrawn is not None:
                 how = withdrawn
             else:
-                # The order before its stops, the reverse of a driver's
-                # complete; safe only because stops an insertion has just added
-                # are ones no driver has reached.
-                how, finished, notice = await _remove_stops(session, order)
+                # Holding the order now, so the route is taken without
+                # waiting: a driver's complete holds the route and then waits
+                # for its stops' orders, and this one may be among them.
+                how, finished, notice = await _remove_stops(session, order, wait=False)
     # Only from a status dispatch may cancel: queued behind a driver's pickup,
     # this re-checks once the pickup commits and refuses a collected order
     # (`picked_up` -> `cancelled` is legal for the machine, as a return).
@@ -189,6 +189,30 @@ async def cancel_live_order(
         await _free_driver(*finished)
     logger.info("order_cancelled_by_dispatch", order_id=order_id, hub_id=hub_id, how=how)
     return how
+
+
+async def _cancel_before_collection_for_dispatch(
+    session: AsyncSession, hold_queue: HoldQueueStore, order: Order
+) -> None:
+    """A client's cancel, refused in dispatch's words.
+
+    The order read as waiting, and the guarded write found it gone to a driver:
+    a cycle or an in-flight insertion moved it in between. The client's refusal
+    says "call dispatch", which is no use to the dispatcher; the live path now
+    applies, so cancelling again takes it off the driver.
+    """
+    try:
+        await cancel_before_collection(session, hold_queue, order)
+    except OrderNotCancellable as exc:
+        # The write matched nothing; what the row is now says why.
+        await session.refresh(order)
+        if order.status in LIVE_CANCELLABLE_STATUSES:
+            raise OrderNotCancellable(
+                "A driver was given this order a moment ago. Cancel again to take it off them."
+            ) from exc
+        if order.status in CANCELLABLE_STATUSES:
+            raise
+        raise OrderNotCancellable(why_dispatch_cannot_cancel(order)) from exc
 
 
 async def _free_driver(hub_id: str, driver_id: str, route_id: str) -> None:
@@ -253,32 +277,58 @@ async def _withdraw_offer(session: AsyncSession, order: Order, *, wait: bool = T
 
 
 async def _remove_stops(
-    session: AsyncSession, order: Order
+    session: AsyncSession, order: Order, *, wait: bool = True
 ) -> tuple[str, tuple[str, str, str] | None, dict | None]:
     """Take the order's stops off its route. Returns how; when that left the
     route with nothing to do, its (hub id, driver id, route id), so the caller
     can free the driver once the change is committed; and the driver app's
     notice of the change, for the caller to send after the commit. The notice
-    is None when the order is on no live route."""
+    is None when the order is on no live route.
+
+    `wait=False` when the caller already holds the order's row: then the route
+    is taken without waiting, and a busy one refuses with "try again" (see
+    docs/ARCHITECTURE.md, lock order).
+    """
+    # The route first, then its stops, then orders - the order every path that
+    # changes a live route takes (docs/ARCHITECTURE.md). Each of them writes the
+    # ETAs of the route's other stops, so a cancel that held its own stops while
+    # waiting for the route deadlocked against a driver's complete holding the
+    # route and writing those stops' ETAs.
+    route_id = await session.scalar(
+        select(Stop.route_id)
+        .join(StopOrder, StopOrder.stop_id == Stop.id)
+        .join(Route, Route.id == Stop.route_id)
+        .where(StopOrder.order_id == order.id, Route.status == "active")
+        .limit(1)
+    )
+    if route_id is None:
+        # Assigned with neither an open offer nor a live route: nothing holds
+        # the order, so there is nothing to take it off.
+        return STOPS_REMOVED, None, None
+    if wait:
+        await lock_route(session, route_id)
+    elif not await try_lock_route(session, route_id):
+        raise OrderNotCancellable(
+            "The driver is updating this route right now. Try again in a moment."
+        )
     # The stops locked and read fresh, in sequence, before the pickup's status
-    # is trusted: a driver completing the pickup holds that stop, and this waits
-    # for them and then sees it collected. Read unlocked, a stale `en_route`
-    # pickup was taken off a route the driver had just collected from (`CON-5`).
-    # Stops before the route, as `complete_stop` and `flag_stop_issue` take them.
+    # is trusted. A driver completing the pickup holds the route, and this
+    # waited for them, so it sees the pickup collected. Read unlocked, a stale
+    # `en_route` pickup was taken off a route the driver had just collected
+    # from (`CON-5`). Re-checked against the route's status: the driver may have
+    # finished it while this waited.
     rows = (
         await session.execute(
             select(Stop, Route)
             .join(StopOrder, StopOrder.stop_id == Stop.id)
             .join(Route, Route.id == Stop.route_id)
-            .where(StopOrder.order_id == order.id, Route.status == "active")
+            .where(StopOrder.order_id == order.id, Route.id == route_id, Route.status == "active")
             .order_by(Stop.sequence)
             .with_for_update(of=Stop)
             .execution_options(populate_existing=True)
         )
     ).all()
     if not rows:
-        # Assigned with neither an open offer nor a live route: nothing holds
-        # the order, so there is nothing to take it off.
         return STOPS_REMOVED, None, None
     pickup = next((stop for stop, _ in rows if stop.stop_type == "pickup"), None)
     if pickup is not None and pickup.status in ("arrived", "completed"):
@@ -314,9 +364,8 @@ async def _remove_stops(
     # A route whose every stop is now finished is over, the way `complete_stop`
     # and `flag_stop_issue` close one. Left `active`, it held the driver as busy
     # and stayed a candidate for in-flight insertion with nothing ahead of it.
-    # Locked first, as the driver's complete and flag paths do, so a driver
-    # finishing the last other stop at this moment can't leave it open.
-    await lock_route(session, route.id)
+    # The route lock taken above makes a driver finishing the last other stop
+    # at this moment wait, then count what this committed.
     live = await session.scalar(
         select(func.count())
         .select_from(Stop)

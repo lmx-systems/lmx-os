@@ -64,9 +64,14 @@ class HoldQueueStore:
     def __init__(self) -> None:
         self._redis = get_client()
 
-    async def add(self, hub_id: str, order: HeldOrder) -> None:
+    async def add(self, hub_id: str, order: HeldOrder, *, schedule_wakeup: bool = True) -> None:
+        """Queue `order`. `schedule_wakeup=False` for a caller whose own next
+        step is a cycle for this hub, and which must not start a second one: the
+        wake-up at a deadline already past fires within a second."""
         async with timed_operation("holdqueue.add"):
             await self._redis.hset(_queue_key(hub_id), order.order_id, _serialize(order))
+            if not schedule_wakeup:
+                return
             # Look at the hub again the moment this hold runs out. A lone order
             # waits for a partner until exactly then, and no event marks it.
             await self._redis.zadd(
