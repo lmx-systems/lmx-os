@@ -19,6 +19,7 @@ from app.api.driver_routes import (
     get_stop_site_facts,
     record_dock_survey,
     record_handoff_photo_route,
+    record_stop_site_facts,
 )
 from app.identity.site_facts import (
     SOURCE_SURVEY,
@@ -30,11 +31,13 @@ from app.identity.site_facts import (
 from app.models.handoff_point import HandoffPoint
 from app.models.location import Location
 from app.models.machine_label import MACHINES, MachineLabel
+from app.models.site_address_share import SiteAddressShare
 from app.models.site_draw import SiteDraw
 from app.record.desk_prefill import DESK, SiteEvidence, apply_desk_facts
 from app.record.site_draws import draw_test_sites
-from app.schemas.driver_app import ArriveBody, CompleteStopBody, DockSurveyBody, HandoffPhotoBody
-from tests.integration.test_dock_survey import _authed
+from app.identity.dock_survey import surveys_recorded_today
+from app.schemas.driver_app import ArriveBody, CompleteStopBody, DockSurveyBody, HandoffPhotoBody, SiteFactsBody
+from tests.integration.test_dock_survey import _authed, _captured_door, _dropoff, _world
 from tests.integration.test_visits import DOOR_PIN, STOP_PIN, _a_day, _site, _tier
 
 pytestmark = pytest.mark.integration
@@ -196,7 +199,7 @@ class TestSiteFactWriters:
         written = await record_site_facts(db_session, merged, setting="city_core")
         await db_session.commit()
 
-        assert written is not None and written.id == survivor.id
+        assert written is not None and written.site.id == survivor.id
         await db_session.refresh(survivor)
         assert (survivor.setting, (survivor.site_fact_sources or {}).get("setting")) == ("city_core", SOURCE_SURVEY)
         await db_session.refresh(merged)
@@ -239,3 +242,125 @@ class TestTestSitesStayDrawn:
         }
         assert after == before
         assert sum(again.by_group.values()) == 0
+
+
+async def _desk_dock(db_session):
+    """A drop-off route at a door already captured and surveyed this year - so
+    the survey is not due - whose site's three facts only the desk knows."""
+    hub, client, shop, driver, location = await _world(db_session)
+    await apply_desk_facts(
+        db_session,
+        [SiteEvidence(location_id=location.id, matched=True, kind_of_site="body_shop", setting="suburb", shares_address=True)],
+    )
+    await db_session.commit()
+    await _captured_door(db_session, location)
+    surveyed = await _dropoff(db_session, hub, client, shop, driver, dock=location)
+    await record_dock_survey(
+        str(surveyed.id), DockSurveyBody(landing_surface="paved_lot"), driver=_authed(driver, hub), session=db_session,
+    )
+    stop = await _dropoff(db_session, hub, client, shop, driver, status="pending", dock=location)
+    return stop, location, _authed(driver, hub), driver
+
+
+class TestTheFactsOnTheirOwn:
+    async def test_a_captured_door_with_desk_facts_still_carries_them(self, db_session):
+        """The review's finding: the facts went out only with the survey, and a
+        door captured before the desk filled its site is past the survey's year
+        and shift gates - so its record stayed capped for a year, unasked."""
+        stop, location, authed, driver = await _desk_dock(db_session)
+
+        route = await get_my_route(driver=authed, session=db_session)
+
+        view = next(v for v in route.stops if v.stop_id == str(stop.id))
+        assert view.dock_needs_survey is False
+        assert view.site_facts is not None
+        assert view.site_facts.ask == ["kind_of_site", "setting", "shares_address"]
+
+    async def test_answering_them_alone_lifts_the_cap_and_is_not_a_survey(self, db_session):
+        stop, location, authed, driver = await _desk_dock(db_session)
+        surveys_before = await surveys_recorded_today(db_session, driver)
+
+        answered = await record_stop_site_facts(
+            str(stop.id),
+            SiteFactsBody(kind_of_site="body_shop", setting="suburb", shares_address=True),
+            driver=authed, session=db_session,
+        )
+
+        assert answered.ask == [] and answered.disputed == []
+        await db_session.refresh(location)
+        assert location.site_fact_sources == {f: SOURCE_SURVEY for f in ("kind_of_site", "setting", "shares_address")}
+        assert location.site_fact_answers["setting"]["by"] == str(driver)
+        assert location.site_fact_answers["setting"]["stop_id"] == str(stop.id)
+        # Not a survey: it counts against neither the year nor the shift cap.
+        assert await surveys_recorded_today(db_session, driver) == surveys_before
+        # Nothing left open, so the stop no longer carries the facts.
+        route = await get_my_route(driver=authed, session=db_session)
+        view = next(v for v in route.stops if v.stop_id == str(stop.id))
+        assert view.site_facts is None
+
+    async def test_a_stop_with_no_dock_is_a_409(self, db_session):
+        hub, client, shop, driver, _ = await _world(db_session, linked=False)
+        stop = await _dropoff(db_session, hub, client, shop, driver, status="pending")
+
+        with pytest.raises(HTTPException) as refused:
+            await record_stop_site_facts(
+                str(stop.id), SiteFactsBody(setting="suburb"), driver=_authed(driver, hub), session=db_session,
+            )
+
+        assert refused.value.status_code == 409
+
+
+class TestAnAnswerNeverOverwritesAPersons:
+    async def test_a_disagreeing_answer_is_kept_as_a_dispute_not_applied(self, db_session):
+        site = await _site(db_session, setting=None)
+        first, second = uuid.uuid4(), uuid.uuid4()
+
+        applied = await record_site_facts(db_session, site, setting="suburb", by=first)
+        disputed = await record_site_facts(db_session, site, setting="city_core", by=second)
+        await db_session.commit()
+
+        assert (applied.applied, disputed.applied, disputed.disputed) == (["setting"], [], ["setting"])
+        await db_session.refresh(site)
+        assert site.setting == "suburb"
+        entry = site.site_fact_answers["setting"]
+        assert (entry["value"], entry["by"]) == ("suburb", str(first))
+        assert [(d["value"], d["by"]) for d in entry["disputes"]] == [("city_core", str(second))]
+
+    async def test_a_stale_offline_replay_cannot_undo_a_newer_answer(self, db_session):
+        """Driver A's phone cached the site while nobody knew; B answered yes;
+        A's "no", sent when A found signal, arrives after it."""
+        site = await _site(db_session)
+        site.shares_address = None
+        await db_session.commit()
+
+        await record_site_facts(db_session, site, shares_address=True, by=uuid.uuid4())
+        replay = await record_site_facts(db_session, site, shares_address=False, by=uuid.uuid4())
+        await db_session.commit()
+
+        assert replay.disputed == ["shares_address"]
+        await db_session.refresh(site)
+        assert site.shares_address is True
+
+    async def test_an_answer_agreeing_with_a_persons_changes_nothing(self, db_session):
+        site = await _site(db_session)  # the import's kind and shared-address answer
+
+        agreed = await record_site_facts(db_session, site, kind_of_site="body_shop", by=uuid.uuid4())
+        await db_session.commit()
+
+        assert (agreed.applied, agreed.disputed) == ([], [])
+        await db_session.refresh(site)
+        assert site.site_fact_sources is None
+        assert site.site_fact_answers in (None, {})
+
+    async def test_a_no_to_an_address_the_import_recorded_as_shared_is_a_dispute(self, db_session):
+        site, other = await _site(db_session), await _site(db_session)
+        site.shares_address = None
+        db_session.add(SiteAddressShare(location_id=site.id, shares_with_location_id=other.id))
+        await db_session.commit()
+
+        answered = await record_site_facts(db_session, site, shares_address=False, by=uuid.uuid4())
+        await db_session.commit()
+
+        assert answered.disputed == ["shares_address"]
+        await db_session.refresh(site)
+        assert site.shares_address is None

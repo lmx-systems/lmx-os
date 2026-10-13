@@ -261,6 +261,24 @@ class SiteFactsView(BaseModel):
     ask: list[str]
 
 
+class SiteFactsBody(BaseModel):
+    """The site's place facts alone (`DE-15`), asked after a drop-off at a door
+    already captured, where the full survey is not due. Each optional; "not
+    sure" is left out. Validated against app/models/location.py's vocabularies."""
+
+    kind_of_site: str | None = None
+    setting: str | None = None
+    shares_address: bool | None = None
+
+
+class SiteFactsAnsweredView(SiteFactsView):
+    """The site's facts after an answer, and which answers disagreed with what a
+    person or the import had already said - kept for a person to settle, not
+    applied (`app/identity/site_facts.py`)."""
+
+    disputed: list[str]
+
+
 class StopView(BaseModel):
     stop_id: str
     sequence: int
@@ -395,6 +413,9 @@ class DockSurveyResult(BaseModel):
     # How many more this driver will be asked for today. Returned so the app
     # does not have to count, and cannot disagree with the server about the cap.
     surveys_remaining_today: int
+    # Site-fact answers that disagreed with a person's or the import's and were
+    # kept as disputes rather than applied (`DE-15`).
+    site_facts_disputed: list[str] = []
 
 
 class StopGeofenceEventBody(BaseModel):

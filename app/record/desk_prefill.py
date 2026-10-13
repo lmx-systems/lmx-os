@@ -123,7 +123,7 @@ _SUFFIX = {
 _ROUTE = re.compile(
     r"\b(?:(?P<county>county|co)|us|u\s*s|nj|state)?\s*(?:hwy|highway|route|rte|rt|road|rd)?\s*[-#]?\s*(?P<n>\d{1,3})\b"
 )
-_ROUTE_WORDS = re.compile(r"\b(?:us|u\s*s|nj|state|county|hwy|highway|route|rte|rt)\b")
+_ROUTE_WORDS = re.compile(r"\b(?:us|u\s*s|nj|state|county|co|hwy|highway|route|rte|rt)\b")
 _DIRECTIONS = {"n", "s", "e", "w", "north", "south", "east", "west"}
 _ZIP = re.compile(r"\b(\d{5})(?:-\d{4})?\s*$")
 _NUMBER = re.compile(r"^\s*(\d+[a-z]?)(?:\s*-\s*\d+[a-z]?)?\s+(.+)$")
