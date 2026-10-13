@@ -11,7 +11,7 @@ from app.models.route import Route
 from app.models.stop import Stop
 
 
-async def lock_route(session: AsyncSession, route_id: uuid.UUID) -> None:
+async def lock_route(session: AsyncSession, route_id: uuid.UUID) -> Route | None:
     """Take the route row's lock for the rest of the transaction.
 
     **Taken before any of the route's stops** (docs/ARCHITECTURE.md, lock
@@ -31,8 +31,31 @@ async def lock_route(session: AsyncSession, route_id: uuid.UUID) -> None:
 
     Taking it again in the same transaction is free, so helpers that write a
     route's stops take it themselves rather than trusting the caller.
+
+    Returns the route **read fresh** under the lock (None if there is no such
+    route). A caller that read the route before waiting here holds a stale
+    copy: its status may have gone `completed` and its `plan_version` moved on
+    while it waited. The in-flight insertion appended stops to a route a
+    driver had just finished, and wrote back a `plan_version` another writer
+    had already used, from exactly that (`CON-5`). Pending changes on the
+    caller's copy are flushed first (autoflush), so nothing written is lost.
     """
-    await session.execute(select(Route.id).where(Route.id == route_id).with_for_update())
+    return (
+        await session.execute(
+            select(Route)
+            .where(Route.id == route_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+
+
+# Postgres's lock_not_available: what NOWAIT raises on a row somebody holds.
+_LOCK_NOT_AVAILABLE = "55P03"
+
+
+def _is_lock_busy(exc: DBAPIError) -> bool:
+    return getattr(exc.orig, "sqlstate", None) == _LOCK_NOT_AVAILABLE
 
 
 async def try_lock_route(session: AsyncSession, route_id: uuid.UUID) -> bool:
@@ -41,13 +64,16 @@ async def try_lock_route(session: AsyncSession, route_id: uuid.UUID) -> bool:
     For a caller already holding an order row: the route comes before orders,
     so one that waited here could deadlock with a driver's complete holding the
     route and waiting for that order. Returns False, with the transaction rolled
-    back, when the route is busy.
+    back, when the route is busy. Any other database error is raised: a dropped
+    connection or a statement timeout is not "somebody is on this route".
     """
     try:
         await session.execute(
             select(Route.id).where(Route.id == route_id).with_for_update(nowait=True)
         )
-    except DBAPIError:
+    except DBAPIError as exc:
+        if not _is_lock_busy(exc):
+            raise
         await session.rollback()
         return False
     return True
@@ -63,7 +89,8 @@ async def try_lock_route_and_stops(session: AsyncSession, route_id: uuid.UUID) -
     the walk reads statuses nobody can change under it, so it never writes a
     forecast onto a stop the driver has just arrived at.
 
-    Returns False, with the transaction rolled back, when anything is busy.
+    Returns False, with the transaction rolled back, when anything is busy; any
+    other database error is raised.
     """
     try:
         await session.execute(
@@ -72,7 +99,9 @@ async def try_lock_route_and_stops(session: AsyncSession, route_id: uuid.UUID) -
         await session.execute(
             select(Stop.id).where(Stop.route_id == route_id).with_for_update(nowait=True)
         )
-    except DBAPIError:
+    except DBAPIError as exc:
+        if not _is_lock_busy(exc):
+            raise
         await session.rollback()
         return False
     return True

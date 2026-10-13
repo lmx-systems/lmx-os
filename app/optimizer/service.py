@@ -697,7 +697,33 @@ class DispatchOptimizerService:
                     continue
                 detour_miles, route, at_pickup, at_drop = best
 
-                # The status first, only from held or queued, and nothing else
+                # The route first, before the order, as every writer of a live
+                # route takes it (docs/ARCHITECTURE.md, lock order): its plan
+                # version and its other stops' ETAs change below, and a driver
+                # completing or flagging a stop holds it while writing their own
+                # orders - a redelivered order among them may be this one. Read
+                # fresh under the lock: `active_routes` was read unlocked at the
+                # start of the pass, and a driver may have finished this route
+                # while this waited. Stops appended to a completed route reach
+                # nobody - the app shows only an active route - and the order
+                # sat `assigned` on them for good (`CON-5`).
+                locked_route = await lock_route(session, route.id)
+                if locked_route is None or locked_route.status != "active":
+                    active_routes = [r for r in active_routes if r.id != route.id]
+                    # Nothing written; the commit only lets the route go. The
+                    # order is untouched, still waiting, and the next cycle
+                    # tries it again.
+                    await session.commit()
+                    logger.info(
+                        "route_stop_insertion_route_finished",
+                        hub_id=hub_id,
+                        order_id=order_id,
+                        route_id=str(route.id),
+                    )
+                    continue
+                route = locked_route
+
+                # Then the status, only from held or queued, and nothing else
                 # written if it doesn't move: the order was read unlocked above, and a
                 # dispatcher may have offered it to a driver by hand since
                 # (app/orders/assignment.py holds the row until it commits). It
@@ -707,18 +733,12 @@ class DispatchOptimizerService:
                     session, [order.id], OrderStatus.assigned, only_from=_PLANNABLE
                 )
                 if not assigned_now:
+                    await session.commit()  # lets the route go; nothing written
                     logger.info(
                         "route_stop_insertion_order_taken", hub_id=hub_id, order_id=order_id
                     )
                     continue
                 assigned_now[0].assigned_at = datetime.now(timezone.utc)
-                # The route before any of its stops are written, as every writer
-                # of a live route's stops takes it (app/delivery/routes.py). Its
-                # plan version and its other stops' ETAs change below; a driver
-                # completing a stop or a dispatch cancel waits here, or this waits
-                # for them. This holds an order row first - the one order nothing
-                # else holds a route for, since it is on no route yet.
-                await lock_route(session, route.id)
 
                 next_sequence = (
                     (await session.execute(select(func.max(Stop.sequence)).where(Stop.route_id == route.id))).scalar_one()
@@ -752,6 +772,8 @@ class DispatchOptimizerService:
                 await session.flush()
                 session.add(StopOrder(stop_id=dropoff.id, order_id=order.id))
 
+                # From the version read under the lock, so a cancel's bump that
+                # landed while this waited is built on, not written over.
                 route.plan_version += 1
                 # The live ETA too, not only the plan. Until now the two new stops
                 # carried `eta = None` until the driver's next tap, so the app
