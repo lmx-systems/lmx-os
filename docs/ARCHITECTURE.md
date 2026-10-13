@@ -177,8 +177,8 @@ This closed three real gaps, not just "add some endpoints":
 
   Since October 2026 **dispatch can make an offer** by hand, from the
   exceptions queue, to an idle driver (`app/orders/assignment.py`); a driver
-  already on a route is refused until the cycle's own writes are hardened
-  (`docs/ROADMAP_1.5.md` `CON-5`). Two writers now offer, so: **the cycle
+  already on a route is refused until appending to a working route is built
+  (`docs/ROADMAP_1.5.md` `CON-5`'s second half). Two writers now offer, so: **the cycle
   offers only the orders it actually moved to `assigned`** - its status write
   and its in-flight insertion only move an order still held or queued
   (`advance_orders(only_from=...)`), so an order dispatch assigned
@@ -189,6 +189,38 @@ This closed three real gaps, not just "add some endpoints":
   goes back to the queue. The assign also holds the hub lock the cycle and the
   Redis rebuild take, so the rebuild never frees a driver whose offer is being
   committed.
+
+  **Every order status write is conditional** (`CON-5`): `advance_orders`
+  writes `WHERE status IN (...)`, with the caller's own precondition when it
+  has one (the cycle: held or queued; dispatch's cancel: assigned or en route
+  to the pickup; a client's cancel: anything before a driver; resolving a
+  failure: delivery_failed) and otherwise every status the state machine lets
+  move to the new one. A write queued behind another transaction re-checks
+  once it commits, so nothing lands on a status it may not leave from - a
+  driver's pickup on a cancelled order, a cancel on a collected one. **The
+  cycle's offers lock the orders they carry** to their commit, so a cancel
+  either lands first (the order is left off the offer) or waits and then
+  withdraws the offer. **Orders a failed cycle left `assigned` to nobody**
+  are sent back by the scheduled sweep, under the hub lock, once they have
+  sat past `stranded_assignment_grace_seconds`
+  (`return_stranded_assignments`, `app/orders/requeue.py`); it wakes no
+  cycle, so a failure that recurs costs one round trip per sweep.
+
+  **Lock order**, for anyone adding a writer:
+  - the hub lock (Redis) before any row - the cycle, the sweep, the assign;
+  - a driver row before order rows (the cycle's offers: drivers for share,
+    then their orders for update; the assign: the order, then its driver for
+    share, under the hub lock, so never beside a cycle);
+  - an offer row before its orders (accept, decline, expiry, cancel's
+    withdrawal);
+  - stops before their orders and their route (`complete_stop`,
+    `flag_stop_issue`, dispatch's cancel - which now reads the stops locked);
+  - the one exception, an order before its stops: a cancel that found no
+    offer and no stop locks the order and then looks again, which can only
+    find stops an in-flight insertion has just added and no driver has reached;
+  - an order before an offer only without waiting: a cancel that found
+    nothing and then locked the order looks for the offer with `SKIP LOCKED`,
+    and refuses with "try again" when a driver is answering it.
 - **The first Route/Stop endpoints this codebase has ever had.** The
   `routes`/`stops` tables existed since the initial migration but had zero
   API surface. Accepting an offer now builds one pickup `Stop` per shop

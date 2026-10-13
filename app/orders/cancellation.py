@@ -91,8 +91,13 @@ async def cancel_before_collection(
     """
     if order.status not in CANCELLABLE_STATUSES:
         raise OrderNotCancellable(why_not_cancellable(order))
-    # Through the state machine, so the client's webhook hears CANCELLED.
-    moved = await advance_orders(session, [order.id], OrderStatus.cancelled)
+    # Through the state machine, so the client's webhook hears CANCELLED. Only
+    # from a status a client may cancel: a cycle assigning the order since the
+    # read above leaves this write nothing to match, and the client is told a
+    # driver has it rather than cancelling an order with an offer out (`CON-5`).
+    moved = await advance_orders(
+        session, [order.id], OrderStatus.cancelled, only_from=CANCELLABLE_STATUSES
+    )
     if not moved:
         raise OrderNotCancellable(why_not_cancellable(order))
     await session.commit()
@@ -133,17 +138,53 @@ async def cancel_live_order(
         raise OrderNotCancellable(why_dispatch_cannot_cancel(order))
 
     finished: tuple[str, str, str] | None = None
+    notice: dict | None = None
     withdrawn = await _withdraw_offer(session, order)
     if withdrawn is not None:
         how = withdrawn
     else:
-        how, finished = await _remove_stops(session, order)
-    moved = await advance_orders(session, [order.id], OrderStatus.cancelled)
+        how, finished, notice = await _remove_stops(session, order)
+        if notice is None:
+            # Assigned with neither an open offer nor a stop: the cycle may be
+            # between its status write and its offers' commit, or an in-flight
+            # insertion between its status write and its stops' commit. The
+            # offers hold their orders locked to that commit
+            # (app/optimizer/service.py) and the insertion holds the row it
+            # wrote, so taking this one for update waits for either; then an
+            # offer that went out is withdrawn and stops that were added come
+            # off, and an offer not yet made reads the order cancelled and
+            # leaves it out (`CON-5`).
+            await _lock_order(session, order)
+            if order.status in CANCELLABLE_STATUSES:
+                # The cycle's offer to a driver it found taken or switched off
+                # sent the order back while this waited.
+                await cancel_before_collection(session, hold_queue, order)
+                return BEFORE_COLLECTION
+            # Without waiting on the offer: holding the order now, waiting on a
+            # driver who is answering (and so writing this order) deadlocks.
+            withdrawn = await _withdraw_offer(session, order, wait=False)
+            if withdrawn is not None:
+                how = withdrawn
+            else:
+                # The order before its stops, the reverse of a driver's
+                # complete; safe only because stops an insertion has just added
+                # are ones no driver has reached.
+                how, finished, notice = await _remove_stops(session, order)
+    # Only from a status dispatch may cancel: queued behind a driver's pickup,
+    # this re-checks once the pickup commits and refuses a collected order
+    # (`picked_up` -> `cancelled` is legal for the machine, as a return).
+    moved = await advance_orders(
+        session, [order.id], OrderStatus.cancelled, only_from=LIVE_CANCELLABLE_STATUSES
+    )
     if not moved:
         raise OrderNotCancellable(why_dispatch_cannot_cancel(order))
     order_id, hub_id = str(order.id), str(order.hub_id)
     await session.commit()
     await hold_queue.remove(hub_id, order_id)
+    if notice is not None:
+        # After the commit, so the app is never told of a removal that a refusal
+        # then rolled back.
+        await get_client().publish(f"driver_route_events:{notice['driver_id']}", json.dumps(notice["event"]))
     if finished is not None:
         await _free_driver(*finished)
     logger.info("order_cancelled_by_dispatch", order_id=order_id, hub_id=hub_id, how=how)
@@ -171,26 +212,38 @@ async def _free_driver(hub_id: str, driver_id: str, route_id: str) -> None:
         await dispatch_event_bus.publish(hub_id, "driver_status_changed")
 
 
-async def _withdraw_offer(session: AsyncSession, order: Order) -> str | None:
+async def _lock_order(session: AsyncSession, order: Order) -> None:
+    """Take the order's row for update and read it fresh."""
+    await session.execute(
+        select(Order)
+        .where(Order.id == order.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+
+
+async def _withdraw_offer(session: AsyncSession, order: Order, *, wait: bool = True) -> str | None:
     # Locked and read fresh. A driver accepting or declining holds the row, and
     # this waits for them: then the offer is no longer `offered`, nothing is
     # withdrawn, and the caller takes the order off the route an accept built.
     # Unlocked, a stale copy marked an accepted offer `withdrawn` over the
     # accept, and sent back orders a decline had already sent back - by then
     # possibly given to somebody else.
+    open_offer = select(RouteOffer).where(
+        RouteOffer.hub_id == order.hub_id,
+        RouteOffer.status == "offered",
+        RouteOffer.stop_payload.contains([{"order_id": str(order.id)}]),
+    )
     offer = (
         await session.execute(
-            select(RouteOffer)
-            .where(
-                RouteOffer.hub_id == order.hub_id,
-                RouteOffer.status == "offered",
-                RouteOffer.stop_payload.contains([{"order_id": str(order.id)}]),
-            )
-            .with_for_update()
-            .execution_options(populate_existing=True)
+            open_offer.with_for_update(skip_locked=not wait).execution_options(populate_existing=True)
         )
     ).scalars().first()
     if offer is None:
+        if not wait and await session.scalar(open_offer.with_only_columns(RouteOffer.id).limit(1)):
+            raise OrderNotCancellable(
+                "The driver is answering the offer for this order right now. Try again in a moment."
+            )
         return None
     offer.status = "withdrawn"
     offer.responded_at = datetime.now(timezone.utc)
@@ -201,10 +254,17 @@ async def _withdraw_offer(session: AsyncSession, order: Order) -> str | None:
 
 async def _remove_stops(
     session: AsyncSession, order: Order
-) -> tuple[str, tuple[str, str, str] | None]:
-    """Take the order's stops off its route. Returns how, and - when that left
-    the route with nothing to do - its (hub id, driver id, route id), so the
-    caller can free the driver once the change is committed."""
+) -> tuple[str, tuple[str, str, str] | None, dict | None]:
+    """Take the order's stops off its route. Returns how; when that left the
+    route with nothing to do, its (hub id, driver id, route id), so the caller
+    can free the driver once the change is committed; and the driver app's
+    notice of the change, for the caller to send after the commit. The notice
+    is None when the order is on no live route."""
+    # The stops locked and read fresh, in sequence, before the pickup's status
+    # is trusted: a driver completing the pickup holds that stop, and this waits
+    # for them and then sees it collected. Read unlocked, a stale `en_route`
+    # pickup was taken off a route the driver had just collected from (`CON-5`).
+    # Stops before the route, as `complete_stop` and `flag_stop_issue` take them.
     rows = (
         await session.execute(
             select(Stop, Route)
@@ -212,12 +272,14 @@ async def _remove_stops(
             .join(Route, Route.id == Stop.route_id)
             .where(StopOrder.order_id == order.id, Route.status == "active")
             .order_by(Stop.sequence)
+            .with_for_update(of=Stop)
+            .execution_options(populate_existing=True)
         )
     ).all()
     if not rows:
         # Assigned with neither an open offer nor a live route: nothing holds
         # the order, so there is nothing to take it off.
-        return STOPS_REMOVED, None
+        return STOPS_REMOVED, None, None
     pickup = next((stop for stop, _ in rows if stop.stop_type == "pickup"), None)
     if pickup is not None and pickup.status in ("arrived", "completed"):
         raise OrderNotCancellable(
@@ -272,18 +334,16 @@ async def _remove_stops(
         # walk skips a cancelled stop the way it skips a completed one.
         await refresh_route_etas(session, route.id)
     # The same channel the live insertion uses, so the app sees one kind of change.
-    await get_client().publish(
-        f"driver_route_events:{route.driver_id}",
-        json.dumps(
-            {
-                "type": "route_updated",
-                "route_id": str(route.id),
-                "plan_version": route.plan_version,
-                "change": "stop_removed",
-                "affected_stop_ids": removed,
-                "message": "Dispatch cancelled an order; its stops are off your route",
-                "occurred_at": datetime.now(timezone.utc).isoformat(),
-            }
-        ),
-    )
-    return STOPS_REMOVED, finished
+    notice = {
+        "driver_id": str(route.driver_id),
+        "event": {
+            "type": "route_updated",
+            "route_id": str(route.id),
+            "plan_version": route.plan_version,
+            "change": "stop_removed",
+            "affected_stop_ids": removed,
+            "message": "Dispatch cancelled an order; its stops are off your route",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+    return STOPS_REMOVED, finished, notice

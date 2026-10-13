@@ -9,15 +9,22 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
+import structlog
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
+from app.config import settings
 from app.fleet_state.manager import FleetStateManager
 from app.models.order import INTAKE_LIVE, Order, OrderStatus
+from app.models.route_offer import RouteOffer
+from app.models.shop import Shop
+from app.models.stop import Stop, StopOrder
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.orders.sinks import emit_status_change
+
+logger = structlog.get_logger(__name__)
 
 
 async def requeue_orders_from_offer(
@@ -27,6 +34,7 @@ async def requeue_orders_from_offer(
     stop_payload: list[dict],
     *,
     free_driver: bool = True,
+    wake: bool = True,
 ) -> None:
     """
     A declined/expired offer never touches Route/Stop - the orders just go
@@ -50,6 +58,9 @@ async def requeue_orders_from_offer(
     the same offer finds it answered and sends nothing back. Only that makes
     "still `assigned`" mean "still assigned on this offer": an order this offer
     lost and dispatch gave to somebody else is `assigned` too.
+
+    `wake=False` sends them back without waking the hub's cycle: the stranded
+    sweep below, which runs just before the scheduled cycles anyway.
 
     `free_driver=False` for orders an offer never reached: the cycle moved them
     to `assigned` for a driver whom somebody else claimed before the cycle could
@@ -151,4 +162,100 @@ async def requeue_orders_from_offer(
                 ),
             ),
         )
-    await dispatch_event_bus.publish(hub_id, "job_offer_lapsed")
+    if wake:
+        await dispatch_event_bus.publish(hub_id, "job_offer_lapsed")
+
+
+async def return_stranded_assignments(
+    session: AsyncSession, hub_id: str, *, now: datetime | None = None
+) -> int:
+    """Send back orders `assigned` to nobody, and return how many (`CON-5`).
+
+    A cycle moves its orders to `assigned` and commits, then makes their offers
+    in a second transaction. When that one fails, the drivers it claimed are
+    given back but the orders stay `assigned`, with no offer, no stop and out of
+    the hold queue: nobody has them and nothing says so. Sending them back from
+    the cycle's failure path re-ran the cycle into the same failure about once a
+    second, each order flipping between `assigned` and `held` with a client
+    webhook each time. So the scheduled sweep does it instead, under the hub
+    lock, before its cycles (app/api/internal_routes.py), and does not wake the
+    cycle itself: a failure that recurs costs one round trip per order per
+    sweep, every five minutes, not one a second.
+
+    Stranded means: `assigned`, live, unchanged for the grace, on no open offer,
+    and on no stop that wasn't cancelled. Locked with `SKIP LOCKED`, so an order
+    somebody is writing is left for the next sweep, and re-checked by the
+    requeue's own `WHERE status = 'assigned'`. Commits nothing; the caller does.
+    """
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=settings.stranded_assignment_grace_seconds)
+    candidates = list(
+        (
+            await session.execute(
+                select(Order)
+                .where(
+                    Order.hub_id == uuid.UUID(hub_id),
+                    Order.status == OrderStatus.assigned,
+                    Order.intake_mode == INTAKE_LIVE,
+                    Order.updated_at < cutoff,
+                )
+                .order_by(Order.id)
+                .with_for_update(skip_locked=True)
+                .execution_options(populate_existing=True)
+            )
+        ).scalars()
+    )
+    if not candidates:
+        return 0
+    candidate_ids = [order.id for order in candidates]
+    open_payloads: list[list[dict]] = list(
+        await session.scalars(
+            select(RouteOffer.stop_payload).where(
+                RouteOffer.hub_id == uuid.UUID(hub_id), RouteOffer.status == "offered"
+            )
+        )
+    )
+    on_an_offer = {stop.get("order_id") for stops in open_payloads for stop in (stops or [])}
+    on_a_stop = set(
+        await session.scalars(
+            select(StopOrder.order_id)
+            .join(Stop, Stop.id == StopOrder.stop_id)
+            .where(StopOrder.order_id.in_(candidate_ids), Stop.status != "cancelled")
+        )
+    )
+    stranded = [
+        order
+        for order in candidates
+        if str(order.id) not in on_an_offer and order.id not in on_a_stop
+    ]
+    if not stranded:
+        return 0
+    shops = {
+        shop.id: shop
+        for shop in await session.scalars(
+            select(Shop).where(Shop.id.in_({order.shop_id for order in stranded}))
+        )
+    }
+    payload: list[dict] = []
+    for order in stranded:
+        shop = shops.get(order.shop_id) if order.shop_id is not None else None
+        if shop is None:
+            continue  # nowhere to collect from; left for a person, as before
+        payload.append(
+            {
+                "order_id": str(order.id),
+                "lat": shop.lat,
+                "lng": shop.lng,
+                "sla_tier": getattr(order.sla_tier, "value", order.sla_tier) or "T2",
+                "shop_name": shop.name,
+            }
+        )
+    if not payload:
+        return 0
+    # No driver to free: whoever was claimed for these was given back when the
+    # offers failed, and a driver `offered` now belongs to some other offer.
+    await requeue_orders_from_offer(
+        session, hub_id, "", payload, free_driver=False, wake=False
+    )
+    logger.warning("dispatch_stranded_assignments_returned", hub_id=hub_id, orders=len(payload))
+    return len(payload)
