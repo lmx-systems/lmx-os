@@ -859,6 +859,9 @@ export interface GigJob {
   pay_cents: number
   distance_miles: string | null
   status: string
+  /** DE-7: logged as a golden record, and the bonus owed once delivered. */
+  is_logged_as_record: boolean
+  record_bonus_cents: number | null
 }
 
 /** Volume and pairing figures for the gig path (docs/ROADMAP.md G12). */

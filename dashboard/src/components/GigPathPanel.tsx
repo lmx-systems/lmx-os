@@ -207,6 +207,17 @@ export function GigPathPanel({ hubId }: { hubId: string }) {
                   </td>
                   <td className="py-1 text-[var(--text-secondary)]">
                     {job.status.replace('_', ' ')}
+                    {job.is_logged_as_record && (
+                      <span className="block text-[11px]">
+                        {/* DE-7: typed on the record form, so it rests on the
+                            driver's word - checked before any bonus is paid. */}
+                        {job.intake_source === 'record_form'
+                          ? `logged, typed by the driver - check before paying${
+                              job.record_bonus_cents != null ? ` ${money(job.record_bonus_cents)}` : ''
+                            }`
+                          : 'logged as a record'}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

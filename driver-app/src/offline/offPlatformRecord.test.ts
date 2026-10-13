@@ -7,6 +7,7 @@ import {
   EMPTY_JOB,
   itemFacts,
   jobIntake,
+  clearDrafts,
   loadDrafts,
   newDraft,
   recordBody,
@@ -21,7 +22,7 @@ const NOW = new Date(2026, 9, 12, 15, 0);
 describe('logging an off-platform delivery (DE-7)', () => {
   it('names the record with a v4 UUID the server accepts', () => {
     expect(uuidV4()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-    const draft = newDraft(NOW);
+    const draft = newDraft('d1', NOW);
     expect(draft.recordId).not.toEqual(draft.pickupStopId);
   });
 
@@ -68,7 +69,7 @@ describe('logging an off-platform delivery (DE-7)', () => {
   });
 
   it('names a stored job by its id, and a typed one by itself', () => {
-    const draft = newDraft(NOW);
+    const draft = newDraft('d1', NOW);
     const typed = jobIntake({ ...EMPTY_JOB, platform: 'dispatch', ref: 'D', pickupAddress: 'a', dropoffAddress: 'b', pickupFrom: '1:00', pickupTo: '2:00', pay: '9' }, NOW);
     if (typeof typed === 'string') throw new Error(typed);
 
@@ -81,12 +82,25 @@ describe('logging an off-platform delivery (DE-7)', () => {
   });
 
   it('keeps a draft until the door is logged', async () => {
-    const draft = newDraft(NOW);
+    const draft = newDraft('d1', NOW);
     await saveDraft(draft);
     await saveDraft({ ...draft, jobLabel: 'C-1' });
-    expect(await loadDrafts()).toEqual([{ ...draft, jobLabel: 'C-1' }]);
+    expect(await loadDrafts('d1')).toEqual([{ ...draft, jobLabel: 'C-1' }]);
 
     await removeDraft(draft.recordId);
-    expect(await loadDrafts()).toEqual([]);
+    expect(await loadDrafts('d1')).toEqual([]);
+  });
+
+  it("shows a driver only their own drafts, and none after signing out", async () => {
+    const mine = newDraft('d1', NOW);
+    const theirs = newDraft('d2', NOW);
+    await saveDraft(mine);
+    await saveDraft(theirs);
+    expect(await loadDrafts('d1')).toEqual([mine]);
+    expect(await loadDrafts('d2')).toEqual([theirs]);
+
+    await clearDrafts();
+    expect(await loadDrafts('d1')).toEqual([]);
+    expect(await loadDrafts('d2')).toEqual([]);
   });
 });

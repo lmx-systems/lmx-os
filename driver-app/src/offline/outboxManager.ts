@@ -48,6 +48,27 @@ export function isPermanentFailure(err: unknown): boolean {
   return !RETRYABLE_4XX.has(err.status);
 }
 
+// Folding a record's later half into its earlier one, still queued: each send
+// carries only what that moment adds, so one end's object is merged with the
+// same end's, not replaced by it - the door pin must not drop the stop pin taken
+// a minute before (DE-7).
+const RECORD_PARTS = ['pickup', 'dropoff', 'item'] as const;
+
+export function mergeRecordPayload(
+  earlier: Record<string, unknown>,
+  later: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...earlier, ...later };
+  for (const part of RECORD_PARTS) {
+    const a = earlier[part];
+    const b = later[part];
+    if (a && b && typeof a === 'object' && typeof b === 'object') {
+      merged[part] = { ...(a as Record<string, unknown>), ...(b as Record<string, unknown>) };
+    }
+  }
+  return merged;
+}
+
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -62,6 +83,10 @@ export class OutboxManager {
   private items: OutboxItem[] = [];
   private listeners = new Set<(items: OutboxItem[]) => void>();
   private flushing = false;
+  // The item whose request is open right now. Nothing is folded into it: when
+  // its request succeeds it is removed by id, and whatever was folded in after
+  // it left would go with it, unsent.
+  private sendingId: string | null = null;
   private initialized = false;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -125,14 +150,15 @@ export class OutboxManager {
     if (type === 'off-platform-record') {
       // The counter half, then the door: one record, each send overwriting only
       // what it carries. Folded into one still waiting - or one refused, which
-      // the driver is redoing - rather than queued twice.
-      const idx = this.items.findIndex(sameAction);
+      // the driver is redoing - rather than queued twice. Never into one being
+      // sent: that goes as a new item behind it.
+      const idx = this.foldTarget(sameAction);
       if (idx !== -1) {
         this.items = this.items.map((i, n) =>
           n === idx
             ? {
                 ...i,
-                payload: { ...i.payload, ...payload },
+                payload: mergeRecordPayload(i.payload, payload),
                 attempts: 0,
                 lastError: null,
                 permanentlyFailed: false,
@@ -153,7 +179,7 @@ export class OutboxManager {
       // unsent one.
       // The driver corrected a weight before it went: the correction replaces
       // it, rather than two writes racing to be last.
-      const idx = this.items.findIndex(sameAction);
+      const idx = this.foldTarget(sameAction);
       if (idx !== -1) {
         this.items = this.items.map((i, n) =>
           n === idx ? { ...i, payload, nextAttemptAt: new Date().toISOString() } : i,
@@ -166,7 +192,7 @@ export class OutboxManager {
       // Coalesce: only the latest absolute scanned_count matters, so
       // several rapid taps while offline collapse into one queued item
       // instead of N separate requests once connectivity returns.
-      const idx = this.items.findIndex((i) => i.type === 'scan' && i.stopId === stopId);
+      const idx = this.foldTarget((i) => i.type === 'scan' && i.stopId === stopId);
       if (idx !== -1) {
         this.items = this.items.map((i, n) =>
           n === idx ? { ...i, payload, nextAttemptAt: new Date().toISOString() } : i,
@@ -175,10 +201,11 @@ export class OutboxManager {
         this.flush();
         return;
       }
-    } else if (this.items.some(sameAction)) {
+    } else if (type !== 'off-platform-record' && this.items.some(sameAction)) {
       // arrive/complete/flag are one-shot state transitions - don't queue
       // the same transition twice for the same stop. Persisted anyway, in case
-      // the filter above removed a rejected one.
+      // the filter above removed a rejected one. (A record's later half, whose
+      // earlier one is being sent, is not a repeat: it goes behind it.)
       await this.persistAndNotify();
       return;
     }
@@ -198,6 +225,19 @@ export class OutboxManager {
     ];
     await this.persistAndNotify();
     this.flush();
+  }
+
+  /**
+   * The queued item a new action folds into: the latest that matches, since a
+   * later item is sent later and must carry the newest values. None when that
+   * one is being sent - its request may already have left with the old payload,
+   * and success removes it by id - so the caller queues a new item behind it.
+   */
+  private foldTarget(match: (i: OutboxItem) => boolean): number {
+    for (let n = this.items.length - 1; n >= 0; n--) {
+      if (match(this.items[n])) return this.items[n].id === this.sendingId ? -1 : n;
+    }
+    return -1;
   }
 
   /**
@@ -243,7 +283,12 @@ export class OutboxManager {
         }
 
         try {
-          await this.send(item);
+          this.sendingId = item.id;
+          try {
+            await this.send(item);
+          } finally {
+            this.sendingId = null;
+          }
           this.items = this.items.filter((i) => i.id !== item.id);
           await this.persistAndNotify();
         } catch (err) {

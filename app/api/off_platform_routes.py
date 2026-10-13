@@ -22,6 +22,7 @@ from app.record.off_platform import (
     RecordConflict,
     RecordInvalid,
     RecordNotFound,
+    find_off_platform_record,
     log_off_platform_record,
     record_grade,
 )
@@ -43,6 +44,7 @@ async def _view(session: AsyncSession, record: OffPlatformRecord) -> OffPlatform
         tier=tier,
         elements_missing=missing,
         record_bonus_cents=record.job.record_bonus_cents,
+        counter_resolved=record.pickup.handoff_point_id is not None,
     )
 
 
@@ -79,4 +81,20 @@ async def log_off_platform_delivery(
     except RecordInvalid as invalid:
         raise HTTPException(status_code=422, detail=str(invalid)) from invalid
     await session.commit()
+    return await _view(session, record)
+
+
+@router.get("/me/off-platform-records/{record_id}", response_model=OffPlatformRecordView)
+async def get_off_platform_record(
+    record_id: uuid.UUID,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> OffPlatformRecordView:
+    """The record as the server has it - for the app to know, once the counter
+    half has landed, whether there is a counter to capture. 404 until the first
+    send arrives, and for anyone else's record."""
+    try:
+        record = await find_off_platform_record(session, driver_id=uuid.UUID(driver.driver_id), record_id=record_id)
+    except RecordNotFound as missing:
+        raise HTTPException(status_code=404, detail=str(missing)) from missing
     return await _view(session, record)

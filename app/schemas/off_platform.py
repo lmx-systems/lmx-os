@@ -64,5 +64,9 @@ class OffPlatformRecordView(BaseModel):
     # elements are still missing.
     tier: str | None
     elements_missing: int | None
-    # Owed for logging the job, and not paid until payouts exist.
+    # Owed once the delivery is logged, and not paid until payouts exist.
     record_bonus_cents: int | None
+    # Whether the pickup address named a place, so the counter has a handoff
+    # point to capture. False: there is nothing to survey there, and the app
+    # does not offer it.
+    counter_resolved: bool

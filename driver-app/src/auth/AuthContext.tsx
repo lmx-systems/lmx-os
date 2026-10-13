@@ -7,6 +7,7 @@ import { api, setAuthToken } from '../api/client';
 import { adoptAuthToken, clearAuthToken, TOKEN_STORAGE_KEY } from './token';
 import type { DriverProfile } from '../api/types';
 import { stopReportingLocation } from '../location/reportDriverLocation';
+import { clearDrafts } from '../offline/offPlatformRecord';
 import { registerForPushNotifications } from '../notifications/registerForPushNotifications';
 
 // SecureStore (Keychain on iOS, EncryptedSharedPreferences on Android), not
@@ -129,6 +130,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // watcher down would go out unauthenticated (docs/ROADMAP.md F1).
     stopReportingLocation();
     await clearAuthToken();
+    // DE-7: a half-logged delivery holds the job's addresses and pay, and the
+    // next person to sign in on this phone is not its driver.
+    await clearDrafts();
     setProfileState(null);
     setIsSignedIn(false);
     setNeedsBiometricRetry(false);

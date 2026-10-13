@@ -32,7 +32,7 @@ jest.mock('../api/client', () => ({
 
 import { ApiError, api } from '../api/client';
 import { sendHandoffPhoto } from './handoffPhotos';
-import { isPermanentFailure, OutboxManager } from './outboxManager';
+import { isPermanentFailure, mergeRecordPayload, OutboxManager } from './outboxManager';
 import type { OutboxItem } from './types';
 
 const mockApi = api as unknown as Record<
@@ -69,6 +69,22 @@ const mockApi = api as unknown as Record<
  * reason: the misclassification *is* the bug, and it should be checkable
  * without standing up a queue, a network stub and a clock.
  */
+describe("folding one half of an off-platform record into the other (DE-7)", () => {
+  it('merges each end with the same end, and the item with the item', () => {
+    expect(
+      mergeRecordPayload(
+        { pickup_stop_id: 'p1', pickup: { stop_pin: 'a' }, item: { item_weight_kg: 4 } },
+        { pickup_stop_id: 'p1', pickup: { door_pin: 'b' }, item: { item_size_class: 'small' }, dropoff: { at: 't' } },
+      ),
+    ).toEqual({
+      pickup_stop_id: 'p1',
+      pickup: { stop_pin: 'a', door_pin: 'b' },
+      item: { item_weight_kg: 4, item_size_class: 'small' },
+      dropoff: { at: 't' },
+    });
+  });
+});
+
 describe('which failures are worth giving up on', () => {
   it('does not give up on a 401 — a stale token is fixed by refreshing', () => {
     expect(isPermanentFailure(new ApiError(401, 'Invalid or expired session'))).toBe(false);
@@ -342,6 +358,57 @@ describe('the queue on a shift', () => {
       item: { item_weight_kg: 4 },
       pickup: { at: 't1' },
       dropoff: { at: 't2' },
+    });
+    expect(itemsOf(queue)).toEqual([]);
+  });
+
+  it('never folds the door half into a counter half whose request is already out (DE-7)', async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    mockApi.logOffPlatformRecord
+      .mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)))
+      .mockResolvedValue({});
+    const queue = new OutboxManager();
+
+    await queue.enqueue('off-platform-record', 'r1', { pickup_stop_id: 'p1', pickup: { at: 't1' } });
+    await settle();
+    // The counter half is on the wire when the driver taps Delivered.
+    expect(mockApi.logOffPlatformRecord).toHaveBeenCalledTimes(1);
+    await queue.enqueue('off-platform-record', 'r1', { pickup_stop_id: 'p1', dropoff: { at: 't2' } });
+    answer({});
+    await settle();
+    await settle();
+    await jest.advanceTimersByTimeAsync(2000);
+    await settle();
+    await settle();
+
+    // Folded in, the door half went with the counter's item when its 200 came
+    // back, and was never sent.
+    expect(mockApi.logOffPlatformRecord.mock.calls).toEqual([
+      ['r1', { pickup_stop_id: 'p1', pickup: { at: 't1' } }],
+      ['r1', { pickup_stop_id: 'p1', dropoff: { at: 't2' } }],
+    ]);
+    expect(itemsOf(queue)).toEqual([]);
+  });
+
+  it('keeps the stop pin when the counter pin is folded into the same end (DE-7)', async () => {
+    mockApi.logOffPlatformRecord
+      .mockRejectedValueOnce(new TypeError('Network request failed'))
+      .mockResolvedValue({});
+    const queue = new OutboxManager();
+
+    await queue.enqueue('off-platform-record', 'r1', { pickup_stop_id: 'p1', pickup: { stop_pin: { lat: 1, lng: 2 } } });
+    await settle();
+    await queue.enqueue('off-platform-record', 'r1', {
+      pickup_stop_id: 'p1',
+      item: { item_weight_kg: 4 },
+      pickup: { door_pin: { lat: 3, lng: 4 }, at: 't1' },
+    });
+    await settle();
+
+    expect(mockApi.logOffPlatformRecord).toHaveBeenLastCalledWith('r1', {
+      pickup_stop_id: 'p1',
+      item: { item_weight_kg: 4 },
+      pickup: { stop_pin: { lat: 1, lng: 2 }, door_pin: { lat: 3, lng: 4 }, at: 't1' },
     });
     expect(itemsOf(queue)).toEqual([]);
   });
