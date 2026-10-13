@@ -294,11 +294,24 @@ async def _remove_stops(
     # ETAs of the route's other stops, so a cancel that held its own stops while
     # waiting for the route deadlocked against a driver's complete holding the
     # route and writing those stops' ETAs.
+    #
+    # Only stops still to be done. A redelivery keeps its failed attempt's
+    # stops as history (app/delivery/resolution.py) - a completed pickup, a
+    # failed drop-off - possibly on another route still active. Counted, they
+    # picked the wrong route (`limit(1)` with no order), refused the cancel as
+    # "already has the parts" over a pickup collected on the attempt that
+    # failed, or rewrote the history to `cancelled`. Newest first, so the
+    # attempt being driven now is the one taken off.
     route_id = await session.scalar(
         select(Stop.route_id)
         .join(StopOrder, StopOrder.stop_id == Stop.id)
         .join(Route, Route.id == Stop.route_id)
-        .where(StopOrder.order_id == order.id, Route.status == "active")
+        .where(
+            StopOrder.order_id == order.id,
+            Route.status == "active",
+            Stop.status.notin_(_TERMINAL_STOP_STATUSES),
+        )
+        .order_by(Stop.created_at.desc(), Stop.id)
         .limit(1)
     )
     if route_id is None:
@@ -317,7 +330,11 @@ async def _remove_stops(
     # `en_route` pickup was taken off a route the driver had just collected
     # from (`CON-5`). Re-checked against the route's status: the driver may have
     # finished it while this waited.
-    rows = (
+    #
+    # All the order's stops on the route are locked, finished ones included, so
+    # a pickup the driver completed while this waited is seen; only the
+    # unfinished ones are taken off.
+    locked = (
         await session.execute(
             select(Stop, Route)
             .join(StopOrder, StopOrder.stop_id == Stop.id)
@@ -328,10 +345,16 @@ async def _remove_stops(
             .execution_options(populate_existing=True)
         )
     ).all()
+    rows = [(stop, route) for stop, route in locked if stop.status not in _TERMINAL_STOP_STATUSES]
     if not rows:
         return STOPS_REMOVED, None, None
+    # The parts are on the van, or the driver is at the counter: the pickup
+    # being driven to is reached, or there is a drop-off left with no pickup
+    # still ahead of it - collected while this waited. A finished pickup with
+    # its finished drop-off is a failed attempt's history, not this one.
     pickup = next((stop for stop, _ in rows if stop.stop_type == "pickup"), None)
-    if pickup is not None and pickup.status in ("arrived", "completed"):
+    has_dropoff = any(stop.stop_type == "dropoff" for stop, _ in rows)
+    if (pickup is not None and pickup.status == "arrived") or (pickup is None and has_dropoff):
         raise OrderNotCancellable(
             "The driver is at the shop or already has the parts. When they report, "
             "resolve the delivery as a return."

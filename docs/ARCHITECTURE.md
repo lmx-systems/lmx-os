@@ -212,8 +212,11 @@ This closed three real gaps, not just "add some endpoints":
   **Lock order**, for anyone adding a writer:
   - the hub lock (Redis) before any row - the cycle, the sweep, the assign;
   - a driver row before order rows (the cycle's offers: drivers for share,
-    then their orders for update; the assign: the order, then its driver for
-    share, under the hub lock, so never beside a cycle);
+    then their orders for update). **The manual assign is the exception**: the
+    order for update, then its driver for share. It is safe only because it
+    runs under the hub lock, so never beside a cycle; the hub lock's lease is a
+    fixed 60 seconds with no renewal, and a cycle that outlives it loses that
+    guarantee (`CON-5`);
   - an offer row before its orders (accept, decline, expiry, cancel's
     withdrawal);
   - **a route before any of its stops, and its stops before their orders.**
@@ -226,11 +229,14 @@ This closed three real gaps, not just "add some endpoints":
     `refresh_route_etas` take it themselves (free when held). Holding a stop
     while waiting for the route deadlocked a cancel against a driver's
     complete. The location-ping refresh takes route then stops with `NOWAIT`;
-    accepting an offer locks a route nobody else can see yet;
-  - an order before a route only for an order on no route yet: the in-flight
-    insertion writes the order (`only_from` held or queued), then locks the
-    route it is joining. Nothing holding that route waits on that order;
-  - and a cancel that found no offer and no stop locks the order and looks
+    accepting an offer locks a route nobody else can see yet. The in-flight
+    insertion locks the route it is joining and then writes the order
+    (`only_from` held or queued): it once wrote the order first, but a driver
+    flagging a redelivered order's old stop holds that route and then writes
+    the same order. `lock_route` returns the route **read fresh** - a caller
+    that read it before waiting may hold a route since completed, or a stale
+    `plan_version`, and the insertion skips a route no longer `active`;
+  - the one order before a route: a cancel that found no offer and no stop locks the order and looks
     again, then takes the route **without waiting** (`try_lock_route`) and
     refuses with "try again" if a driver is busy on it - a driver's complete
     holds the route and then waits for its stop's orders, which may include
