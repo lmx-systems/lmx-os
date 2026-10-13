@@ -62,6 +62,7 @@ from app.legal.retention import prune_all
 from app.models.hub import Hub
 from app.optimizer.redis_rebuild import reconcile_redis_state
 from app.orders.requeue import return_stranded_assignments
+from app.playbook.sweep import run_playbook
 from app.optimizer.service import DispatchOptimizerService
 from app.webhooks.delivery import deliver_pending
 
@@ -124,6 +125,7 @@ async def run_dispatch_for_all_hubs(session: AsyncSession = Depends(get_db)) -> 
 
     results: dict[str, int | str] = {}
     stranded: dict[str, int] = {}
+    playbook: dict[str, dict | str] = {}
     for hub_id in await _active_hub_ids(session):
         try:
             # The same per-hub lock the event-driven cycle and the rebuild take.
@@ -136,6 +138,10 @@ async def run_dispatch_for_all_hubs(session: AsyncSession = Depends(get_db)) -> 
                 # Orders a failed cycle left `assigned` to nobody, back in the
                 # queue for the cycle below (`CON-5`). Under the hub lock, so no
                 # cycle is between its status write and its offers right now.
+                # The playbook's calls on orders that need one, and its actions on
+                # the calls that have fallen due (`DEC-8`). First, so an order it
+                # redelivers is placed by the cycle below.
+                playbook[hub_id] = await _run_playbook(session, hub_id)
                 returned = await _return_stranded(session, hub_id)
                 if returned:
                     stranded[hub_id] = returned
@@ -154,6 +160,7 @@ async def run_dispatch_for_all_hubs(session: AsyncSession = Depends(get_db)) -> 
         "hubs": results,
         "offers_expired": expired,
         "stranded_returned": stranded,
+        "playbook": playbook,
         "redis_rebuild": rebuilt,
     }
 
@@ -167,6 +174,22 @@ async def _return_stranded(session: AsyncSession, hub_id: str) -> int:
         await session.rollback()
         logger.exception("stranded_assignment_return_failed", hub_id=hub_id)
         return 0
+
+
+async def _run_playbook(session: AsyncSession, hub_id: str) -> dict | str:
+    try:
+        sweep = await run_playbook(session, hub_id)
+    except Exception as exc:  # noqa: BLE001 - the cycle still runs without it
+        await session.rollback()
+        logger.exception("playbook_sweep_failed", hub_id=hub_id)
+        return f"error: {type(exc).__name__}"
+    return {
+        "called": sweep.called,
+        "acted": sweep.acted,
+        "escalated": sweep.escalated,
+        "superseded": sweep.superseded,
+        "errors": sweep.errors,
+    }
 
 
 @router.post("/learning-loop/run-all", dependencies=[Depends(require_internal_secret)])

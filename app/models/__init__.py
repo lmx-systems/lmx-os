@@ -47,6 +47,8 @@ from app.models.shop import Shop
 from app.models.site_address_share import SiteAddressShare
 from app.models.stop import Stop, StopFlag, StopOrder
 from app.models.stop_geofence_event import StopGeofenceEvent
+from app.models.ops_touch import OpsTouch
+from app.models.playbook_decision import PlaybookDecision
 
 __all__ = [
     "Client",
@@ -55,6 +57,8 @@ __all__ = [
     "ClientUser",
     "DeliveryRating",
     "DispatchAssignment",
+    "OpsTouch",
+    "PlaybookDecision",
     "Driver",
     "DriverDocument",
     "DriverLocationPing",

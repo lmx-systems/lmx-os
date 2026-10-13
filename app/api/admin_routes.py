@@ -96,6 +96,8 @@ from app.ops_auth.dependencies import (
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.orders.cancellation import OrderNotCancellable, cancel_live_order
 from app.payroll import get_payroll_provider
+from app.playbook.sweep import record_person_resolution
+from app.playbook.touches import record_ops_touch
 from app.payroll.overtime_rules import overtime_rule_for_state
 from app.reporting.cod_disputes import build_cod_dispute_report
 from app.returns.service import AWAITING_STATUSES, return_views
@@ -159,7 +161,10 @@ from app.storage.photo_upload_client import readable_url
 
 logger = structlog.get_logger(__name__)
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+# Every write here is a person acting, and is counted (`DEC-7`, app/playbook/touches.py).
+router = APIRouter(
+    prefix="/admin", tags=["admin"], dependencies=[Depends(record_ops_touch, scope="function")]
+)
 
 # Kept in sync by hand with app.models.order.SLATier's string values - not
 # imported directly since ClientRate.sla_tier is deliberately a plain
@@ -1056,7 +1061,7 @@ async def resolve_order(
     order_id: str,
     body: ResolveFailedOrderBody,
     session: AsyncSession = Depends(get_db),
-    _admin: AuthedOpsUser = Depends(require_dispatcher),
+    ops: AuthedOpsUser = Depends(require_dispatcher),
 ) -> OrderResolutionResult:
     """
     The defined next step for a delivery_failed order (docs/ROADMAP.md R5,
@@ -1075,6 +1080,11 @@ async def resolve_order(
         raise HTTPException(status_code=404, detail="Order not found")
 
     try:
+        # The playbook's call on this failure, closed in the same transaction as the
+        # resolution: agreed or overruled, which is how the rule earns authority
+        # (`DEC-8`). Before the order is touched - the call, then the order, as the
+        # sweep takes them.
+        await record_person_resolution(session, order, body.action, ops.ops_user_id)
         resolved = await resolve_failed_order(session, HoldQueueStore(), order, body.action)
     except OrderNotFailedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

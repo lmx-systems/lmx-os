@@ -324,6 +324,59 @@ export interface ExceptionItem {
   // in the queue only `queued`.
   status: string
   hold_deadline: string | null
+  // The playbook's call on this order (docs/ROADMAP_1.5.md DEC-8), on a failed
+  // delivery: what its rule chose and why, and when it will act if nobody does.
+  playbook?: PlaybookCall | null
+}
+
+export type PlaybookMode = 'recommend' | 'veto' | 'act'
+
+export interface PlaybookCall {
+  rule: string
+  action: string
+  reason: string
+  mode: PlaybookMode
+  // `open`: recommended, or waiting for `due_at`. `escalated`: the rule has no
+  // answer for this case and hands it to a person.
+  outcome: 'open' | 'escalated'
+  due_at: string | null
+}
+
+/** How often a person still acts, and how the rules replacing them are doing (DEC-7, DEC-8). */
+export interface PlaybookReport {
+  since: string
+  until: string
+  hub_id: string | null
+  orders: number
+  // Running the day and fixing the record: the work the playbook takes over.
+  touches: number
+  touches_per_100_orders: number | null
+  by_category: Record<string, number>
+  by_action: { action: string; category: string; count: number }[]
+  // Touches on no hub (a site, a merge): outside this hub's rate.
+  unscoped_touches: number
+  rules: {
+    rule: string
+    mode: PlaybookMode
+    outcomes: Record<string, number>
+    yes: number
+    no: number
+    agreement: number | null
+    ready_to_move_up: boolean
+    next_mode: PlaybookMode | null
+    // The bar for moving up: this many decided calls, agreeing this often.
+    min_decisions: number
+    min_agreement: number
+  }[]
+  overruled: {
+    order_id: string
+    external_ref: string | null
+    rule: string
+    rule_action: string
+    human_action: string | null
+    reason: string
+    closed_at: string | null
+  }[]
 }
 
 export interface ExceptionQueue {

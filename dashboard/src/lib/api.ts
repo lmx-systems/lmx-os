@@ -63,6 +63,7 @@ import type {
   UrgencyRuleBody,
   UrgencyRuleView,
   ExceptionQueue,
+  PlaybookReport,
   SiteFactDispute,
 } from './types'
 
@@ -172,6 +173,13 @@ export const api = {
   operationsExceptions: (hubId?: string) =>
     request<ExceptionQueue>(
       hubId ? `/operations/exceptions?hub_id=${hubId}` : '/operations/exceptions',
+    ),
+
+  // How often a person still acts, and how the rules replacing them are doing
+  // (docs/ROADMAP_1.5.md DEC-7, DEC-8). Any ops session.
+  playbook: (hubId?: string, days = 7) =>
+    request<PlaybookReport>(
+      hubId ? `/operations/playbook?hub_id=${hubId}&days=${days}` : `/operations/playbook?days=${days}`,
     ),
 
   // Why this order is where it is (docs/ROADMAP_1.5.md AGT-4). Fetched on

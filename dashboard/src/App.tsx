@@ -25,6 +25,7 @@ import { UrgencyRulesPanel } from './components/UrgencyRulesPanel'
 import { DriverDocumentsPanel } from './components/DriverDocumentsPanel'
 import { PendingSignupsPanel } from './components/PendingSignupsPanel'
 import { ProposedRulesPanel } from './components/ProposedRulesPanel'
+import { PlaybookPanel } from './components/PlaybookPanel'
 import { CodDisputesPanel } from './components/CodDisputesPanel'
 import { SupportInboxPanel } from './components/SupportInboxPanel'
 import { DriverDevicesPanel } from './components/DriverDevicesPanel'
@@ -279,6 +280,11 @@ function App() {
                       }}
                       onToast={showToast}
                     />
+                    {/* Last on the board: not work to do, but how much of it
+                        still needs a person, and how the rules taking it over
+                        are doing (DEC-7, DEC-8). The goal is that this is the
+                        only panel left worth opening. */}
+                    <PlaybookPanel key={`playbook-${hubId}`} hubId={hubId} />
                   </>
                 )}
 

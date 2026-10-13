@@ -50,6 +50,8 @@ from app.models.order import Order
 from app.models.receiver_profile import ReceiverProfile
 from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
+from app.playbook.report import build_playbook_report
+from app.playbook.touches import record_ops_touch
 from app.ops_auth.dependencies import (
     AuthedOpsUser,
     get_current_ops_user,
@@ -125,12 +127,18 @@ from app.schemas.reporting import (
     SettleSiteFactBody,
     SiteFactAnswerView,
     SiteFactDisputeView,
+    OverruledCallView,
+    PlaybookCallView,
+    PlaybookReportView,
+    PlaybookRuleView,
     TierExposureView,
+    TouchCountView,
     UnlabelledDockView,
     WriterHealthView,
 )
 
-router = APIRouter(tags=["ops"])
+# Every write here is a person acting, and is counted (`DEC-7`, app/playbook/touches.py).
+router = APIRouter(tags=["ops"], dependencies=[Depends(record_ops_touch, scope="function")])
 
 
 @router.get("/health")
@@ -1275,8 +1283,82 @@ async def operations_exceptions(
                 next_action=item.next_action,
                 status=item.status,
                 hold_deadline=item.hold_deadline,
+                playbook=(
+                    PlaybookCallView(
+                        rule=item.playbook.rule,
+                        action=item.playbook.action,
+                        reason=item.playbook.reason,
+                        mode=item.playbook.mode,
+                        outcome=item.playbook.outcome,
+                        due_at=item.playbook.due_at,
+                    )
+                    if item.playbook is not None
+                    else None
+                ),
             )
             for item in queue.items
+        ],
+    )
+
+
+@router.get("/operations/playbook", response_model=PlaybookReportView)
+async def operations_playbook(
+    hub_id: Annotated[uuid.UUID | None, Query()] = None,
+    days: Annotated[int, Query(ge=1, le=90)] = 7,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> PlaybookReportView:
+    """How often a person still has to act, and how the rules replacing them are
+    doing (`docs/ROADMAP_1.5.md` DEC-7, DEC-8; decision D-SEAT).
+
+    The end state is nobody running the day. **Person touches per 100 orders** is
+    the distance to it: every ops write is counted (app/playbook/touches.py), and
+    the headline is the two kinds the playbook exists to take over - running the
+    day and fixing the record. Each rule's record says how often its calls
+    matched what people did, and whether that clears the bar for more authority.
+    Moving a rule up stays a setting a person changes; this shows the evidence.
+
+    Any ops session, like the exception queue it sits beside.
+    """
+    report = await build_playbook_report(session, hub_id=hub_id, days=days)
+    return PlaybookReportView(
+        since=report.since,
+        until=report.until,
+        hub_id=report.hub_id,
+        orders=report.orders,
+        touches=report.touches,
+        touches_per_100_orders=report.touches_per_100_orders,
+        by_category=report.by_category,
+        unscoped_touches=report.unscoped_touches,
+        by_action=[
+            TouchCountView(action=t.action, category=t.category, count=t.count) for t in report.by_action
+        ],
+        rules=[
+            PlaybookRuleView(
+                rule=r.rule,
+                mode=r.mode,
+                outcomes=r.outcomes,
+                yes=r.yes,
+                no=r.no,
+                agreement=r.agreement,
+                ready_to_move_up=r.ready_to_move_up,
+                next_mode=r.next_mode,
+                min_decisions=r.min_decisions,
+                min_agreement=r.min_agreement,
+            )
+            for r in report.rules
+        ],
+        overruled=[
+            OverruledCallView(
+                order_id=o.order_id,
+                external_ref=o.external_ref,
+                rule=o.rule,
+                rule_action=o.rule_action,
+                human_action=o.human_action,
+                reason=o.reason,
+                closed_at=o.closed_at,
+            )
+            for o in report.overruled
         ],
     )
 

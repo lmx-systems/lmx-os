@@ -127,8 +127,17 @@ EDGE = (
 #                 the core will read this by design. Not Core either: it is not
 #                 dispatch, and a change here does not move an order. Foundation,
 #                 like `orders` - imported from both sides, owning neither.
+#   playbook    - the rules replacing a dispatcher's calls (DEC-7..9): what to do
+#                 with an order the engine could not complete, carried out through
+#                 the same resolution a person's click uses. Not Core: the
+#                 dispatch engine never calls it - it runs beside the cycle, from
+#                 the scheduled sweep - and a rule the engine depended on could not
+#                 be switched back to recommending. Not Edge: nothing about it is
+#                 negotiated outside. It reads the core and the record; nothing in
+#                 the core reads it.
 UNCLASSIFIED = (
     "orders",
+    "playbook",
     "identity",
     "record",
     "experiment",

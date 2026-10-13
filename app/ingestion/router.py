@@ -10,8 +10,12 @@ from app.ingestion.adapters.base import IngestionAdapterError
 from app.ingestion.service import ShopNotFoundError, ingest_order
 from app.ops_auth.dependencies import AuthedOpsUser, require_dispatcher
 from app.optimizer.event_trigger import dispatch_event_bus
+from app.playbook.touches import record_ops_touch
 
-router = APIRouter(prefix="/ingestion", tags=["ingestion"])
+# A person keying an order in is a touch (`DEC-7`, app/playbook/touches.py).
+router = APIRouter(
+    prefix="/ingestion", tags=["ingestion"], dependencies=[Depends(record_ops_touch, scope="function")]
+)
 
 
 def get_hold_queue_store() -> HoldQueueStore:

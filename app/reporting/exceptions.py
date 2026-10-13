@@ -46,7 +46,7 @@ under older items defeats the point of having it.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, or_, select
@@ -55,6 +55,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.order import INTAKE_LIVE, Order, OrderStatus
 from app.models.stop import FLAG_SOURCE_DRIVER, Stop, StopFlag, StopOrder
+from app.playbook.sweep import current_calls
 
 # Ordered most-actionable-first for ties, not most-urgent-first: the clock does
 # the urgency ranking and this only decides what to do when two things are
@@ -85,6 +86,22 @@ _NEXT_ACTION = {
 
 
 @dataclass(frozen=True)
+class PlaybookCall:
+    """What the playbook's rule chose for this order (`DEC-8`), shown beside it.
+
+    `outcome` is `open` - recommended, or waiting for `due_at` to act - or
+    `escalated`, which is the rule saying a person decides this one.
+    """
+
+    rule: str
+    action: str
+    reason: str
+    mode: str
+    outcome: str
+    due_at: datetime | None
+
+
+@dataclass(frozen=True)
 class Exception_:
     """One thing worth a person's attention, with enough to act on."""
 
@@ -104,6 +121,7 @@ class Exception_:
     # hold override only `queued`) and say when putting it back is pointless.
     status: str = ""
     hold_deadline: datetime | None = None
+    playbook: PlaybookCall | None = None
 
     @property
     def next_action(self) -> str:
@@ -192,6 +210,15 @@ async def build_exception_queue(
                 detail=order.failure_reason or "attempted and not completed",
             )
         )
+
+    # The playbook's call on each failed order, flagged or not (`DEC-8`): what it
+    # recommends, when it will act, or that it has handed the order to a person.
+    calls = await current_calls(session, [o for o, _ in flagged] + failed)
+    if calls:
+        queue.items = [
+            replace(item, playbook=_call(calls[item.order_id])) if item.order_id in calls else item
+            for item in queue.items
+        ]
 
     # Past the promise and still open. The grace is the same one the health
     # check uses, so a dispatcher and a pager do not disagree about what late
@@ -306,6 +333,17 @@ async def build_exception_queue(
         key=lambda i: (-i.minutes_waiting, KINDS.index(i.kind))
     )
     return queue
+
+
+def _call(decision) -> PlaybookCall:
+    return PlaybookCall(
+        rule=decision.rule,
+        action=decision.action,
+        reason=decision.reason,
+        mode=decision.mode,
+        outcome=decision.outcome,
+        due_at=decision.due_at,
+    )
 
 
 def _item(kind: str, order: Order, now: datetime, *, detail: str) -> Exception_:

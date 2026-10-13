@@ -104,6 +104,19 @@ class CreditExposureView(BaseModel):
     unpriced_orders: int
 
 
+class PlaybookCallView(BaseModel):
+    """The playbook's call on an exception (`DEC-8`): what its rule chose and why,
+    the mode it is in, and when it will act if nobody does first. `outcome` is
+    `open` or `escalated` - the rule handing the order to a person."""
+
+    rule: str
+    action: str
+    reason: str
+    mode: str
+    outcome: str
+    due_at: datetime | None
+
+
 class ExceptionItemView(BaseModel):
     """One thing worth a dispatcher's attention (docs/ROADMAP_1.5.md CON-4).
 
@@ -127,6 +140,7 @@ class ExceptionItemView(BaseModel):
     # or `queued`, the hold override only `queued`).
     status: str
     hold_deadline: datetime | None
+    playbook: PlaybookCallView | None = None
 
 
 class ExceptionQueueView(BaseModel):
@@ -497,3 +511,60 @@ class OrderLookupPage(BaseModel):
     items: list[OrderLookupRow]
     total: int
     limit: int
+
+
+class TouchCountView(BaseModel):
+    action: str
+    category: str
+    count: int
+
+
+class PlaybookRuleView(BaseModel):
+    """One rule's record (`DEC-8`). `outcomes` counts its calls in the window;
+    `yes`, `no` and `agreement` are the evidence for moving it up from `mode`,
+    all time, and `ready_to_move_up` says that evidence clears the bar."""
+
+    rule: str
+    mode: str
+    outcomes: dict[str, int]
+    yes: int
+    no: int
+    agreement: float | None
+    ready_to_move_up: bool
+    next_mode: str | None
+    min_decisions: int
+    min_agreement: float
+
+
+class OverruledCallView(BaseModel):
+    order_id: uuid.UUID
+    external_ref: str | None
+    rule: str
+    rule_action: str
+    human_action: str | None
+    reason: str
+    closed_at: datetime | None
+
+
+class PlaybookReportView(BaseModel):
+    """How often a person still acts, and how each rule is doing (`DEC-7`, `DEC-8`).
+
+    `touches_per_100_orders` counts running the day and fixing the record - the
+    work the playbook exists to take over - against live orders received in the
+    window; null when there were none. `by_category` also shows setting policy
+    and running the business, which are counted but are not dispatching.
+    """
+
+    since: datetime
+    until: datetime
+    hub_id: uuid.UUID | None
+    orders: int
+    touches: int
+    touches_per_100_orders: float | None
+    by_category: dict[str, int]
+    by_action: list[TouchCountView]
+    # With a hub chosen, touches on no hub (a site, a merge): outside this hub's
+    # rate, inside the all-hubs one.
+    unscoped_touches: int
+    rules: list[PlaybookRuleView]
+    overruled: list[OverruledCallView]
