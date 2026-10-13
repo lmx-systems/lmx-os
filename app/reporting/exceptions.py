@@ -54,6 +54,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.order import Order, OrderStatus
+from app.ingestion.service import duplicate_answer
 from app.models.stop import FLAG_SOURCE_DRIVER, Stop, StopFlag, StopOrder
 from app.orders.unplaced import unplaced_clause
 from app.playbook.sweep import current_calls
@@ -68,13 +69,13 @@ KIND_UNPLACED = "released_but_unplaced"
 KIND_POSSIBLE_DUPLICATE = "possible_duplicate"
 KINDS = (KIND_FLAGGED, KIND_FAILED, KIND_PAST_PROMISE, KIND_UNPLACED, KIND_POSSIBLE_DUPLICATE)
 
-# Before the driver collects it, a repeat order costs a phone call to cancel;
-# after, it costs a wasted run. So a likely duplicate is listed only until then.
-_NOT_YET_COLLECTED = (
-    OrderStatus.received,
-    OrderStatus.held,
-    OrderStatus.queued,
+# A likely repeat is the client's to answer, in the portal (`DEC-13`): before a
+# driver has it, they cancel it themselves or say both are real. It becomes a
+# person's only once a driver is on the way to collect it with no answer - the
+# client can no longer cancel it then, and a wasted run is minutes off.
+_DRIVER_ON_THE_WAY = (
     OrderStatus.assigned,
+    OrderStatus.en_route_pickup,
 )
 
 _NEXT_ACTION = {
@@ -82,7 +83,7 @@ _NEXT_ACTION = {
     KIND_FAILED: "resolve it (retry, return to shop, or cancel) - the parts are on a van going nowhere",
     KIND_PAST_PROMISE: "check the route is moving, then tell the customer before they ask",
     KIND_UNPLACED: "nobody has this order - assign it or put it back in the queue",
-    KIND_POSSIBLE_DUPLICATE: "ask the client whether it was sent twice; cancel the repeat if so",
+    KIND_POSSIBLE_DUPLICATE: "the client has not said whether it was sent twice, and a driver is on the way - call them; cancel the repeat if so",
 }
 
 
@@ -277,19 +278,20 @@ async def build_exception_queue(
 
     # An order with no reference of its own that matches one the same client sent
     # minutes earlier (D-DUP, app/ingestion/service.py). Flagged at intake and never
-    # merged: only the client knows whether it was sent twice.
+    # merged: only the client knows whether it was sent twice, and they are asked
+    # (`DEC-13`). Listed here only unanswered with a driver on the way.
     repeats = list(
         await session.scalars(
             _scope(
                 select(Order).where(
                     Order.intake_flags.contains([{"kind": KIND_POSSIBLE_DUPLICATE}]),
-                    Order.status.in_(_NOT_YET_COLLECTED),
+                    Order.status.in_(_DRIVER_ON_THE_WAY),
                 )
             )
         )
     )
     for order in repeats:
-        if order.id in seen:
+        if order.id in seen or duplicate_answer(order) is not None:
             continue
         seen.add(order.id)
         original = next(
