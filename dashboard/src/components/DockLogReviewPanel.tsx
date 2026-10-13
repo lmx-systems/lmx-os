@@ -191,7 +191,7 @@ export function DockLogReviewPanel({ onToast, isAdmin }: { onToast: (message: st
                   <button
                     disabled={busy !== null || !chosen[submission.submission_id]}
                     onClick={() => importOne(submission)}
-                    className="rounded-md bg-[var(--accent)] px-2 py-1 text-[11px] font-medium text-white disabled:opacity-40"
+                    className="rounded-full bg-[var(--accent)] px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-40"
                   >
                     Import
                   </button>

@@ -143,7 +143,7 @@ export function OnboardDriverForm({
         <button
           onClick={submit}
           disabled={!ready || saving}
-          className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-[13px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
         >
           {saving ? 'Adding…' : 'Add driver'}
         </button>

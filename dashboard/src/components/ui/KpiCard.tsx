@@ -13,11 +13,11 @@ interface KpiCardProps {
 export function KpiCard({ label, value, sub, risk = false, stale = false, children }: KpiCardProps) {
   return (
     <div
-      className={`rounded-[var(--radius-lg)] border bg-[var(--surface)] p-3.5 shadow-[var(--shadow-sm)] ${
-        risk ? 'border-[var(--red)]/25' : 'border-[var(--border)]'
+      className={`rounded-[24px] bg-[var(--surface)] px-6 py-5 ${
+        risk ? 'shadow-[inset_0_0_0_1.5px_var(--needs-dim)]' : ''
       }`}
     >
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]">
+      <div className="mb-1 flex items-center gap-1.5 text-[13px] font-medium text-[var(--text-secondary)]">
         {label}
         {stale && (
           <AlertTriangle
@@ -27,10 +27,10 @@ export function KpiCard({ label, value, sub, risk = false, stale = false, childr
           />
         )}
       </div>
-      <div className={`text-[26px] font-medium tracking-tight ${risk ? 'text-[var(--red)]' : ''}`}>
+      <div className={`text-[30px] font-extrabold leading-tight tracking-[-0.04em] tabular-nums ${risk ? 'text-[var(--needs)]' : ''}`}>
         {value}
       </div>
-      {sub && <div className="mt-1 text-xs text-[var(--text-muted)]">{sub}</div>}
+      {sub && <div className="mt-1 text-xs text-[var(--text-secondary)]">{sub}</div>}
       {children}
     </div>
   )

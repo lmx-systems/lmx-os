@@ -112,7 +112,7 @@ export function DriverDocumentsPanel({ onToast }: DriverDocumentsPanelProps) {
           {documents.map((doc) => (
             <div
               key={doc.document_id}
-              className="flex flex-col gap-3 rounded-[var(--radius)] border border-[var(--border)] p-3"
+              className="flex flex-col gap-3 rounded-[20px] bg-[var(--surface-2)] p-3"
             >
               <div className="flex flex-col gap-1">
                 <div className="font-medium text-[var(--text-primary)]">
@@ -176,14 +176,14 @@ export function DriverDocumentsPanel({ onToast }: DriverDocumentsPanelProps) {
                 <button
                   disabled={busyId === doc.document_id}
                   onClick={() => verify(doc)}
-                  className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
+                  className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-60"
                 >
                   Verify
                 </button>
                 <button
                   disabled={busyId === doc.document_id}
                   onClick={() => reject(doc)}
-                  className="rounded-[var(--radius)] border border-[var(--border-strong)] px-3 py-1.5 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
+                  className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
                 >
                   Reject
                 </button>
