@@ -236,8 +236,8 @@ This closed three real gaps, not just "add some endpoints":
     the same order. `lock_route` returns the route **read fresh** - a caller
     that read it before waiting may hold a route since completed, or a stale
     `plan_version`, and the insertion skips a route no longer `active`;
-  - the one order before a route: a cancel that found no offer and no stop locks the order and looks
-    again, then takes the route **without waiting** (`try_lock_route`) and
+  - the one order before a route: a cancel that found no offer and no stop
+    locks the order and looks again, then takes the route **without waiting** (`try_lock_route`) and
     refuses with "try again" if a driver is busy on it - a driver's complete
     holds the route and then waits for its stop's orders, which may include
     this one;
