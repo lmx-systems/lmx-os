@@ -364,6 +364,8 @@ export interface PlaybookReport {
     agreement: number | null
     ready_to_move_up: boolean
     next_mode: PlaybookMode | null
+    // False for a rule that only recommends until acting is built for it.
+    acts: boolean
     // The bar for moving up: this many decided calls, agreeing this often.
     min_decisions: number
     min_agreement: number

@@ -5,6 +5,7 @@ import type { PlaybookMode, PlaybookReport } from '../lib/types'
 
 const RULE_LABEL: Record<string, string> = {
   failed_delivery: 'Failed deliveries',
+  unplaced: 'Orders nobody has',
 }
 
 const MODE_LABEL: Record<PlaybookMode, string> = {
@@ -18,6 +19,9 @@ const ACTION_LABEL: Record<string, string> = {
   return_to_shop: 'return to shop',
   cancel: 'cancel',
   escalate: 'hand to a person',
+  offer: 'offer to a driver',
+  hold: 'put back in the queue',
+  release: 'release it',
 }
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -136,7 +140,13 @@ export function PlaybookPanel({ hubId }: { hubId: string }) {
                       } overtaken by events.`}
                 </p>
                 <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                  {rule.next_mode === null
+                  {!rule.acts
+                    ? decided === 0
+                      ? 'Recommends only. Acting is built for it once its calls match what people do.'
+                      : `Recommends only: ${rule.yes} of ${decided} decided calls matched what a person did (${Math.round(
+                          (rule.agreement ?? 0) * 100,
+                        )}%). Acting is built for it once that is high enough.`
+                    : rule.next_mode === null
                     ? 'At full authority.'
                     : rule.ready_to_move_up
                       ? `Ready to move up: ${rule.yes} of ${decided} decided calls agreed with people. Set it to ${rule.next_mode}.`

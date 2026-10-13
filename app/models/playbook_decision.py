@@ -64,6 +64,10 @@ class PlaybookDecision(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     outcome: Mapped[str] = mapped_column(String(16), nullable=False, default=OUTCOME_OPEN, server_default=OUTCOME_OPEN)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # What a person did instead or as well, and who.
+    # Whom the call names - a driver to offer the order to (`DEC-10`); null when
+    # it names nobody.
+    target: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # What a person did instead or as well, whom they chose, and who they were.
     human_action: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    human_target: Mapped[str | None] = mapped_column(String(64), nullable=True)
     ops_user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

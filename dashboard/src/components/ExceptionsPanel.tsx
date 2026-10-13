@@ -230,6 +230,8 @@ const ACTION_LABEL: Record<string, string> = {
   redeliver: 'redeliver',
   return_to_shop: 'return it to the shop',
   cancel: 'cancel',
+  // The reason that follows names them.
+  offer: 'offer it to a free driver',
 }
 
 /**

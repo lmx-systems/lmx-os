@@ -532,6 +532,8 @@ class PlaybookRuleView(BaseModel):
     agreement: float | None
     ready_to_move_up: bool
     next_mode: str | None
+    # False for a rule that only recommends until acting is built for it.
+    acts: bool
     min_decisions: int
     min_agreement: float
 

@@ -142,7 +142,7 @@ async def test_a_person_agreeing_and_a_person_overruling(db_session, real_redis_
     assert (second.outcome, second.human_action) == ("overruled", "cancel")
 
     report = await build_playbook_report(db_session, hub_id=seeded[0])
-    [rule] = report.rules
+    [rule] = [r for r in report.rules if r.rule == "failed_delivery"]
     assert (rule.yes, rule.no, rule.agreement) == (1, 1, 0.5)
     assert not rule.ready_to_move_up
     [mistake] = report.overruled

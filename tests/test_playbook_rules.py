@@ -75,3 +75,35 @@ def test_no_failed_stop_on_record_is_treated_as_a_drop_off():
 def test_every_call_says_why():
     assert "closed" in _call(SHOP_CLOSED).reason
     assert _call(COD_DISPUTE).reason.endswith("a person settles it.")
+
+
+# The unplaced rule (`DEC-10`).
+
+from app.playbook.rules import OFFER, Candidate, decide_unplaced  # noqa: E402
+
+
+def _c(driver_id, miles, stale=False):
+    return Candidate(driver_id=driver_id, name=f"Driver {driver_id}", miles=miles, position_stale=stale)
+
+
+def test_the_nearest_reporting_driver_is_chosen():
+    call = decide_unplaced([_c("far", 5.0), _c("near", 1.2), _c("nearest-but-quiet", 0.2, stale=True)], hub_closed=False)
+    assert (call.action, call.target) == (OFFER, "near")
+    assert "1.2 miles" in call.reason
+
+
+def test_when_every_app_is_quiet_the_nearest_is_named_to_phone_first():
+    call = decide_unplaced([_c("a", 3.0, stale=True), _c("b", 0.5, stale=True)], hub_closed=False)
+    assert (call.action, call.target) == (OFFER, "b")
+    assert "phone them" in call.reason
+
+
+def test_a_driver_with_no_position_comes_last():
+    call = decide_unplaced([_c("unknown", None), _c("known", 9.0)], hub_closed=False)
+    assert call.target == "known"
+
+
+def test_nobody_free_or_a_closed_hub_goes_to_a_person():
+    assert decide_unplaced([], hub_closed=False).action == ESCALATE
+    assert decide_unplaced([_c("a", 1.0)], hub_closed=True).action == ESCALATE
+    assert decide_unplaced([], hub_closed=False).target is None

@@ -95,6 +95,8 @@ from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.service import _position_is_stale
 from app.orders.state_machine import TERMINAL
 from app.orders.status_service import advance_orders
+from app.playbook.rules import OFFER
+from app.playbook.sweep import record_person_action
 
 logger = structlog.get_logger(__name__)
 
@@ -220,6 +222,10 @@ async def _check_and_offer(
     ops_user_email: str,
 ) -> _Offered:
     """Every check, then the offer, committed. Run under the hub lock."""
+    # The playbook's call on this order, closed in this transaction: agreed if
+    # it named this driver (`DEC-10`). First, before the order - the call before
+    # the order, as the sweep takes them. Rolled back with any refusal below.
+    await record_person_action(session, order_id, OFFER, ops_user_id, target=str(driver_id))
     # Locked, and read fresh: the cycle and a driver's decline write the status
     # from other sessions, and two dispatchers can press Assign at once.
     order = (

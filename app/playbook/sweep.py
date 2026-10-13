@@ -32,13 +32,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.batch_queue.clustering import miles_between
 from app.batch_queue.store import HoldQueueStore
+from app.compliance.driver_documents import evaluate_driver_documents
 from app.config import settings
 from app.delivery.resolution import OrderNotFailedError, ShopMissingError, resolve_failed_order
+from app.fleet_state.manager import FleetStateManager
+from app.hub_calendar import is_hub_closed_at
+from app.models.driver import Driver
 from app.models.order import INTAKE_LIVE, Order, OrderStatus
 from app.models.playbook_decision import (
     MODE_ACT,
@@ -53,8 +58,19 @@ from app.models.playbook_decision import (
     OUTCOME_SUPERSEDED,
     PlaybookDecision,
 )
+from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
-from app.playbook.rules import ESCALATE, RULE_FAILED_DELIVERY, decide_failed_delivery
+from app.optimizer.service import _position_is_stale
+from app.orders.unplaced import unplaced_clause
+from app.playbook.rules import (
+    ESCALATE,
+    OFFER,
+    RULE_FAILED_DELIVERY,
+    RULE_UNPLACED,
+    Candidate,
+    decide_failed_delivery,
+    decide_unplaced,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -83,6 +99,7 @@ async def run_playbook(
     hub_id: str | uuid.UUID,
     *,
     hold_queue: HoldQueueStore | None = None,
+    fleet: FleetStateManager | None = None,
     now: datetime | None = None,
 ) -> PlaybookSweep:
     now = now or datetime.now(timezone.utc)
@@ -94,6 +111,11 @@ async def run_playbook(
     await _call_failed_deliveries(session, hub, now, sweep)
     await session.commit()
     await _act_on_due(session, hub, now, hold_queue or HoldQueueStore(), sweep)
+    # Orders nobody has (`DEC-10`): recommends only, so nothing here acts.
+    sweep.superseded += await _close_unplaced_moved_on(session, hub, now)
+    await session.commit()
+    await _call_unplaced(session, hub, now, sweep, fleet or FleetStateManager())
+    await session.commit()
     return sweep
 
 
@@ -339,18 +361,217 @@ async def record_person_resolution(
         decision.ops_user_id = ops_user_id
 
 
-async def current_calls(session: AsyncSession, orders: list[Order]) -> dict:
-    """The rule's call on each failed order's current attempt, for the exceptions
-    queue: open (waiting, or recommended) or escalated (a person's to make)."""
-    failed = [order for order in orders if order.status == OrderStatus.delivery_failed]
-    if not failed:
-        return {}
-    attempts = {order.id: order.delivery_attempts for order in failed}
-    decisions = await session.scalars(
-        select(PlaybookDecision).where(
-            PlaybookDecision.rule == RULE_FAILED_DELIVERY,
-            PlaybookDecision.order_id.in_(list(attempts)),
-            PlaybookDecision.outcome.in_((OUTCOME_OPEN, OUTCOME_ESCALATED)),
+async def _close_unplaced_moved_on(session: AsyncSession, hub_id: uuid.UUID, now: datetime) -> int:
+    """An unplaced order's call is current until the order stops being unplaced -
+    the cycle placed it, a client cancelled it - or a person acts on it. Then an
+    open call is superseded, and an escalation simply ends."""
+    still_unplaced = select(Order.id).where(Order.hub_id == hub_id, unplaced_clause(now))
+    current = (
+        PlaybookDecision.hub_id == hub_id,
+        PlaybookDecision.rule == RULE_UNPLACED,
+        PlaybookDecision.closed_at.is_(None),
+        PlaybookDecision.order_id.notin_(still_unplaced),
+    )
+    superseded = await session.execute(
+        update(PlaybookDecision)
+        .where(*current, PlaybookDecision.outcome == OUTCOME_OPEN)
+        .values(outcome=OUTCOME_SUPERSEDED, closed_at=now)
+        .returning(PlaybookDecision.id)
+    )
+    await session.execute(
+        update(PlaybookDecision)
+        .where(*current, PlaybookDecision.outcome == OUTCOME_ESCALATED)
+        .values(closed_at=now)
+    )
+    return len(superseded.all())
+
+
+async def _call_unplaced(
+    session: AsyncSession, hub_id: uuid.UUID, now: datetime, sweep: PlaybookSweep, fleet: FleetStateManager
+) -> None:
+    """One call per spell of being unplaced: an order with no current call gets one.
+
+    A call stays current (`closed_at` null) until the order moves or a person
+    acts, escalations included - so an order nobody can take is escalated once,
+    not every sweep. The next spell, after a declined offer say, is a new call
+    with the next `attempt`.
+    """
+    called = PlaybookDecision.__table__.alias("called")
+    uncalled = list(
+        await session.execute(
+            select(Order, Shop)
+            .join(Shop, Shop.id == Order.shop_id)
+            .outerjoin(
+                called,
+                and_(
+                    called.c.order_id == Order.id,
+                    called.c.rule == RULE_UNPLACED,
+                    called.c.closed_at.is_(None),
+                ),
+            )
+            .where(Order.hub_id == hub_id, unplaced_clause(now), called.c.id.is_(None))
+            .order_by(Order.requested_at, Order.id)
         )
     )
-    return {d.order_id: d for d in decisions if attempts.get(d.order_id) == d.attempt}
+    if not uncalled:
+        return
+    hub_closed = await is_hub_closed_at(session, str(hub_id), now)
+    candidates = [] if hub_closed else await _free_drivers(session, hub_id, now, fleet)
+    mode = rule_mode(RULE_UNPLACED)
+    for order, shop in uncalled:
+        call = decide_unplaced(
+            [
+                Candidate(
+                    driver_id=c.driver_id,
+                    name=c.name,
+                    miles=(
+                        round(miles_between(position[0], position[1], float(shop.lat), float(shop.lng)), 1)
+                        if position is not None
+                        else None
+                    ),
+                    position_stale=c.position_stale,
+                )
+                for c, position in candidates
+            ],
+            hub_closed=hub_closed,
+        )
+        escalate = call.action == ESCALATE
+        next_attempt = (
+            select(func.coalesce(func.max(PlaybookDecision.attempt), 0) + 1)
+            .where(PlaybookDecision.rule == RULE_UNPLACED, PlaybookDecision.order_id == order.id)
+            .scalar_subquery()
+        )
+        inserted = await session.execute(
+            insert(PlaybookDecision)
+            .values(
+                rule=RULE_UNPLACED,
+                hub_id=order.hub_id,
+                order_id=order.id,
+                attempt=next_attempt,
+                action=call.action,
+                reason=call.reason,
+                target=call.target,
+                mode=mode,
+                due_at=None,
+                outcome=OUTCOME_ESCALATED if escalate else OUTCOME_OPEN,
+            )
+            .on_conflict_do_nothing(constraint="uq_playbook_decisions_rule_order_attempt")
+            .returning(PlaybookDecision.id)
+        )
+        if inserted.first() is None:
+            continue
+        sweep.called += 1
+        if escalate:
+            sweep.escalated += 1
+
+
+async def _free_drivers(
+    session: AsyncSession, hub_id: uuid.UUID, now: datetime, fleet: FleetStateManager
+) -> list[tuple[Candidate, tuple[float, float] | None]]:
+    """Drivers a person's assign would accept (app/orders/assignment.py): idle
+    with no route, room on the van, switched on, papers in order. With their last
+    position, which the caller turns into a distance per shop."""
+    states = [
+        state
+        for state in await fleet.get_fleet_overview(str(hub_id))
+        if state.status == "available"
+        and not state.current_route_id
+        and state.capacity_units - state.load_units >= 1
+    ]
+    if not states:
+        return []
+    drivers = {
+        str(driver.id): driver
+        for driver in await session.scalars(
+            select(Driver).where(
+                Driver.id.in_([uuid.UUID(state.driver_id) for state in states]),
+                Driver.hub_id == hub_id,
+                Driver.is_active.is_(True),
+            )
+        )
+    }
+    free: list[tuple[Candidate, tuple[float, float] | None]] = []
+    for state in states:
+        driver = drivers.get(state.driver_id)
+        if driver is None or not (await evaluate_driver_documents(session, state.driver_id)).can_go_on_shift:
+            continue
+        location = await fleet.get_driver_location(str(hub_id), state.driver_id)
+        stale = location is None or _position_is_stale(location.recorded_at, now)
+        position = (location.lat, location.lng) if location is not None else None
+        free.append(
+            (
+                Candidate(driver_id=state.driver_id, name=driver.name, miles=None, position_stale=stale),
+                position,
+            )
+        )
+    return free
+
+
+async def record_person_action(
+    session: AsyncSession,
+    order_id: uuid.UUID,
+    action: str,
+    ops_user_id: str,
+    *,
+    target: str | None = None,
+) -> None:
+    """A person is acting on an order nobody had: close the rule's current call.
+
+    From the assign (`offer`, with the driver), the hold override (`hold` or
+    `release`) and dispatch's cancel, before they lock the order and in their
+    transaction - the call before the order, as everywhere. An open call is
+    `agreed` only when the person offered it to the driver the call named;
+    anything else overrules it. An escalation keeps its outcome and gains the
+    answer it did not have.
+    """
+    decision = await session.scalar(
+        select(PlaybookDecision)
+        .where(
+            PlaybookDecision.rule == RULE_UNPLACED,
+            PlaybookDecision.order_id == order_id,
+            PlaybookDecision.closed_at.is_(None),
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if decision is None:
+        return
+    if decision.outcome == OUTCOME_OPEN:
+        same = action == decision.action == OFFER and target == decision.target
+        decision.outcome = OUTCOME_AGREED if same else OUTCOME_OVERRULED
+    decision.closed_at = datetime.now(timezone.utc)
+    decision.human_action = action
+    decision.human_target = target
+    decision.ops_user_id = ops_user_id
+
+
+async def current_calls(session: AsyncSession, orders: list[Order]) -> dict:
+    """Each rule's current call on these orders, for the exceptions queue: open
+    (waiting, or recommended) or escalated (a person's to make).
+
+    A failed delivery's call is the one for its current attempt; an unplaced
+    order's is the one still current for this spell of being unplaced.
+    """
+    calls: dict = {}
+    failed = [order for order in orders if order.status == OrderStatus.delivery_failed]
+    if failed:
+        attempts = {order.id: order.delivery_attempts for order in failed}
+        decisions = await session.scalars(
+            select(PlaybookDecision).where(
+                PlaybookDecision.rule == RULE_FAILED_DELIVERY,
+                PlaybookDecision.order_id.in_(list(attempts)),
+                PlaybookDecision.outcome.in_((OUTCOME_OPEN, OUTCOME_ESCALATED)),
+            )
+        )
+        calls.update({d.order_id: d for d in decisions if attempts.get(d.order_id) == d.attempt})
+    waiting = [order.id for order in orders if order.status in (OrderStatus.held, OrderStatus.queued)]
+    if waiting:
+        decisions = await session.scalars(
+            select(PlaybookDecision).where(
+                PlaybookDecision.rule == RULE_UNPLACED,
+                PlaybookDecision.order_id.in_(waiting),
+                PlaybookDecision.closed_at.is_(None),
+            )
+        )
+        calls.update({d.order_id: d for d in decisions})
+    return calls

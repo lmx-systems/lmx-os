@@ -17,9 +17,16 @@ from dataclasses import dataclass
 from app.delivery.resolution import RETURN_TO_SHOP, REDELIVER
 
 RULE_FAILED_DELIVERY = "failed_delivery"
-RULES = (RULE_FAILED_DELIVERY,)
+RULE_UNPLACED = "unplaced"
+RULES = (RULE_FAILED_DELIVERY, RULE_UNPLACED)
+# Rules that can act once their mode allows. The others only recommend: acting
+# is built for a rule when its record says it would act well.
+ACTING_RULES = (RULE_FAILED_DELIVERY,)
 
 ESCALATE = "escalate"
+# Offer the order to the driver the call names (`Call.target`), as a person's
+# assign does (app/orders/assignment.py).
+OFFER = "offer"
 
 # The driver's "Flag an issue" reasons (app/schemas/driver_app.py,
 # StopFailureReason). Strings here so the rule does not import the API schema.
@@ -34,6 +41,24 @@ REFUSED = "REFUSED"
 class Call:
     action: str
     reason: str
+    # Whom the action is for, when it is for somebody: a driver's id.
+    target: str | None = None
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """A driver who could be offered an order nobody has: switched on, papers in
+    order, idle with no route, and room on the van - every check a person's
+    assign makes (app/orders/assignment.py). Only position is left to judge."""
+
+    driver_id: str
+    name: str
+    # Straight-line miles from their last reported position to the shop; None
+    # when they have never reported one.
+    miles: float | None
+    # Their app has not reported recently. The cycle never offers to such a
+    # driver - they may not see it - which is usually why the order is unplaced.
+    position_stale: bool
 
 
 def decide_failed_delivery(
@@ -90,4 +115,39 @@ def decide_failed_delivery(
     return Call(
         RETURN_TO_SHOP,
         f"The drop-off {blocked} on all {attempt} attempts; the parts go back to the shop.",
+    )
+
+
+def decide_unplaced(candidates: list[Candidate], *, hub_closed: bool) -> Call:
+    """What to do with an order nobody has (`DEC-10`).
+
+    A person faced with one either offers it to a driver they can see is free,
+    or - when nobody is - finds cover or tells the client. The rule makes the
+    first call the same way: the nearest free driver whose app is reporting; if
+    every free driver's app has gone quiet, the nearest of those, whom a person
+    would phone first; if nobody is free, a person. Nearest by a straight line
+    to the shop, which is what a dispatcher reading the map does.
+    """
+    if hub_closed:
+        return Call(ESCALATE, "The hub is closed today, so nothing is dispatched; a person decides what to tell the client.")
+    if not candidates:
+        return Call(
+            ESCALATE,
+            "No driver at the hub is free with room on the van; a person brings in cover or tells the client.",
+        )
+
+    def by_distance(c: Candidate) -> tuple[bool, float, str]:
+        return (c.miles is None, c.miles if c.miles is not None else 0.0, c.driver_id)
+
+    reporting = sorted((c for c in candidates if not c.position_stale), key=by_distance)
+    if reporting:
+        best = reporting[0]
+        where = f"{best.miles:.1f} miles from the shop" if best.miles is not None else "position unknown"
+        return Call(OFFER, f"{best.name} is free, {where}, with room on the van.", target=best.driver_id)
+    best = sorted(candidates, key=by_distance)[0]
+    where = f"last seen {best.miles:.1f} miles from the shop" if best.miles is not None else "never reported a position"
+    return Call(
+        OFFER,
+        f"{best.name} is free and {where}, but their app has gone quiet - phone them before offering.",
+        target=best.driver_id,
     )
