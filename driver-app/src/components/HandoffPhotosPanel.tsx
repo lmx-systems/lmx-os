@@ -27,7 +27,7 @@ const SLOTS: { slot: HandoffPhotoSlot; label: string; hint: string }[] = [
  * nothing; a retake replaces the photo for its slot. Optional, like every
  * question here.
  */
-export function HandoffPhotosPanel({ stopId }: { stopId: string }) {
+export function HandoffPhotosPanel({ stopId, queueAfter }: { stopId: string; queueAfter?: string }) {
   const colors = useThemeColors();
   const styles = makeStyles(colors);
   const [taking, setTaking] = useState<HandoffPhotoSlot | null>(null);
@@ -39,7 +39,7 @@ export function HandoffPhotosPanel({ stopId }: { stopId: string }) {
     const previous = kept.current[slot];
     const uri = await keepPhoto(cacheUri);
     kept.current[slot] = uri;
-    await outboxManager.enqueue('handoff-photo', stopId, { slot, uri, contentType: 'image/jpeg' });
+    await outboxManager.enqueue('handoff-photo', stopId, { slot, uri, contentType: 'image/jpeg' }, { after: queueAfter });
     // The retake replaced the queued photo, so its file is no longer anybody's.
     if (previous) await discardPhoto(previous);
     setTaken((t) => ({ ...t, [slot]: uri }));

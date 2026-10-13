@@ -164,6 +164,17 @@ class GigJob(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # them makes an extraction bug unreproducible after the fact.
     raw_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
+    # The golden record this job was logged as (`DE-7`, app/record/off_platform.py):
+    # the stand-in order that holds its item. One record per job. Null until the
+    # driver logs it.
+    record_order_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("orders.id", name="fk_gig_jobs_record_order"), nullable=True, unique=True
+    )
+    # The bonus owed for logging it, set when the record is made. Recorded, not
+    # paid: a payout needs Stripe Connect, which is stubbed, and `GigPayout` is
+    # keyed on a completed LMX stop, which a logged job never is.
+    record_bonus_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     @property
     def is_pinned_to_driver(self) -> bool:
         """Whether this job can be reassigned to a different driver.

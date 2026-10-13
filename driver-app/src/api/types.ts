@@ -96,6 +96,71 @@ export interface ItemFactsBody {
   item_hazmat_or_liquid?: boolean;
 }
 
+// DE-7: a delivery made for a gig platform, logged as a golden record.
+// Mirrors app/schemas/gig.py and app/schemas/off_platform.py.
+export type GigPlatform = 'curri' | 'dispatch' | 'roadie';
+
+/** The job as typed on the form - GigJobIntake. */
+export interface GigJobIntake {
+  source_platform: GigPlatform;
+  platform_job_ref: string;
+  pickup_address: string;
+  dropoff_address: string;
+  pickup_window_open: string;
+  pickup_window_close: string;
+  dropoff_window_close?: string;
+  pay_cents: number;
+  intake_source?: 'manual';
+}
+
+/** A job already in the store - the fields the form needs from GigJobView. */
+export interface GigJob {
+  gig_job_id: string;
+  source_platform: GigPlatform;
+  platform_job_ref: string;
+  pickup_address: string;
+  dropoff_address: string | null;
+  status: 'offered' | 'accepted' | 'picked_up' | 'delivered' | 'declined' | 'cancelled';
+  is_logged_as_record: boolean;
+  record_bonus_cents: number | null;
+}
+
+export interface PinBody {
+  lat: number;
+  lng: number;
+  accuracy_m?: number | null;
+}
+
+/** One end of the job: where the vehicle stopped, the counter or door, when. */
+export interface OffPlatformEnd {
+  stop_pin?: PinBody;
+  door_pin?: PinBody;
+  at?: string;
+}
+
+/** Sent at the counter and again at the door; each send writes what it carries. */
+export interface OffPlatformRecordBody {
+  pickup_stop_id: string;
+  gig_job_id?: string;
+  job?: GigJobIntake;
+  item?: ItemFactsBody;
+  pickup?: OffPlatformEnd;
+  dropoff?: OffPlatformEnd;
+}
+
+export interface OffPlatformRecordView {
+  record_id: string;
+  pickup_stop_id: string;
+  order_id: string;
+  gig_job_id: string;
+  gig_job_status: string;
+  picked_up_at: string | null;
+  delivered_at: string | null;
+  tier: string | null;
+  elements_missing: number | null;
+  record_bonus_cents: number | null;
+}
+
 /** Mirrors app/schemas/driver_app.py OrderItemView. Null = not known yet. */
 export interface OrderItemView {
   order_id: string;

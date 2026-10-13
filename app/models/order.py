@@ -32,6 +32,12 @@ INTAKE_LIVE = "live"
 INTAKE_BACKFILL = "backfill"
 INTAKE_MODES = (INTAKE_LIVE, INTAKE_BACKFILL)
 
+# `source_system` of the stand-in order an off-platform delivery is logged as
+# (`DE-7`, app/record/off_platform.py): a gig platform's job, held as a golden
+# record. Not work LMX did, so the few readers that look across every hub and
+# client leave it out by this.
+SOURCE_SYSTEM_OFF_PLATFORM = "off_platform"
+
 
 class OrderStatus(str, enum.Enum):
     received = "received"

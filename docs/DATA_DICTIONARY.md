@@ -70,7 +70,7 @@ One row per door, bay or counter a delivery can use. A site can have several.
 |---|---|---|
 | `stops.handoff_point_id` | The handoff point this delivery used | — |
 | `stops.stop_type` | What the stop is. A record is a drop-off or a visit | `pickup`, `dropoff`, `visit` (a technician at a site, no delivery: `DE-6`) |
-| `stops.record_source` | Where the record came from. Every record has one | `lmx_app` by default; `import_route_export` and `import_site_counts` for Experiment 0 (`DE-3`); `redrive` for a technician's visit (`DE-6`); later e.g. `off_platform`, `desk` |
+| `stops.record_source` | Where the record came from. Every record has one | `lmx_app` by default; `import_route_export` and `import_site_counts` for Experiment 0 (`DE-3`); `redrive` for a technician's visit (`DE-6`); `off_platform` for a gig job a driver logged (`DE-7`); later e.g. `desk` |
 | `stops.collected_by` | Who collected the record | A driver, technician or scorer id |
 | `orders.item_description` | What was carried | Free text |
 | `orders.item_weight_kg` | The item's real weight. Separate from dispatch's `weight_units`, which is a unitless capacity number that defaults to 1.0 | Kilograms, zero or more |
@@ -161,3 +161,19 @@ nothing over cannot learn and records as unknown.
 | Gold | Drop-off end and autonomy qualifier |
 | Silver | Drop-off end |
 | Reference | No drop-off end |
+
+**An off-platform delivery is graded like any delivery (`DE-7`)**, with two
+readings of the delivery profile, because LMX never held the job. A driver who
+delivered a gig platform's job logs it as one record: a stand-in order
+(`orders.source_system = 'off_platform'`, no client, `intake_mode = 'backfill'`)
+holding the item, a pickup and a drop-off stop with `record_source =
+'off_platform'`, and the job pointing at the order (`gig_jobs.record_order_id`).
+
+| Delivery profile, off-platform | Reads |
+|---|---|
+| Urgency | The platform's drop-off deadline (`orders.delivery_window_end`). `sla_tier` stays null: it is LMX's call on how long to hold an order, and nobody held this one |
+| Pickup located | The pickup counter's site coordinates, or the driver's pin at the counter. There is no shop |
+
+Its stops' status is `recorded` and its route's `record`: something that
+happened elsewhere, written down, never LMX work. `gig_jobs.record_bonus_cents`
+is the bonus owed for logging it, recorded and not paid.

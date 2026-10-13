@@ -64,6 +64,7 @@ AUDIENCE: dict[str, tuple[str, ...]] = {
     "ops_auth_routes": ("dashboard/src",),
     "client_routes": ("client-portal/src",),
     "driver_routes": ("driver-app/src",),
+    "off_platform_routes": ("driver-app/src",),
     "public_routes": ("client-portal/src", "dashboard/src"),  # the tracking page
 }
 
@@ -72,6 +73,7 @@ ROUTERS = (
     "admin_routes",
     "client_routes",
     "driver_routes",
+    "off_platform_routes",
     "ops_auth_routes",
     "public_routes",
     "public_api_routes",
@@ -126,9 +128,6 @@ NOT_A_FEATURE: frozenset[str] = frozenset(
 )
 
 KNOWN_UNREACHABLE: dict[str, str] = {
-    "GET /driver/me/gig-jobs": "G3 - the app has no gig screen",
-    "POST /driver/me/gig-jobs": "G3 - same",
-    "PATCH /driver/me/gig-jobs/{gig_job_id}": "G3 - same",
     "POST /fleet/{hub_id}/drivers/location": (
         "F1 - the superseded ops-admin write path. The app posts to "
         "/driver/me/location; F1's own note says this one would never have "
@@ -136,8 +135,8 @@ KNOWN_UNREACHABLE: dict[str, str] = {
     ),
     "POST /fleet/{hub_id}/drivers/state": "F1 - same",
     "POST /driver/me/gig-jobs/evaluate": (
-        "G3 - the app has no gig screen; offers arrive and are answered on the "
-        "platform's own app today"
+        "G3 - the app's only gig screen logs a delivered job as a record (DE-7); "
+        "offers arrive and are answered on the platform's own app today"
     ),
 }
 

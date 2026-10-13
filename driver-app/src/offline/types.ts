@@ -25,7 +25,11 @@ export type OutboxActionType =
   | 'return-to-shop'
   // DRV-7. Idempotent on the server by overwrite: a retry writes the same
   // answers to the same columns rather than creating a second profile.
-  | 'survey';
+  | 'survey'
+  // DE-7: a gig job logged as a record. `stopId` is the record's id, chosen by
+  // the phone. Each send writes what it carries; an unsent one absorbs the next
+  // half, so the counter and the door go as one request when there is no signal.
+  | 'off-platform-record';
 
 export interface OutboxItem {
   id: string;
@@ -39,6 +43,10 @@ export interface OutboxItem {
   // return-not-ready: {}; return-to-shop: {} - kept loose here since each
   // type's shape is only ever read by outboxManager.send(), not by UI code.
   payload: Record<string, unknown>;
+  // Another stop whose actions must reach the server first. An off-platform
+  // record's pickup counter (DE-7) is surveyed under the pickup's own id, which
+  // exists on the server only once the record's first send has landed.
+  after?: string;
   attempts: number;
   lastError: string | null;
   nextAttemptAt: string; // ISO

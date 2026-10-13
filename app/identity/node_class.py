@@ -26,7 +26,7 @@ from sqlalchemy import ColumnElement, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.location import Location
-from app.models.order import Order
+from app.models.order import SOURCE_SYSTEM_OFF_PLATFORM, Order
 from app.models.shop import Shop
 
 NODE_CLASS_SHOP = "shop"
@@ -223,7 +223,12 @@ def is_a_served_dock() -> ColumnElement[bool]:
     """
     return or_(
         exists().where(Shop.location_id == Location.id),
-        exists().where(Order.delivery_location_id == Location.id),
+        # A door a driver delivered to for a gig platform (`DE-7`) is not one LMX
+        # serves.
+        exists().where(
+            Order.delivery_location_id == Location.id,
+            Order.source_system != SOURCE_SYSTEM_OFF_PLATFORM,
+        ),
     )
 
 

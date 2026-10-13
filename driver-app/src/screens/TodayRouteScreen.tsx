@@ -25,6 +25,8 @@ import { etaLabel } from '../utils/etaLabel';
 import { useTodayRoute } from './useTodayRoute';
 import { LocationDisclosureScreen } from './LocationDisclosureScreen';
 import { markAsked, shouldAskForBackgroundLocation } from '../location/backgroundConsent';
+import { loadDrafts } from '../offline/offPlatformRecord';
+import type { OffPlatformDraft } from '../offline/offPlatformRecord';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'Home'>;
 
@@ -51,6 +53,16 @@ export function TodayRouteScreen({ navigation }: Props) {
   // to background location with no work in front of you is a worse consent and
   // a worse conversion.
   const [askingConsent, setAskingConsent] = useState(false);
+  // DE-7: off-platform deliveries started and not yet logged at the door.
+  const [drafts, setDrafts] = useState<OffPlatformDraft[]>([]);
+
+  useEffect(
+    () =>
+      navigation.addListener('focus', () => {
+        void loadDrafts().then(setDrafts);
+      }),
+    [navigation],
+  );
 
   useRouteEvents(route?.route_id ?? null, useCallback((event) => setRouteChangeEvent(event), []));
 
@@ -244,6 +256,21 @@ export function TodayRouteScreen({ navigation }: Props) {
       {!route && !primaryOffer && !isOnline && (
         <Button label="Go online" onPress={() => handleToggle(true)} loading={togglingOnline} />
       )}
+
+      {/* DE-7. Not LMX work, so never in the way of it: only when there is no
+          route, below everything that is. */}
+      {!route && (
+        <View style={styles.offPlatform}>
+          {drafts
+            .filter((d) => !d.deliveredAt)
+            .map((d) => (
+              <Card key={d.recordId} style={styles.otherOfferCard} onPress={() => navigation.navigate('OffPlatform', { recordId: d.recordId })}>
+                <Text style={styles.cardBody}>Finish logging {d.jobLabel || 'a job'}</Text>
+              </Card>
+            ))}
+          <Button label="Log an off-platform delivery" variant="outline" onPress={() => navigation.navigate('OffPlatform', {})} />
+        </View>
+      )}
     </ScreenContainer>
   );
 }
@@ -257,6 +284,7 @@ const makeStyles = (colors: ColorScheme) =>
       marginBottom: spacing.lg,
     },
     statusTitle: { ...typography.title, color: colors.textPrimary },
+    offPlatform: { marginTop: spacing.lg },
     statusSubtitle: { ...typography.subtitle, color: colors.textSecondary },
     currentCard: { marginBottom: spacing.lg, gap: spacing.sm },
     stopTypeLabel: { ...typography.label, color: colors.textPrimary },

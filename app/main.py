@@ -21,6 +21,7 @@ from app.api.admin_routes import router as admin_router
 from app.api.client_routes import router as client_router
 from app.api.driver_routes import router as driver_router
 from app.api.internal_routes import router as internal_router
+from app.api.off_platform_routes import router as off_platform_router
 from app.api.ops_auth_routes import router as ops_auth_router
 from app.api.public_api_routes import router as public_api_router
 from app.api.public_routes import router as public_router
@@ -138,6 +139,8 @@ app.include_router(ops_router)
 app.include_router(ops_auth_router)
 app.include_router(ingestion_router)
 app.include_router(driver_router)
+# DE-7: a gig job logged as a golden record - driver-authenticated, like the above.
+app.include_router(off_platform_router)
 app.include_router(client_router)
 app.include_router(admin_router)
 # The only unauthenticated write surface - see app/api/public_routes.py for what

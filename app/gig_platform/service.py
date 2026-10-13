@@ -101,6 +101,8 @@ def gig_job_view(job: GigJob) -> GigJobView:
         delivered_at=job.delivered_at,
         is_pinned_to_driver=job.is_pinned_to_driver,
         is_sequenceable=job.is_sequenceable,
+        is_logged_as_record=job.record_order_id is not None,
+        record_bonus_cents=job.record_bonus_cents,
     )
 
 
@@ -123,6 +125,7 @@ async def record_job(
     hub_id: str,
     driver_id: str | None = None,
     status: str = "offered",
+    commit: bool = True,
 ) -> GigJob:
     """Record one captured offer, whatever path captured it.
 
@@ -133,6 +136,9 @@ async def record_job(
     `driver_id` is the driver whose platform account the offer arrived on.
     Supplied for anything captured by a driver's own device; null only for an
     offer recorded centrally with no owner yet.
+
+    `commit=False` flushes instead, for a caller recording the job as one step of
+    a larger write (`DE-7`'s off-platform record).
     """
     existing = await find_by_platform_ref(
         session, intake.source_platform, intake.platform_job_ref
@@ -165,8 +171,36 @@ async def record_job(
         raw_payload=intake.raw_payload,
     )
     session.add(job)
-    await session.commit()
-    await session.refresh(job)
+    if commit:
+        await session.commit()
+        await session.refresh(job)
+    else:
+        await session.flush()
+    return job
+
+
+def advance_to(job: GigJob, target: GigJobStatus, *, at: datetime | None = None) -> GigJob:
+    """Move a job forward to `target`, past steps nobody recorded. Does not commit.
+
+    Only `target`'s time is stamped, with `at`: a step the driver never told us
+    about happened at a time nobody knows, and a null says so where a copy of
+    `at` would be a guess.
+
+    For a driver logging a delivery after the fact (`DE-7`): a job they never
+    marked picked up in the app still was, so logging the drop-off takes it
+    straight there rather than refusing a jump `transition` would refuse. A
+    job declined or cancelled is not walked anywhere - that is a contradiction to
+    report, not a step to take - and neither is one already past `target`.
+    """
+    order = ("offered", "accepted", "picked_up", "delivered")
+    if job.status not in order:
+        raise InvalidGigJobTransition(job.status, target)
+    if order.index(job.status) >= order.index(target):
+        return job
+    job.status = target
+    stamp = _STATUS_TIMESTAMPS.get(target)
+    if stamp is not None and getattr(job, stamp) is None:
+        setattr(job, stamp, at or datetime.now(timezone.utc))
     return job
 
 

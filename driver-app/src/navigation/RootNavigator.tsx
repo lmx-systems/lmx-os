@@ -11,6 +11,7 @@ import { EarningsScreen } from '../screens/EarningsScreen';
 import { EditVehicleScreen } from '../screens/EditVehicleScreen';
 import { FlagIssueScreen } from '../screens/FlagIssueScreen';
 import { LocationDisclosureScreen } from '../screens/LocationDisclosureScreen';
+import { OffPlatformRecordScreen } from '../screens/OffPlatformRecordScreen';
 import { PaymentMethodScreen } from '../screens/PaymentMethodScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { SignInScreen } from '../screens/SignInScreen';
@@ -59,6 +60,11 @@ function HomeNavigator() {
       <HomeStack.Screen name="Home" component={TodayRouteScreen} />
       <HomeStack.Screen name="StopDetail" component={StopDetailScreen} options={{ headerShown: true, title: 'Stop' }} />
       <HomeStack.Screen name="FlagIssue" component={FlagIssueScreen} options={{ headerShown: true, title: 'Flag an issue' }} />
+      <HomeStack.Screen
+        name="OffPlatform"
+        component={OffPlatformRecordScreen}
+        options={{ headerShown: true, title: 'Off-platform delivery' }}
+      />
     </HomeStack.Navigator>
   );
 }

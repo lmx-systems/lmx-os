@@ -111,6 +111,11 @@ class GigJobView(BaseModel):
     is_pinned_to_driver: bool
     is_sequenceable: bool
 
+    # `DE-7`: whether the driver has logged this job as a golden record, and the
+    # bonus owed for it - recorded, not paid until payouts exist.
+    is_logged_as_record: bool = False
+    record_bonus_cents: int | None = None
+
 
 class GigJobStatusUpdate(BaseModel):
     status: GigJobStatus
