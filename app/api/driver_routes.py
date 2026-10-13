@@ -2979,21 +2979,32 @@ async def flag_stop_issue(
     if plan_changed:
         # After the commit, as dispatch's cancel sends it, so the app is never
         # told of a removal that was rolled back. The same event, so the app
-        # sees one kind of change.
-        await get_client().publish(
-            f"driver_route_events:{route.driver_id}",
-            json.dumps(
-                {
-                    "type": "route_updated",
-                    "route_id": str(route.id),
-                    "plan_version": route.plan_version,
-                    "change": "stop_removed",
-                    "affected_stop_ids": taken_off,
-                    "message": "A flagged pickup's delivery is off your route",
-                    "occurred_at": datetime.now(timezone.utc).isoformat(),
-                }
-            ),
+        # sees one kind of change. A failed publish is logged, never raised: the
+        # flag is committed, and a 500 here skipped freeing the driver below for
+        # good, since the app's retry then takes the replay path above. The app
+        # still finds the change at its next route load, by `plan_version`.
+        message = (
+            "A flagged pickup's delivery is off your route"
+            if stop.stop_type == "pickup"
+            else "The flagged order's other stops are off your route"
         )
+        try:
+            await get_client().publish(
+                f"driver_route_events:{route.driver_id}",
+                json.dumps(
+                    {
+                        "type": "route_updated",
+                        "route_id": str(route.id),
+                        "plan_version": route.plan_version,
+                        "change": "stop_removed",
+                        "affected_stop_ids": taken_off,
+                        "message": message,
+                        "occurred_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ),
+            )
+        except Exception:
+            logger.exception("flag_route_event_publish_failed", route_id=str(route.id))
 
     # Vehicle-load tracking, mirroring complete_stop's: a flagged *dropoff*
     # still means that weight leaves the vehicle (whatever the resolution

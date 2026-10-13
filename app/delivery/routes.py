@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.parcel import Parcel
 from app.models.route import Route
 from app.models.stop import Stop, StopOrder
 
@@ -68,8 +69,13 @@ async def take_orders_off_stops(
     stops out. Its `eta` goes - there is no arrival to forecast - and its
     `planned_eta` stays, as the record of what was planned.
 
+    A shared pickup also sheds the leaving orders' parcels (`_shed_parcels`):
+    left at its old count, it could never be completed, since a scan counts only
+    the parcels of orders still on the stop and completion waits for the count.
+
     The caller bumps the route's `plan_version`, refreshes its ETAs, promotes
-    its next stop and tells the driver's app, after the commit.
+    its next stop and tells the driver's app, after the commit; the app reloads
+    the route on that change and sees the new count.
     """
     leaving = set(order_ids)
     removed: list[str] = []
@@ -88,12 +94,42 @@ async def take_orders_off_stops(
             ).all()
             for link in links:
                 await session.delete(link)
+            if stop.stop_type == "pickup":
+                await _shed_parcels(session, stop, list(carried & leaving), list(carried - leaving))
             continue
         stop.status = "cancelled"
         stop.eta = None
         removed.append(str(stop.id))
     await session.flush()
     return removed
+
+
+async def _parcels(session: AsyncSession, order_ids: list[uuid.UUID]) -> tuple[int, int]:
+    """(parcels, parcels scanned) across these orders' Parcel rows."""
+    total, scanned = (
+        await session.execute(
+            select(func.count(), func.count(Parcel.scanned_at)).where(Parcel.order_id.in_(order_ids))
+        )
+    ).one()
+    return int(total), int(scanned)
+
+
+async def _shed_parcels(
+    session: AsyncSession, stop: Stop, leaving: list[uuid.UUID], staying: list[uuid.UUID]
+) -> None:
+    """Take the leaving orders' parcels off a pickup that keeps other orders.
+
+    A pickup's count was built as its orders' Parcel rows, or one per order where
+    an order has none (`_parcel_count_for_orders` and its callers), so the leaving
+    orders take the same away: their rows, or one each. It never falls below one
+    per order still on the stop. Scans of the leaving orders' parcels come off the
+    scanned count too - left in, they would let the stop complete with a staying
+    order's parcel unscanned. A parcel confirmed by hand is not stamped, so a hand
+    count can't be told apart by order; it stays, capped at the new count.
+    """
+    leaving_total, leaving_scanned = await _parcels(session, leaving)
+    stop.parcel_count = max(len(staying), stop.parcel_count - (leaving_total or len(leaving)))
+    stop.scanned_count = min(stop.parcel_count, max(0, stop.scanned_count - leaving_scanned))
 
 
 # Postgres's lock_not_available: what NOWAIT raises on a row somebody holds.

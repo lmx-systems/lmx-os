@@ -29,7 +29,7 @@ from app.identity.merge import (
     revert_merge,
 )
 from app.identity.node_class import classification_coverage, is_a_served_dock, set_node_class
-from app.identity.site_facts import NothingToSettle, open_disputes, settle_dispute
+from app.identity.site_facts import NewerAnswer, NothingToSettle, open_disputes, settle_dispute
 from app.learning_loop.service import run_nightly_job
 from app.models.dispatcher_override import (
     ACTION_RELEASE,
@@ -41,7 +41,7 @@ from app.models.dispatch_assignment import DispatchAssignment
 from app.models.driver import Driver
 from app.models.hub import Hub
 from app.models.linkage_flag import LinkageFlag
-from app.models.location import Location
+from app.models.location import SITE_FACTS, Location
 from app.models.location_merge import LocationMerge
 from app.models.machine_label import MACHINES, MISSING_DATA, NO_REASONS
 from app.models.order import Order
@@ -258,14 +258,34 @@ async def attention_counts(
         .select_from(Location)
         .where(Location.node_class.is_(None), Location.merged_into_id.is_(None), is_a_served_dock())
     )
+    # Counted as the panel counts them: one per fact waiting at a site, so a site
+    # with two disputed facts is two in the badge as it is two in the list.
     disputed = await session.scalar(
-        select(func.count()).select_from(Location).where(_has_open_site_fact_dispute())
+        select(
+            sum(
+                (
+                    func.count().filter(_fact_has_open_dispute(name))
+                    for name in SITE_FACTS
+                ),
+                start=literal_column("0"),
+            )
+        ).where(Location.merged_into_id.is_(None))
     )
     return AttentionCountsView(
         late_orders=late,
         merge_proposals=merges,
         unlabelled_docks=int(unlabelled or 0),
         site_fact_disputes=int(disputed or 0),
+    )
+
+
+def _fact_has_open_dispute(name: str) -> ColumnElement[bool]:
+    """This one fact at a site has an answer waiting for a person."""
+    return func.coalesce(
+        func.jsonb_path_exists(
+            Location.site_fact_answers, literal_column(f"'$.{name}.disputes[0]'::jsonpath")
+        ),
+        False,
     )
 
 
@@ -347,9 +367,14 @@ async def settle_site_fact_dispute(
         raise HTTPException(status_code=404, detail="No such site")
     try:
         await settle_dispute(
-            session, location, fact, take=body.take, by=uuid.UUID(ops.ops_user_id)
+            session,
+            location,
+            fact,
+            take=body.take,
+            by=uuid.UUID(ops.ops_user_id),
+            seen_up_to=body.seen_up_to,
         )
-    except NothingToSettle as exc:
+    except (NothingToSettle, NewerAnswer) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
     return None

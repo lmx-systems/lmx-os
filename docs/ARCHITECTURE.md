@@ -251,8 +251,11 @@ This closed three real gaps, not just "add some endpoints":
     (`record_site_facts`, `app/identity/site_facts.py`) - or, after a drop-off
     where the survey is not due, locks the site and nothing else
     (`POST /driver/stops/{id}/site-facts`). A merge landing between the lookup
-    and the lock is followed to the surviving site, which is locked in turn;
-    merges take no row locks, so the two sites cannot wait on each other. The
+    and the lock is followed to the surviving site, which is locked in turn.
+    A merge, and its revert, lock both sites in id order (`lock_sites`) to
+    carry the answers given at the merged site's doors, and hold no stop,
+    route or order; a door holds one site, so the two cannot wait on each
+    other. The
     desk pre-fill locks sites and nothing else. Nothing holding a site waits on
     a stop, route or order.
 - **The first Route/Stop endpoints this codebase has ever had.** The

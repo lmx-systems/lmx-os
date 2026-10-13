@@ -428,6 +428,9 @@ async def order_arrival_estimate(
 # seconds or so; a minute keeps the walk off the hot path and is far inside the
 # design doc's ten-minute threshold for telling anyone their time has moved.
 PING_REFRESH_SECONDS = 60
+# After a refresh that failed for any reason but a busy route: long enough that a
+# failure repeating on every ping is not retried on every ping.
+PING_RETRY_AFTER_FAILURE_SECONDS = 15
 
 
 async def refresh_after_ping(session: AsyncSession, driver_id: uuid.UUID) -> dict | None:
@@ -469,7 +472,8 @@ async def refresh_after_ping(session: AsyncSession, driver_id: uuid.UUID) -> dic
         await session.commit()
     except Exception:
         # Any other failure (a dropped connection, a timeout) also leaves the
-        # refresh undone, so the next ping tries again too.
-        await redis.delete(key)
+        # refresh undone. The next ping may try again, but not at once: a refresh
+        # that fails every time (a bad row) would otherwise run on every ping.
+        await redis.set(key, "1", ex=PING_RETRY_AFTER_FAILURE_SECONDS)
         raise
     return summary

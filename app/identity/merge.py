@@ -32,6 +32,7 @@ from app.identity.account_signals import (
     why_these_accounts_might_be_one_place,
 )
 from app.identity.resolution import canonical_location
+from app.identity.site_facts import fold_answers, lock_sites, unfold_answers
 from app.models.location import Location
 from app.models.location_merge import (
     SOURCE_AUTOMATIC,
@@ -341,6 +342,14 @@ async def revert_merge(
     if source is None:
         raise ValueError("the merged dock no longer exists")
 
+    # The answers the merge carried over and are still waiting go back with it
+    # (`DE-15`); the source kept its own record, so it returns as it was.
+    target = await session.get(Location, merge.target_location_id)
+    if target is not None:
+        locked = await lock_sites(session, [source.id, target.id])
+        source, target = locked[source.id], locked[target.id]
+        unfold_answers(source.id, target)
+
     source.merged_into_id = None
     for shop_id in merge.moved_shop_ids or []:
         shop = await session.get(Shop, UUID(str(shop_id)))
@@ -400,6 +409,14 @@ async def _apply(
     )
     for shop in moved:
         shop.location_id = target.id
+
+    # The answers given at the source's doors come along (`DE-15`): its open
+    # disputes and any answer the target disagrees with are disputes here now,
+    # and a retry from one of its stops is still a repeat. Both rows locked, in
+    # id order, so a door's answer to either waits for this or this for it.
+    locked = await lock_sites(session, [source.id, target.id])
+    source, target = locked[source.id], locked[target.id]
+    fold_answers(source, target)
 
     source.merged_into_id = target.id
 

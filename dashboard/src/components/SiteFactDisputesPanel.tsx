@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Card } from './ui/Card'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import type { SiteFactDispute } from '../lib/types'
 
 const FACT_LABELS: Record<SiteFactDispute['fact'], string> = {
@@ -50,12 +50,22 @@ export function SiteFactDisputesPanel({ canDispatch }: { canDispatch: boolean })
   async function settle(d: SiteFactDispute, take: string | boolean | null) {
     const key = `${d.location_id}:${d.fact}`
     setBusy(key)
+    // The newest answer shown here: one that came in after it is one nobody saw.
+    const seenUpTo = d.answers.reduce<string | null>(
+      (newest, a) => (a.at && (!newest || Date.parse(a.at) > Date.parse(newest)) ? a.at : newest),
+      null,
+    )
     try {
-      await api.settleSiteFact(d.location_id, d.fact, take)
+      await api.settleSiteFact(d.location_id, d.fact, take, seenUpTo)
       setDisputes((current) =>
         (current ?? []).filter((x) => !(x.location_id === d.location_id && x.fact === d.fact)),
       )
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        // Another answer came in (or someone settled it first): show what is
+        // there now rather than deciding on what was.
+        await load()
+      }
       setError(e as Error)
     } finally {
       setBusy(null)
@@ -65,7 +75,7 @@ export function SiteFactDisputesPanel({ canDispatch }: { canDispatch: boolean })
   if (disputes !== null && disputes.length === 0 && !error) return null
 
   return (
-    <Card title="Answers that disagree" meta={disputes ? `${disputes.length} to settle` : 'loading…'}>
+    <Card title="Answers that disagree" meta={disputes ? `${disputes.length} ${disputes.length === 1 ? 'fact' : 'facts'} to settle` : 'loading…'}>
       {error && <p className="text-sm text-[var(--red)]">Couldn't load: {error.message}</p>}
       <ul className="space-y-2">
         {(disputes ?? []).map((d) => {

@@ -456,9 +456,14 @@ class SiteFactDisputeView(BaseModel):
 
 
 class SettleSiteFactBody(BaseModel):
-    """Keep the fact as recorded (`take` omitted), or take a disputed value."""
+    """Keep the fact as recorded (`take` omitted), or take a disputed value.
+
+    `seen_up_to` is the time of the newest answer the panel showed; a settle is
+    refused when a newer one has arrived since, so nobody files an answer they
+    never saw."""
 
     take: str | bool | None = None
+    seen_up_to: datetime | None = None
 
 
 class OrderLookupRow(BaseModel):
