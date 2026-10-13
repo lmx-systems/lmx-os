@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api } from '../lib/api'
 import { truncateId } from '../lib/format'
 import type { AssignmentResult, DriverState } from '../lib/types'
+import { pillButton } from './ui/buttons'
 
 const STATUS_WORDS: Record<DriverState['status'], string> = {
   off_shift: 'off shift',
@@ -110,8 +111,7 @@ export function AssignDriverControl({
     }
   }
 
-  const button =
-    'rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40'
+  const button = pillButton
 
   if (!open) {
     return (
@@ -130,7 +130,7 @@ export function AssignDriverControl({
           setChosenId(e.target.value)
           setRefused(null)
         }}
-        className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-[11px] text-[var(--text-primary)]"
+        className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-[12.5px] text-[var(--text-primary)]"
       >
         <option value="">
           {drivers === null
@@ -162,13 +162,13 @@ export function AssignDriverControl({
       </select>
       {chosen && (
         <>
-          <span className="text-[11px] text-[var(--text-primary)]">
+          <span className="text-[12.5px] text-[var(--text-primary)]">
             {`Offer ${label} to ${nameOf(chosen)}? They can decline it.`}
           </span>
           {offerBonusCents ? (
             // For an order already turned down: the playbook's step-up. Owed to
             // the driver once delivered; the amount is a placeholder.
-            <label className="inline-flex items-center gap-1 text-[11px] text-[var(--text-secondary)]">
+            <label className="inline-flex items-center gap-1 text-[12.5px] text-[var(--text-secondary)]">
               <input
                 type="checkbox"
                 checked={withBonus}
@@ -194,7 +194,7 @@ export function AssignDriverControl({
       >
         Not now
       </button>
-      {refused && <span className="text-[11px] text-[var(--red)]">{refused}</span>}
+      {refused && <span className="text-[12.5px] text-[var(--red)]">{refused}</span>}
     </span>
   )
 }

@@ -83,7 +83,7 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
         {(proposals ?? []).filter((p) => p.status === 'proposed').map((proposal) => (
           <li
             key={proposal.id}
-            className="rounded-[var(--radius)] border border-[var(--border)] px-2.5 py-2"
+            className="rounded-[20px] bg-[var(--surface-2)] px-2.5 py-2"
           >
             <p className="text-[13px] text-[var(--text-primary)]">{proposal.source_address}</p>
             <p className="text-[13px] text-[var(--text-primary)]">{proposal.target_address}</p>
@@ -100,14 +100,14 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
                 <button
                   disabled={busy === proposal.id}
                   onClick={() => decide(proposal.id, 'confirm')}
-                  className="rounded-md bg-[var(--accent)] px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-40"
+                  className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-[11px] font-semibold text-white disabled:opacity-40"
                 >
                   Same place
                 </button>
                 <button
                   disabled={busy === proposal.id}
                   onClick={() => decide(proposal.id, 'reject')}
-                  className="rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                  className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-40"
                 >
                   Different
                 </button>
@@ -139,7 +139,7 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
                 <button
                   disabled={busy === merge.id}
                   onClick={() => decide(merge.id, 'revert')}
-                  className="flex-shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                  className="flex-shrink-0 rounded-full px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] disabled:opacity-40"
                 >
                   Undo
                 </button>
@@ -169,7 +169,7 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
                 <button
                   disabled={busy === merge.id}
                   onClick={() => decide(merge.id, 'redo')}
-                  className="flex-shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                  className="flex-shrink-0 rounded-full px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] disabled:opacity-40"
                 >
                   Redo
                 </button>

@@ -174,7 +174,7 @@ export function SupportInboxPanel({ hubId, onToast }: { hubId: string; onToast: 
               type="button"
               disabled={sending || !draft.trim()}
               onClick={() => void reply()}
-              className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
+              className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-[13px] font-semibold text-white disabled:opacity-40"
             >
               {sending ? 'Sending…' : 'Reply'}
             </button>

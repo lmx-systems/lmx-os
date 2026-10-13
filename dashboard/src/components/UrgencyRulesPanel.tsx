@@ -133,7 +133,7 @@ export function UrgencyRulesPanel({ hubId, onToast }: UrgencyRulesPanelProps) {
             <button
               type="submit"
               disabled={submitting}
-              className="rounded-[var(--radius)] bg-[var(--accent)] px-4 py-1.5 text-[13px] font-medium text-white disabled:opacity-60"
+              className="rounded-full bg-[var(--accent)] px-4 py-1.5 text-[13px] font-semibold text-white disabled:opacity-60"
             >
               {submitting ? 'Adding…' : 'Add'}
             </button>
@@ -174,14 +174,14 @@ export function UrgencyRulesPanel({ hubId, onToast }: UrgencyRulesPanelProps) {
                         <button
                           disabled={busyId === rule.rule_id}
                           onClick={() => toggle(rule)}
-                          className="rounded-[var(--radius)] border border-[var(--border-strong)] px-2 py-1 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
+                          className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-1 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
                         >
                           {rule.enabled ? 'Disable' : 'Enable'}
                         </button>
                         <button
                           disabled={busyId === rule.rule_id}
                           onClick={() => remove(rule)}
-                          className="rounded-[var(--radius)] border border-[var(--border-strong)] px-2 py-1 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
+                          className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-1 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
                         >
                           Delete
                         </button>

@@ -157,7 +157,7 @@ export function LabellingQueuePanel({ canDispatch }: { canDispatch: boolean }) {
       )}
 
       {record && (
-        <div className="rounded-[var(--radius)] border border-[var(--border)] px-2.5 py-2">
+        <div className="rounded-[20px] bg-[var(--surface-2)] px-2.5 py-2">
           <Facts record={record} />
 
           {canDispatch &&
@@ -208,7 +208,7 @@ export function LabellingQueuePanel({ canDispatch }: { canDispatch: boolean }) {
             <button
               disabled={!complete || busy || !page?.machine_limits_version}
               onClick={save}
-              className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40"
+              className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-40"
             >
               Save and next
             </button>

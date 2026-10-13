@@ -107,7 +107,7 @@ export function PendingSignupsPanel({ hubId, onToast }: PendingSignupsPanelProps
           {signups.map((signup) => (
             <div
               key={signup.client_id}
-              className="flex flex-col gap-3 rounded-[var(--radius)] border border-[var(--border)] p-3"
+              className="flex flex-col gap-3 rounded-[20px] bg-[var(--surface-2)] p-3"
             >
               <div className="flex flex-col gap-1">
                 <div className="font-medium text-[var(--text-primary)]">{signup.company_name}</div>
@@ -147,14 +147,14 @@ export function PendingSignupsPanel({ hubId, onToast }: PendingSignupsPanelProps
                 <button
                   disabled={busyId === signup.client_id}
                   onClick={() => approve(signup)}
-                  className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
+                  className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-60"
                 >
                   Approve &amp; set rates
                 </button>
                 <button
                   disabled={busyId === signup.client_id}
                   onClick={() => reject(signup)}
-                  className="rounded-[var(--radius)] border border-[var(--border-strong)] px-3 py-1.5 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
+                  className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
                 >
                   Decline
                 </button>

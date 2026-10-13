@@ -78,6 +78,7 @@ Never assume a commit reached the remote: confirm with
 | `docs/THE_RECORD_AND_IDENTITY_LAYERS.md` | **What the record and identity layers actually do** — what writes, what reads, what runs at 2am, what a person must do, and the figures measured against the design partner's real export. Read with `ROADMAP_AUDIT_2026-09.md`, which says what was broken |
 | `docs/LMX_LINK_PLAN.md` | The order-intake track: contract, design principles, sequence |
 | `docs/DOCUMENT_STYLE.md` | House style for generated documents |
+| `docs/DESIGN_SYSTEM.md` | **The look of every screen** — console, client portal, tracking page and driver app: tokens, type, components. The default for all new UI |
 | `docs/ORDER_API.md`, `docs/WEBHOOKS.md` | External-facing interfaces |
 | `app/legal/content/*.md` | The terms and privacy policy themselves — served, versioned, and the single copy |
 | `docs/LEGAL_BRIEF.md` | Counsel's covering memo: what each clause depends on, the open decisions, how to publish |
@@ -149,6 +150,14 @@ whatever deadline is on the object.
 **Status write-back gets equal weight to intake.** A carrier that accepts
 orders and goes quiet is a favour, not a carrier. It is an exit criterion,
 never a follow-up ticket.
+
+## Product UI
+
+Every screen follows `docs/DESIGN_SYSTEM.md`: light only (no dark theme), a
+grey ground with white tiles, ink pill buttons, one lime headline tile, peach
+for what needs a person, Plus Jakarta Sans. Use the existing tokens and
+components rather than new colours or one-off styles; extend the design system
+doc in the same change when something new is needed.
 
 ## Generated documents
 

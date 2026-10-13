@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../lib/api'
 import type { OrderCancellationResult } from '../lib/types'
+import { pillButton } from './ui/buttons'
 
 const HOW: Record<OrderCancellationResult['how'], string> = {
   before_collection: 'cancelled; it was still waiting to go out',
@@ -44,14 +45,13 @@ export function CancelOrderButton({
     }
   }
 
-  const button =
-    'rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--red)] hover:text-[var(--text-primary)] disabled:opacity-40'
+  const button = pillButton
 
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
       {confirming ? (
         <>
-          <span className="text-[11px] text-[var(--text-primary)]">Cancel {label}? It can't be reopened.</span>
+          <span className="text-[12.5px] text-[var(--text-primary)]">Cancel {label}? It can't be reopened.</span>
           <button disabled={busy} onClick={cancel} className={button}>
             {busy ? 'Cancelling…' : 'Yes, cancel it'}
           </button>
@@ -64,7 +64,7 @@ export function CancelOrderButton({
           Cancel order
         </button>
       )}
-      {refused && <span className="text-[11px] text-[var(--red)]">{refused}</span>}
+      {refused && <span className="text-[12.5px] text-[var(--red)]">{refused}</span>}
     </span>
   )
 }

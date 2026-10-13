@@ -204,7 +204,7 @@ export function ClientRatesPanel({
                           <button
                             disabled={busy}
                             onClick={() => save(tier)}
-                            className="mr-1 rounded-md bg-[var(--accent)] px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-40"
+                            className="mr-1 rounded-full bg-[var(--accent)] px-2 py-0.5 text-[11px] font-semibold text-white disabled:opacity-40"
                           >
                             Save
                           </button>

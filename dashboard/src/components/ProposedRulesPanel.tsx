@@ -71,7 +71,7 @@ export function ProposedRulesPanel({ hubId, onToast }: ProposedRulesPanelProps) 
             {rules.map((rule) => (
               <div
                 key={rule.rule_id}
-                className="flex items-start justify-between gap-4 rounded-[var(--radius)] border border-[var(--border)] p-3"
+                className="flex items-start justify-between gap-4 rounded-[20px] bg-[var(--surface-2)] p-3"
               >
                 <div className="flex flex-col gap-1">
                   <div className="font-medium text-[var(--text-primary)]">{rule.rule_type}</div>
@@ -87,14 +87,14 @@ export function ProposedRulesPanel({ hubId, onToast }: ProposedRulesPanelProps) 
                   <button
                     disabled={busyId === rule.rule_id}
                     onClick={() => decide(rule, 'approve')}
-                    className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
+                    className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-60"
                   >
                     Approve
                   </button>
                   <button
                     disabled={busyId === rule.rule_id}
                     onClick={() => decide(rule, 'dismiss')}
-                    className="rounded-[var(--radius)] border border-[var(--border-strong)] px-3 py-1.5 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
+                    className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
                   >
                     Dismiss
                   </button>
