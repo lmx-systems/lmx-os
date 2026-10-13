@@ -38,8 +38,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models.dispatcher_override import (
     ACTION_HOLD,
@@ -131,7 +132,7 @@ async def apply_override(
             "with no reason."
         )
 
-    order = await session.get(Order, order_id)
+    order = await session.get(Order, order_id, populate_existing=True)
     if order is None:
         raise OverrideRefused("No such order.")
 
@@ -168,7 +169,22 @@ async def apply_override(
     )
     session.add(override)
 
-    order.status = new_status
+    # Compare-and-set: a dispatcher assigning this order
+    # (app/orders/assignment.py), or the cycle, may have moved it since the read
+    # above, and a blind write would put an order a driver has been offered back
+    # in the queue.
+    changed = await session.execute(
+        update(Order)
+        .where(Order.id == order.id, Order.status == previous)
+        .values(status=new_status)
+        .returning(Order.id)
+        .execution_options(synchronize_session=False)
+    )
+    if changed.scalar_one_or_none() is None:
+        raise OverrideRefused(
+            "This order moved while you were looking at it - look at it again."
+        )
+    set_committed_value(order, "status", new_status)
     await session.flush()
 
     return OverrideOutcome(

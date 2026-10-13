@@ -3,16 +3,23 @@ import { Card } from './ui/Card'
 import { Chip } from './ui/Chip'
 import { TierBadge } from './ui/Badge'
 import { api } from '../lib/api'
-import { truncateId } from '../lib/format'
+import { minutesUntil, truncateId } from '../lib/format'
+import { AssignDriverControl } from './AssignDriverControl'
 import { CancelOrderButton } from './CancelOrderButton'
-import type { ExceptionItem, ExceptionQueue, ResolutionAction } from '../lib/types'
+import { ASSIGNABLE, DISPATCH_CANCELLABLE } from '../lib/orderStatus'
+import { OverrideForm } from './OverrideForm'
+import type { DriverState, ExceptionItem, ExceptionQueue, ResolutionAction } from '../lib/types'
 
 interface ExceptionsPanelProps {
   data: ExceptionQueue | null
   error: Error | null
   loading: boolean
-  // Resolving a failed delivery and cancelling are a dispatcher's on the server.
+  // Resolving, cancelling, assigning and re-queueing are a dispatcher's on the server.
   canDispatch: boolean
+  // The hub's roster, for the assign control's driver picker. The same polled
+  // fleet the map and roster read, so all three agree about who is free.
+  drivers: DriverState[] | null
+  driversError: boolean
   onResolved: () => void
   onToast: (message: string) => void
 }
@@ -72,6 +79,8 @@ export function ExceptionsPanel({
   error,
   loading,
   canDispatch,
+  drivers,
+  driversError,
   onResolved,
   onToast,
 }: ExceptionsPanelProps) {
@@ -165,17 +174,39 @@ export function ExceptionsPanel({
                       {canDispatch && item.kind === 'delivery_failed' && (
                         <Resolve item={item} onResolved={onResolved} onToast={onToast} />
                       )}
-                      {canDispatch && item.kind !== 'delivery_failed' && (
-                        // A failed delivery's cancel is one of its resolutions above.
+                      {canDispatch && ASSIGNABLE.includes(item.status) && (
+                        // On any row whose order is still waiting for a driver,
+                        // not only "nobody has it": a held order past its promise
+                        // is listed under that kind first and needs a driver just
+                        // the same.
                         <div className="mt-1.5">
-                          <CancelOrderButton
+                          <AssignDriverControl
                             orderId={item.order_id}
                             label={item.external_ref || truncateId(item.order_id)}
+                            drivers={drivers}
+                            driversError={driversError}
                             onDone={onResolved}
                             onToast={onToast}
                           />
                         </div>
                       )}
+                      {canDispatch && item.status === 'queued' && (
+                        <PutBack item={item} onResolved={onResolved} onToast={onToast} />
+                      )}
+                      {canDispatch &&
+                        item.kind !== 'delivery_failed' &&
+                        DISPATCH_CANCELLABLE.includes(item.status) && (
+                          // A failed delivery's cancel is one of its resolutions
+                          // above; an order already collected can only be returned.
+                          <div className="mt-1.5">
+                            <CancelOrderButton
+                              orderId={item.order_id}
+                              label={item.external_ref || truncateId(item.order_id)}
+                              onDone={onResolved}
+                              onToast={onToast}
+                            />
+                          </div>
+                        )}
                     </td>
                   </tr>
                 ))}
@@ -280,5 +311,57 @@ function Resolve({
       )}
       {failed && <span className="text-[11px] text-[var(--red)]">Couldn't resolve: {failed}</span>}
     </div>
+  )
+}
+
+/**
+ * Put a released order back under the hold queue's rules - the hold override
+ * (docs/ROADMAP_1.5.md CON-2), with its mandatory reason. Only a `queued` order:
+ * that is what a dispatcher's release produced, and the server refuses hold
+ * from anything else.
+ *
+ * Behind a disclosure because it is the less common answer to "nobody has it",
+ * and says so when it would do little: once the hold deadline has passed, the
+ * next cycle releases the order again on its own.
+ */
+function PutBack({
+  item,
+  onResolved,
+  onToast,
+}: {
+  item: ExceptionItem
+  onResolved: () => void
+  onToast: (message: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const label = item.external_ref || truncateId(item.order_id)
+  const holdHasRunOut = item.hold_deadline !== null && minutesUntil(item.hold_deadline) <= 0
+
+  if (!open) {
+    return (
+      <div className="mt-1.5">
+        <button
+          onClick={() => setOpen(true)}
+          className="rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)]"
+        >
+          Put back in the queue
+        </button>
+      </div>
+    )
+  }
+  return (
+    <OverrideForm
+      orderId={item.order_id}
+      action="hold"
+      warning={
+        holdHasRunOut
+          ? 'The hold has run out - the next cycle sends it straight back. This only undoes the release.'
+          : undefined
+      }
+      onDone={() => {
+        onToast(`${label} is back in the hold queue.`)
+        onResolved()
+      }}
+    />
   )
 }

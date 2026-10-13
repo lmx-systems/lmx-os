@@ -16,11 +16,13 @@ mutate one column on the hot path a driver waits on.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime, timezone
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models.order import Order, OrderStatus
 from app.orders.sinks import emit_status_change
@@ -35,10 +37,26 @@ async def advance_orders(
     new_status: OrderStatus,
     *,
     occurred_at: datetime | None = None,
+    only_from: Collection[OrderStatus] | None = None,
 ) -> list[Order]:
     """Move a set of orders to `new_status`, skipping any that can't legally go.
 
     Returns the orders that actually moved.
+
+    **`only_from`** is the caller's precondition, written into the write: each
+    move is `UPDATE ... WHERE status IN (<only_from>)`, and counts as moved only
+    if a row changed. For the dispatch cycle and its in-flight insertion, which
+    read without holding the row and race a dispatcher offering an order by hand
+    (app/orders/assignment.py holds the row until it commits). The plain path
+    read `held`, queued its write behind the dispatcher's, then wrote `assigned`
+    over `assigned` and reported a move - and the order went to a second driver.
+    Here the queued UPDATE re-checks its WHERE once the dispatcher commits,
+    matches nothing, and the order is skipped. The caller's statuses rather than
+    the one just read: a dispatcher's release (`held` to `queued`) landing
+    between this read and this write still leaves an order the cycle may place,
+    and comparing against the read would drop it - already out of the hold
+    queue, and placed by nobody. No lock is taken that the write itself would
+    not take. The other writers are not moved onto it here (`CON-5`).
 
     **An illegal transition is skipped and logged, not raised.** These are driven
     by driver actions on a route that may cover several orders in different
@@ -68,6 +86,9 @@ async def advance_orders(
             await session.execute(
                 select(Order)
                 .where(Order.id.in_(order_ids))
+                # Row order is lock order for the conditional writes below,
+                # which go one at a time rather than through the unit of work.
+                .order_by(Order.id)
                 .execution_options(populate_existing=True)
             )
         )
@@ -89,7 +110,39 @@ async def advance_orders(
             continue
 
         previous = order.status
-        order.status = new_status
+        if only_from is not None:
+            if previous not in only_from:
+                logger.info(
+                    "order_status_not_in_precondition",
+                    order_id=str(order.id),
+                    current=previous.value,
+                    requested=new_status.value,
+                )
+                continue
+            changed = await session.execute(
+                update(Order)
+                .where(Order.id == order.id, Order.status.in_(list(only_from)))
+                .values(status=new_status)
+                .returning(Order.id, Order.updated_at)
+                .execution_options(synchronize_session=False)
+            )
+            row = changed.one_or_none()
+            if row is None:
+                logger.info(
+                    "order_status_changed_underneath",
+                    order_id=str(order.id),
+                    read=previous.value,
+                    requested=new_status.value,
+                )
+                continue
+            # Written already (and `updated_at` with it, by the column's
+            # onupdate - tracking-link expiry reads it); recorded on the
+            # instance as committed state so the unit of work does not write
+            # either a second time.
+            set_committed_value(order, "status", new_status)
+            set_committed_value(order, "updated_at", row.updated_at)
+        else:
+            order.status = new_status
         if new_status == OrderStatus.delivered and order.delivered_at is None:
             # Ground truth (docs/ROADMAP.md I1): written once, never on update.
             order.delivered_at = occurred_at

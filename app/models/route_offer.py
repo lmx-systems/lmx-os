@@ -36,7 +36,13 @@ class RouteOffer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
 
     status: Mapped[str] = mapped_column(String(16), default="offered", nullable=False)
-    # offered | accepted | declined | expired
+    # offered | accepted | declined | expired | withdrawn
+    #
+    # `withdrawn` is dispatch cancelling one of the offer's orders before the
+    # driver answered (app/orders/cancellation.py). Most offers come from the
+    # optimizer's cycle; dispatch can also offer an order to an idle driver by
+    # hand (app/orders/assignment.py), and those carry no `visit_payload` and
+    # have a `dispatch_assignments` row naming who made them.
 
     stop_payload: Mapped[list] = mapped_column(JSONB, nullable=False)
 

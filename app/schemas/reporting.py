@@ -122,6 +122,11 @@ class ExceptionItemView(BaseModel):
     promised_at: datetime | None
     detail: str
     next_action: str
+    # The order's status now, and when its hold runs out: what the console needs
+    # to offer only the actions the server would accept (an assign takes `held`
+    # or `queued`, the hold override only `queued`).
+    status: str
+    hold_deadline: datetime | None
 
 
 class ExceptionQueueView(BaseModel):
@@ -444,6 +449,10 @@ class OrderLookupRow(BaseModel):
     promised_at: datetime | None
     delivered_at: datetime | None
     minutes_late: int | None
+    # The ops user who last gave this order to a driver by hand, and when
+    # (`POST /admin/orders/{id}/assign`). Null when the optimizer placed it.
+    assigned_by_dispatch: str | None = None
+    assigned_by_dispatch_at: datetime | None = None
 
 
 class OrderLookupPage(BaseModel):

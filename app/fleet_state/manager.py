@@ -159,6 +159,41 @@ class FleetStateManager:
             )
         return bool(changed)
 
+    async def claim_for_offer(self, hub_id: str, driver_id: str) -> tuple[DriverState, DriverState] | None:
+        """Take an available driver out of the pool for an offer, or say no.
+
+        Two writers make offers now - the dispatch cycle and a dispatcher
+        assigning by hand - and "one open offer per driver" holds only because
+        an offered driver leaves the available set. Each read the driver as
+        available and then wrote `offered`, so between one's read and its write
+        the other could offer the same driver: two open offers, and two active
+        routes if both were accepted. A short per-driver lock makes the
+        read-and-mark one step.
+
+        Returns (state before, state after) when the driver was available, so
+        a caller whose commit then fails can put them back; None when they were
+        not, or another writer is claiming them this instant.
+        """
+        lock = f"driver_offer_claim:{hub_id}:{driver_id}"
+        if not await self._redis.set(lock, "1", nx=True, px=5000):
+            return None
+        try:
+            before = await self.get_driver_state(hub_id, driver_id)
+            if before is None or before.status != "available":
+                return None
+            after = DriverState(
+                driver_id=driver_id,
+                hub_id=hub_id,
+                status="offered",
+                capacity_units=before.capacity_units,
+                load_units=before.load_units,
+                current_route_id=before.current_route_id,
+            )
+            await self.upsert_driver_state(after)
+            return before, after
+        finally:
+            await self._redis.delete(lock)
+
     async def get_driver_state(self, hub_id: str, driver_id: str) -> DriverState | None:
         async with timed_operation("fleet.get_driver_state"):
             data = _fields(await self._redis.hgetall(_state_key(hub_id, driver_id)))

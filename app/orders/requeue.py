@@ -22,7 +22,12 @@ from app.schemas.fleet import DriverState
 
 
 async def requeue_orders_from_offer(
-    session: AsyncSession, hub_id: str, driver_id: str, stop_payload: list[dict]
+    session: AsyncSession,
+    hub_id: str,
+    driver_id: str,
+    stop_payload: list[dict],
+    *,
+    free_driver: bool = True,
 ) -> None:
     """
     A declined/expired offer never touches Route/Stop - the orders just go
@@ -39,9 +44,14 @@ async def requeue_orders_from_offer(
     optimizer took them out of it the moment it made the offer (see
     app/optimizer/service.py) precisely so they can't be offered a second,
     overlapping job while this one is still pending.
+
+    `free_driver=False` for orders an offer never reached: the cycle moved them
+    to `assigned` for a driver whom somebody else claimed before the cycle could
+    (app/optimizer/service.py). That driver's `offered` belongs to the other
+    offer, and must stand.
     """
     manager = FleetStateManager()
-    existing_state = await manager.get_driver_state(hub_id, driver_id)
+    existing_state = await manager.get_driver_state(hub_id, driver_id) if free_driver else None
     if existing_state is not None and existing_state.status == "offered":
         await manager.upsert_driver_state(
             DriverState(
@@ -57,11 +67,32 @@ async def requeue_orders_from_offer(
     hold_queue = HoldQueueStore()
     now = datetime.now(timezone.utc)
     order_ids = [uuid.UUID(s["order_id"]) for s in stop_payload]
-    if order_ids:
-        await session.execute(
-            update(Order).where(Order.id.in_(order_ids)).values(status=OrderStatus.held)
+    # Only orders still `assigned`. An order dispatch cancelled, or assigned to
+    # somebody else by hand, since this offer was made is not this offer's to
+    # send back: the UPDATE used to set `held` whatever the status was, and put a
+    # cancelled order back in the queue for the next cycle to dispatch.
+    requeued_ids = (
+        set(
+            await session.scalars(
+                update(Order)
+                .where(Order.id.in_(order_ids), Order.status == OrderStatus.assigned)
+                .values(status=OrderStatus.held)
+                .returning(Order.id)
+                .execution_options(synchronize_session=False)
+            )
         )
-    orders_result = await session.execute(select(Order).where(Order.id.in_(order_ids))) if order_ids else None
+        if order_ids
+        else set()
+    )
+    orders_result = (
+        await session.execute(
+            select(Order)
+            .where(Order.id.in_(requeued_ids))
+            .execution_options(populate_existing=True)
+        )
+        if requeued_ids
+        else None
+    )
     orders_by_id = {o.id: o for o in (orders_result.scalars().all() if orders_result else [])}
 
     # The client was told ASSIGNED, so it's told the order is back. The UPDATE
@@ -82,6 +113,8 @@ async def requeue_orders_from_offer(
 
     for stop in stop_payload:
         order = orders_by_id.get(uuid.UUID(stop["order_id"]))
+        if order is None:
+            continue  # not this offer's to send back; see above
         await hold_queue.add(
             hub_id,
             HeldOrder(
