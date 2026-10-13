@@ -53,7 +53,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.order import Order, OrderStatus
+from app.models.order import INTAKE_LIVE, Order, OrderStatus
 from app.models.stop import FLAG_SOURCE_DRIVER, Stop, StopFlag, StopOrder
 
 # Ordered most-actionable-first for ties, not most-urgent-first: the clock does
@@ -234,10 +234,16 @@ async def build_exception_queue(
     # without the second clause it never appeared here at all. Past its
     # deadline by more than the grace, so an order the next cycle is about to
     # place is not raised as an exception.
+    #
+    # Live orders only. A backfill loads history as `held` with a deadline long
+    # past (app/ingestion/service.py), on purpose and never queued; without
+    # this every imported order showed here with an Assign button, as the
+    # health check's stuck count has always excluded them.
     unplaced = list(
         await session.scalars(
             _scope(
                 select(Order).where(
+                    Order.intake_mode == INTAKE_LIVE,
                     or_(
                         and_(
                             Order.status == OrderStatus.queued,
