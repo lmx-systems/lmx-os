@@ -41,6 +41,24 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 
+# The data engine's kinds of site (`docs/DATA_DICTIONARY.md`): taxonomy v0.1's
+# five, and two the Experiment 0 workbook found outside it. Every writer of
+# `kind_of_site` - the import, the desk, the door survey - draws from this.
+SITE_KINDS = (
+    "independent_repair_or_tire",
+    "body_shop",
+    "dealership_counter",
+    "parts_store_counter",
+    "fleet_or_transport_yard",
+    "municipal_fleet_garage",
+    "gas_station_with_bays",
+)
+# `ck_locations_setting` (migration 0069).
+SETTINGS = ("city_core", "suburb")
+# The three site facts a record's end needs besides its door, each with its own
+# source in `site_fact_sources`.
+SITE_FACTS = ("kind_of_site", "setting", "shares_address")
+
 
 class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "locations"
@@ -118,10 +136,13 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     shares_address: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Where the site fields came from: listing, technician, desk, import.
     site_source: Mapped[str | None] = mapped_column(String(24), nullable=True)
-    # Where each site fact came from when it differs by fact - kind from the
-    # import, setting from the desk - as {fact: source}. A fact with no entry
-    # has `site_source`. A record whose site counts only thanks to a `desk` fact
-    # is graded bronze at most (DE-15, migration 0080).
+    # Where each site fact came from - kind from the import, setting from the
+    # desk, the shared-address answer from the door survey - as {fact: source}.
+    # Every writer sets its fact's entry, even when the value is unchanged
+    # (`app/identity/site_facts.py::set_site_fact`); a fact written before that,
+    # with no entry, has `site_source`. A record whose site counts only thanks
+    # to a fact whose entry is `desk` is graded bronze at most (DE-15, migration
+    # 0080), so a person confirming the desk's value lifts the cap.
     site_fact_sources: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
 
     @property

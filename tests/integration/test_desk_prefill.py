@@ -46,7 +46,8 @@ async def test_desk_facts_fill_an_empty_site_and_say_where_they_came_from(db_ses
     row = (await db_session.execute(select(Location).where(Location.id == site.id))).scalar_one()
     assert (row.kind_of_site, row.setting, row.shares_address) == ("body_shop", "suburb", True)
     assert row.site_fact_sources == {"kind_of_site": DESK, "setting": DESK, "shares_address": DESK}
-    assert row.site_source == DESK
+    # Each fact says desk; the site-wide source is not the desk's to set.
+    assert row.site_source is None
     assert report.filled["setting"] == 1
     assert report.place_known_after == 1
 

@@ -63,6 +63,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import settings  # noqa: E402
 from app.identity import resolve_location  # noqa: E402
+from app.identity.site_facts import set_site_fact  # noqa: E402
 from app.models.driver import Driver  # noqa: E402
 from app.models.handoff_point import HandoffPoint  # noqa: E402
 from app.models.hub import Hub  # noqa: E402
@@ -76,6 +77,8 @@ REGION = "NJ"
 NJ_CLOCK = ZoneInfo("America/New_York")
 SOURCE_ROUTE_EXPORT = "import_route_export"
 SOURCE_SITE_COUNTS = "import_site_counts"
+# A site fact's source (`locations.site_fact_sources`).
+SOURCE_IMPORT = "import"
 
 # The workbook's kind-of-site guesses, as taxonomy codes. Three are not in
 # taxonomy v0.1 and the workbook says so; they are kept as their own codes
@@ -271,11 +274,14 @@ async def import_workbook(session: AsyncSession, workbook: Workbook) -> Report:
             continue
         location_for_site[site.site_id] = location
         location.region = location.region or REGION
+        # Each fact with its own source (`set_site_fact`): a shared-address
+        # answer the desk filled first is the import's once the distributor's
+        # own accounts say it, and must not stay marked `desk`.
         if location.kind_of_site is None and KIND_OF_SITE.get(site.kind_label):
-            location.kind_of_site = KIND_OF_SITE[site.kind_label]
+            set_site_fact(location, "kind_of_site", KIND_OF_SITE[site.kind_label], SOURCE_IMPORT)
         if site.shares_with:
-            location.shares_address = True
-        location.site_source = location.site_source or "import"
+            set_site_fact(location, "shares_address", True, SOURCE_IMPORT)
+        location.site_source = location.site_source or SOURCE_IMPORT
         if location.id not in points:
             points[location.id] = HandoffPoint(id=uuid.uuid4(), location_id=location.id, source="import")
             session.add(points[location.id])

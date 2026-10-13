@@ -217,6 +217,20 @@ export interface Stop {
   // app renders what it is told rather than restating a condition another
   // module owns, which is what produced both bugs in THE_DRIVER_APP.md §6.
   dock_needs_survey: boolean;
+  // The site's place facts and which of them the survey should ask (DE-15).
+  // Present when `dock_needs_survey` is; carried with the stop so the questions
+  // work without signal.
+  site_facts?: SiteFacts | null;
+}
+
+/** A site's kind, setting and shared-address answer as known now, and which the
+ *  door survey should ask: unknown, or only the desk's guess
+ *  (app/identity/site_facts.py). */
+export interface SiteFacts {
+  kind_of_site: string | null;
+  setting: string | null;
+  shares_address: boolean | null;
+  ask: ('kind_of_site' | 'setting' | 'shares_address')[];
 }
 
 /** One core, as the three W1 endpoints hand it back. */
@@ -393,6 +407,11 @@ export interface DockSurveyBody {
   obstructions?: string[] | null;
   overhead?: string[] | null;
   drone_open_ground?: boolean | null;
+  // The site's place facts (DE-15). A confirm sends the value already there.
+  // Vocabularies: app/models/location.py.
+  kind_of_site?: string | null;
+  setting?: string | null;
+  shares_address?: boolean | null;
 }
 
 export interface DockSurveyResult {

@@ -52,6 +52,7 @@ from app.identity.dock_survey import (
     surveys_recorded_today,
 )
 from app.identity.handoff_capture import CaptureRefused, capture_handoff, record_handoff_photo
+from app.identity.site_facts import SiteFactRefused, record_site_facts, site_facts_for
 from app.identity.profile import profile_for, set_access, set_autonomy_fit
 from app.messaging.cod_notifications import ESCALATION_SENT, notify_client_of_cod_dispute
 from app.messaging.delivery_pin import MAX_PIN_VERIFICATION_ATTEMPTS, generate_delivery_pin
@@ -94,6 +95,7 @@ from app.schemas.driver_app import (
     DockSurveyBody,
     HandoffPhotoBody,
     DockSurveyResult,
+    SiteFactsView,
     DriverAvailabilityUpdate,
     DriverComplianceProblemView,
     DriverComplianceView,
@@ -1238,6 +1240,24 @@ async def _get_owned_offer(
 # ---------------------------------------------------------------------------
 
 
+async def _site_facts_view(session: AsyncSession, stop: Stop) -> SiteFactsView | None:
+    """The stop's site facts for the door survey (`DE-15`), or None with no dock."""
+    location = await location_for_stop(session, stop)
+    if location is None:
+        return None
+    return SiteFactsView(**await site_facts_for(session, location))
+
+
+async def _survey_fields(session: AsyncSession, stop: Stop, driver_id: uuid.UUID) -> dict:
+    """Whether to offer the door survey here and, when it is offered, the site
+    facts it should ask - sent with the stop so the questions work offline."""
+    needs = await dock_needs_survey(session, stop, driver_id)
+    return {
+        "dock_needs_survey": needs,
+        "site_facts": await _site_facts_view(session, stop) if needs else None,
+    }
+
+
 async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteView:
     # `get_one`, not `get`: every caller passes a route that exists - one it
     # just wrote, or a stop's non-null foreign key. A missing row here is
@@ -1325,7 +1345,7 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     completed_at=stop.completed_at,
                     failure_reason=stop.failure_reason,
                     flag_note=stop.flag_note,
-                    dock_needs_survey=await dock_needs_survey(session, stop, route.driver_id),
+                    **await _survey_fields(session, stop, route.driver_id),
                 )
             )
         else:
@@ -1358,9 +1378,7 @@ async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteV
                     returns=await _stop_returns_view(session, stop),
                     # `route.driver_id`, not the authenticated caller: the
                     # per-shift cap belongs to whoever is running this route.
-                    dock_needs_survey=await dock_needs_survey(
-                        session, stop, route.driver_id
-                    ),
+                    **await _survey_fields(session, stop, route.driver_id),
                 )
             )
 
@@ -2272,6 +2290,16 @@ async def record_dock_survey(
     except CaptureRefused as bad_value:
         raise HTTPException(status_code=422, detail=str(bad_value)) from bad_value
 
+    # The site's place facts (`DE-15`), as `survey` even when unchanged: a
+    # confirmation of the desk's guess is what lifts its cap on the grade.
+    try:
+        await record_site_facts(
+            session, location,
+            kind_of_site=body.kind_of_site, setting=body.setting, shares_address=body.shares_address,
+        )
+    except SiteFactRefused as bad_value:
+        raise HTTPException(status_code=422, detail=str(bad_value)) from bad_value
+
     await session.commit()
     remaining = MAX_SURVEYS_PER_SHIFT - await surveys_recorded_today(session, driver_uuid)
     return DockSurveyResult(
@@ -2280,6 +2308,24 @@ async def record_dock_survey(
         surveyed_at=profile.surveyed_at,
         surveys_remaining_today=max(0, remaining),
     )
+
+
+@router.get("/stops/{stop_id}/site-facts", response_model=SiteFactsView)
+async def get_stop_site_facts(
+    stop_id: str,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> SiteFactsView:
+    """The site facts the door survey should ask at this stop (`DE-15`).
+
+    A route's stops carry these already; this is for a stop that is not on a
+    route the app holds - an off-platform record's door or counter (`DE-7`).
+    """
+    stop = await _get_owned_stop(session, stop_id, driver)
+    view = await _site_facts_view(session, stop)
+    if view is None:
+        raise HTTPException(status_code=409, detail=_no_dock_to("ask about", stop))
+    return view
 
 
 @router.post("/stops/{stop_id}/handoff-photo", response_model=DockSurveyResult)

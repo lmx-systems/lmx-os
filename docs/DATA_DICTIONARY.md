@@ -38,8 +38,8 @@ missing, and a missing element lowers the tier.
 | `locations.region` | The region the record belongs to. New Jersey records never count toward a Texas test pool (D-NJ) | e.g. `TX`, `NJ` |
 | `locations.shares_address` | Whether other businesses share this address. Null until somebody checked | yes, no |
 | `site_address_shares` | Which other sites share it, one row per pair, recorded from the site that was checked | — |
-| `locations.site_source` | Where the site facts came from | e.g. `technician`, `desk`, `import` |
-| `locations.site_fact_sources` | Where each site fact came from, when they differ (`DE-15`). A fact with no entry has `site_source` | JSON object, fact to source: `{"setting": "desk"}` |
+| `locations.site_source` | Where the site facts came from, site-wide. The desk does not set it | e.g. `import` |
+| `locations.site_fact_sources` | Where each site fact came from (`DE-15`). Every writer sets its fact's entry, even when the value is unchanged; a fact with no entry was written before that rule and has `site_source` | JSON object, fact to source: `{"setting": "desk", "shares_address": "survey"}`. Sources: `import`, `desk`, `survey` (the door survey) |
 | `receiver_profiles.receiving_hours` | When the site receives. Already existed before `DE-1` | Per weekday, open and close times |
 | `receiver_profiles.who_receives` | Who takes the delivery. Already existed before `DE-1` | The survey's vocabulary |
 
@@ -168,8 +168,9 @@ filled from public data at the desk is marked `desk` in
 `locations.site_fact_sources`. When a record's pickup or drop-off end counts only
 thanks to one, `record_tiers` sets `desk_site` and grades the record bronze if
 it would otherwise be gold or silver - a visit included. Bronze and reference
-records are unchanged, and the cap lifts when a person confirms the fact and its
-source changes.
+records are unchanged. The cap lifts when a person answers the fact at the door:
+the survey asks a fact that is unknown or only the desk's, and writes the answer
+as `survey` even when it confirms the desk's value.
 
 **An off-platform delivery is graded like any delivery (`DE-7`)**, with two
 readings of the delivery profile, because LMX never held the job. A driver who
