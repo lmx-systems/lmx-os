@@ -1452,6 +1452,29 @@ async def _get_owned_stop(
     return stop
 
 
+async def _get_owned_stop_on_locked_route(
+    session: AsyncSession, stop_id: str, driver: AuthedDriver
+) -> Stop:
+    """The driver's stop, locked and read fresh, with its route locked first.
+
+    For the actions that change a route - arriving, completing, flagging. Each
+    writes the ETAs of the route's other stops, and so does a dispatch cancel; the
+    route is the one lock they all queue on, taken before any stop
+    (docs/ARCHITECTURE.md, lock order). A complete that held its stop and then
+    waited for the route deadlocked against a cancel holding the route and
+    writing that stop's ETA. Read fresh after the wait, so a stop dispatch
+    cancelled meanwhile is seen as cancelled.
+    """
+    stop = await _get_owned_stop(session, stop_id, driver)
+    await lock_route(session, stop.route_id)
+    locked = await session.get(
+        Stop, stop.id, with_for_update=True, populate_existing=True
+    )
+    if locked is None:
+        raise HTTPException(status_code=404, detail="Stop not found")
+    return locked
+
+
 async def _stop_view_after_reload(session: AsyncSession, stop: Stop) -> StopView:
     view = await _load_route_view(session, stop.route_id)
     return next(s for s in view.stops if s.stop_id == str(stop.id))
@@ -1605,7 +1628,9 @@ async def arrive_at_stop(
     driver: AuthedDriver = Depends(get_current_driver),
     session: AsyncSession = Depends(get_db),
 ) -> StopView:
-    stop = await _get_owned_stop(session, stop_id, driver)
+    # Locked, after the route: read unlocked, an arrival landed on a stop a
+    # dispatch cancel had just taken off the route (`CON-5`).
+    stop = await _get_owned_stop_on_locked_route(session, stop_id, driver)
     _assert_stop_not_terminal(stop, "mark arrived")
     stop.status = "arrived"
     # Ground-truth capture (docs/ROADMAP.md I1): stamp the first arrival only,
@@ -2495,10 +2520,11 @@ async def complete_stop(
     driver: AuthedDriver = Depends(get_current_driver),
     session: AsyncSession = Depends(get_db),
 ) -> StopView:
-    # for_update: without this, two concurrent completion calls for the same
-    # stop (e.g. an offline-queue retry racing a request that already landed)
-    # could both read status != "completed" before either commits.
-    stop = await _get_owned_stop(session, stop_id, driver, for_update=True)
+    # Locked, after the route: without the stop lock, two concurrent completion
+    # calls for the same stop (e.g. an offline-queue retry racing a request that
+    # already landed) could both read status != "completed" before either
+    # commits; and the route comes first, as for every writer of its stops.
+    stop = await _get_owned_stop_on_locked_route(session, stop_id, driver)
 
     if stop.status == "completed":
         # Idempotent replay, not a conflict - an offline-queue retry (or any
@@ -2682,10 +2708,10 @@ async def complete_stop(
         if stop.stop_type == "dropoff" and moved:
             await record_delivery_outcomes(session, moved)
 
-    # The route row is locked before counting what's left on it, so this and a
-    # dispatch cancel (app/orders/cancellation.py, which takes the same lock) can't
-    # each see the other's stop as still live and both leave the route open.
-    await lock_route(session, stop.route_id)
+    # The route row, locked above before the stop, is what makes this count
+    # safe: this and a dispatch cancel (app/orders/cancellation.py, which takes
+    # the same lock) can't each see the other's stop as still live and both
+    # leave the route open.
     remaining_result = await session.execute(
         select(func.count())
         .select_from(Stop)
@@ -2779,7 +2805,7 @@ async def flag_stop_issue(
     consumer with different semantics; this is a driver-facing incident
     report.
     """
-    stop = await _get_owned_stop(session, stop_id, driver, for_update=True)
+    stop = await _get_owned_stop_on_locked_route(session, stop_id, driver)
 
     if stop.status == "failed":
         # Idempotent replay, as complete_stop's is. The app's offline queue
@@ -2809,10 +2835,10 @@ async def flag_stop_issue(
             update(Order).where(Order.id.in_(order_ids)).values(failure_reason=body.reason.value)
         )
 
-    # The route row is locked before counting what's left on it, so this and a
-    # dispatch cancel (app/orders/cancellation.py, which takes the same lock) can't
-    # each see the other's stop as still live and both leave the route open.
-    await lock_route(session, stop.route_id)
+    # The route row, locked above before the stop, is what makes this count
+    # safe: this and a dispatch cancel (app/orders/cancellation.py, which takes
+    # the same lock) can't each see the other's stop as still live and both
+    # leave the route open.
     remaining_result = await session.execute(
         select(func.count())
         .select_from(Stop)

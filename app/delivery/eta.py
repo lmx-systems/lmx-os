@@ -64,7 +64,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.batch_queue.clustering import miles_between
-from app.delivery.routes import try_lock_route_and_stops
+from app.delivery.routes import lock_route, try_lock_route_and_stops
 from app.identity.inherited_dwell import planning_service_minutes, profiles_by_location
 from app.models.driver_location_ping import DriverLocationPing
 from app.models.hub import Hub
@@ -280,6 +280,10 @@ async def refresh_route_etas(
     """
     reference = now or datetime.now(timezone.utc)
 
+    # Writes every unreached stop on the route, so the route first, as every
+    # path that writes its stops takes it (app/delivery/routes.py). Free when
+    # the caller already holds it, which they all should.
+    await lock_route(session, route_id)
     route = await session.get(Route, route_id)
     if route is None:
         return {"written": 0, "reason": "no_route"}

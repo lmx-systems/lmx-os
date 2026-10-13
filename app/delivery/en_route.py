@@ -32,9 +32,10 @@ field this client-facing; the sequence is always available.
 from __future__ import annotations
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.delivery.routes import lock_route
 from app.models.order import OrderStatus
 from app.models.stop import Stop, StopOrder
 from app.orders.status_service import advance_orders
@@ -44,7 +45,8 @@ logger = structlog.get_logger(__name__)
 # Mirrors app/api/driver_routes.py's set. Duplicated rather than imported so this
 # module doesn't depend on the API layer.
 # `cancelled`: a stop dispatch took off the route (app/orders/cancellation.py).
-_TERMINAL_STOP_STATUSES = ("completed", "failed", "cancelled")
+# `recorded`: a delivery logged off-platform (`DE-7`), never driven.
+_TERMINAL_STOP_STATUSES = ("completed", "failed", "cancelled", "recorded")
 
 
 async def mark_current_stop_en_route(session: AsyncSession, route_id) -> Stop | None:
@@ -61,18 +63,37 @@ async def mark_current_stop_en_route(session: AsyncSession, route_id) -> Stop | 
 
     Does not commit; the caller owns the transaction, so a status that says the driver
     is inbound cannot outlive the action that made it true.
+
+    **The route first, and the write conditional.** `complete_stop` calls this in a
+    second transaction of its own, after its commit. Read unlocked, a dispatch cancel
+    landing between the read and the write had its `cancelled` stop written back to
+    `en_route` - the cancelled order's pickup back on the driver's route, after the
+    app had been told it was gone. So the route lock is taken first, as every writer
+    of a route's stops takes it (app/delivery/routes.py), the stop is read fresh, and
+    the promotion only lands on a stop still `pending`.
     """
+    await lock_route(session, route_id)
     result = await session.execute(
         select(Stop)
         .where(Stop.route_id == route_id, Stop.status.notin_(_TERMINAL_STOP_STATUSES))
         .order_by(Stop.sequence)
         .limit(1)
+        .execution_options(populate_existing=True)
     )
     current = result.scalar_one_or_none()
     if current is None:
         return None  # route finished
 
     if current.status == "pending":
+        promoted = await session.scalar(
+            update(Stop)
+            .where(Stop.id == current.id, Stop.status == "pending")
+            .values(status="en_route")
+            .returning(Stop.id)
+            .execution_options(synchronize_session=False)
+        )
+        if promoted is None:
+            return None  # somebody finished it first; nothing to promote
         current.status = "en_route"
 
     if current.stop_type == "dropoff":
