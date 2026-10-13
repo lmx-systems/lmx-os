@@ -93,6 +93,9 @@ class PlaybookReport:
     touches_per_100_orders: float | None
     by_category: dict[str, int]
     by_action: list[TouchCount]
+    # With a hub chosen: touches on no hub at all - a site, a merge - which the
+    # hub's rate cannot hold and the all-hubs one does. Zero otherwise.
+    unscoped_touches: int = 0
     rules: list[RuleRecord] = field(default_factory=list)
     overruled: list[Overruled] = field(default_factory=list)
 
@@ -125,6 +128,21 @@ async def build_playbook_report(
     for touch in by_action:
         by_category[touch.category] = by_category.get(touch.category, 0) + touch.count
     touches = by_category[CATEGORY_DAY] + by_category[CATEGORY_RECORD]
+    unscoped = 0
+    if hub_id is not None:
+        unscoped = int(
+            await session.scalar(
+                select(func.count())
+                .select_from(OpsTouch)
+                .where(
+                    OpsTouch.touched_at >= since,
+                    OpsTouch.touched_at < until,
+                    OpsTouch.hub_id.is_(None),
+                    OpsTouch.category.in_((CATEGORY_DAY, CATEGORY_RECORD)),
+                )
+            )
+            or 0
+        )
 
     report = PlaybookReport(
         since=since,
@@ -135,6 +153,7 @@ async def build_playbook_report(
         touches_per_100_orders=round(100.0 * touches / orders, 1) if orders else None,
         by_category=by_category,
         by_action=by_action,
+        unscoped_touches=unscoped,
     )
     for rule in RULES:
         report.rules.append(await _rule_record(session, rule, hub_id, since, until))

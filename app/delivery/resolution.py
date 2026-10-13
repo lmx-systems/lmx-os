@@ -55,14 +55,21 @@ class ShopMissingError(Exception):
 
 
 async def resolve_failed_order(
-    session: AsyncSession, hold_queue: HoldQueueStore, order: Order, action: str
+    session: AsyncSession,
+    hold_queue: HoldQueueStore,
+    order: Order,
+    action: str,
+    *,
+    schedule_wakeup: bool = True,
 ) -> Order:
+    """`schedule_wakeup=False` for a caller whose next step is a cycle for the
+    hub anyway (the playbook's sweep, `app/playbook/sweep.py`)."""
     if order.status != OrderStatus.delivery_failed:
         raise OrderNotFailedError(
             f"Order {order.id} is '{order.status.value}', not 'delivery_failed' - nothing to resolve"
         )
     if action == REDELIVER:
-        await _redeliver(session, hold_queue, order)
+        await _redeliver(session, hold_queue, order, schedule_wakeup=schedule_wakeup)
     elif action == RETURN_TO_SHOP:
         await _move(session, order, OrderStatus.returned)
     elif action == CANCEL:
@@ -95,7 +102,9 @@ async def _move(session: AsyncSession, order: Order, status: OrderStatus) -> Non
         )
 
 
-async def _redeliver(session: AsyncSession, hold_queue: HoldQueueStore, order: Order) -> None:
+async def _redeliver(
+    session: AsyncSession, hold_queue: HoldQueueStore, order: Order, *, schedule_wakeup: bool = True
+) -> None:
     """Put a failed order back into the dispatch pipeline for another
     attempt. It re-enters through the batch-hold queue exactly like a
     freshly ingested order, so the optimizer builds a new pickup+dropoff
@@ -182,4 +191,5 @@ async def _redeliver(session: AsyncSession, hold_queue: HoldQueueStore, order: O
             delivery_lat=float(order.delivery_lat) if order.delivery_lat is not None else None,
             delivery_lng=float(order.delivery_lng) if order.delivery_lng is not None else None,
         ),
+        schedule_wakeup=schedule_wakeup,
     )

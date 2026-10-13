@@ -38,8 +38,12 @@ from datetime import datetime, timezone
 
 import structlog
 from fastapi import Request
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import session_scope
+from app.models.client import Client
+from app.models.driver import Driver
 from app.models.ops_touch import (
     CATEGORY_BUSINESS,
     CATEGORY_DAY,
@@ -49,6 +53,9 @@ from app.models.ops_touch import (
     OpsTouch,
 )
 from app.models.order import Order
+from app.models.return_item import ReturnItem
+from app.models.route import Route
+from app.models.stop import Stop
 from app.ops_auth.tokens import InvalidOpsToken, decode_token
 
 logger = structlog.get_logger(__name__)
@@ -124,10 +131,7 @@ async def record_ops_touch(request: Request):
     try:
         async with session_scope() as session:
             order_id = _as_uuid(params.get("order_id"))
-            hub_id = _as_uuid(params.get("hub_id"))
-            if hub_id is None and order_id is not None:
-                order = await session.get(Order, order_id)
-                hub_id = order.hub_id if order is not None else None
+            hub_id = _as_uuid(params.get("hub_id")) or await _hub_of(session, params)
             session.add(
                 OpsTouch(
                     touched_at=datetime.now(timezone.utc),
@@ -142,6 +146,34 @@ async def record_ops_touch(request: Request):
             )
     except Exception:  # noqa: BLE001 - the write it describes has already happened
         logger.exception("ops_touch_not_recorded", action=action)
+
+
+async def _hub_of(session: AsyncSession, params: dict[str, str]) -> uuid.UUID | None:
+    """The hub a write was about, from whichever thing its path names.
+
+    Without this a per-hub rate counts only writes whose path carries a hub or an
+    order, and most of the record work - a stop's label, a return closed, a reply
+    to a driver - would vanish from it. A site, a merge or a flag belongs to no
+    hub; those stay null and the report counts them beside the hub's figure.
+    """
+    lookups = (
+        ("order_id", select(Order.hub_id).where(Order.id == _as_uuid(params.get("order_id")))),
+        ("return_id", select(ReturnItem.hub_id).where(ReturnItem.id == _as_uuid(params.get("return_id")))),
+        ("driver_id", select(Driver.hub_id).where(Driver.id == _as_uuid(params.get("driver_id")))),
+        ("client_id", select(Client.hub_id).where(Client.id == _as_uuid(params.get("client_id")))),
+        (
+            "stop_id",
+            select(Route.hub_id)
+            .join(Stop, Stop.route_id == Route.id)
+            .where(Stop.id == _as_uuid(params.get("stop_id"))),
+        ),
+    )
+    for name, query in lookups:
+        if _as_uuid(params.get(name)) is not None:
+            hub_id = await session.scalar(query)
+            if hub_id is not None:
+                return hub_id
+    return None
 
 
 def _ops_user_id(authorization: str | None) -> str | None:

@@ -1329,6 +1329,7 @@ async def operations_playbook(
         touches=report.touches,
         touches_per_100_orders=report.touches_per_100_orders,
         by_category=report.by_category,
+        unscoped_touches=report.unscoped_touches,
         by_action=[
             TouchCountView(action=t.action, category=t.category, count=t.count) for t in report.by_action
         ],

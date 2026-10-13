@@ -563,5 +563,8 @@ class PlaybookReportView(BaseModel):
     touches_per_100_orders: float | None
     by_category: dict[str, int]
     by_action: list[TouchCountView]
+    # With a hub chosen, touches on no hub (a site, a merge): outside this hub's
+    # rate, inside the all-hubs one.
+    unscoped_touches: int
     rules: list[PlaybookRuleView]
     overruled: list[OverruledCallView]

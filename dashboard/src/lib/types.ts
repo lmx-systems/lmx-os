@@ -353,6 +353,8 @@ export interface PlaybookReport {
   touches_per_100_orders: number | null
   by_category: Record<string, number>
   by_action: { action: string; category: string; count: number }[]
+  // Touches on no hub (a site, a merge): outside this hub's rate.
+  unscoped_touches: number
   rules: {
     rule: string
     mode: PlaybookMode

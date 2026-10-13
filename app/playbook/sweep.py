@@ -88,12 +88,43 @@ async def run_playbook(
     now = now or datetime.now(timezone.utc)
     hub = uuid.UUID(str(hub_id))
     sweep = PlaybookSweep()
+    await _follow_current_mode(session, hub, now)
     sweep.superseded += await _supersede_moved_on(session, hub, now)
     await session.commit()
     await _call_failed_deliveries(session, hub, now, sweep)
     await session.commit()
     await _act_on_due(session, hub, now, hold_queue or HoldQueueStore(), sweep)
     return sweep
+
+
+_MODE_RANK = {MODE_RECOMMEND: 0, MODE_VETO: 1, MODE_ACT: 2}
+
+
+async def _follow_current_mode(session: AsyncSession, hub_id: uuid.UUID, now: datetime) -> None:
+    """Calls made in a higher mode than the rule has now come down to it.
+
+    The mode setting is the off switch. A rule turned back from `veto` to
+    `recommend` because it was misbehaving must not go on to carry out the calls
+    it scheduled before - so they become recommendations, with no time to act,
+    and the exceptions queue stops saying it will act. Brought down to `veto`,
+    a call from `act` waits the veto window from now. Their evidence then counts
+    in the mode they ended in, which is the one a person judged them in.
+    """
+    current = rule_mode(RULE_FAILED_DELIVERY)
+    higher = [mode for mode, rank in _MODE_RANK.items() if rank > _MODE_RANK[current]]
+    if not higher:
+        return
+    due_at = now + timedelta(minutes=settings.playbook_veto_minutes) if current == MODE_VETO else None
+    await session.execute(
+        update(PlaybookDecision)
+        .where(
+            PlaybookDecision.hub_id == hub_id,
+            PlaybookDecision.rule == RULE_FAILED_DELIVERY,
+            PlaybookDecision.outcome == OUTCOME_OPEN,
+            PlaybookDecision.mode.in_(higher),
+        )
+        .values(mode=current, due_at=due_at)
+    )
 
 
 async def _supersede_moved_on(session: AsyncSession, hub_id: uuid.UUID, now: datetime) -> int:
@@ -204,6 +235,9 @@ async def _act_on_due(
     hold_queue: HoldQueueStore,
     sweep: PlaybookSweep,
 ) -> None:
+    if rule_mode(RULE_FAILED_DELIVERY) == MODE_RECOMMEND:
+        # Belt and braces with _follow_current_mode: a recommending rule never acts.
+        return
     due_ids = list(
         await session.scalars(
             select(PlaybookDecision.id)
@@ -241,7 +275,10 @@ async def _act_on_due(
                 or order.delivery_attempts != attempt
             ):
                 raise OrderNotFailedError(f"Order {order_id} is no longer failed on attempt {attempt}")
-            await resolve_failed_order(session, hold_queue, order, action)  # commits the claim with it
+            # Commits the claim with it. No wake-up: the cycle that run-all starts
+            # next for this hub places the redelivery, and a wake-up at a deadline
+            # already past would start a second one within a second.
+            await resolve_failed_order(session, hold_queue, order, action, schedule_wakeup=False)
             sweep.acted += 1
         except OrderNotFailedError:
             await session.rollback()

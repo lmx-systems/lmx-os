@@ -330,3 +330,36 @@ async def test_a_touch_cannot_be_edited(db_session):
         await db_session.commit()
     await db_session.rollback()
     assert await db_session.scalar(select(func.count()).select_from(OpsTouch)) >= 1
+
+
+async def test_turning_the_rule_down_stops_what_it_scheduled(db_session, real_redis_client, monkeypatch):
+    """The mode is the off switch: a rule set back to recommend carries out none
+    of the calls it scheduled in veto mode."""
+    monkeypatch.setattr(settings, "playbook_failed_delivery_mode", "veto")
+    seeded = await _hub(db_session)
+    order = await _failed(db_session, seeded)
+    now = datetime.now(timezone.utc)
+    await run_playbook(db_session, seeded[0], now=now)
+
+    monkeypatch.setattr(settings, "playbook_failed_delivery_mode", "recommend")
+    sweep = await run_playbook(db_session, seeded[0], now=now + timedelta(hours=1))
+
+    assert sweep.acted == 0
+    assert (await _order(db_session, order)).status == OrderStatus.delivery_failed
+    decision = await _decision(db_session, order)
+    assert (decision.mode, decision.due_at, decision.outcome) == ("recommend", None, "open")
+
+
+async def test_a_touch_on_a_stop_belongs_to_its_hub(db_session, real_redis_client):
+    """Most record work names a stop, a return or a driver rather than an order;
+    without the hub it vanished from the hub's rate."""
+    from app.playbook.touches import _hub_of
+
+    seeded = await _hub(db_session)
+    order = await _failed(db_session, seeded)
+    stop_id = await db_session.scalar(select(StopOrder.stop_id).where(StopOrder.order_id == order))
+
+    assert await _hub_of(db_session, {"stop_id": str(stop_id)}) == seeded[0]
+    assert await _hub_of(db_session, {"driver_id": str(seeded[3])}) == seeded[0]
+    assert await _hub_of(db_session, {"client_id": str(seeded[1])}) == seeded[0]
+    assert await _hub_of(db_session, {"location_id": str(uuid.uuid4())}) is None

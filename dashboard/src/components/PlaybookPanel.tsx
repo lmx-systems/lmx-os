@@ -87,6 +87,8 @@ export function PlaybookPanel({ hubId }: { hubId: string }) {
             <p className="mt-0.5 text-xs text-[var(--text-muted)]">
               {report.touches} {report.touches === 1 ? 'touch' : 'touches'} running the day or fixing the
               record, {report.orders} live {report.orders === 1 ? 'order' : 'orders'}. The goal is zero.
+              {report.unscoped_touches > 0 &&
+                ` Plus ${report.unscoped_touches} on sites and merges that belong to no one hub.`}
               {(report.by_category.policy ?? 0) + (report.by_category.business ?? 0) > 0 &&
                 ` Also ${report.by_category.policy ?? 0} setting policy and ${report.by_category.business ?? 0} running the business, counted but not in the rate.`}
             </p>
@@ -129,7 +131,9 @@ export function PlaybookPanel({ hubId }: { hubId: string }) {
                         rule.outcomes.agreed ?? 0
                       } a person agreed with, ${rule.outcomes.overruled ?? 0} overruled, ${
                         rule.outcomes.escalated ?? 0
-                      } handed to a person, ${rule.outcomes.open ?? 0} waiting.`}
+                      } handed to a person, ${rule.outcomes.open ?? 0} waiting, ${
+                        rule.outcomes.superseded ?? 0
+                      } overtaken by events.`}
                 </p>
                 <p className="mt-0.5 text-xs text-[var(--text-muted)]">
                   {rule.next_mode === null
