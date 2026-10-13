@@ -57,7 +57,7 @@ export function TermsBanner({
           href={state.terms_path}
           target="_blank"
           rel="noreferrer"
-          className="font-medium text-[var(--accent)] hover:underline"
+          className="font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
         >
           Read the terms
         </a>
@@ -65,7 +65,7 @@ export function TermsBanner({
           href={state.privacy_path}
           target="_blank"
           rel="noreferrer"
-          className="font-medium text-[var(--accent)] hover:underline"
+          className="font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
         >
           Privacy policy
         </a>

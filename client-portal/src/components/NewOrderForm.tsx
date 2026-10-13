@@ -163,7 +163,7 @@ export function NewOrderForm({ onOrderPlaced }: NewOrderFormProps) {
       <button
         type="button"
         onClick={() => setShowDetails((v) => !v)}
-        className="self-start text-[13px] font-medium text-[var(--accent)] hover:underline"
+        className="self-start text-[13px] font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
       >
         {showDetails ? 'Hide details' : 'Add contact, notes or a reference'}
       </button>

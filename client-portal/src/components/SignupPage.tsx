@@ -117,7 +117,7 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
           </p>
           <button
             onClick={onSignedIn}
-            className="mt-5 text-sm font-medium text-[var(--accent)] hover:underline"
+            className="mt-5 text-sm font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
           >
             Already approved? Sign in
           </button>
@@ -165,7 +165,7 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
               drafts. Said plainly rather than by a dead button: an applicant who
               cannot tell why the form does nothing assumes it is broken. */}
           {legal && !legal.signup_open && (
-            <p className="rounded-[20px] bg-[var(--surface-sunk,transparent)] px-3 py-2 text-[13px] text-[var(--text-secondary)]">
+            <p className="rounded-[20px] bg-[var(--surface-2)] px-3 py-2 text-[13px] text-[var(--text-secondary)]">
               We are not taking new accounts through this page yet. Our terms of service
               are being finalised, and we will not ask you to agree to something you
               cannot read.
@@ -191,7 +191,7 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
                 href={legal ? legal.terms.path : '/terms'}
                 target="_blank"
                 rel="noreferrer"
-                className="font-medium text-[var(--accent)] hover:underline"
+                className="font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
               >
                 terms of service
               </a>{' '}
@@ -200,7 +200,7 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
                 href={legal ? legal.privacy.path : '/privacy'}
                 target="_blank"
                 rel="noreferrer"
-                className="font-medium text-[var(--accent)] hover:underline"
+                className="font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
               >
                 privacy policy
               </a>
@@ -224,7 +224,7 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
 
           <p className="text-center text-xs text-[var(--text-muted)]">
             Already have an account?{' '}
-            <button type="button" onClick={onSignedIn} className="font-medium text-[var(--accent)] hover:underline">
+            <button type="button" onClick={onSignedIn} className="font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2">
               Sign in
             </button>
           </p>

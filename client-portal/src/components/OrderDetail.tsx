@@ -365,7 +365,9 @@ function DeliveryTrack({ order }: { order: ClientOrderDetailView }) {
   const at = TRACK_STEP[order.status] ?? 0
   const when: (string | null)[] = [
     formatDate(order.requested_at),
-    order.collected_at ? formatDate(order.collected_at) : null,
+    // Only once the track says collected: after a failed delivery the order is
+    // back to held and the old pickup's time would describe the last attempt.
+    at >= 1 && order.collected_at ? formatDate(order.collected_at) : null,
     null,
     order.delivered_at
       ? formatDate(order.delivered_at)

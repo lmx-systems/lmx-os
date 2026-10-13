@@ -30,7 +30,8 @@ const STATUS_LABEL: Record<string, string> = {
   classified: 'Classified',
   held: 'Preparing',
   queued: 'Queued',
-  assigned: 'Out for delivery',
+  // Before collection: a driver has it on their route, nothing has left the shop.
+  assigned: 'Driver assigned',
   // Stop-level progress promoted onto the order (app/models/order.py).
   accepted: 'Driver assigned',
   en_route_pickup: 'Driver on the way to collect',

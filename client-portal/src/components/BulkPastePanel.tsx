@@ -270,7 +270,7 @@ function BatchReport({
 
       <button
         onClick={onDismiss}
-        className="self-start text-[13px] font-medium text-[var(--accent)] hover:underline"
+        className="self-start text-[13px] font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
       >
         Dismiss
       </button>

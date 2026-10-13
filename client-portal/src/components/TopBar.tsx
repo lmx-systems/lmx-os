@@ -41,16 +41,16 @@ export function TopBar({ profile, onLogout, nav }: TopBarProps) {
           </button>
         ))}
       </nav>
-      <div className="ml-auto flex items-center gap-2 rounded-full bg-[var(--surface)] py-1 pl-1 pr-1 text-[13px] font-semibold">
+      <div className="ml-auto flex min-w-0 max-w-full items-center gap-2 rounded-full bg-[var(--surface)] py-1 pl-1 pr-1 text-[13px] font-semibold">
         <span
           aria-hidden="true"
           className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--lime)] text-[11px] font-bold text-[var(--lime-ink)]"
         >
           {profile.name.trim().charAt(0).toUpperCase() || '?'}
         </span>
-        <span className="flex flex-col leading-tight">
-          <span>{profile.name}</span>
-          <span className="text-[11.5px] font-medium text-[var(--text-muted)]">
+        <span className="flex min-w-0 max-w-[220px] flex-col leading-tight">
+          <span className="truncate">{profile.name}</span>
+          <span className="truncate text-[11.5px] font-medium text-[var(--text-muted)]">
             {profile.email}
             {profile.role === 'admin' && ' · Admin'}
           </span>

@@ -123,7 +123,7 @@ export function ResetPasswordPage({ token, onDone }: ResetPasswordPageProps) {
             <button
               type="button"
               onClick={onDone}
-              className="text-center text-xs font-medium text-[var(--accent)] hover:underline"
+              className="text-center text-xs font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
             >
               Back to sign in
             </button>

@@ -243,7 +243,7 @@ export default function App() {
 
   if (!profile || !orders) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-[var(--text-muted)]">
+      <div className="flex min-h-screen items-center justify-center text-sm text-[var(--text-secondary)]">
         {loadError ?? 'Loading your account…'}
       </div>
     )
@@ -314,7 +314,7 @@ export default function App() {
                 {entryMode !== 'single' && (
                   <button
                     onClick={() => setEntryMode('single')}
-                    className="text-[var(--accent)] hover:underline"
+                    className="text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
                   >
                     Just one delivery
                   </button>
@@ -322,7 +322,7 @@ export default function App() {
                 {entryMode !== 'paste' && (
                   <button
                     onClick={() => setEntryMode('paste')}
-                    className="text-[var(--accent)] hover:underline"
+                    className="text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
                   >
                     Paste several
                   </button>
@@ -330,7 +330,7 @@ export default function App() {
                 {entryMode !== 'file' && (
                   <button
                     onClick={() => setEntryMode('file')}
-                    className="text-[var(--accent)] hover:underline"
+                    className="text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
                   >
                     Upload a file
                   </button>
@@ -399,7 +399,7 @@ export default function App() {
               }}
             />
           ) : (
-            <div className="text-sm text-[var(--text-muted)]">Loading order…</div>
+            <div className="text-sm text-[var(--text-secondary)]">Loading order…</div>
           ))}
         {view.name === 'invoices' &&
           (invoices ? (
@@ -411,7 +411,7 @@ export default function App() {
               />
             </>
           ) : (
-            <div className="text-sm text-[var(--text-muted)]">Loading invoices…</div>
+            <div className="text-sm text-[var(--text-secondary)]">Loading invoices…</div>
           ))}
         {view.name === 'invoice-detail' &&
           (selectedInvoice ? (
@@ -421,7 +421,7 @@ export default function App() {
               onBack={() => setView({ name: 'invoices' })}
             />
           ) : (
-            <div className="text-sm text-[var(--text-muted)]">Loading invoice…</div>
+            <div className="text-sm text-[var(--text-secondary)]">Loading invoice…</div>
           ))}
         {view.name === 'performance' && <PerformancePanel />}
         {view.name === 'returns' && <ReturnsPanel />}
