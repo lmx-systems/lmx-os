@@ -354,6 +354,13 @@ class Settings(BaseSettings):
     # app/optimizer/service.py / app/models/route_offer.py).
     job_offer_ttl_seconds: int = 120
 
+    # How long an order may sit `assigned` with no open offer and no stop before
+    # the scheduled sweep sends it back to the hold queue (`CON-5`,
+    # app/orders/requeue.py). Far longer than a cycle takes between its status
+    # write and its offers' commit, which is the only window an order is
+    # legitimately in that state.
+    stranded_assignment_grace_seconds: int = 120
+
     # How old a driver's last position can be before dispatch stops offering
     # them work. The app reports every 30 seconds while it's open; a driver whose
     # reports stopped has closed it, can't see an offer, and one sent to them

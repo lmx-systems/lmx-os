@@ -80,10 +80,16 @@ async def _move(session: AsyncSession, order: Order, status: OrderStatus) -> Non
     failed order had been returned, cancelled or put back in the queue - the
     last thing it heard was that the delivery had failed.
     """
-    moved = await advance_orders(session, [order.id], status)
+    # Only from `delivery_failed`: two people resolving one failure at once each
+    # read it failed, and the second write would otherwise land on the first's
+    # outcome - a redelivery already back in the queue returned to the shop.
+    moved = await advance_orders(
+        session, [order.id], status, only_from=(OrderStatus.delivery_failed,)
+    )
     if not moved:
-        # Unreachable while the caller checks for delivery_failed first; loud
-        # rather than a resolution that silently changed nothing.
+        # The caller checked for delivery_failed first, so somebody else
+        # resolved it in between; loud rather than a resolution that silently
+        # changed nothing.
         raise OrderNotFailedError(
             f"Order {order.id} could not move from '{order.status.value}' to '{status.value}'"
         )

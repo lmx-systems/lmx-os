@@ -26,7 +26,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models.order import Order, OrderStatus
 from app.orders.sinks import emit_status_change
-from app.orders.state_machine import can_transition
+from app.orders.state_machine import can_transition, legal_sources
 
 logger = structlog.get_logger(__name__)
 
@@ -56,7 +56,17 @@ async def advance_orders(
     between this read and this write still leaves an order the cycle may place,
     and comparing against the read would drop it - already out of the hold
     queue, and placed by nobody. No lock is taken that the write itself would
-    not take. The other writers are not moved onto it here (`CON-5`).
+    not take.
+
+    **Every write is conditional (`CON-5`).** A caller that names no
+    precondition gets the state machine's: every status that may legally move to
+    `new_status`. The read below is not locked, so a plain write used to land on
+    whatever the row had become by then - a driver's pickup read `assigned`,
+    queued behind a dispatcher's cancel, and wrote `picked_up` over `cancelled`.
+    Now the queued write re-checks once the other commits and skips an order
+    that has moved somewhere it may not leave from. A caller with a narrower
+    rule than the machine's says so: a cancel names the statuses it may cancel
+    from, because `picked_up` -> `cancelled` is legal for nobody but a return.
 
     **An illegal transition is skipped and logged, not raised.** These are driven
     by driver actions on a route that may cover several orders in different
@@ -73,6 +83,7 @@ async def advance_orders(
         return []
 
     occurred_at = occurred_at or datetime.now(timezone.utc)
+    precondition = frozenset(only_from) if only_from is not None else legal_sources(new_status)
     # populate_existing is load-bearing, not a micro-optimization. Order status
     # is written from more than one session - the optimizer's dispatch cycle
     # sets `assigned` in its own transaction - so an object already in this
@@ -110,39 +121,35 @@ async def advance_orders(
             continue
 
         previous = order.status
-        if only_from is not None:
-            if previous not in only_from:
-                logger.info(
-                    "order_status_not_in_precondition",
-                    order_id=str(order.id),
-                    current=previous.value,
-                    requested=new_status.value,
-                )
-                continue
-            changed = await session.execute(
-                update(Order)
-                .where(Order.id == order.id, Order.status.in_(list(only_from)))
-                .values(status=new_status)
-                .returning(Order.id, Order.updated_at)
-                .execution_options(synchronize_session=False)
+        if previous not in precondition:
+            logger.info(
+                "order_status_not_in_precondition",
+                order_id=str(order.id),
+                current=previous.value,
+                requested=new_status.value,
             )
-            row = changed.one_or_none()
-            if row is None:
-                logger.info(
-                    "order_status_changed_underneath",
-                    order_id=str(order.id),
-                    read=previous.value,
-                    requested=new_status.value,
-                )
-                continue
-            # Written already (and `updated_at` with it, by the column's
-            # onupdate - tracking-link expiry reads it); recorded on the
-            # instance as committed state so the unit of work does not write
-            # either a second time.
-            set_committed_value(order, "status", new_status)
-            set_committed_value(order, "updated_at", row.updated_at)
-        else:
-            order.status = new_status
+            continue
+        changed = await session.execute(
+            update(Order)
+            .where(Order.id == order.id, Order.status.in_(list(precondition)))
+            .values(status=new_status)
+            .returning(Order.id, Order.updated_at)
+            .execution_options(synchronize_session=False)
+        )
+        row = changed.one_or_none()
+        if row is None:
+            logger.info(
+                "order_status_changed_underneath",
+                order_id=str(order.id),
+                read=previous.value,
+                requested=new_status.value,
+            )
+            continue
+        # Written already (and `updated_at` with it, by the column's onupdate -
+        # tracking-link expiry reads it); recorded on the instance as committed
+        # state so the unit of work does not write either a second time.
+        set_committed_value(order, "status", new_status)
+        set_committed_value(order, "updated_at", row.updated_at)
         if new_status == OrderStatus.delivered and order.delivered_at is None:
             # Ground truth (docs/ROADMAP.md I1): written once, never on update.
             order.delivered_at = occurred_at

@@ -311,8 +311,8 @@ class TestWhatIsRefused:
         assert (await db_session.get(Order, order_id)).status == OrderStatus.held
 
     async def test_a_driver_on_a_route(self, db_session, real_redis_client):
-        """Adding to a working driver's route by hand waits for the cycle's own
-        writes to be hardened (`CON-5`). Refused, saying so, and nothing moves."""
+        """Adding to a working driver's route by hand is `CON-5`'s second half,
+        not built. Refused, saying so, and nothing moves."""
         hub_id, _client, driver_id, route_id, _current, order_id, _shop = await _working(db_session)
 
         refused = await _refused(db_session, order_id, driver_id)
@@ -783,7 +783,8 @@ class TestOffersThatNeverCommit:
         driver left `offered` with no offer to lapse is out of every plan until
         something resets them. The orders the status write moved are not sent
         back from here (that would re-run the cycle into the same failure every
-        second); that is `CON-5`'s."""
+        second); the scheduled sweep does (`CON-5`,
+        tests/integration/test_dispatch_cycle_write_safety.py)."""
         import app.optimizer.service as service_module
 
         hub_id, _client, _shop, driver_id, _order = await driver_app._seed(db_session)

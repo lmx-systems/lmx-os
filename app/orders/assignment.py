@@ -19,8 +19,8 @@ puts the order back in the hold queue the way every offer's does
 their last stop - what the cycle's in-flight insertion does for a passing
 driver - is the other half of the design doc's §6 answer, and it is left out on
 purpose: an appender writes a route a driver is tapping through, and doing that
-safely beside the cycle needs the cycle's own writes hardened first
-(`docs/ROADMAP_1.5.md`, `CON-5`). Every other status (`off_shift`, `on_break`,
+safely beside the driver's own paths needs one lock order for the route and to
+give way on a lock wait (`docs/ROADMAP_1.5.md`, `CON-5`'s second half). Every other status (`off_shift`, `on_break`,
 `offered`) is refused too: the driver is not there to take it, or already has a
 question in front of them.
 
