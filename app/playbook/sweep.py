@@ -58,6 +58,7 @@ from app.models.playbook_decision import (
     OUTCOME_SUPERSEDED,
     PlaybookDecision,
 )
+from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.models.stop import Stop, StopOrder
 from app.optimizer.service import _position_is_stale
@@ -65,9 +66,11 @@ from app.orders.unplaced import unplaced_clause
 from app.playbook.rules import (
     ESCALATE,
     OFFER,
+    OFFER_WITH_BONUS,
     RULE_FAILED_DELIVERY,
     RULE_UNPLACED,
     Candidate,
+    OfferHistory,
     decide_failed_delivery,
     decide_unplaced,
 )
@@ -419,6 +422,7 @@ async def _call_unplaced(
     candidates = [] if hub_closed else await _free_drivers(session, hub_id, now, fleet)
     mode = rule_mode(RULE_UNPLACED)
     for order, shop in uncalled:
+        history, turned_down_by = await _offer_history(session, order.id)
         call = decide_unplaced(
             [
                 Candidate(
@@ -430,10 +434,13 @@ async def _call_unplaced(
                         else None
                     ),
                     position_stale=c.position_stale,
+                    turned_it_down=c.driver_id in turned_down_by,
                 )
                 for c, position in candidates
             ],
             hub_closed=hub_closed,
+            history=history,
+            bonus_cents=settings.offer_bonus_cents,
         )
         escalate = call.action == ESCALATE
         next_attempt = (
@@ -463,6 +470,22 @@ async def _call_unplaced(
         sweep.called += 1
         if escalate:
             sweep.escalated += 1
+
+
+async def _offer_history(session: AsyncSession, order_id: uuid.UUID) -> tuple[OfferHistory, set[str]]:
+    """This order's offers that were declined or left to lapse, and by whom."""
+    offers = list(
+        await session.scalars(
+            select(RouteOffer).where(
+                RouteOffer.stop_payload.contains([{"order_id": str(order_id)}]),
+                RouteOffer.status.in_(("declined", "expired")),
+            )
+        )
+    )
+    history = OfferHistory(
+        turned_down=len(offers), bonus_tried=any(offer.bonus_cents for offer in offers)
+    )
+    return history, {str(offer.driver_id) for offer in offers}
 
 
 async def _free_drivers(
@@ -520,8 +543,8 @@ async def record_person_action(
     From the assign (`offer`, with the driver), the hold override (`hold` or
     `release`) and dispatch's cancel, before they lock the order and in their
     transaction - the call before the order, as everywhere. An open call is
-    `agreed` only when the person offered it to the driver the call named;
-    anything else overrules it. An escalation keeps its outcome and gains the
+    `agreed` only when the person offered it to the driver the call named, with
+    a bonus or without as the call said; anything else overrules it. An escalation keeps its outcome and gains the
     answer it did not have.
     """
     decision = await session.scalar(
@@ -537,7 +560,7 @@ async def record_person_action(
     if decision is None:
         return
     if decision.outcome == OUTCOME_OPEN:
-        same = action == decision.action == OFFER and target == decision.target
+        same = action == decision.action and action in (OFFER, OFFER_WITH_BONUS) and target == decision.target
         decision.outcome = OUTCOME_AGREED if same else OUTCOME_OVERRULED
     decision.closed_at = datetime.now(timezone.utc)
     decision.human_action = action

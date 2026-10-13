@@ -1047,6 +1047,7 @@ async def assign_order(
             driver_id=body.driver_id,
             ops_user_id=ops.ops_user_id,
             ops_user_email=ops.email,
+            with_bonus=body.with_bonus,
         )
     except AssignmentRefused as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -1056,6 +1057,7 @@ async def assign_order(
         offer_id=outcome.offer_id,
         offer_expires_at=outcome.offer_expires_at,
         driver_position_stale=outcome.driver_position_stale,
+        bonus_cents=outcome.bonus_cents,
     )
 
 

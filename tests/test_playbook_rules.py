@@ -107,3 +107,39 @@ def test_nobody_free_or_a_closed_hub_goes_to_a_person():
     assert decide_unplaced([], hub_closed=False).action == ESCALATE
     assert decide_unplaced([_c("a", 1.0)], hub_closed=True).action == ESCALATE
     assert decide_unplaced([], hub_closed=False).target is None
+
+
+# The step-up (`DEC-10`, D-BONUS).
+
+from app.playbook.rules import OFFER_WITH_BONUS, OfferHistory  # noqa: E402
+
+
+def _cd(driver_id, miles, *, declined=False, stale=False):
+    return Candidate(
+        driver_id=driver_id, name=f"Driver {driver_id}", miles=miles, position_stale=stale, turned_it_down=declined
+    )
+
+
+def test_turned_down_once_it_goes_again_with_the_bonus_to_someone_new():
+    call = decide_unplaced(
+        [_cd("decliner", 0.5, declined=True), _cd("new", 2.0)],
+        hub_closed=False, history=OfferHistory(turned_down=1), bonus_cents=500,
+    )
+    assert (call.action, call.target) == (OFFER_WITH_BONUS, "new")
+    assert "$5.00 bonus" in call.reason
+
+
+def test_with_only_decliners_free_the_nearest_gets_the_bonus():
+    call = decide_unplaced(
+        [_cd("a", 3.0, declined=True), _cd("b", 1.0, declined=True)],
+        hub_closed=False, history=OfferHistory(turned_down=2), bonus_cents=500,
+    )
+    assert (call.action, call.target) == (OFFER_WITH_BONUS, "b")
+    assert "turned it down before" in call.reason
+
+
+def test_turned_down_with_a_bonus_too_goes_to_a_person():
+    call = decide_unplaced(
+        [_cd("a", 1.0)], hub_closed=False, history=OfferHistory(turned_down=2, bonus_tried=True), bonus_cents=500
+    )
+    assert call.action == ESCALATE

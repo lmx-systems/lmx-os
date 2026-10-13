@@ -386,6 +386,8 @@ export interface ExceptionQueue {
   counts: Record<string, number>
   worst_wait_minutes: number
   items: ExceptionItem[]
+  // The placeholder bonus an offer can carry (DEC-10).
+  offer_bonus_cents: number
 }
 
 /** One thing the decision log says, and the row it says it in (AGT-4). */
@@ -446,6 +448,8 @@ export interface AssignmentResult {
   offer_id: string
   offer_expires_at: string
   driver_position_stale: boolean
+  // The bonus the offer carries, if one was added (DEC-10).
+  bonus_cents: number | null
 }
 
 export interface OrderResolutionResult {

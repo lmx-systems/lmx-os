@@ -1274,6 +1274,7 @@ async def operations_exceptions(
         generated_at=queue.generated_at,
         counts=queue.by_kind(),
         worst_wait_minutes=queue.worst_wait_minutes,
+        offer_bonus_cents=settings.offer_bonus_cents,
         items=[
             ExceptionItemView(
                 kind=item.kind,

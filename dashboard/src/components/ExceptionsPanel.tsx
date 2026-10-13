@@ -188,6 +188,7 @@ export function ExceptionsPanel({
                             driversError={driversError}
                             onDone={onResolved}
                             onToast={onToast}
+                            offerBonusCents={data.offer_bonus_cents}
                           />
                         </div>
                       )}
@@ -232,6 +233,7 @@ const ACTION_LABEL: Record<string, string> = {
   cancel: 'cancel',
   // The reason that follows names them.
   offer: 'offer it to a free driver',
+  offer_bonus: 'offer it again with a bonus',
 }
 
 /**

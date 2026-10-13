@@ -69,6 +69,9 @@ class AssignOrderBody(BaseModel):
     """Dispatch offers an order to an idle driver (app/orders/assignment.py)."""
 
     driver_id: uuid.UUID
+    # Put the placeholder bonus (`settings.offer_bonus_cents`) on the offer: the
+    # step-up for an order already declined or left to lapse (`DEC-10`).
+    with_bonus: bool = False
 
 
 class AssignmentResult(BaseModel):
@@ -84,6 +87,7 @@ class AssignmentResult(BaseModel):
     offer_id: str
     offer_expires_at: datetime
     driver_position_stale: bool = False
+    bonus_cents: int | None = None
 
 
 class OrderCancellationResult(BaseModel):

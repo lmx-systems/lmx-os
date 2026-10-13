@@ -10,8 +10,10 @@ import pytest
 from sqlalchemy import select, update
 
 from app.api.admin_routes import assign_order, cancel_order_as_dispatch
+from app.api.driver_routes import accept_offer, decline_offer, get_my_earnings, list_my_offers
 from app.api.routes import override_order
 from app.config import settings
+from app.driver_auth.dependencies import AuthedDriver
 from app.fleet_state.manager import FleetStateManager
 from app.models.order import Order, OrderStatus
 from app.models.playbook_decision import PlaybookDecision
@@ -177,3 +179,79 @@ async def test_placed_some_other_way_the_call_is_superseded_and_a_new_spell_is_a
 
     calls = await _calls(db_session, order_id)
     assert [(c.attempt, c.outcome) for c in calls] == [(1, "superseded"), (2, "open")]
+
+
+async def _turn_it_down(db_session, hub_id, driver_id, order_id, *, with_bonus=False):
+    """A person offers it, the driver declines, and its hold has long run out again."""
+    result = await assign_order(
+        order_id, AssignOrderBody(driver_id=driver_id, with_bonus=with_bonus), session=db_session, ops=DISPATCHER
+    )
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+    await decline_offer(result.offer_id, driver=authed, session=db_session)
+    row = await db_session.get(Order, order_id, populate_existing=True)
+    assert row.status == OrderStatus.held
+    row.hold_deadline = datetime.now(timezone.utc) - timedelta(seconds=settings.stuck_order_after_seconds + 60)
+    await db_session.commit()
+    return result, authed
+
+
+async def test_turned_down_once_the_next_call_carries_the_bonus(db_session, real_redis_client):
+    hub_id, driver_id, order_id = await _unplaced(db_session)
+    await _turn_it_down(db_session, hub_id, driver_id, order_id)
+
+    await run_playbook(db_session, hub_id)
+
+    call = (await _calls(db_session, order_id))[-1]
+    assert (call.action, call.target, call.outcome) == ("offer_bonus", str(driver_id), "open")
+    assert "$5.00 bonus" in call.reason
+
+    # A person follows it: the offer carries the bonus, the driver sees it, the call agrees.
+    result = await assign_order(
+        order_id, AssignOrderBody(driver_id=driver_id, with_bonus=True), session=db_session, ops=DISPATCHER
+    )
+    assert result.bonus_cents == settings.offer_bonus_cents == 500
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+    [offer] = await list_my_offers(driver=authed, session=db_session)
+    assert offer.bonus_cents == 500
+    call = (await _calls(db_session, order_id))[-1]
+    assert (call.outcome, call.human_action) == ("agreed", "offer_bonus")
+
+
+async def test_without_the_bonus_a_person_overrules_the_bonus_call(db_session, real_redis_client):
+    hub_id, driver_id, order_id = await _unplaced(db_session)
+    await _turn_it_down(db_session, hub_id, driver_id, order_id)
+    await run_playbook(db_session, hub_id)
+
+    await assign_order(order_id, AssignOrderBody(driver_id=driver_id), session=db_session, ops=DISPATCHER)
+
+    call = (await _calls(db_session, order_id))[-1]
+    assert (call.outcome, call.human_action) == ("overruled", "offer")
+
+
+async def test_turned_down_with_the_bonus_too_goes_to_a_person(db_session, real_redis_client):
+    hub_id, driver_id, order_id = await _unplaced(db_session)
+    await _turn_it_down(db_session, hub_id, driver_id, order_id, with_bonus=True)
+
+    await run_playbook(db_session, hub_id)
+
+    call = (await _calls(db_session, order_id))[-1]
+    assert call.action == "escalate"
+
+
+async def test_the_bonus_is_owed_once_delivered(db_session, real_redis_client):
+    hub_id, driver_id, order_id = await _unplaced(db_session)
+    result = await assign_order(
+        order_id, AssignOrderBody(driver_id=driver_id, with_bonus=True), session=db_session, ops=DISPATCHER
+    )
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+    await accept_offer(result.offer_id, driver=authed, session=db_session)
+    assert (await get_my_earnings(driver=authed, session=db_session)).bonuses_owed_cents == 0
+
+    await db_session.execute(
+        update(Order)
+        .where(Order.id == order_id)
+        .values(status=OrderStatus.delivered, delivered_at=datetime.now(timezone.utc))
+    )
+    await db_session.commit()
+
+    assert (await get_my_earnings(driver=authed, session=db_session)).bonuses_owed_cents == 500

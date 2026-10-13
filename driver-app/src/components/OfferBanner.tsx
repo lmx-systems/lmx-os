@@ -138,6 +138,11 @@ export function OfferBanner({ offer, onAccept, onDecline }: OfferBannerProps) {
       {offer.estimated_pay_cents !== null && (
         <Text style={styles.payText}>${(offer.estimated_pay_cents / 100).toFixed(2)}</Text>
       )}
+      {/* A bonus on top (DEC-10): offered again after it was turned down. Shown
+          to every driver, hourly or not, because it is paid per job. */}
+      {offer.bonus_cents ? (
+        <Text style={styles.bonusText}>+${(offer.bonus_cents / 100).toFixed(2)} bonus when delivered</Text>
+      ) : null}
 
       <Text style={styles.cardLabel}>Pickup</Text>
       <Text style={styles.cardBody}>{shopName}</Text>
@@ -162,6 +167,7 @@ const makeStyles = (colors: ColorScheme) =>
     headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     headerTitle: { ...typography.title, color: colors.textPrimary, fontSize: 18 },
     payText: { fontSize: 28, fontWeight: '700', color: colors.primary, marginTop: spacing.xs },
+    bonusText: { ...typography.label, color: colors.primary, marginTop: spacing.xs },
     cardLabel: { ...typography.label, color: colors.textPrimary, marginTop: spacing.sm },
     cardBody: { ...typography.body, color: colors.textPrimary },
     countdownText: { ...typography.small, color: colors.textMuted },

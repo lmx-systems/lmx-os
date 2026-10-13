@@ -20,6 +20,7 @@ const ACTION_LABEL: Record<string, string> = {
   cancel: 'cancel',
   escalate: 'hand to a person',
   offer: 'offer to a driver',
+  offer_bonus: 'offer with a bonus',
   hold: 'put back in the queue',
   release: 'release it',
 }

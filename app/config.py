@@ -377,6 +377,11 @@ class Settings(BaseSettings):
     # mode: this many calls a person also decided, agreeing at least this often.
     playbook_promotion_min_decisions: int = 30
     playbook_promotion_min_agreement: float = 0.9
+    # PLACEHOLDER (decision D-BONUS, Sourabh, 13 October 2026: "use a $5
+    # placeholder bonus"). The bonus an offer carries when an order nobody has is
+    # offered again after a decline or a lapse (`DEC-10`). Recorded as owed when
+    # the order is delivered, not paid: nothing pays per job yet.
+    offer_bonus_cents: int = 500
 
     # How old a driver's last position can be before dispatch stops offering
     # them work. The app reports every 30 seconds while it's open; a driver whose

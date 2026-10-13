@@ -84,6 +84,17 @@ export function EarningsScreen({ navigation }: Props) {
         )}
       </View>
 
+      {(earnings.bonuses_owed_cents ?? 0) > 0 && (
+        // DEC-10: bonuses on offers taken after an order was turned down.
+        // Recorded as owed; nothing pays per job yet, so they are not in the
+        // estimate above.
+        <Card style={styles.overtimeCard}>
+          <Text style={styles.statLabel}>Bonuses owed</Text>
+          <Text style={styles.statValue}>{formatCents(earnings.bonuses_owed_cents ?? 0)}</Text>
+          <Text style={styles.noteText}>For deliveries you took after others turned them down. Not in the estimate above.</Text>
+        </Card>
+      )}
+
       {earnings.overtime_hours > 0 && (
         <Card style={styles.overtimeCard}>
           <Text style={styles.statLabel}>Includes overtime</Text>
