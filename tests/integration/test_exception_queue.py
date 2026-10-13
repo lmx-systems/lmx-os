@@ -136,6 +136,57 @@ class TestTheFourKinds:
         assert [i.kind for i in queue.items] == [KIND_UNPLACED]
 
 
+class TestHeldButNobodyCouldTakeIt:
+    """The second way into "nobody has it". The hold ran out, the cycle released
+    the order and found no driver, and it stays `held` - released again every
+    cycle and placed by none. Only `queued` was listed, so these never showed."""
+
+    async def test_a_held_order_past_its_deadline_surfaces(self, db_session):
+        hub = await _hub(db_session)
+        order = await _order(db_session, hub, status=OrderStatus.held)
+        order.hold_deadline = NOW - GRACE - timedelta(minutes=5)
+        await db_session.flush()
+
+        [item] = (await _queue(db_session, hub)).items
+
+        assert item.kind == KIND_UNPLACED
+        assert "no driver has it" in item.detail
+        assert "nobody has this order" in item.next_action
+
+    async def test_a_held_order_still_inside_its_hold_does_not(self, db_session):
+        """The queue is doing its job: holding for a partner."""
+        hub = await _hub(db_session)
+        order = await _order(db_session, hub, status=OrderStatus.held)
+        order.hold_deadline = NOW + timedelta(minutes=30)
+        await db_session.flush()
+
+        assert (await _queue(db_session, hub)).items == []
+
+    async def test_inside_the_grace_after_its_deadline_it_stays_quiet(self, db_session):
+        """The next cycle is about to release it, and may place it."""
+        hub = await _hub(db_session)
+        order = await _order(db_session, hub, status=OrderStatus.held)
+        order.hold_deadline = NOW - GRACE + timedelta(minutes=5)
+        await db_session.flush()
+
+        assert (await _queue(db_session, hub)).items == []
+
+    async def test_every_item_says_its_status_and_hold(self, db_session):
+        """What the console decides its controls from: an assign takes held or
+        queued, putting it back only queued."""
+        hub = await _hub(db_session)
+        order = await _order(db_session, hub, status=OrderStatus.queued)
+        order.hold_deadline = NOW - timedelta(minutes=10)
+        await _order(db_session, hub, promised_minutes_ago=200)
+        await db_session.flush()
+
+        items = (await _queue(db_session, hub)).items
+
+        assert {i.status for i in items} == {"queued", "assigned"}
+        released = next(i for i in items if i.status == "queued")
+        assert released.hold_deadline == NOW - timedelta(minutes=10)
+
+
 class TestWhatItLeavesAlone:
     async def test_a_delivered_order_is_not_an_exception(self, db_session):
         hub = await _hub(db_session)

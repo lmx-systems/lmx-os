@@ -3,6 +3,8 @@ from datetime import date, datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import uuid
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -61,6 +63,27 @@ class OrderResolutionResult(BaseModel):
     status: str
     delivery_attempts: int
     action: str
+
+
+class AssignOrderBody(BaseModel):
+    """Dispatch offers an order to an idle driver (app/orders/assignment.py)."""
+
+    driver_id: uuid.UUID
+
+
+class AssignmentResult(BaseModel):
+    """The offer an assign made, and what the dispatcher should know about it.
+
+    The driver may decline it; it lapses at `offer_expires_at`, and either way
+    the order goes back in the queue. `driver_position_stale` says the driver's
+    app hasn't reported lately and may not see the offer.
+    """
+
+    order_id: str
+    driver_id: str
+    offer_id: str
+    offer_expires_at: datetime
+    driver_position_stale: bool = False
 
 
 class OrderCancellationResult(BaseModel):

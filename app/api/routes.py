@@ -36,6 +36,7 @@ from app.models.dispatcher_override import (
     REASON_CODES_REQUIRING_NOTE,
     REASON_LABELS,
 )
+from app.models.dispatch_assignment import DispatchAssignment
 from app.models.driver import Driver
 from app.models.hub import Hub
 from app.models.linkage_flag import LinkageFlag
@@ -44,6 +45,7 @@ from app.models.location_merge import LocationMerge
 from app.models.machine_label import MACHINES, MISSING_DATA, NO_REASONS
 from app.models.order import Order
 from app.models.receiver_profile import ReceiverProfile
+from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.ops_auth.dependencies import (
     AuthedOpsUser,
@@ -950,6 +952,49 @@ async def lookup_orders(
         )
     ).all()
 
+    # Who gave each order to a driver by hand, if anybody did - the latest
+    # assign per order (`dispatch_assignments`). A dispatcher on the phone
+    # asking "why is it with that driver?" is answered by a name rather than by
+    # the decision log, which only knows what the optimizer chose.
+    #
+    # Only while that assign still stands. The table is append-only, so an
+    # offer the driver declined or let lapse, or one withdrawn by a cancel,
+    # leaves a row behind; naming the dispatcher then would credit a person
+    # with a driver the optimizer chose afterwards, or with an order nobody has.
+    assigned_by: dict[uuid.UUID, tuple[str | None, datetime | None]] = {}
+    if rows:
+        latest: dict[uuid.UUID, DispatchAssignment] = {}
+        for assignment in (
+            await session.execute(
+                select(DispatchAssignment)
+                .where(DispatchAssignment.order_id.in_([order.id for order, _ in rows]))
+                .order_by(DispatchAssignment.assigned_at)
+            )
+        ).scalars():
+            latest[assignment.order_id] = assignment
+        live_offers = (
+            set(
+                await session.scalars(
+                    select(RouteOffer.id).where(
+                        RouteOffer.id.in_([a.offer_id for a in latest.values()]),
+                        RouteOffer.status.in_(("offered", "accepted")),
+                    )
+                )
+            )
+            if latest
+            else set()
+        )
+        # And only while the order's latest assignment is that one: an order
+        # redelivered and placed again by the optimizer has a newer
+        # `assigned_at`, though the dispatcher's offer still reads accepted.
+        assigned_at_by_order = {order.id: order.assigned_at for order, _ in rows}
+        for order_id, assignment in latest.items():
+            if (
+                assignment.offer_id in live_offers
+                and assigned_at_by_order.get(order_id) == assignment.assigned_at
+            ):
+                assigned_by[order_id] = (assignment.ops_user_email, assignment.assigned_at)
+
     items = []
     for order, shop_name in rows:
         late = None
@@ -960,6 +1005,7 @@ async def lookup_orders(
             reference = order.delivered_at or datetime.now(timezone.utc)
             seconds = (reference - order.promised_at).total_seconds()
             late = int(seconds // 60) if seconds > 0 else None
+        by_whom, by_whom_at = assigned_by.get(order.id, (None, None))
         items.append(
             OrderLookupRow(
                 order_id=order.id,
@@ -971,6 +1017,8 @@ async def lookup_orders(
                 promised_at=order.promised_at,
                 delivered_at=order.delivered_at,
                 minutes_late=late,
+                assigned_by_dispatch=by_whom,
+                assigned_by_dispatch_at=by_whom_at,
             )
         )
     return OrderLookupPage(items=items, total=int(total or 0), limit=limit)
@@ -1069,6 +1117,8 @@ async def operations_exceptions(
                 promised_at=item.promised_at,
                 detail=item.detail,
                 next_action=item.next_action,
+                status=item.status,
+                hold_deadline=item.hold_deadline,
             )
             for item in queue.items
         ],

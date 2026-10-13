@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 import structlog
@@ -359,6 +361,14 @@ class DispatchOptimizerService:
         # because this runs from two contexts: a request-scoped call
         # (POST /optimizer/{hub_id}/run-cycle) and a background asyncio task
         # with no request of its own (app/optimizer/event_trigger.py).
+        # Only what this write actually moved is offered below. A dispatcher can
+        # offer an order by hand while the cycle solves (app/orders/assignment.py):
+        # written `WHERE status IN ('held', 'queued')`, the cycle's write queued
+        # behind theirs re-checks once they commit, matches nothing, and the
+        # order is not offered to a second driver. An order the cycle planned
+        # that was already `assigned` (an earlier writer's, still in Redis) is
+        # skipped the same way.
+        moved_ids: set[str] = set()
         if assigned_stop_ids:
             async with session_scope() as session:
                 # Through the state machine, so the transition reaches the status
@@ -369,9 +379,11 @@ class DispatchOptimizerService:
                     [uuid.UUID(order_id) for order_id in assigned_stop_ids],
                     OrderStatus.assigned,
                     occurred_at=assigned_at,
+                    only_from=_PLANNABLE,
                 )
                 for order in moved:
                     order.assigned_at = assigned_at
+                moved_ids = {str(order.id) for order in moved}
 
         # Extend a job offer to each assigned driver rather than handing them
         # a route directly - see app/models/route_offer.py. Order.status is
@@ -390,7 +402,11 @@ class DispatchOptimizerService:
             # so a driver is never notified about an offer that failed to
             # persist (app/messaging/job_offer_notifications.py).
             offers_to_notify: list[tuple[str, int]] = []
-            async with session_scope() as session:
+            # Drivers this cycle took out of the pool, with their state before,
+            # so a failure before the offers commit can put them back: an
+            # `offered` driver with no offer is left out of every plan.
+            claims: list[DriverState] = []
+            async with self._giving_back_claims_on_failure(claims), session_scope() as session:
                 # Dispatch plans from the fleet state in Redis, which does not
                 # know a driver was switched off since this cycle's snapshot.
                 # The row does. Share-locked to the commit, so a switch-off
@@ -409,11 +425,12 @@ class DispatchOptimizerService:
                     ).scalars()
                 )
                 switched_off: list[tuple[str, list[dict]]] = []
+                taken: list[tuple[str, list[dict]]] = []
                 for assignment in assignments:
                     offer_stops = []
                     for stop_id in assignment.stop_ids:
                         candidate = stops_by_id.get(stop_id)
-                        if candidate is None:
+                        if candidate is None or stop_id not in moved_ids:
                             continue
                         offer_stops.append(
                             {
@@ -429,6 +446,26 @@ class DispatchOptimizerService:
                     if uuid.UUID(assignment.driver_id) not in active_driver_ids:
                         switched_off.append((assignment.driver_id, offer_stops))
                         continue
+                    # Take the driver out of the assignable pool the moment
+                    # they're offered a job, not just once they accept -
+                    # otherwise the very next cycle can offer them a second,
+                    # overlapping job before they've responded to the first
+                    # (get_fleet_snapshot only excludes non-"available"
+                    # drivers). Reverted back to "available" on decline/
+                    # expiry (app/api/driver_routes.py); accept moves it
+                    # straight to "en_route" instead.
+                    #
+                    # Claimed, so reading `available` and writing `offered` is
+                    # one step under the per-driver lock a dispatcher's offer
+                    # takes too: whoever is second finds them taken. A driver
+                    # taken since the snapshot - by a dispatcher, or gone on
+                    # break - gets nothing from this cycle, and their share of
+                    # the plan goes back to the queue.
+                    claim = await self._fleet_state.claim_for_offer(hub_id, assignment.driver_id)
+                    if claim is None:
+                        taken.append((assignment.driver_id, offer_stops))
+                        continue
+                    claims.append(claim[0])
                     # The plan itself, alongside the per-order preview. Only visits for
                     # orders that survived the `stops_by_id` filter above, so the two
                     # payloads describe the same set of work rather than disagreeing.
@@ -455,27 +492,6 @@ class DispatchOptimizerService:
                     )
                     offers_to_notify.append((assignment.driver_id, len(offer_stops)))
 
-                    # Take the driver out of the assignable pool the moment
-                    # they're offered a job, not just once they accept -
-                    # otherwise the very next cycle can offer them a second,
-                    # overlapping job before they've responded to the first
-                    # (get_fleet_snapshot only excludes non-"available"
-                    # drivers). Reverted back to "available" on decline/
-                    # expiry (app/api/driver_routes.py); accept moves it
-                    # straight to "en_route" instead.
-                    existing_state = fleet_by_id.get(assignment.driver_id)
-                    if existing_state is not None:
-                        await self._fleet_state.upsert_driver_state(
-                            DriverState(
-                                driver_id=existing_state.driver_id,
-                                hub_id=hub_id,
-                                status="offered",
-                                capacity_units=existing_state.capacity_units,
-                                load_units=existing_state.load_units,
-                                current_route_id=existing_state.current_route_id,
-                            )
-                        )
-
                 # A switched-off driver's share of the plan goes back to the
                 # hold queue for the next cycle, the way a declined offer does,
                 # and the driver comes out of the pool so it isn't planned
@@ -492,6 +508,14 @@ class DispatchOptimizerService:
                             stale.model_copy(update={"hub_id": hub_id, "status": "off_shift"})
                         )
                     logger.info("dispatch_skipped_switched_off_driver", hub_id=hub_id, driver_id=driver_id)
+
+                # The driver's `offered` belongs to somebody else's offer, so it
+                # stands (`free_driver=False`); only the orders go back.
+                for driver_id, offer_stops in taken:
+                    await requeue_orders_from_offer(
+                        session, hub_id, driver_id, offer_stops, free_driver=False
+                    )
+                    logger.info("dispatch_skipped_driver_taken_since_snapshot", hub_id=hub_id, driver_id=driver_id)
 
             for driver_id, stop_count in offers_to_notify:
                 await notify_driver_of_new_offer(driver_id, stop_count, settings.job_offer_ttl_seconds)
@@ -545,6 +569,23 @@ class DispatchOptimizerService:
             duration_seconds=round(duration, 3),
             over_budget=over_budget,
         )
+
+    @asynccontextmanager
+    async def _giving_back_claims_on_failure(self, claims: list[DriverState]) -> AsyncIterator[None]:
+        """Put back every driver the cycle claimed if its offers don't commit.
+
+        Only the drivers. The orders the status write moved stay `assigned`
+        with no offer, as they did before claims existed; sending them back to
+        the queue from here would re-trigger the cycle into the same failure
+        every second, and is left to the cycle's own hardening (`CON-5`).
+        """
+        try:
+            yield
+        except BaseException:
+            for before in claims:
+                await self._fleet_state.upsert_driver_state(before)
+            logger.warning("dispatch_offers_failed_claims_returned", drivers=len(claims))
+            raise
 
     async def _insert_unassigned_into_active_routes(
         self, hub_id: str, unassigned_order_ids: list[str], stops_by_id: dict[str, StopCandidate]
@@ -623,6 +664,22 @@ class DispatchOptimizerService:
                     continue
                 detour_miles, route, at_pickup, at_drop = best
 
+                # The status first, only from held or queued, and nothing else
+                # written if it doesn't move: the order was read unlocked above, and a
+                # dispatcher may have offered it to a driver by hand since
+                # (app/orders/assignment.py holds the row until it commits). It
+                # used to be written last and blind, so the order went onto this
+                # route and to their driver both.
+                assigned_now = await advance_orders(
+                    session, [order.id], OrderStatus.assigned, only_from=_PLANNABLE
+                )
+                if not assigned_now:
+                    logger.info(
+                        "route_stop_insertion_order_taken", hub_id=hub_id, order_id=order_id
+                    )
+                    continue
+                assigned_now[0].assigned_at = datetime.now(timezone.utc)
+
                 next_sequence = (
                     (await session.execute(select(func.max(Stop.sequence)).where(Stop.route_id == route.id))).scalar_one()
                     or 0
@@ -656,11 +713,6 @@ class DispatchOptimizerService:
                 session.add(StopOrder(stop_id=dropoff.id, order_id=order.id))
 
                 route.plan_version += 1
-                # Through the state machine, as the cycle's own assignments are
-                # since #168: a plain UPDATE here meant a client never heard that
-                # an inserted order had been assigned.
-                for moved in await advance_orders(session, [order.id], OrderStatus.assigned):
-                    moved.assigned_at = datetime.now(timezone.utc)
                 # The live ETA too, not only the plan. Until now the two new stops
                 # carried `eta = None` until the driver's next tap, so the app
                 # showed nothing and the portal fell back to a guess for an order

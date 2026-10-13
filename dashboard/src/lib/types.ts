@@ -319,6 +319,11 @@ export interface ExceptionItem {
   promised_at: string | null
   detail: string
   next_action: string
+  // The order's status now and when its hold runs out. What decides which
+  // controls a row offers: an assign takes `held` or `queued`, putting it back
+  // in the queue only `queued`.
+  status: string
+  hold_deadline: string | null
 }
 
 export interface ExceptionQueue {
@@ -373,6 +378,19 @@ export interface OrderCancellationResult {
   order_id: string
   status: string
   how: 'before_collection' | 'offer_withdrawn' | 'stops_removed'
+}
+
+/**
+ * The offer a dispatcher's assign made (app/orders/assignment.py). The driver
+ * may decline it before `offer_expires_at`; either way the order goes back in
+ * the queue. `driver_position_stale`: their app hasn't reported lately.
+ */
+export interface AssignmentResult {
+  order_id: string
+  driver_id: string
+  offer_id: string
+  offer_expires_at: string
+  driver_position_stale: boolean
 }
 
 export interface OrderResolutionResult {
@@ -628,6 +646,10 @@ export interface OrderLookupRow {
   promised_at: string | null
   delivered_at: string | null
   minutes_late: number | null
+  // The ops user who last gave it to a driver by hand, and when. Null when the
+  // optimizer placed it.
+  assigned_by_dispatch: string | null
+  assigned_by_dispatch_at: string | null
 }
 
 export interface OrderLookupPage {

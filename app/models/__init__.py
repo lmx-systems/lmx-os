@@ -7,6 +7,7 @@ from app.models.client_webhook import ClientWebhookEndpoint, WebhookDelivery
 from app.models.cod_collection import CodCollection
 from app.models.decision_snapshot import DecisionSnapshot
 from app.models.delivery_rating import DeliveryRating
+from app.models.dispatch_assignment import DispatchAssignment
 from app.models.dock_log_submission import DockLogSubmission
 from app.models.driver import Driver
 from app.models.driver_device import DriverDevice
@@ -53,6 +54,7 @@ __all__ = [
     "ClientRate",
     "ClientUser",
     "DeliveryRating",
+    "DispatchAssignment",
     "Driver",
     "DriverDocument",
     "DriverLocationPing",

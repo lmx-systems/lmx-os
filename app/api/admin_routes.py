@@ -32,6 +32,7 @@ from app.billing.service import (
 from app.client_auth.passwords import hash_password
 from app.compliance.driver_documents import evaluate_driver_documents
 from app.db import get_db
+from app.orders.assignment import AssignmentRefused, assign_order_to_driver
 from app.delivery.resolution import (
     RESOLUTION_ACTIONS,
     OrderNotFailedError,
@@ -102,6 +103,8 @@ from app.schemas.admin import (
     AdminClientView,
     AdminDriverDeviceView,
     AdminDriverView,
+    AssignOrderBody,
+    AssignmentResult,
     ClientOnboardingBody,
     ClientOnboardingResult,
     ClientRateBody,
@@ -1007,6 +1010,45 @@ async def cancel_order_as_dispatch(
     except OrderNotCancellable as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return OrderCancellationResult(order_id=str(order.id), status=order.status.value, how=how)
+
+
+@router.post("/orders/{order_id}/assign", response_model=AssignmentResult)
+async def assign_order(
+    order_id: uuid.UUID,
+    body: AssignOrderBody,
+    session: AsyncSession = Depends(get_db),
+    ops: AuthedOpsUser = Depends(require_dispatcher),
+) -> AssignmentResult:
+    """Offer an order nobody has to an idle driver (app/orders/assignment.py).
+
+    The exceptions queue's "nobody has it" row said to assign the order and
+    nothing could. The driver is sent an offer they may decline, through the
+    same accept path the optimizer's offers use. A driver already on a route is
+    refused for now (`CON-5`).
+
+    A dispatcher's write, attributed: every assign records who made it
+    (`dispatch_assignments`). 409 with a sentence when the order or the driver
+    can't take it (already assigned, on a route, off shift, no room, documents
+    lapsed, hub closed); 404 for an order or a driver this hub doesn't have; 422
+    for a row too broken to route (no shop).
+    """
+    try:
+        outcome = await assign_order_to_driver(
+            session,
+            order_id=order_id,
+            driver_id=body.driver_id,
+            ops_user_id=ops.ops_user_id,
+            ops_user_email=ops.email,
+        )
+    except AssignmentRefused as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return AssignmentResult(
+        order_id=outcome.order_id,
+        driver_id=outcome.driver_id,
+        offer_id=outcome.offer_id,
+        offer_expires_at=outcome.offer_expires_at,
+        driver_position_stale=outcome.driver_position_stale,
+    )
 
 
 @router.post("/orders/{order_id}/resolve", response_model=OrderResolutionResult)

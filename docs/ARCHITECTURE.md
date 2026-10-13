@@ -174,6 +174,19 @@ This closed three real gaps, not just "add some endpoints":
   gap: there's no cooldown, so if the same driver is still the only one
   available, they can be re-offered the identical order almost
   immediately after declining.
+
+  Since October 2026 **dispatch can make an offer** by hand, from the
+  exceptions queue, to an idle driver (`app/orders/assignment.py`); a driver
+  already on a route is refused until the cycle's own writes are hardened
+  (`docs/ROADMAP_1.5.md` `CON-5`). Two writers now offer, so: **the cycle
+  offers only the orders it actually moved to `assigned`** - its status write
+  and its in-flight insertion only move an order still held or queued
+  (`advance_orders(only_from=...)`), so an order dispatch assigned
+  while the solver ran is left off the offer rather than handed to a second
+  driver; and **both claim the driver** (`FleetStateManager.claim_for_offer`,
+  read-and-mark under a per-driver lock), so a driver dispatch took since the
+  cycle's snapshot gets no second offer, and the cycle's share of the plan
+  goes back to the queue.
 - **The first Route/Stop endpoints this codebase has ever had.** The
   `routes`/`stops` tables existed since the initial migration but had zero
   API surface. Accepting an offer now builds one pickup `Stop` per shop

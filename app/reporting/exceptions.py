@@ -24,7 +24,12 @@ obviously broken, which is what makes it easy to miss until it is a call.
 
 **Released from the hold queue and never placed.** The quietest and the worst:
 no driver has it, no exception was raised, nothing is happening. It looks
-identical to an order in transit from every other view in the system.
+identical to an order in transit from every other view in the system. Two ways
+in: a dispatcher released it (`queued`) and no cycle placed it, or its hold ran
+out and it is still `held` - which this list can see but not explain. Usually
+cycles released it and no driver could take it; but if the cycles stopped, or the
+hub is closed, the row looks the same, so the detail says only what the data
+shows (`app/record/explain.py` refuses the same inference).
 
 ## Ordered by the clock, and that is a heuristic, not a prediction
 
@@ -44,7 +49,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -94,6 +99,11 @@ class Exception_:
     minutes_waiting: float
     promised_at: datetime | None
     detail: str
+    # What the order is now and when its hold runs out, so the console can offer
+    # only what the server would accept (an assign takes `held` or `queued`; a
+    # hold override only `queued`) and say when putting it back is pointless.
+    status: str = ""
+    hold_deadline: datetime | None = None
 
     @property
     def next_action(self) -> str:
@@ -216,12 +226,29 @@ async def build_exception_queue(
     # Released from the hold queue and never placed on a route. The quietest
     # failure in the system: it looks like an order in transit from every other
     # view, because nothing went wrong - nothing happened at all.
+    #
+    # Two ways to be here. A dispatcher released it and no cycle placed it: the
+    # override is the only writer of `queued`. Or the hold ran out and the
+    # cycle released it, found nobody, and left it `held` - it stays in the
+    # queue and is released again every cycle, so its status never changes and
+    # without the second clause it never appeared here at all. Past its
+    # deadline by more than the grace, so an order the next cycle is about to
+    # place is not raised as an exception.
     unplaced = list(
         await session.scalars(
             _scope(
                 select(Order).where(
-                    Order.status == OrderStatus.queued,
-                    Order.requested_at < now - grace,
+                    or_(
+                        and_(
+                            Order.status == OrderStatus.queued,
+                            Order.requested_at < now - grace,
+                        ),
+                        and_(
+                            Order.status == OrderStatus.held,
+                            Order.hold_deadline.is_not(None),
+                            Order.hold_deadline < now - grace,
+                        ),
+                    )
                 )
             )
         )
@@ -233,7 +260,11 @@ async def build_exception_queue(
         queue.items.append(
             _item(
                 KIND_UNPLACED, order, now,
-                detail="released from the hold queue and not assigned to a route",
+                detail=(
+                    "released from the hold queue and not assigned to a route"
+                    if order.status == OrderStatus.queued
+                    else "its hold ran out and no driver has it - no cycle placed it, or none has run"
+                ),
             )
         )
 
@@ -282,4 +313,6 @@ def _item(kind: str, order: Order, now: datetime, *, detail: str) -> Exception_:
         minutes_waiting=round(_minutes_since(reference, now), 1),
         promised_at=order.promised_at,
         detail=detail,
+        status=order.status.value,
+        hold_deadline=order.hold_deadline,
     )

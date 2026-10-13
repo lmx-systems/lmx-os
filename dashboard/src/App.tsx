@@ -254,10 +254,14 @@ function App() {
                       error={exceptions.error}
                       loading={exceptions.loading}
                       canDispatch={canDispatch}
+                      drivers={fleet.data}
+                      driversError={fleet.error !== null}
                       onResolved={() => {
                         exceptions.refetchNow()
                         // A redelivery is back in the hold queue.
                         held.refetchNow()
+                        // An offer takes a driver out of the available pool.
+                        fleet.refetchNow()
                       }}
                       onToast={showToast}
                     />

@@ -42,6 +42,7 @@ import type {
   OrderLookupPage,
   MergeProposal,
   AttentionCounts,
+  AssignmentResult,
   ClassificationCoverage,
   RecordHealth,
   UnlabelledDock,
@@ -198,6 +199,15 @@ export const api = {
   // once the parts are collected.
   cancelOrderAsDispatch: (orderId: string) =>
     request<OrderCancellationResult>(`/admin/orders/${orderId}/cancel`, { method: 'POST' }),
+
+  // Offer an order nobody has to an idle driver, who may decline it. A
+  // dispatcher's write; 409 when the order or the driver can't take it (a
+  // driver on a route among them, for now), with the reason as `detail`.
+  assignOrder: (orderId: string, driverId: string) =>
+    request<AssignmentResult>(`/admin/orders/${orderId}/assign`, {
+      method: 'POST',
+      body: JSON.stringify({ driver_id: driverId }),
+    }),
 
   // R5: redeliver, return to the shop, or cancel a failed delivery. A dispatcher's
   // (or admin's) write on the server, and until now called by nothing.

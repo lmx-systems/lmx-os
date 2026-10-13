@@ -34,6 +34,7 @@ DISPATCHER_WRITES = {
     ("post", "/optimizer/{hub_id}/run-cycle"),
     ("post", "/ingestion/{hub_id}/{client_id}/{source_system}"),
     ("post", "/admin/orders/{order_id}/cancel"),
+    ("post", "/admin/orders/{order_id}/assign"),
     ("post", "/admin/orders/{order_id}/resolve"),
     ("post", "/admin/returns/{return_id}/mark-returned"),
     ("post", "/admin/returns/{return_id}/reschedule"),

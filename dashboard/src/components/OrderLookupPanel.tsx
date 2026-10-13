@@ -4,10 +4,7 @@ import { api } from '../lib/api'
 import { truncateId } from '../lib/format'
 import type { DecisionFact, OrderLookupRow } from '../lib/types'
 import { CancelOrderButton } from './CancelOrderButton'
-
-// Statuses dispatch can still cancel from (app/orders/cancellation.py): the
-// server is the judge; this only decides whether to show the control.
-const CANCELLABLE = ['received', 'classified', 'held', 'queued', 'assigned', 'en_route_pickup']
+import { DISPATCH_CANCELLABLE } from '../lib/orderStatus'
 
 /**
  * Find an order (docs/ROADMAP_1.5.md CON-1).
@@ -113,10 +110,24 @@ export function OrderLookupPanel({
                       {row.minutes_late} min late
                     </span>
                   )}
+                  {row.assigned_by_dispatch && (
+                    // A person chose this driver, not the optimizer - and the
+                    // decision log, which only records the optimizer, can't say so.
+                    <span
+                      className="ml-1.5"
+                      title={
+                        row.assigned_by_dispatch_at
+                          ? `Assigned by hand at ${new Date(row.assigned_by_dispatch_at).toLocaleTimeString()}`
+                          : undefined
+                      }
+                    >
+                      · assigned by {row.assigned_by_dispatch}
+                    </span>
+                  )}
                 </span>
               </button>
               {openId === row.order_id && <Why orderId={row.order_id} />}
-              {canDispatch && CANCELLABLE.includes(row.status) && (
+              {canDispatch && DISPATCH_CANCELLABLE.includes(row.status) && (
                 <div className="px-2 pb-1.5">
                   <CancelOrderButton
                     orderId={row.order_id}
