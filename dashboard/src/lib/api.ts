@@ -317,17 +317,17 @@ export const api = {
   siteFactDisputes: (limit = 50) =>
     request<SiteFactDispute[]>(`/operations/site-fact-disputes?limit=${limit}`),
 
-  // `seenUpTo`: the newest answer the panel showed. The server refuses (409) a
-  // settle when a newer one has come in, so nobody files an answer unseen.
+  // `seen`: the key of every answer the panel showed. The server refuses (409)
+  // unless those are exactly the answers still open, so nobody files one unseen.
   settleSiteFact: (
     locationId: string,
     fact: string,
     take: string | boolean | null,
-    seenUpTo: string | null,
+    seen: string[],
   ) =>
     requestVoid(`/operations/site-fact-disputes/${locationId}/${fact}`, {
       method: 'POST',
-      body: JSON.stringify({ take, seen_up_to: seenUpTo }),
+      body: JSON.stringify({ take, seen }),
     }),
 
   attentionCounts: (hubId: string) =>

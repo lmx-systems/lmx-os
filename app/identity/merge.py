@@ -342,12 +342,23 @@ async def revert_merge(
     if source is None:
         raise ValueError("the merged dock no longer exists")
 
-    # The answers the merge carried over and are still waiting go back with it
-    # (`DE-15`); the source kept its own record, so it returns as it was.
+    # Both sites before any shop, as `_apply` takes them, and read fresh.
     target = await session.get(Location, merge.target_location_id)
     if target is not None:
         locked = await lock_sites(session, [source.id, target.id])
         source, target = locked[source.id], locked[target.id]
+        # Only the outermost link of a chain comes undone. Once the target has
+        # itself been merged on, this merge's shops and carried answers moved
+        # again with it: putting the shops back from here would leave the later
+        # merge to move them a second time when it is undone, and its answers
+        # would stay open on the dock it went to as well as come back here.
+        if target.merged_into_id is not None:
+            raise ValueError(
+                "the dock this was merged into has since been merged into another -"
+                " undo that merge first"
+            )
+        # The answers the merge carried over and are still waiting go back with
+        # it (`DE-15`); the source kept its own record, so it returns as it was.
         unfold_answers(source.id, target)
 
     source.merged_into_id = None
@@ -404,6 +415,18 @@ async def _apply(
         await session.flush()
         return proposal
 
+    # Both sites locked first, in id order, then the shops - the order a revert
+    # takes them in - so a door's answer to either site waits for this or this
+    # for it, and a merge and a revert queue rather than deadlock.
+    locked = await lock_sites(session, [source.id, target.id])
+    source, target = locked[source.id], locked[target.id]
+    # Resolved before the lock, so read again under it: a merge confirmed in
+    # between (two proposals naming the same dock, confirmed together) has moved
+    # one of them on, and folding its answers here as well would leave them open
+    # on two docks.
+    if source.merged_into_id is not None or target.merged_into_id is not None:
+        raise ValueError("one of these docks was merged into another a moment ago - reload and look again")
+
     moved = list(
         await session.scalars(select(Shop).where(Shop.location_id == source.id))
     )
@@ -412,10 +435,7 @@ async def _apply(
 
     # The answers given at the source's doors come along (`DE-15`): its open
     # disputes and any answer the target disagrees with are disputes here now,
-    # and a retry from one of its stops is still a repeat. Both rows locked, in
-    # id order, so a door's answer to either waits for this or this for it.
-    locked = await lock_sites(session, [source.id, target.id])
-    source, target = locked[source.id], locked[target.id]
+    # and a retry from one of its stops is still a repeat.
     fold_answers(source, target)
 
     source.merged_into_id = target.id

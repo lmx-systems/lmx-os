@@ -39,6 +39,12 @@ OPS = AuthedOpsUser(
 )
 
 
+async def _seen(db_session, location, fact) -> list[str]:
+    """The keys of the answers the panel shows for this fact, as it sends them."""
+    listed = await site_fact_disputes(limit=100, session=db_session, _ops=OPS)
+    return [a.key for d in listed if d.location_id == str(location.id) and d.fact == fact for a in d.answers]
+
+
 async def _a_settled_setting(db_session):
     """A finished drop-off at a site whose setting a person already gave."""
     hub, client, shop, driver, location = await _world(db_session)
@@ -199,7 +205,11 @@ class TestAPersonSettlesThem:
         assert counts.site_fact_disputes >= 1
 
         await settle_site_fact_dispute(
-            location.id, "setting", SettleSiteFactBody(), session=db_session, ops=OPS
+            location.id,
+            "setting",
+            SettleSiteFactBody(seen=await _seen(db_session, location, "setting")),
+            session=db_session,
+            ops=OPS,
         )
 
         await db_session.refresh(location)
@@ -216,7 +226,11 @@ class TestAPersonSettlesThem:
         await record_stop_site_facts(str(stop.id), SiteFactsBody(setting="city_core"), driver=authed, session=db_session)
 
         await settle_site_fact_dispute(
-            location.id, "setting", SettleSiteFactBody(take="city_core"), session=db_session, ops=OPS
+            location.id,
+            "setting",
+            SettleSiteFactBody(take="city_core", seen=await _seen(db_session, location, "setting")),
+            session=db_session,
+            ops=OPS,
         )
         # The phone's retry of that answer, arriving after it was settled.
         await record_stop_site_facts(str(stop.id), SiteFactsBody(setting="city_core"), driver=authed, session=db_session)
@@ -229,12 +243,21 @@ class TestAPersonSettlesThem:
         stop, location, authed, _ = await _a_settled_setting(db_session)
 
         with pytest.raises(HTTPException) as nothing:
-            await settle_site_fact_dispute(location.id, "setting", SettleSiteFactBody(), session=db_session, ops=OPS)
+            await settle_site_fact_dispute(
+                location.id, "setting", SettleSiteFactBody(seen=[]), session=db_session, ops=OPS
+            )
         assert nothing.value.status_code == 409
 
         await record_stop_site_facts(str(stop.id), SiteFactsBody(setting="city_core"), driver=authed, session=db_session)
         with pytest.raises(NothingToSettle):
-            await settle_dispute(db_session, location, "setting", take="suburb_fringe", by=uuid.uuid4())
+            await settle_dispute(
+                db_session,
+                location,
+                "setting",
+                take="suburb_fringe",
+                by=uuid.uuid4(),
+                seen=await _seen(db_session, location, "setting"),
+            )
 
     async def test_an_applied_survey_answer_is_still_survey_sourced(self, db_session):
         hub, client, shop, driver, location = await _world(db_session)

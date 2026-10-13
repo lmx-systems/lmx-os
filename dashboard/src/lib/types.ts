@@ -644,7 +644,7 @@ export interface SiteFactDispute {
   fact: 'kind_of_site' | 'setting' | 'shares_address'
   current: string | boolean | null
   current_source: string | null
-  answers: { value: string | boolean | null; at: string | null; driver_name: string | null }[]
+  answers: { value: string | boolean | null; at: string | null; driver_name: string | null; key: string }[]
 }
 
 /** One order as a dispatcher on the phone needs to see it (CON-1). */

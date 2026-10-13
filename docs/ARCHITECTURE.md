@@ -252,12 +252,15 @@ This closed three real gaps, not just "add some endpoints":
     where the survey is not due, locks the site and nothing else
     (`POST /driver/stops/{id}/site-facts`). A merge landing between the lookup
     and the lock is followed to the surviving site, which is locked in turn.
-    A merge, and its revert, lock both sites in id order (`lock_sites`) to
-    carry the answers given at the merged site's doors, and hold no stop,
-    route or order; a door holds one site, so the two cannot wait on each
-    other. The
-    desk pre-fill locks sites and nothing else. Nothing holding a site waits on
-    a stop, route or order.
+    A merge, and its revert, lock both sites in id order (`lock_sites`)
+    before any shop row, then move the shops - the same order both ways, so a
+    merge and a revert queue rather than deadlock - and hold no stop, route or
+    order; a door holds one site, so the two cannot wait on each other. A
+    merge re-reads both sites under the lock and refuses if either was merged
+    on in between; a revert is refused once its target has itself been merged
+    on (only a chain's outermost link comes undone). The desk pre-fill locks
+    sites and nothing else, one by one in id order. Nothing holding a site
+    waits on a stop, route or order.
 - **The first Route/Stop endpoints this codebase has ever had.** The
   `routes`/`stops` tables existed since the initial migration but had zero
   API surface. Accepting an offer now builds one pickup `Stop` per shop
