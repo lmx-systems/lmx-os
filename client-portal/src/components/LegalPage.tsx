@@ -65,7 +65,7 @@ export function LegalPage({ kind }: LegalPageProps) {
             </p>
 
             {!doc.published && (
-              <p className="mt-4 rounded-[var(--radius)] border border-[var(--border)] px-3 py-2 text-[13px] text-[var(--text-secondary)]">
+              <p className="mt-4 rounded-[20px] bg-[var(--surface-2)] px-3 py-2 text-[13px] text-[var(--text-secondary)]">
                 <strong className="font-medium">This is a draft.</strong> It has not been
                 finalised and it does not yet apply to anyone. We are not asking anybody to
                 agree to it.

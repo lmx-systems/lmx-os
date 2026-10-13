@@ -52,13 +52,13 @@ export function PerformancePanel() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="text-sm font-semibold text-[var(--text-primary)]">Your deliveries</h2>
-        <p className="text-xs text-[var(--text-muted)]">Last {data.window_days} days</p>
+        <h1 className="text-[clamp(28px,4vw,40px)] font-extrabold leading-[1.05] tracking-[-0.045em] text-[var(--text-primary)]">Your deliveries</h1>
+        <p className="mt-1 text-[15px] text-[var(--text-secondary)]">Last {data.window_days} days</p>
       </div>
 
-      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4">
-        <p className="text-xs text-[var(--text-muted)]">Delivered</p>
-        <p className="text-2xl font-semibold text-[var(--text-primary)]">
+      <div className="rounded-[var(--radius-lg)] bg-[var(--lime)] p-6">
+        <p className="text-[13px] font-semibold text-[var(--lime-ink)]">Delivered</p>
+        <p className="text-[44px] font-extrabold leading-none tracking-[-0.05em] tabular-nums text-[var(--text-primary)]">
           {data.delivered_count}
         </p>
       </div>
@@ -66,7 +66,7 @@ export function PerformancePanel() {
       {data.hit_rates.map((rate) => (
         <div
           key={rate.name}
-          className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4"
+          className="rounded-[var(--radius-lg)] bg-[var(--surface)] p-6"
         >
           <p className="text-xs text-[var(--text-muted)]">{rate.name}</p>
           {rate.not_measured ? (
@@ -77,7 +77,7 @@ export function PerformancePanel() {
             </p>
           ) : (
             <>
-              <p className="text-2xl font-semibold text-[var(--text-primary)]">
+              <p className="text-[44px] font-extrabold leading-none tracking-[-0.05em] tabular-nums text-[var(--text-primary)]">
                 {rate.percentage}%
               </p>
               <p className="text-xs text-[var(--text-muted)]">

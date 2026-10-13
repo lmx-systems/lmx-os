@@ -75,7 +75,7 @@ export function TermsBanner({
             type="button"
             onClick={accept}
             disabled={saving}
-            className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
           >
             {saving ? 'Accepting…' : 'Accept and continue'}
           </button>

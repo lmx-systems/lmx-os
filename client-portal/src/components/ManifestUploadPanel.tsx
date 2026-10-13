@@ -99,7 +99,7 @@ export function ManifestUploadPanel({ onOrdersPlaced }: ManifestUploadPanelProps
         <button
           type="submit"
           disabled={!canSubmit || busy}
-          className="self-start rounded-[var(--radius)] bg-[var(--accent)] px-4 py-2 text-[13px] font-medium text-white disabled:opacity-60"
+          className="self-start rounded-full bg-[var(--accent)] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-60"
         >
           {busy ? 'Importing…' : 'Import manifest'}
         </button>

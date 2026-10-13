@@ -73,7 +73,7 @@ export function UsersPanel({ profile }: UsersPanelProps) {
 
   return (
     <div>
-      <h1 className="mb-4 text-[16px] font-semibold text-[var(--text-primary)]">Team</h1>
+      <h1 className="mb-6 text-[clamp(28px,4vw,40px)] font-extrabold leading-[1.05] tracking-[-0.045em] text-[var(--text-primary)]">Team</h1>
 
       {error && (
         <div className="mb-4 rounded-[var(--radius)] border border-[var(--danger-border,var(--border-strong))] bg-[var(--surface-2)] px-3 py-2 text-sm text-[var(--text-primary)]">
@@ -83,7 +83,7 @@ export function UsersPanel({ profile }: UsersPanelProps) {
 
       <form
         onSubmit={handleAdd}
-        className="mb-6 grid grid-cols-1 gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 sm:grid-cols-[1fr_1fr_1fr_auto_auto]"
+        className="mb-6 grid grid-cols-1 gap-3 rounded-[var(--radius-lg)] bg-[var(--surface)] p-4 sm:grid-cols-[1fr_1fr_1fr_auto_auto]"
       >
         <input
           type="email"
@@ -121,7 +121,7 @@ export function UsersPanel({ profile }: UsersPanelProps) {
         <button
           type="submit"
           disabled={adding}
-          className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-60"
+          className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-60"
         >
           {adding ? 'Adding…' : 'Add user'}
         </button>
@@ -130,7 +130,7 @@ export function UsersPanel({ profile }: UsersPanelProps) {
       {users === null ? (
         <div className="text-sm text-[var(--text-muted)]">Loading team…</div>
       ) : (
-        <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+        <div className="overflow-hidden rounded-[var(--radius-lg)] bg-[var(--surface)]">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-[var(--border)] text-xs font-medium text-[var(--text-muted)]">
@@ -184,14 +184,14 @@ export function UsersPanel({ profile }: UsersPanelProps) {
                                 role: u.role === 'admin' ? 'member' : 'admin',
                               })
                             }
-                            className="rounded-[var(--radius)] border border-[var(--border-strong)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)] disabled:opacity-60"
+                            className="rounded-full border border-[var(--border-strong)] px-2 py-1 text-xs font-semibold text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)] disabled:opacity-60"
                           >
                             {u.role === 'admin' ? 'Make member' : 'Make admin'}
                           </button>
                           <button
                             disabled={busy}
                             onClick={() => patch(u.client_user_id, { is_active: !u.is_active })}
-                            className="rounded-[var(--radius)] border border-[var(--border-strong)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)] disabled:opacity-60"
+                            className="rounded-full border border-[var(--border-strong)] px-2 py-1 text-xs font-semibold text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)] disabled:opacity-60"
                           >
                             {u.is_active ? 'Deactivate' : 'Reactivate'}
                           </button>

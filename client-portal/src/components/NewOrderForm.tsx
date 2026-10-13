@@ -169,7 +169,7 @@ export function NewOrderForm({ onOrderPlaced }: NewOrderFormProps) {
       </button>
 
       {showDetails && (
-        <div className="flex flex-col gap-3 rounded-[var(--radius)] border border-[var(--border)] p-3">
+        <div className="flex flex-col gap-3 rounded-[20px] bg-[var(--surface-2)] p-3">
           <Optional label="Who's receiving it" value={dropContact} onChange={setDropContact} placeholder="Name at the delivery address" />
           <Optional label="Their phone" value={dropPhone} onChange={setDropPhone} type="tel" placeholder="For the driver, if needed" />
           <Optional label="Access notes" value={notes} onChange={setNotes} placeholder="Round the back, ring the bell" />
@@ -186,7 +186,7 @@ export function NewOrderForm({ onOrderPlaced }: NewOrderFormProps) {
       <button
         type="submit"
         disabled={submitting}
-        className="rounded-[var(--radius)] bg-[var(--accent)] px-4 py-2.5 text-[15px] font-medium text-white disabled:opacity-60"
+        className="rounded-full bg-[var(--accent)] px-4 py-2.5 text-[15px] font-semibold text-white disabled:opacity-60"
       >
         {submitting ? 'Sending…' : 'Send this delivery'}
       </button>
@@ -244,7 +244,7 @@ function OrderConfirmation({ result, onNext }: { result: ClientOrderResult; onNe
 
       <button
         onClick={onNext}
-        className="rounded-[var(--radius)] bg-[var(--accent)] px-4 py-2.5 text-[15px] font-medium text-white"
+        className="rounded-full bg-[var(--accent)] px-4 py-2.5 text-[15px] font-semibold text-white"
       >
         Send another
       </button>

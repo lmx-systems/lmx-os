@@ -36,14 +36,18 @@ export function OrderDetail({ order, onBack, onCancelled }: OrderDetailProps) {
         ← Back to orders
       </button>
 
-      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6">
+      <div className="rounded-[var(--radius-lg)] bg-[var(--surface)] p-6">
         <div className="flex items-start justify-between">
           <div>
-            <div className="text-[15px] font-semibold text-[var(--text-primary)]">{order.external_order_ref}</div>
-            <div className="mt-1 text-xs text-[var(--text-muted)]">{order.shop_name ?? 'Unknown shop'}</div>
+            <h1 className="text-[clamp(26px,3.5vw,36px)] font-extrabold leading-[1.05] tracking-[-0.045em] text-[var(--text-primary)]">
+              {order.external_order_ref}
+            </h1>
+            <div className="mt-1 text-[15px] text-[var(--text-secondary)]">{order.shop_name ?? 'Unknown shop'}</div>
           </div>
           <TierBadge tier={order.sla_tier} />
         </div>
+
+        <DeliveryTrack order={order} />
 
         {order.duplicate_question_open && (
           <SentTwice order={order} onAnswered={onCancelled} />
@@ -256,7 +260,7 @@ function SentTwice({
           <button
             onClick={() => answer('cancel')}
             disabled={busy !== null}
-            className="rounded-[var(--radius)] bg-[var(--red)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--red)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
           >
             {busy === 'cancel' ? 'Cancelling…' : 'Yes - cancel this one'}
           </button>
@@ -264,7 +268,7 @@ function SentTwice({
         <button
           onClick={() => answer('keep')}
           disabled={busy !== null}
-          className="rounded-[var(--radius)] border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] disabled:opacity-60"
+          className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] disabled:opacity-60"
         >
           {busy === 'keep' ? 'Saving…' : 'No - both are real'}
         </button>
@@ -315,7 +319,7 @@ function CancelOrder({
           <button
             onClick={cancel}
             disabled={busy}
-            className="rounded-[var(--radius)] bg-[var(--red)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--red)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
           >
             {busy ? 'Cancelling…' : 'Yes, cancel it'}
           </button>
@@ -337,5 +341,62 @@ function CancelOrder({
       )}
       {refused && <p className="mt-2 text-xs text-[var(--text-muted)]">{refused}</p>}
     </div>
+  )
+}
+
+// Where an order is, as the four moments a client cares about. Every status
+// before collection is "Booked" from the client's side: held, queued, assigned
+// and a driver on the way to collect are our business, not a step of theirs.
+const TRACK = ['Booked', 'Collected', 'On the way', 'Delivered'] as const
+const TRACK_STEP: Record<string, number> = {
+  picked_up: 1,
+  en_route_drop: 2,
+  delivered: 3,
+}
+const OFF_TRACK = new Set(['cancelled', 'delivery_failed', 'returned'])
+
+/**
+ * The order's progress as four steps (docs/DESIGN_SYSTEM.md): done in lime,
+ * the current one in ink, the rest outlined. Not shown for an order that left
+ * the track - a failure or a cancellation says so in words above.
+ */
+function DeliveryTrack({ order }: { order: ClientOrderDetailView }) {
+  if (OFF_TRACK.has(order.status)) return null
+  const at = TRACK_STEP[order.status] ?? 0
+  const when: (string | null)[] = [
+    formatDate(order.requested_at),
+    order.collected_at ? formatDate(order.collected_at) : null,
+    null,
+    order.delivered_at
+      ? formatDate(order.delivered_at)
+      : order.estimated_delivery_by
+        ? `Expected ~${formatDate(order.estimated_delivery_by)}`
+        : null,
+  ]
+  return (
+    <ol className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Delivery progress">
+      {TRACK.map((label, i) => {
+        const done = i < at || (i === at && order.status === 'delivered')
+        const current = i === at && !done
+        return (
+          <li
+            key={label}
+            aria-current={current ? 'step' : undefined}
+            className={`flex flex-col gap-0.5 rounded-[18px] px-4 py-3 ${
+              done
+                ? 'bg-[var(--lime)] text-[var(--text-primary)]'
+                : current
+                  ? 'bg-[var(--accent)] text-white'
+                  : 'bg-[var(--surface)] text-[var(--text-secondary)] shadow-[inset_0_0_0_1.5px_var(--border)]'
+            }`}
+          >
+            <span className="text-[14px] font-bold">{label}</span>
+            <span className={`text-[12px] ${done ? 'text-[var(--lime-ink)]' : current ? 'text-white/80' : 'text-[var(--text-muted)]'}`}>
+              {when[i] ?? (current ? formatStatus(order.status) : '\u00a0')}
+            </span>
+          </li>
+        )
+      })}
+    </ol>
   )
 }

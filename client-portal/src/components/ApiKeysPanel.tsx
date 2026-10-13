@@ -121,7 +121,7 @@ export function ApiKeysPanel() {
         <button
           type="submit"
           disabled={creating}
-          className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-60"
+          className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-[13px] font-semibold text-white disabled:opacity-60"
         >
           Create key
         </button>
@@ -171,7 +171,7 @@ export function ApiKeysPanel() {
                       <button
                         disabled={busyId === key.api_key_id}
                         onClick={() => revoke(key)}
-                        className="rounded-[var(--radius)] border border-[var(--border-strong)] px-2 py-1 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
+                        className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-1 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
                       >
                         Revoke
                       </button>
