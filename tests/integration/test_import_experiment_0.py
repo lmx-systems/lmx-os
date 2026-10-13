@@ -51,20 +51,20 @@ def _workbook(path):
     book.active.append(["Experiment 0, invented for a test"])
     sites = book.create_sheet("Sites, any name")
     sites.append(SITES)
-    sites.append(["T-1", "Source A", "100/0", "Elm Street Garage", "12 Elm Street", "Teaneck", "07666",
+    sites.append(["T-1", "Source A", "100/0", "Elm Street Garage", "12 Elm Street", "Sometown", "00101",
                   "Independent repair or tire shop", "Drop-off", None, 2, "Reference", None])
     # Two businesses at one address: one location, recorded as shared.
-    sites.append(["T-2", "Source A", "200/0", "Cedar Body Works", "40 Cedar Lane", "Teaneck", "07666",
+    sites.append(["T-2", "Source A", "200/0", "Cedar Body Works", "40 Cedar Lane", "Sometown", "00101",
                   "Body shop", "Drop-off", "Cedar Tire Co", 1, "Reference", None])
-    sites.append(["T-3", "Source A", "201/0", "Cedar Tire Co", "40 Cedar Lane", "Teaneck", "07666",
+    sites.append(["T-3", "Source A", "201/0", "Cedar Tire Co", "40 Cedar Lane", "Sometown", "00101",
                   "Unclear from name", "Drop-off", "Cedar Body Works", 1, "Reference", None])
     # No address: its records have no site.
     sites.append(["T-4", "Source A", "300/0", "Somebody Auto", None, None, None,
                   "Independent repair or tire shop", "Drop-off", None, 1, "Reference", "No address"])
-    sites.append(["T-5", "Source A", "900/0", "Parts Supplier", "1 Depot Road", "Bogota", "07603",
+    sites.append(["T-5", "Source A", "900/0", "Parts Supplier", "1 Depot Road", "Othertown", "00102",
                   "Parts store or distributor counter", "Pickup likely (supplier)", None, 1, "Reference", None])
     # The other source: deliveries only as a count.
-    sites.append(["T-6", "Source B", None, "Maple Dealer", "7 Maple Ave", "Paramus", "07652",
+    sites.append(["T-6", "Source B", None, "Maple Dealer", "7 Maple Ave", "Thirdtown", "00103",
                   "Dealership service or parts counter", "Drop-off", None, 3, "Bronze at best", None])
     rows = book.create_sheet("Deliveries, any name")
     rows.append(DELIVERIES)
