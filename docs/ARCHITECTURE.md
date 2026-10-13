@@ -237,7 +237,12 @@ This closed three real gaps, not just "add some endpoints":
     this one;
   - an order before an offer only without waiting: a cancel that found
     nothing and then locked the order looks for the offer with `SKIP LOCKED`,
-    and refuses with "try again" when a driver is answering it.
+    and refuses with "try again" when a driver is answering it;
+  - a site (`locations`) row last: the door survey writes its stop and the
+    handoff point, then locks the site to write its place facts
+    (`record_site_facts`, `app/identity/site_facts.py`); the desk pre-fill
+    locks sites and nothing else. Nothing holding a site waits on a stop,
+    route or order.
 - **The first Route/Stop endpoints this codebase has ever had.** The
   `routes`/`stops` tables existed since the initial migration but had zero
   API surface. Accepting an offer now builds one pickup `Stop` per shop
