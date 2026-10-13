@@ -15,6 +15,7 @@ import type {
   DeclineReason,
   DockSurveyBody,
   DockSurveyResult,
+  SiteFacts,
   DriverScorecard,
   Earnings,
   FlagReasonCode,
@@ -234,6 +235,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  // The site facts the door survey should ask (DE-15), for a stop not on a
+  // route the app holds - an off-platform record's door or counter. A route's
+  // stops carry them already.
+  getSiteFacts: (stopId: string) => request<SiteFacts>(`/driver/stops/${stopId}/site-facts`),
 
   // W1's reverse leg. All three are idempotent on the server as of the retry
   // work that landed with these screens: a repeat of a collection returns the

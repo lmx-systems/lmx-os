@@ -250,6 +250,17 @@ class StopReturnsView(BaseModel):
         return bool(self.expected_manifests or self.to_drop_manifests)
 
 
+class SiteFactsView(BaseModel):
+    """A site's kind, setting and shared-address answer as known now, and which
+    the door survey should ask: the unknown ones and the ones only the desk has
+    said (`app/identity/site_facts.py`)."""
+
+    kind_of_site: str | None
+    setting: str | None
+    shares_address: bool | None
+    ask: list[str]
+
+
 class StopView(BaseModel):
     stop_id: str
     sequence: int
@@ -284,6 +295,9 @@ class StopView(BaseModel):
     # never restates a condition another module owns - which is what produced
     # both bugs `THE_DRIVER_APP.md` §6 records.
     dock_needs_survey: bool = False
+    # The site's place facts, with which of them the survey should ask (`DE-15`):
+    # sent with a stop the survey is offered at, so the questions work offline.
+    site_facts: SiteFactsView | None = None
 
 
 class RouteView(BaseModel):
@@ -345,6 +359,14 @@ class DockSurveyBody(BaseModel):
     obstructions: list[str] | None = Field(default=None, max_length=8)
     overhead: list[str] | None = Field(default=None, max_length=8)
     drone_open_ground: bool | None = None
+
+    # The site's place facts (`DE-15`), asked only where unknown or the desk's:
+    # a one-tap confirm sends the value already there, which is what lifts the
+    # desk's cap. "Not sure" is left out. Validated against
+    # app/models/location.py's vocabularies.
+    kind_of_site: str | None = None
+    setting: str | None = None
+    shares_address: bool | None = None
 
 
 class ArriveBody(BaseModel):

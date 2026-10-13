@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import type { DockSurveyBody } from '../api/types';
+import { api } from '../api/client';
+import type { DockSurveyBody, SiteFacts } from '../api/types';
 import { outboxManager } from '../offline/outboxManager';
 import { HandoffPhotosPanel } from './HandoffPhotosPanel';
+import { siteFactQuestions } from './siteFactQuestions';
 import { radius, spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
 
@@ -216,11 +218,16 @@ export function DockSurveyModal({
   visit = false,
   atPickup = false,
   queueAfter,
+  siteFacts,
   onClose,
 }: {
   visible: boolean;
   stopId: string;
   visit?: boolean;
+  // The site's place facts and which to ask (DE-15), from the stop. Left out
+  // for a stop the app holds no route for (an off-platform record), when the
+  // modal asks the server instead - and, without signal, asks none of them.
+  siteFacts?: SiteFacts | null;
   // An off-platform record's pickup counter (DE-7): like a visit, nobody here
   // received anything, so access is not asked.
   atPickup?: boolean;
@@ -233,6 +240,24 @@ export function DockSurveyModal({
   const styles = makeStyles(colors);
   const [answers, setAnswers] = useState<DockSurveyBody>({});
   const [busy, setBusy] = useState(false);
+  const [facts, setFacts] = useState<SiteFacts | null>(siteFacts ?? null);
+  const [notSure, setNotSure] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (siteFacts !== undefined) {
+      setFacts(siteFacts);
+      return;
+    }
+    if (!visible) return;
+    let live = true;
+    api
+      .getSiteFacts(stopId)
+      .then((got) => live && setFacts(got))
+      .catch(() => live && setFacts(null));
+    return () => {
+      live = false;
+    };
+  }, [siteFacts, stopId, visible]);
 
   function choose(key: keyof DockSurveyBody, value: string) {
     setAnswers((prev) => ({ ...prev, [key]: prev[key] === value ? null : value }));
@@ -270,6 +295,49 @@ export function DockSurveyModal({
         </View>
 
         <ScrollView contentContainerStyle={styles.body}>
+          {siteFactQuestions(facts).map((question) => (
+            <View key={question.key} style={styles.question}>
+              <Text style={styles.prompt}>{question.prompt}</Text>
+              <View style={styles.options}>
+                {question.options.map((option) => {
+                  const chosen = answers[question.key] === option.value;
+                  return (
+                    <Pressable
+                      key={String(option.value)}
+                      onPress={() => {
+                        setNotSure((prev) => prev.filter((k) => k !== question.key));
+                        setAnswers((prev) => ({ ...prev, [question.key]: chosen ? null : option.value }));
+                      }}
+                      style={[styles.option, chosen && styles.optionChosen]}
+                    >
+                      <Text style={[styles.optionLabel, chosen && styles.optionLabelChosen]}>
+                        {option.guess ? `${option.label} (our guess)` : option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+                {question.notSure &&
+                  (() => {
+                    // Not sure sends nothing: unknown stays unknown.
+                    const chosen = notSure.includes(question.key);
+                    return (
+                      <Pressable
+                        onPress={() => {
+                          setNotSure((prev) =>
+                            chosen ? prev.filter((k) => k !== question.key) : [...prev, question.key],
+                          );
+                          setAnswers((prev) => ({ ...prev, [question.key]: null }));
+                        }}
+                        style={[styles.option, chosen && styles.optionChosen]}
+                      >
+                        <Text style={[styles.optionLabel, chosen && styles.optionLabelChosen]}>Not sure</Text>
+                      </Pressable>
+                    );
+                  })()}
+              </View>
+            </View>
+          ))}
+
           {QUESTIONS.filter((q) => !noAccess || !DELIVERY_ONLY.includes(q.key)).map((question) => (
             <View key={question.key as string} style={styles.question}>
               <Text style={styles.prompt}>{question.prompt}</Text>

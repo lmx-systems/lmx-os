@@ -319,6 +319,7 @@ export function StopDetailScreen({ route, navigation }: Props) {
           visible={surveying}
           stopId={stopId}
           visit={stop.stop_type === 'visit'}
+          siteFacts={stop.site_facts ?? null}
           onClose={() => {
             setSurveying(false);
             navigation.navigate('Home');

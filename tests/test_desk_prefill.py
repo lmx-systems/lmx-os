@@ -49,6 +49,26 @@ class TestAddresses:
     def test_a_street_that_merely_contains_state_is_not_a_highway(self):
         assert normalize_street("State Street") == "state st"
 
+    def test_words_before_a_route_keep_it_a_different_road(self):
+        assert normalize_street("Old Route 22") != normalize_street("Route 22")
+        assert normalize_street("Old Route 22") == "old route 22"
+        # A direction before it is not a different road.
+        assert normalize_street("N Route 22") == "route 22"
+
+    def test_a_county_route_is_not_the_us_route_of_the_same_number(self):
+        assert normalize_street("County Route 9") != normalize_street("US Route 9")
+        assert {normalize_street(n) for n in ("County Route 9", "County Road 9", "CR 9")} == {"cr 9"}
+
+
+class TestVocabulary:
+    def test_every_kind_the_desk_or_the_import_writes_is_one_the_survey_knows(self):
+        from app.models.location import SITE_KINDS
+        from app.record.desk_prefill import GAS_STATION_WITH_BAYS, KIND_FROM_CATEGORY
+        from scripts.import_experiment_0 import KIND_OF_SITE
+
+        assert set(KIND_FROM_CATEGORY.values()) | {GAS_STATION_WITH_BAYS} <= set(SITE_KINDS)
+        assert {k for k in KIND_OF_SITE.values() if k is not None} <= set(SITE_KINDS)
+
 
 class TestKind:
     def test_a_repair_shop_and_a_tire_shop_are_one_kind(self):
