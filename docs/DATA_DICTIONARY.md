@@ -39,6 +39,7 @@ missing, and a missing element lowers the tier.
 | `locations.shares_address` | Whether other businesses share this address. Null until somebody checked | yes, no |
 | `site_address_shares` | Which other sites share it, one row per pair, recorded from the site that was checked | — |
 | `locations.site_source` | Where the site facts came from | e.g. `technician`, `desk`, `import` |
+| `locations.site_fact_sources` | Where each site fact came from, when they differ (`DE-15`). A fact with no entry has `site_source` | JSON object, fact to source: `{"setting": "desk"}` |
 | `receiver_profiles.receiving_hours` | When the site receives. Already existed before `DE-1` | Per weekday, open and close times |
 | `receiver_profiles.who_receives` | Who takes the delivery. Already existed before `DE-1` | The survey's vocabulary |
 
@@ -161,6 +162,14 @@ nothing over cannot learn and records as unknown.
 | Gold | Drop-off end and autonomy qualifier |
 | Silver | Drop-off end |
 | Reference | No drop-off end |
+
+**A desk fact grades a record bronze at most (`DE-15`, D-DESK).** A site fact
+filled from public data at the desk is marked `desk` in
+`locations.site_fact_sources`. When a record's pickup or drop-off end counts only
+thanks to one, `record_tiers` sets `desk_site` and grades the record bronze if
+it would otherwise be gold or silver - a visit included. Bronze and reference
+records are unchanged, and the cap lifts when a person confirms the fact and its
+source changes.
 
 **An off-platform delivery is graded like any delivery (`DE-7`)**, with two
 readings of the delivery profile, because LMX never held the job. A driver who

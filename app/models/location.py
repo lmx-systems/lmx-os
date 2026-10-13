@@ -35,6 +35,7 @@ not. Per §2.2(c) the founding set is merged by a person for exactly this reason
 import uuid
 
 from sqlalchemy import Boolean, Float, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -117,6 +118,11 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     shares_address: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Where the site fields came from: listing, technician, desk, import.
     site_source: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    # Where each site fact came from when it differs by fact - kind from the
+    # import, setting from the desk - as {fact: source}. A fact with no entry
+    # has `site_source`. A record whose site counts only thanks to a `desk` fact
+    # is graded bronze at most (DE-15, migration 0080).
+    site_fact_sources: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
 
     @property
     def geocoded(self) -> bool:
