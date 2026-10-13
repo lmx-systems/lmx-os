@@ -26,6 +26,20 @@ who disagree leave both answers on the record rather than whichever arrived
 last. A "no" to a shared address is a dispute, too, wherever the import recorded
 the address as shared with another site.
 
+**One answer per stop, and a retry is a repeat, never a second answer.** An
+answer carries the stop it was given at, and only a drop-off, a visit or an
+off-platform counter that is finished (`completed`, or a logged record's
+`recorded`) may give one (`stop_refusal`). A request repeating what that stop
+already answered changes nothing - so an outbox retry after a lost response
+leaves one dispute, not two - and one contradicting it is refused
+(`AlreadyAnsweredHere`). A fact keeps at most `MAX_DISPUTES` open disputes,
+oldest dropped.
+
+**A person settles a dispute** (`settle_dispute`, the console's "Answers that
+disagree"): keep the fact as it is or take the disputed value, either way as
+`ops`, with who settled and when. The settled disputes stay in the fact's
+history, so a late retry of one is still recognised as a repeat.
+
 **Every writer of a site fact records its source per fact** through
 `set_site_fact` - the import, the desk and the survey. A fact with no entry is
 one written before that rule, and has the site's `site_source`.
@@ -47,13 +61,44 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.identity.resolution import canonical_location
 from app.models.location import SETTINGS, SITE_FACTS, SITE_KINDS, Location
 from app.models.site_address_share import SiteAddressShare
+from app.models.stop import Stop
 
 SOURCE_SURVEY = "survey"
 SOURCE_DESK = "desk"
+SOURCE_OPS = "ops"
+
+# Open disputes kept per fact, and settlements kept in its history. A dispute is
+# a second opinion for a person to weigh; twenty of them is a site somebody
+# should visit, not a longer list.
+MAX_DISPUTES = 20
+MAX_SETTLED = 20
+
+# The stops that may answer about a site, and when: the door of a drop-off or a
+# visit, or an off-platform record's counter (`DE-7`), once the stop is done.
+ANSWERING_STOP_STATUSES = ("completed", "recorded")
 
 
 class SiteFactRefused(ValueError):
     """A kind or setting outside the vocabulary."""
+
+
+class AlreadyAnsweredHere(ValueError):
+    """This stop already answered the fact differently. One answer per stop."""
+
+
+def stop_refusal(stop: Stop) -> str | None:
+    """Why this stop may not answer about its site, or None when it may.
+
+    A pickup at a distributor's counter is not the delivery door, and a stop
+    the driver never finished - pending, failed, cancelled - is a door they may
+    never have stood at. Only an off-platform pickup names its own counter.
+    """
+    is_counter = stop.stop_type == "pickup" and stop.record_source == "off_platform"
+    if stop.stop_type not in ("dropoff", "visit") and not is_counter:
+        return "Only a delivery door, a visit or a logged counter can answer about its site"
+    if stop.status not in ANSWERING_STOP_STATUSES:
+        return "This stop is not finished, so it cannot answer about its site yet"
+    return None
 
 
 def fact_source(location: Location, name: str) -> str | None:
@@ -98,6 +143,14 @@ async def site_facts_for(session: AsyncSession, location: Location) -> dict:
         "shares_address": site.shares_address,
         "ask": facts_to_ask(site),
     }
+
+
+def validate_site_facts(*, kind_of_site: str | None, setting: str | None) -> None:
+    """Refuse a kind or setting outside the vocabulary (`SiteFactRefused`)."""
+    if kind_of_site is not None and kind_of_site not in SITE_KINDS:
+        raise SiteFactRefused(f"kind_of_site must be one of {', '.join(SITE_KINDS)}")
+    if setting is not None and setting not in SETTINGS:
+        raise SiteFactRefused(f"setting must be one of {', '.join(SETTINGS)}")
 
 
 @dataclass
@@ -164,16 +217,21 @@ async def record_site_facts(
     locks it, so the two cannot interleave a read and a write. Returns None
     when nothing was answered. Flushes; the caller commits.
     """
-    if kind_of_site is not None and kind_of_site not in SITE_KINDS:
-        raise SiteFactRefused(f"kind_of_site must be one of {', '.join(SITE_KINDS)}")
-    if setting is not None and setting not in SETTINGS:
-        raise SiteFactRefused(f"setting must be one of {', '.join(SETTINGS)}")
+    validate_site_facts(kind_of_site=kind_of_site, setting=setting)
     answers = {"kind_of_site": kind_of_site, "setting": setting, "shares_address": shares_address}
     if all(value is None for value in answers.values()):
         return None
     site = await _lock_canonical(session, location)
     outcome = SiteFactsAnswered(site=site)
     record = {name: dict(entry) for name, entry in (site.site_fact_answers or {}).items()}
+    if stop_id is not None:
+        # A repeat of what this stop already said is a retry: nothing to do. A
+        # different answer from the same stop is refused before anything is
+        # written, so the request is all or nothing.
+        for name, value in answers.items():
+            earlier = _answered_at(record.get(name, {}), stop_id)
+            if value is not None and earlier is not _UNANSWERED and earlier != value:
+                raise AlreadyAnsweredHere(f"This stop already answered {name}")
     answer = {
         "by": str(by) if by is not None else None,
         "at": datetime.now(timezone.utc).isoformat(),
@@ -182,20 +240,119 @@ async def record_site_facts(
     for name, value in answers.items():
         if value is None:
             continue
+        entry = record.get(name, {})
+        if stop_id is not None and _answered_at(entry, stop_id) is not _UNANSWERED:
+            continue
         contradicts_import = (
             name == "shares_address" and value is False and await _recorded_as_shared(session, site)
         )
         if fact_is_open(site, name) and not contradicts_import:
             set_site_fact(site, name, value, SOURCE_SURVEY)
-            entry = record.get(name, {})
-            record[name] = {**answer, "value": value, "disputes": list(entry.get("disputes", []))}
+            record[name] = {**entry, **answer, "value": value, "disputes": list(entry.get("disputes", []))}
             outcome.applied.append(name)
         elif getattr(site, name) != value:
-            entry = record.get(name, {})
-            record[name] = {**entry, "disputes": [*entry.get("disputes", []), {**answer, "value": value}]}
+            disputes = [*entry.get("disputes", []), {**answer, "value": value}][-MAX_DISPUTES:]
+            record[name] = {**entry, "disputes": disputes}
             outcome.disputed.append(name)
-        # An answer that agrees with a person's changes nothing.
+        elif stop_id is not None:
+            # Agrees with a person's: changes nothing, but remembered as this
+            # stop's answer so a contradicting one from it is refused.
+            agreed = [*entry.get("agreed", []), {**answer, "value": value}][-MAX_DISPUTES:]
+            record[name] = {**entry, "agreed": agreed}
     # A new dict, so the JSONB column is seen as changed.
     site.site_fact_answers = record
     await session.flush()
     return outcome
+
+
+_UNANSWERED = object()
+
+
+def _answered_at(entry: dict, stop_id: uuid.UUID) -> object:
+    """What this stop already answered for one fact, or `_UNANSWERED`: as the
+    applied answer, an open dispute, an agreement, or a settled dispute."""
+    wanted = str(stop_id)
+    if entry.get("stop_id") == wanted:
+        return entry.get("value")
+    given = [
+        *entry.get("disputes", []),
+        *entry.get("agreed", []),
+        *(d for settled in entry.get("settled", []) for d in settled.get("disputes", [])),
+        *(settled["replaced"] for settled in entry.get("settled", []) if settled.get("replaced")),
+    ]
+    for earlier in given:
+        if earlier.get("stop_id") == wanted:
+            return earlier.get("value")
+    return _UNANSWERED
+
+
+@dataclass
+class OpenDispute:
+    """One fact at one site where the people at the door disagreed."""
+
+    location: Location
+    fact: str
+    current: str | bool | None
+    current_source: str | None
+    disputes: list[dict]
+
+
+def open_disputes(location: Location) -> list[OpenDispute]:
+    """The facts at this site with answers waiting for a person to settle."""
+    return [
+        OpenDispute(
+            location=location,
+            fact=name,
+            current=getattr(location, name),
+            current_source=fact_source(location, name),
+            disputes=list(entry.get("disputes", [])),
+        )
+        for name, entry in (location.site_fact_answers or {}).items()
+        if name in SITE_FACTS and entry.get("disputes")
+    ]
+
+
+class NothingToSettle(ValueError):
+    """No open dispute for that fact, or a value nobody gave."""
+
+
+async def settle_dispute(
+    session: AsyncSession,
+    location: Location,
+    fact: str,
+    *,
+    take: object | None,
+    by: uuid.UUID,
+) -> Location:
+    """Settle a fact's open disputes: keep it as it is (`take` None) or take one
+    of the disputed values. Either way the fact is now `ops` - a person looked -
+    and the disputes move to its history with who settled them and when.
+    Flushes; the caller commits."""
+    if fact not in SITE_FACTS:
+        raise NothingToSettle(f"not a site fact: {fact}")
+    site = await _lock_canonical(session, location)
+    record = {name: dict(entry) for name, entry in (site.site_fact_answers or {}).items()}
+    entry = record.get(fact, {})
+    disputes = list(entry.get("disputes", []))
+    if not disputes:
+        raise NothingToSettle("Nothing to settle: no answer disagrees with this fact")
+    if take is not None and take not in [d.get("value") for d in disputes]:
+        raise NothingToSettle("That value is not one the disputed answers gave")
+    value = getattr(site, fact) if take is None else take
+    set_site_fact(site, fact, value, SOURCE_OPS)
+    now = datetime.now(timezone.utc).isoformat()
+    settled = [
+        *entry.get("settled", []),
+        {
+            "by": str(by), "at": now, "kept": take is None, "value": value, "disputes": disputes,
+            # The answer a taken value replaces, so a late retry of it from its
+            # stop is still known as a repeat.
+            "replaced": None if take is None else {k: entry.get(k) for k in ("by", "at", "stop_id", "value")},
+        },
+    ][-MAX_SETTLED:]
+    record[fact] = {**entry, "disputes": [], "settled": settled}
+    if take is not None:
+        record[fact].update({"by": str(by), "at": now, "stop_id": None, "value": value})
+    site.site_fact_answers = record
+    await session.flush()
+    return site

@@ -63,6 +63,7 @@ import type {
   UrgencyRuleBody,
   UrgencyRuleView,
   ExceptionQueue,
+  SiteFactDispute,
 } from './types'
 
 // Real per-account ops auth (docs/ROADMAP.md S1), replacing the old
@@ -312,6 +313,16 @@ export const api = {
     ),
 
   // How much is waiting for a person, without loading any of it (CON-1).
+  // DE-15: answers at the door that disagree with a site's facts.
+  siteFactDisputes: (limit = 50) =>
+    request<SiteFactDispute[]>(`/operations/site-fact-disputes?limit=${limit}`),
+
+  settleSiteFact: (locationId: string, fact: string, take: string | boolean | null) =>
+    requestVoid(`/operations/site-fact-disputes/${locationId}/${fact}`, {
+      method: 'POST',
+      body: JSON.stringify({ take }),
+    }),
+
   attentionCounts: (hubId: string) =>
     request<AttentionCounts>(`/operations/attention-counts?hub_id=${hubId}`),
 

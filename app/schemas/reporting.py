@@ -426,10 +426,39 @@ class AttentionCountsView(BaseModel):
     late_orders: int
     merge_proposals: int
     unlabelled_docks: int
+    # Sites where the people at the door disagreed about a fact (`DE-15`).
+    # Falls as a person settles them, so it belongs in the badge.
+    site_fact_disputes: int = 0
 
     @property
     def total(self) -> int:
-        return self.late_orders + self.merge_proposals + self.unlabelled_docks
+        return self.late_orders + self.merge_proposals + self.unlabelled_docks + self.site_fact_disputes
+
+
+class SiteFactAnswerView(BaseModel):
+    """One answer given at a door that disagrees with the fact as recorded."""
+
+    value: str | bool | None
+    at: str | None
+    driver_name: str | None
+
+
+class SiteFactDisputeView(BaseModel):
+    """A fact at a site where an answer at the door disagreed (`DE-15`): the
+    fact as recorded, where it came from, and what the door said instead."""
+
+    location_id: str
+    address: str | None
+    fact: str
+    current: str | bool | None
+    current_source: str | None
+    answers: list[SiteFactAnswerView]
+
+
+class SettleSiteFactBody(BaseModel):
+    """Keep the fact as recorded (`take` omitted), or take a disputed value."""
+
+    take: str | bool | None = None
 
 
 class OrderLookupRow(BaseModel):

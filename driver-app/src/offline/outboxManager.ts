@@ -456,11 +456,13 @@ export class OutboxManager {
       case 'survey':
         // Safe to retry: the server overwrites the same columns on the same
         // dock and re-stamps `surveyed_at`. It cannot create a second profile -
-        // `profile_for` is keyed on the canonical dock.
+        // `profile_for` is keyed on the canonical dock - and the site facts in
+        // it are kept once per stop, so a repeat of them changes nothing.
         return api.recordDockSurvey(item.stopId, item.payload as DockSurveyBody);
       case 'site-facts':
-        // Safe to retry: an answer fills only a fact still open, and one that
-        // disagrees with a person's is kept as a dispute, not applied.
+        // Safe to retry: the server keeps one answer per stop, so a repeat of
+        // what this stop already said changes nothing - one answer or one
+        // dispute, never two.
         return api.recordSiteFacts(item.stopId, item.payload as SiteFactsBody);
       case 'off-platform-record':
         // Safe to retry: the record is named by its id and each field is
