@@ -268,7 +268,7 @@ export function DockLogPage() {
             type="button"
             onClick={askForLocation}
             disabled={locating}
-            className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[13px] text-[var(--text-primary)] disabled:opacity-40"
+            className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 py-1 text-[13px] text-[var(--text-primary)] disabled:opacity-40"
           >
             {locating ? 'Locating…' : coords ? 'Update my location' : 'Use my location'}
           </button>
@@ -359,7 +359,7 @@ export function DockLogPage() {
         <button
           onClick={submit}
           disabled={!canSubmit}
-          className="rounded-md bg-[var(--accent)] px-3 py-2 text-[14px] font-medium text-white disabled:opacity-40"
+          className="rounded-full bg-[var(--accent)] px-3 py-2 text-[14px] font-semibold text-white disabled:opacity-40"
         >
           {busy ? 'Sending…' : answered === 0 ? 'Answer at least one question' : `Send ${answered} answer${answered === 1 ? '' : 's'}`}
         </button>

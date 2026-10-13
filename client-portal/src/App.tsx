@@ -243,7 +243,7 @@ export default function App() {
 
   if (!profile || !orders) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-[var(--text-muted)]">
+      <div className="flex min-h-screen items-center justify-center text-sm text-[var(--text-secondary)]">
         {loadError ?? 'Loading your account…'}
       </div>
     )
@@ -264,93 +264,42 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[var(--bg-page)]">
       {termsState && <TermsBanner state={termsState} onAccepted={setTermsState} />}
-      <TopBar profile={profile} onLogout={handleLogout} />
-      <main className="mx-auto max-w-5xl px-6 py-6">
-        <nav className="mb-5 flex gap-1 border-b border-[var(--border)] print:hidden">
-          <button
-            onClick={() => setView({ name: 'new-order' })}
-            className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-              onNewOrderTab
-                ? 'border-[var(--accent)] text-[var(--text-primary)]'
-                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            New order
-          </button>
-          <button
-            onClick={() => setView({ name: 'orders' })}
-            className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-              onOrdersTab
-                ? 'border-[var(--accent)] text-[var(--text-primary)]'
-                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            Orders
-          </button>
-          <button
-            onClick={() => setView({ name: 'invoices' })}
-            className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-              onInvoicesTab
-                ? 'border-[var(--accent)] text-[var(--text-primary)]'
-                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            Invoices
-          </button>
-          <button
-            onClick={() => setView({ name: 'performance' })}
-            className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-              onPerformanceTab
-                ? 'border-[var(--accent)] text-[var(--text-primary)]'
-                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            Performance
-          </button>
-          <button
-            onClick={() => setView({ name: 'returns' })}
-            className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-              onReturnsTab
-                ? 'border-[var(--accent)] text-[var(--text-primary)]'
-                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            Returns
-          </button>
-          {isAdmin && (
-            <button
-              onClick={() => setView({ name: 'team' })}
-              className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-                onTeamTab
-                  ? 'border-[var(--accent)] text-[var(--text-primary)]'
-                  : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              Team
-            </button>
-          )}
-          {/* Admin-only for the same reason as Team: an endpoint is where their
-              order data goes, and its secret signs our requests - a dispatcher who
-              can submit orders shouldn't be able to redirect the notification
-              stream. */}
-          {isAdmin && (
-            <button
-              onClick={() => setView({ name: 'integrations' })}
-              className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors duration-150 ${
-                onIntegrationsTab
-                  ? 'border-[var(--accent)] text-[var(--text-primary)]'
-                  : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              Integrations
-            </button>
-          )}
-        </nav>
+      <TopBar
+        profile={profile}
+        onLogout={handleLogout}
+        nav={[
+          { id: 'new-order', label: 'New order', active: onNewOrderTab, onSelect: () => setView({ name: 'new-order' }) },
+          { id: 'orders', label: 'Orders', active: onOrdersTab, onSelect: () => setView({ name: 'orders' }) },
+          { id: 'invoices', label: 'Invoices', active: onInvoicesTab, onSelect: () => setView({ name: 'invoices' }) },
+          { id: 'performance', label: 'Performance', active: onPerformanceTab, onSelect: () => setView({ name: 'performance' }) },
+          { id: 'returns', label: 'Returns', active: onReturnsTab, onSelect: () => setView({ name: 'returns' }) },
+          // The Team tab (user management, docs/ROADMAP.md C4) is admin-only -
+          // the API 403s a member regardless.
+          ...(isAdmin
+            ? [{ id: 'team', label: 'Team', active: onTeamTab, onSelect: () => setView({ name: 'team' }) }]
+            : []),
+          // Admin-only for the same reason as Team: an endpoint is where their
+          // order data goes, and its secret signs our requests - a dispatcher who
+          // can submit orders shouldn't be able to redirect the notification
+          // stream.
+          ...(isAdmin
+            ? [
+                {
+                  id: 'integrations',
+                  label: 'Integrations',
+                  active: onIntegrationsTab,
+                  onSelect: () => setView({ name: 'integrations' }),
+                },
+              ]
+            : []),
+        ]}
+      />
+      <main className="mx-auto max-w-[1280px] px-4 py-8 sm:px-8">
 
         {view.name === 'new-order' && (
-          <div className="max-w-xl">
-            <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
-              <h1 className="text-[16px] font-semibold text-[var(--text-primary)]">
+          <div className="max-w-2xl">
+            <div className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
+              <h1 className="text-[clamp(28px,4vw,40px)] font-extrabold leading-[1.05] tracking-[-0.045em] text-[var(--text-primary)]">
                 {entryMode === 'single'
                   ? 'Send a delivery'
                   : entryMode === 'paste'
@@ -365,7 +314,7 @@ export default function App() {
                 {entryMode !== 'single' && (
                   <button
                     onClick={() => setEntryMode('single')}
-                    className="text-[var(--accent)] hover:underline"
+                    className="text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
                   >
                     Just one delivery
                   </button>
@@ -373,7 +322,7 @@ export default function App() {
                 {entryMode !== 'paste' && (
                   <button
                     onClick={() => setEntryMode('paste')}
-                    className="text-[var(--accent)] hover:underline"
+                    className="text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
                   >
                     Paste several
                   </button>
@@ -381,13 +330,14 @@ export default function App() {
                 {entryMode !== 'file' && (
                   <button
                     onClick={() => setEntryMode('file')}
-                    className="text-[var(--accent)] hover:underline"
+                    className="text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
                   >
                     Upload a file
                   </button>
                 )}
               </div>
             </div>
+            <div className="rounded-[var(--radius-lg)] bg-[var(--surface)] p-6 sm:p-8">
             {entryMode === 'paste' ? (
               <BulkPastePanel
                 onOrdersPlaced={() => {
@@ -410,11 +360,12 @@ export default function App() {
                 }}
               />
             )}
+            </div>
           </div>
         )}
         {view.name === 'orders' && (
           <>
-            <h1 className="mb-4 text-[16px] font-semibold text-[var(--text-primary)]">Your orders</h1>
+            <h1 className="mb-6 text-[clamp(28px,4vw,40px)] font-extrabold leading-[1.05] tracking-[-0.045em] text-[var(--text-primary)]">Your orders</h1>
             <OrdersTable
               orders={orders}
               onSelect={(orderId) => setView({ name: 'order-detail', orderId })}
@@ -448,19 +399,19 @@ export default function App() {
               }}
             />
           ) : (
-            <div className="text-sm text-[var(--text-muted)]">Loading order…</div>
+            <div className="text-sm text-[var(--text-secondary)]">Loading order…</div>
           ))}
         {view.name === 'invoices' &&
           (invoices ? (
             <>
-              <h1 className="mb-4 text-[16px] font-semibold text-[var(--text-primary)]">Your invoices</h1>
+              <h1 className="mb-6 text-[clamp(28px,4vw,40px)] font-extrabold leading-[1.05] tracking-[-0.045em] text-[var(--text-primary)]">Your invoices</h1>
               <InvoicesTable
                 invoices={invoices}
                 onSelect={(invoiceId) => setView({ name: 'invoice-detail', invoiceId })}
               />
             </>
           ) : (
-            <div className="text-sm text-[var(--text-muted)]">Loading invoices…</div>
+            <div className="text-sm text-[var(--text-secondary)]">Loading invoices…</div>
           ))}
         {view.name === 'invoice-detail' &&
           (selectedInvoice ? (
@@ -470,7 +421,7 @@ export default function App() {
               onBack={() => setView({ name: 'invoices' })}
             />
           ) : (
-            <div className="text-sm text-[var(--text-muted)]">Loading invoice…</div>
+            <div className="text-sm text-[var(--text-secondary)]">Loading invoice…</div>
           ))}
         {view.name === 'performance' && <PerformancePanel />}
         {view.name === 'returns' && <ReturnsPanel />}

@@ -97,15 +97,16 @@ export function WebhooksPanel() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-[16px] font-semibold text-[var(--text-primary)]">Integrations</h1>
+      <h1 className="text-[clamp(28px,4vw,40px)] font-extrabold leading-[1.05] tracking-[-0.045em] text-[var(--text-primary)]">Integrations</h1>
 
       {/* Orders in first, status out second - the order an integrator actually
           builds them in. */}
-      <ApiKeysPanel />
+      <div className="rounded-[var(--radius-lg)] bg-[var(--surface)] p-6">
+        <ApiKeysPanel />
+      </div>
 
-      <hr className="border-[var(--border)]" />
-
-      <div>
+      <div className="flex flex-col gap-6 rounded-[var(--radius-lg)] bg-[var(--surface)] p-6">
+        <div>
         <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
           Getting status updates back
         </h2>
@@ -115,7 +116,7 @@ export function WebhooksPanel() {
           <code className="text-[12px]">X-LMX-Signature</code> header you can verify with the
           signing secret, and we retry for up to three days if your endpoint is down.
         </p>
-      </div>
+        </div>
 
       {error && <p className="text-[13px] text-[var(--danger,#b42318)]">{error}</p>}
 
@@ -165,7 +166,7 @@ export function WebhooksPanel() {
         <button
           type="submit"
           disabled={creating}
-          className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-60"
+          className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-[13px] font-semibold text-white disabled:opacity-60"
         >
           Add endpoint
         </button>
@@ -185,7 +186,7 @@ export function WebhooksPanel() {
           {endpoints.map((endpoint) => (
             <div
               key={endpoint.endpoint_id}
-              className="flex flex-col gap-2 rounded-[var(--radius)] border border-[var(--border)] p-3 text-[13px]"
+              className="flex flex-col gap-2 rounded-[20px] bg-[var(--surface-2)] p-3 text-[13px]"
             >
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <span className="break-all font-medium text-[var(--text-primary)]">
@@ -224,7 +225,7 @@ export function WebhooksPanel() {
                 <button
                   disabled={busyId === endpoint.endpoint_id}
                   onClick={() => toggle(endpoint)}
-                  className="rounded-[var(--radius)] border border-[var(--border-strong)] px-3 py-1 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
+                  className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1 text-[12px] text-[var(--text-secondary)] disabled:opacity-60"
                 >
                   {endpoint.is_active ? 'Pause' : 'Resume'}
                 </button>
@@ -276,6 +277,7 @@ export function WebhooksPanel() {
           ))}
         </div>
       )}
+      </div>
     </div>
   )
 }

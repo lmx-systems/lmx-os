@@ -91,6 +91,7 @@ Tiles have 24px padding; the gap between tiles is 16px. Pages are at most
 | Number tile | `ui/KpiCard` | Label, big number, one line of context |
 | Headline tile | `HomeTiles` `TouchesTile` | The page's one lime tile |
 | Decision row | `ExceptionsPanel` | 44px peach icon tile, bold title, one-line detail, the clock, one ink **Decide** button; opens in place to show what happened, the playbook's call and the actions |
+| Delivery track | portal `OrderDetail` `DeliveryTrack` | Booked → Collected → On the way → Delivered: done in lime, current in ink, ahead outlined; not shown for a failed or cancelled order |
 | Steps | `PlaybookPanel` `Steps` | Three pills a rule climbs: Suggests → Acts unless stopped → Acts alone; current in ink, passed in lime, ahead outlined |
 | Toast | `ui/Toast` | White pill at the bottom with a lime check |
 
@@ -99,7 +100,7 @@ Tiles have 24px padding; the gap between tiles is 16px. Pages are at most
 | App | State |
 |---|---|
 | Ops console (`dashboard/`) | **Done.** Home (Needs you, Going ahead, person touches, Rules, map, the day's numbers), then Orders, Drivers, Rules, Record, and for admins Clients and Settings |
-| Client portal (`client-portal/`) and its public tracking page | In progress: same tokens and components; still on the old green theme until that change lands |
+| Client portal (`client-portal/`) and its public tracking page | **Done.** Sections as a pill nav; each order leads with its delivery track (Booked → Collected → On the way → Delivered); the tracking page a single white tile with the delivery code on lime. Text links are underlined, since ink alone doesn't set them apart |
 | Driver app (`driver-app/`) | In progress: same colours, type and radii in `src/theme/tokens.ts`; one primary action per screen, large touch targets for sunlight and gloves |
 
 Update this table in the change that moves an app over.

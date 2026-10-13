@@ -181,7 +181,7 @@ export function BulkPastePanel({ onOrdersPlaced }: BulkPastePanelProps) {
         <button
           type="submit"
           disabled={submitting || rows.length === 0 || overCap}
-          className="rounded-[var(--radius)] bg-[var(--accent)] px-4 py-2.5 text-[15px] font-medium text-white disabled:opacity-60"
+          className="rounded-full bg-[var(--accent)] px-4 py-2.5 text-[15px] font-semibold text-white disabled:opacity-60"
         >
           {submitting
             ? 'Sending…'
@@ -270,7 +270,7 @@ function BatchReport({
 
       <button
         onClick={onDismiss}
-        className="self-start text-[13px] font-medium text-[var(--accent)] hover:underline"
+        className="self-start text-[13px] font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
       >
         Dismiss
       </button>

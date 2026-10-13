@@ -56,7 +56,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
   if (mode === 'requested') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--bg-page)] px-4">
-        <div className="w-full max-w-sm rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 text-center shadow-[var(--shadow-md)]">
+        <div className="w-full max-w-sm rounded-[var(--radius-lg)] bg-[var(--surface)] p-6 text-center shadow-[var(--shadow-md)]">
           <img src="/lmx-mark.png" alt="LMX" className="mx-auto mb-4 h-8 w-8 rounded-[var(--radius)]" />
           <div className="text-[15px] font-semibold text-[var(--text-primary)]">Check your email</div>
           <p className="mt-2 text-sm text-[var(--text-secondary)]">
@@ -65,7 +65,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
           </p>
           <button
             onClick={() => setMode('signin')}
-            className="mt-4 text-sm font-medium text-[var(--accent)] hover:underline"
+            className="mt-4 text-sm font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
           >
             Back to sign in
           </button>
@@ -77,7 +77,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
   if (mode === 'forgot') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--bg-page)] px-4">
-        <div className="w-full max-w-sm rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
+        <div className="w-full max-w-sm rounded-[var(--radius-lg)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
           <div className="mb-5 flex items-center gap-2">
             <img src="/lmx-mark.png" alt="LMX" className="h-8 w-8 rounded-[var(--radius)]" />
             <div>
@@ -105,14 +105,14 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
             <button
               type="submit"
               disabled={submitting}
-              className="mt-1 rounded-[var(--radius)] bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+              className="mt-1 rounded-full bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
             >
               {submitting ? 'Sending…' : 'Send reset link'}
             </button>
             <button
               type="button"
               onClick={() => setMode('signin')}
-              className="text-center text-xs font-medium text-[var(--accent)] hover:underline"
+              className="text-center text-xs font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
             >
               Back to sign in
             </button>
@@ -124,7 +124,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg-page)] px-4">
-      <div className="w-full max-w-sm rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
+      <div className="w-full max-w-sm rounded-[var(--radius-lg)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
         <div className="mb-6 flex items-center gap-2">
           <img src="/lmx-mark.png" alt="LMX" className="h-8 w-8 rounded-[var(--radius)]" />
           <div>
@@ -164,7 +164,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
           <button
             type="submit"
             disabled={submitting}
-            className="mt-2 rounded-[var(--radius)] bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-60"
+            className="mt-2 rounded-full bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-60"
           >
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
@@ -172,7 +172,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
           <button
             type="button"
             onClick={() => setMode('forgot')}
-            className="text-center text-xs font-medium text-[var(--accent)] hover:underline"
+            className="text-center text-xs font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
           >
             Forgot your password?
           </button>

@@ -57,7 +57,7 @@ export function TermsBanner({
           href={state.terms_path}
           target="_blank"
           rel="noreferrer"
-          className="font-medium text-[var(--accent)] hover:underline"
+          className="font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
         >
           Read the terms
         </a>
@@ -65,7 +65,7 @@ export function TermsBanner({
           href={state.privacy_path}
           target="_blank"
           rel="noreferrer"
-          className="font-medium text-[var(--accent)] hover:underline"
+          className="font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
         >
           Privacy policy
         </a>
@@ -75,7 +75,7 @@ export function TermsBanner({
             type="button"
             onClick={accept}
             disabled={saving}
-            className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
           >
             {saving ? 'Accepting…' : 'Accept and continue'}
           </button>

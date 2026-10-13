@@ -69,7 +69,7 @@ export function OrdersTable({
             .finally(() => setExporting(false))
         }}
         disabled={exporting}
-        className="rounded-[var(--radius)] border border-[var(--border)] px-3 py-2 text-sm text-[var(--text-secondary)] disabled:opacity-50"
+        className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text-secondary)] disabled:opacity-50"
       >
         {exporting ? 'Preparing…' : 'Export CSV'}
       </button>
@@ -112,7 +112,7 @@ export function OrdersTable({
             type="button"
             onClick={() => onOffsetChange(Math.max(0, offset - limit))}
             disabled={offset === 0}
-            className="rounded-[var(--radius)] border border-[var(--border)] px-2.5 py-1 disabled:opacity-40"
+            className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 py-1 disabled:opacity-40"
           >
             Previous
           </button>
@@ -120,7 +120,7 @@ export function OrdersTable({
             type="button"
             onClick={() => onOffsetChange(offset + limit)}
             disabled={to >= total}
-            className="rounded-[var(--radius)] border border-[var(--border)] px-2.5 py-1 disabled:opacity-40"
+            className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 py-1 disabled:opacity-40"
           >
             Next
           </button>
@@ -133,7 +133,7 @@ export function OrdersTable({
       <div>
         {controls}
         {exportError}
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-8 text-center text-sm text-[var(--text-muted)]">
+        <div className="rounded-[var(--radius-lg)] bg-[var(--surface)] p-8 text-center text-sm text-[var(--text-muted)]">
           {/* Three different empty states, because "no orders yet" told a counter person
               whose search simply missed that their company has never sent us anything. */}
           {query
@@ -150,7 +150,7 @@ export function OrdersTable({
     <div>
       {controls}
       {exportError}
-      <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+      <div className="overflow-hidden rounded-[var(--radius-lg)] bg-[var(--surface)]">
       <table className="w-full text-left text-sm">
         <thead>
           <tr className="border-b border-[var(--border)] text-xs font-medium text-[var(--text-muted)]">
