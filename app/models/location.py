@@ -144,6 +144,11 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # to a fact whose entry is `desk` is graded bronze at most (DE-15, migration
     # 0080), so a person confirming the desk's value lifts the cap.
     site_fact_sources: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
+    # Who gave each fact's answer at the door, and later answers that disagreed
+    # (migration 0081), as {fact: {value, by, at, stop_id, disputes: [...]}}.
+    # An answer fills only an open fact - unknown, or only the desk's - so a
+    # disagreeing one is kept here for a person to settle, never applied.
+    site_fact_answers: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
 
     @property
     def geocoded(self) -> bool:

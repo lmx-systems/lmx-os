@@ -233,6 +233,20 @@ export interface SiteFacts {
   ask: ('kind_of_site' | 'setting' | 'shares_address')[];
 }
 
+/** The site facts alone (DE-15), after a drop-off at a door already captured.
+ *  "Not sure" is left out. */
+export interface SiteFactsBody {
+  kind_of_site?: string | null;
+  setting?: string | null;
+  shares_address?: boolean | null;
+}
+
+/** The site's facts after an answer, and which answers disagreed with a
+ *  person's and were kept rather than applied. */
+export interface SiteFactsAnswered extends SiteFacts {
+  disputed: string[];
+}
+
 /** One core, as the three W1 endpoints hand it back. */
 export interface ReturnItem {
   return_id: string;

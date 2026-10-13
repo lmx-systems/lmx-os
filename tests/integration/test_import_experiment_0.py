@@ -15,6 +15,8 @@ from sqlalchemy import func, select
 
 from app.api.public_routes import client_signup
 from app.identity.node_class import classify_unlabelled_locations, is_a_served_dock
+from app.identity.resolution import resolve_location
+from app.identity.site_facts import SOURCE_SURVEY, record_site_facts
 from app.models.client import Client
 from app.models.handoff_point import HandoffPoint
 from app.models.hub import Hub
@@ -113,6 +115,23 @@ async def test_sites_carry_region_kind_and_the_shared_address(db_session, tmp_pa
     points = (await db_session.scalars(select(HandoffPoint))).all()
     assert len(points) == len(locations)
     assert all(p.handoff_type is None and p.source == "import" for p in points)
+
+
+async def test_a_persons_answer_is_not_overwritten_or_relabelled_by_the_import(db_session, tmp_path):
+    """The import fills the shared-address fact only while it is open: an
+    answer somebody gave at the door stays theirs."""
+    workbook = parse_workbook(_workbook(tmp_path / "exp0.xlsx"))
+    shared = next(site for site in workbook.sites if site.shares_with)
+    location = await resolve_location(db_session, address=shared.address)
+    await record_site_facts(db_session, location, shares_address=False, by=uuid.uuid4())
+    await db_session.commit()
+
+    await import_workbook(db_session, workbook)
+    await db_session.commit()
+
+    await db_session.refresh(location)
+    assert location.shares_address is False
+    assert (location.site_fact_sources or {}).get("shares_address") == SOURCE_SURVEY
 
 
 async def test_no_driver_name_is_stored_and_times_are_new_jersey_clock(db_session, tmp_path):

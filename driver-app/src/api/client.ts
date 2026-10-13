@@ -16,6 +16,8 @@ import type {
   DockSurveyBody,
   DockSurveyResult,
   SiteFacts,
+  SiteFactsAnswered,
+  SiteFactsBody,
   DriverScorecard,
   Earnings,
   FlagReasonCode,
@@ -240,6 +242,13 @@ export const api = {
   // route the app holds - an off-platform record's door or counter. A route's
   // stops carry them already.
   getSiteFacts: (stopId: string) => request<SiteFacts>(`/driver/stops/${stopId}/site-facts`),
+
+  // The site facts alone, after a drop-off where the survey is not due (DE-15).
+  recordSiteFacts: (stopId: string, body: SiteFactsBody) =>
+    request<SiteFactsAnswered>(`/driver/stops/${stopId}/site-facts`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   // W1's reverse leg. All three are idempotent on the server as of the retry
   // work that landed with these screens: a repeat of a collection returns the

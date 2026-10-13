@@ -96,6 +96,8 @@ from app.schemas.driver_app import (
     DockSurveyBody,
     HandoffPhotoBody,
     DockSurveyResult,
+    SiteFactsAnsweredView,
+    SiteFactsBody,
     SiteFactsView,
     DriverAvailabilityUpdate,
     DriverComplianceProblemView,
@@ -1250,13 +1252,23 @@ async def _site_facts_view(session: AsyncSession, stop: Stop) -> SiteFactsView |
 
 
 async def _survey_fields(session: AsyncSession, stop: Stop, driver_id: uuid.UUID) -> dict:
-    """Whether to offer the door survey here and, when it is offered, the site
-    facts it should ask - sent with the stop so the questions work offline."""
+    """Whether to offer the door survey here, and the site facts to ask - sent
+    with the stop so the questions work offline.
+
+    The facts go with the survey when it is due, and **on their own when it is
+    not but a fact is still open** (`DE-15`): a door captured before the desk
+    filled its site is past the survey's year and shift gates, and without this
+    its record stayed capped at bronze for a year with nobody asked. The app
+    asks them alone, in a short prompt after the drop-off - once per stop,
+    because a stop is completed once.
+    """
     needs = await dock_needs_survey(session, stop, driver_id)
-    return {
-        "dock_needs_survey": needs,
-        "site_facts": await _site_facts_view(session, stop) if needs else None,
-    }
+    facts = None
+    if needs or (stop.stop_type in ("dropoff", "visit") and stop.status != "failed"):
+        facts = await _site_facts_view(session, stop)
+        if not needs and facts is not None and not facts.ask:
+            facts = None
+    return {"dock_needs_survey": needs, "site_facts": facts}
 
 
 async def _load_route_view(session: AsyncSession, route_id: uuid.UUID) -> RouteView:
@@ -2292,11 +2304,13 @@ async def record_dock_survey(
         raise HTTPException(status_code=422, detail=str(bad_value)) from bad_value
 
     # The site's place facts (`DE-15`), as `survey` even when unchanged: a
-    # confirmation of the desk's guess is what lifts its cap on the grade.
+    # confirmation of the desk's guess is what lifts its cap on the grade. An
+    # answer that disagrees with a person's is kept, not applied.
     try:
-        await record_site_facts(
+        answered = await record_site_facts(
             session, location,
             kind_of_site=body.kind_of_site, setting=body.setting, shares_address=body.shares_address,
+            by=driver_uuid, stop_id=stop.id,
         )
     except SiteFactRefused as bad_value:
         raise HTTPException(status_code=422, detail=str(bad_value)) from bad_value
@@ -2308,6 +2322,7 @@ async def record_dock_survey(
         is_surveyed=profile.is_surveyed,
         surveyed_at=profile.surveyed_at,
         surveys_remaining_today=max(0, remaining),
+        site_facts_disputed=answered.disputed if answered is not None else [],
     )
 
 
@@ -2327,6 +2342,40 @@ async def get_stop_site_facts(
     if view is None:
         raise HTTPException(status_code=409, detail=_no_dock_to("ask about", stop))
     return view
+
+
+@router.post("/stops/{stop_id}/site-facts", response_model=SiteFactsAnsweredView)
+async def record_stop_site_facts(
+    stop_id: str,
+    body: SiteFactsBody,
+    driver: AuthedDriver = Depends(get_current_driver),
+    session: AsyncSession = Depends(get_db),
+) -> SiteFactsAnsweredView:
+    """The site's place facts on their own (`DE-15`), after a drop-off at a door
+    already captured, where the survey is not due but a fact is still open.
+
+    Writes the facts and nothing else: no `surveyed_at`, so it counts against
+    neither the year nor the shift's survey cap. An answer fills only an open
+    fact; one disagreeing with a person's or the import's is kept as a dispute.
+    Safe to retry - a repeat agrees with what the first wrote.
+    """
+    stop = await _get_owned_stop(session, stop_id, driver)
+    location = await location_for_stop(session, stop)
+    if location is None:
+        raise HTTPException(status_code=409, detail=_no_dock_to("answer about", stop))
+    try:
+        answered = await record_site_facts(
+            session, location,
+            kind_of_site=body.kind_of_site, setting=body.setting, shares_address=body.shares_address,
+            by=uuid.UUID(driver.driver_id), stop_id=stop.id,
+        )
+    except SiteFactRefused as bad_value:
+        raise HTTPException(status_code=422, detail=str(bad_value)) from bad_value
+    await session.commit()
+    return SiteFactsAnsweredView(
+        **await site_facts_for(session, location),
+        disputed=answered.disputed if answered is not None else [],
+    )
 
 
 @router.post("/stops/{stop_id}/handoff-photo", response_model=DockSurveyResult)

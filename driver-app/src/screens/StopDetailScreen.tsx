@@ -11,6 +11,7 @@ import { CodPanel } from '../components/CodPanel';
 import { ReturnsPanel } from '../components/ReturnsPanel';
 import { ItemFactsPanel } from '../components/ItemFactsPanel';
 import { DockSurveyModal } from '../components/DockSurveyModal';
+import { siteFactQuestions } from '../components/siteFactQuestions';
 import { PodCapture } from '../components/PodCapture';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SyncStatusPill } from '../components/SyncStatusPill';
@@ -175,6 +176,9 @@ export function StopDetailScreen({ route, navigation }: Props) {
 
   // Shown after a dropoff completes, when the server says this dock is due.
   const [surveying, setSurveying] = useState(false);
+  // DE-15: the site's facts alone, when the survey is not due but the server
+  // sent facts still open - a door captured before the desk filled its site.
+  const [askingFacts, setAskingFacts] = useState(false);
 
   async function handlePickupComplete() {
     await outboxManager.enqueue('complete', stopId, { method: 'photo', ...doorPin(await currentPin()) });
@@ -189,6 +193,10 @@ export function StopDetailScreen({ route, navigation }: Props) {
   function leaveTheDoor() {
     if (stop?.dock_needs_survey) {
       setSurveying(true);
+      return;
+    }
+    if (siteFactQuestions(stop?.site_facts).length > 0) {
+      setAskingFacts(true);
       return;
     }
     navigation.navigate('Home');
@@ -322,6 +330,16 @@ export function StopDetailScreen({ route, navigation }: Props) {
           siteFacts={stop.site_facts ?? null}
           onClose={() => {
             setSurveying(false);
+            navigation.navigate('Home');
+          }}
+        />
+        <DockSurveyModal
+          visible={askingFacts}
+          stopId={stopId}
+          factsOnly
+          siteFacts={stop.site_facts ?? null}
+          onClose={() => {
+            setAskingFacts(false);
             navigation.navigate('Home');
           }}
         />
