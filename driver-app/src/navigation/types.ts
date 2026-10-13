@@ -22,6 +22,8 @@ export type HomeStackParamList = {
   Home: undefined;
   StopDetail: { stopId: string };
   FlagIssue: { stopId: string };
+  // DE-7: a gig-platform delivery logged as a record. No id starts a new one.
+  OffPlatform: { recordId?: string } | undefined;
 };
 
 // Screen 1r, "Profile" and its sub-screens - vehicle edit, documents,

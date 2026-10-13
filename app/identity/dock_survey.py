@@ -75,9 +75,11 @@ async def location_for_stop(session: AsyncSession, stop: Stop) -> Location | Non
     the column existed have none either.
 
     A visit (`DE-6`) has no order: it is at the site of the handoff point it was
-    planned against (app/record/visits.py), as the place that site is now.
+    planned against (app/record/visits.py), as the place that site is now. So is
+    a pickup that names its counter's handoff point - an off-platform record's
+    (`DE-7`) - since the order's delivery address is the other end.
     """
-    if stop.stop_type == "visit":
+    if stop.stop_type == "visit" or (stop.stop_type == "pickup" and stop.handoff_point_id is not None):
         if stop.handoff_point_id is None:
             return None
         point = await session.get(HandoffPoint, stop.handoff_point_id)

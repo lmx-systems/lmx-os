@@ -1418,7 +1418,9 @@ async def _stop_view_after_reload(session: AsyncSession, stop: Stop) -> StopView
 # step (complete a dropoff whose pickup was never scanned) or re-run a
 # terminal transition's side effects a second time.
 # `cancelled`: a stop dispatch took off the route (app/orders/cancellation.py).
-_TERMINAL_STOP_STATUSES = {"completed", "failed", "cancelled"}
+# `recorded`: a delivery made off-platform and logged as a record (`DE-7`) - never
+# driven here, so nothing may arrive at, complete or flag it.
+_TERMINAL_STOP_STATUSES = {"completed", "failed", "cancelled", "recorded"}
 
 
 def _assert_arrived(stop: Stop, action: str) -> None:
@@ -2180,8 +2182,9 @@ async def record_dock_survey(
     driver_uuid = uuid.UUID(driver.driver_id)
     # At a visit (`DE-6`) access is unknown: a technician who hands nothing over
     # cannot learn who receives or whether a booking is needed, so neither is
-    # written from one, whatever is sent.
-    visit = stop.stop_type == "visit"
+    # written from one, whatever is sent. Nor from a pickup counter (`DE-7`):
+    # who receives deliveries there is not what the driver collecting saw.
+    visit = stop.stop_type in ("visit", "pickup")
     try:
         await set_access(
             session,

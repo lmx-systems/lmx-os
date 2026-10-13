@@ -1,7 +1,13 @@
 import NetInfo from '@react-native-community/netinfo';
 import { AppState } from 'react-native';
 
-import type { DockSurveyBody, HandoffPhotoSlot, ItemFactsBody, UploadContentType } from '../api/types';
+import type {
+  DockSurveyBody,
+  HandoffPhotoSlot,
+  ItemFactsBody,
+  OffPlatformRecordBody,
+  UploadContentType,
+} from '../api/types';
 import { api, ApiError } from '../api/client';
 import { adoptAuthToken } from '../auth/token';
 import { sendHandoffPhoto } from './handoffPhotos';
@@ -98,7 +104,12 @@ export class OutboxManager {
     return () => this.listeners.delete(fn);
   }
 
-  async enqueue(type: OutboxActionType, stopId: string, payload: Record<string, unknown>): Promise<void> {
+  async enqueue(
+    type: OutboxActionType,
+    stopId: string,
+    payload: Record<string, unknown>,
+    options: { after?: string } = {},
+  ): Promise<void> {
     // Doing an action again after the server rejected it is how a driver fixes
     // the rejection, so the new attempt replaces the rejected one. Matched as a
     // duplicate below, the redo was silently dropped, and a rejected scan kept
@@ -111,6 +122,30 @@ export class OutboxManager {
       (type !== 'scan-parcel' || i.payload.barcode === payload.barcode) &&
       (type !== 'item-facts' || i.payload.orderId === payload.orderId) &&
       (type !== 'handoff-photo' || i.payload.slot === payload.slot);
+    if (type === 'off-platform-record') {
+      // The counter half, then the door: one record, each send overwriting only
+      // what it carries. Folded into one still waiting - or one refused, which
+      // the driver is redoing - rather than queued twice.
+      const idx = this.items.findIndex(sameAction);
+      if (idx !== -1) {
+        this.items = this.items.map((i, n) =>
+          n === idx
+            ? {
+                ...i,
+                payload: { ...i.payload, ...payload },
+                attempts: 0,
+                lastError: null,
+                permanentlyFailed: false,
+                nextAttemptAt: new Date().toISOString(),
+              }
+            : i,
+        );
+        await this.persistAndNotify();
+        this.flush();
+        return;
+      }
+    }
+
     this.items = this.items.filter((i) => !(i.permanentlyFailed && sameAction(i)));
 
     if (type === 'item-facts' || type === 'handoff-photo') {
@@ -155,6 +190,7 @@ export class OutboxManager {
         type,
         stopId,
         payload,
+        ...(options.after ? { after: options.after } : {}),
         attempts: 0,
         lastError: null,
         nextAttemptAt: new Date().toISOString(),
@@ -192,6 +228,12 @@ export class OutboxManager {
       for (const item of [...this.items]) {
         if (failedStopIds.has(item.stopId)) continue;
         if (item.permanentlyFailed) continue;
+        if (item.after && this.items.some((i) => i.stopId === item.after && i.id !== item.id && !i.permanentlyFailed)) {
+          // The stop it depends on has not reached the server yet; its own
+          // later actions wait behind it, as behind a failure.
+          failedStopIds.add(item.stopId);
+          continue;
+        }
         if (new Date(item.nextAttemptAt).getTime() > Date.now()) {
           // Still backing off, so its stop's later actions wait behind it. Left
           // unblocked, a "complete" went out ahead of its own unsent "arrive",
@@ -370,6 +412,10 @@ export class OutboxManager {
         // dock and re-stamps `surveyed_at`. It cannot create a second profile -
         // `profile_for` is keyed on the canonical dock.
         return api.recordDockSurvey(item.stopId, item.payload as DockSurveyBody);
+      case 'off-platform-record':
+        // Safe to retry: the record is named by its id and each field is
+        // overwritten with what was sent.
+        return api.logOffPlatformRecord(item.stopId, item.payload as unknown as OffPlatformRecordBody);
     }
   }
 

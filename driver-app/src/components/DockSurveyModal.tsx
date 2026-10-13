@@ -214,13 +214,21 @@ export function DockSurveyModal({
   visible,
   stopId,
   visit = false,
+  atPickup = false,
+  queueAfter,
   onClose,
 }: {
   visible: boolean;
   stopId: string;
   visit?: boolean;
+  // An off-platform record's pickup counter (DE-7): like a visit, nobody here
+  // received anything, so access is not asked.
+  atPickup?: boolean;
+  // A stop whose queued actions must reach the server first (DE-7).
+  queueAfter?: string;
   onClose: () => void;
 }) {
+  const noAccess = visit || atPickup;
   const colors = useThemeColors();
   const styles = makeStyles(colors);
   const [answers, setAnswers] = useState<DockSurveyBody>({});
@@ -235,7 +243,7 @@ export function DockSurveyModal({
     try {
       // Through the outbox, like every other stop event. A dock is surveyed in
       // a stockroom about as often as a parcel is delivered in one.
-      await outboxManager.enqueue('survey', stopId, answers as Record<string, unknown>);
+      await outboxManager.enqueue('survey', stopId, answers as Record<string, unknown>, { after: queueAfter });
       onClose();
     } finally {
       setBusy(false);
@@ -249,16 +257,20 @@ export function DockSurveyModal({
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
         <View style={styles.header}>
-          <Text style={styles.title}>{visit ? 'This site\'s door' : 'About this dock'}</Text>
+          <Text style={styles.title}>
+            {atPickup ? 'The pickup counter' : visit ? 'This site\'s door' : 'About this dock'}
+          </Text>
           <Text style={styles.subtitle}>
-            {visit
-              ? 'The door a delivery would use, as you see it from outside. Skip anything you cannot see — a blank answer is better than a guess.'
-              : 'A few taps at a door we have not fully captured yet, then once a year. Skip anything you did not see — a blank answer is better than a guess.'}
+            {atPickup
+              ? 'Where you collected it, as you found it. Skip anything you did not see — a blank answer is better than a guess.'
+              : visit
+                ? 'The door a delivery would use, as you see it from outside. Skip anything you cannot see — a blank answer is better than a guess.'
+                : 'A few taps at a door we have not fully captured yet, then once a year. Skip anything you did not see — a blank answer is better than a guess.'}
           </Text>
         </View>
 
         <ScrollView contentContainerStyle={styles.body}>
-          {QUESTIONS.filter((q) => !visit || !DELIVERY_ONLY.includes(q.key)).map((question) => (
+          {QUESTIONS.filter((q) => !noAccess || !DELIVERY_ONLY.includes(q.key)).map((question) => (
             <View key={question.key as string} style={styles.question}>
               <Text style={styles.prompt}>{question.prompt}</Text>
               <View style={styles.options}>
@@ -353,9 +365,9 @@ export function DockSurveyModal({
             </View>
           ))}
 
-          <HandoffPhotosPanel stopId={stopId} />
+          <HandoffPhotosPanel stopId={stopId} queueAfter={queueAfter} />
 
-          {!visit && (
+          {!noAccess && (
             <View style={styles.question}>
               <Text style={styles.prompt}>Did you need an appointment or booking?</Text>
               <View style={styles.options}>

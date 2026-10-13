@@ -18,8 +18,11 @@ import type {
   DriverScorecard,
   Earnings,
   FlagReasonCode,
+  GigJob,
   JobOffer,
   Message,
+  OffPlatformRecordBody,
+  OffPlatformRecordView,
   PodMethod,
   ReturnItem,
   Route,
@@ -267,6 +270,17 @@ export const api = {
   // The parcels a pickup expects. Empty when the order's source sent no
   // barcodes, which is most of them - the count is all there is to check.
   stopParcels: (stopId: string) => request<ParcelView[]>(`/driver/stops/${stopId}/parcels`),
+
+  // DE-7: this driver's gig jobs, to log one as a record without retyping it.
+  myGigJobs: () => request<GigJob[]>('/driver/me/gig-jobs'),
+
+  // DE-7: make the job's record, or add to it. The phone names the record (the
+  // drop-off stop's id), so a retry or a second half lands on the same one.
+  logOffPlatformRecord: (recordId: string, body: OffPlatformRecordBody) =>
+    request<OffPlatformRecordView>(`/driver/me/off-platform-records/${recordId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 
   // DE-5: what each order on a pickup carries, as known so far.
   stopItems: (stopId: string) => request<OrderItemView[]>(`/driver/stops/${stopId}/items`),

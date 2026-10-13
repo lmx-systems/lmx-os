@@ -49,7 +49,7 @@ from app.hub_calendar import hub_local_date
 from app.learning_loop.detection import HOLD_TOO_LONG_FLAG, HOLD_TOO_SHORT_FLAG
 from app.models.driver_shift_event import DriverShiftEvent
 from app.models.hub import Hub
-from app.models.order import Order, OrderStatus
+from app.models.order import SOURCE_SYSTEM_OFF_PLATFORM, Order, OrderStatus
 from app.models.route_offer import RouteOffer
 from app.models.stop import Stop, StopFlag
 from app.reporting.insertion import (
@@ -351,6 +351,9 @@ async def _sla_hit_rates(
                     Order.status == OrderStatus.delivered,
                     Order.delivered_at.is_not(None),
                     Order.delivered_at >= since,
+                    # A gig job logged as a record (`DE-7`) was the platform's
+                    # promise, not ours.
+                    Order.source_system != SOURCE_SYSTEM_OFF_PLATFORM,
                     *([Order.client_id == client_id] if client_id is not None else []),
                 )
             )

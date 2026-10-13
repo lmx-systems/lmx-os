@@ -24,6 +24,8 @@ jest.mock('../api/client', () => ({
     recordItemFacts: jest.fn(),
     completeStop: jest.fn(),
     flagStop: jest.fn(),
+    recordDockSurvey: jest.fn(),
+    logOffPlatformRecord: jest.fn(),
     refreshToken: jest.fn(),
   },
 }));
@@ -34,7 +36,14 @@ import { isPermanentFailure, OutboxManager } from './outboxManager';
 import type { OutboxItem } from './types';
 
 const mockApi = api as unknown as Record<
-  'arriveAtStop' | 'scanParcels' | 'scanParcel' | 'recordItemFacts' | 'completeStop' | 'flagStop',
+  | 'arriveAtStop'
+  | 'scanParcels'
+  | 'scanParcel'
+  | 'recordItemFacts'
+  | 'completeStop'
+  | 'flagStop'
+  | 'recordDockSurvey'
+  | 'logOffPlatformRecord',
   jest.Mock
 >;
 
@@ -312,6 +321,52 @@ describe('the queue on a shift', () => {
 
     // The arrival is work the driver did, and it's still on its way.
     expect(itemsOf(queue).map((i) => i.type)).toEqual(['arrive']);
+  });
+
+  it("folds an off-platform record's door half into a counter half still waiting (DE-7)", async () => {
+    mockApi.logOffPlatformRecord
+      .mockRejectedValueOnce(new TypeError('Network request failed'))
+      .mockResolvedValue({});
+    const queue = new OutboxManager();
+
+    await queue.enqueue('off-platform-record', 'r1', { pickup_stop_id: 'p1', item: { item_weight_kg: 4 }, pickup: { at: 't1' } });
+    await settle();
+    // The counter half never got out; the door half joins it.
+    await queue.enqueue('off-platform-record', 'r1', { pickup_stop_id: 'p1', dropoff: { at: 't2' } });
+    await settle();
+
+    // One request carrying both halves, the item kept - not two in the queue.
+    expect(mockApi.logOffPlatformRecord).toHaveBeenCalledTimes(2);
+    expect(mockApi.logOffPlatformRecord).toHaveBeenLastCalledWith('r1', {
+      pickup_stop_id: 'p1',
+      item: { item_weight_kg: 4 },
+      pickup: { at: 't1' },
+      dropoff: { at: 't2' },
+    });
+    expect(itemsOf(queue)).toEqual([]);
+  });
+
+  it("holds the pickup counter's survey until its record has landed (DE-7)", async () => {
+    mockApi.logOffPlatformRecord
+      .mockRejectedValueOnce(new ApiError(503, 'unavailable'))
+      .mockResolvedValue({});
+    mockApi.recordDockSurvey.mockResolvedValue({});
+    const queue = new OutboxManager();
+
+    await queue.enqueue('off-platform-record', 'r1', { pickup_stop_id: 'p1' });
+    await settle();
+    // Under the pickup's own id, which the server knows only once the record does.
+    await queue.enqueue('survey', 'p1', { handoff_type: 'counter' }, { after: 'r1' });
+    await settle();
+    expect(mockApi.recordDockSurvey).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(2000);
+    await settle();
+
+    expect(mockApi.logOffPlatformRecord.mock.invocationCallOrder[1]).toBeLessThan(
+      mockApi.recordDockSurvey.mock.invocationCallOrder[0],
+    );
+    expect(itemsOf(queue)).toEqual([]);
   });
 
   it('counts for sign-out only what can still be sent', async () => {

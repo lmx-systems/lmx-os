@@ -318,7 +318,9 @@ async def driver_day_cost(
         await session.scalars(
             select(Stop)
             .join(Route, Route.id == Stop.route_id)
-            .where(Route.driver_id == driver_id)
+            # Not a logged off-platform job's (`DE-7`): driven for a platform,
+            # not on LMX's wage.
+            .where(Route.driver_id == driver_id, Route.status != "record")
             .order_by(Stop.sequence)
         )
     )
