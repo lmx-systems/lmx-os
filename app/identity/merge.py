@@ -259,6 +259,46 @@ async def recently_applied_merges(
     )
 
 
+async def recently_reverted_merges(
+    session: AsyncSession, *, limit: int = 10
+) -> list[LocationMerge]:
+    """Merges that were undone and could go through again, newest first — the redo list.
+
+    Only the outermost link of a chain comes undone (`revert_merge`), so taking
+    out a wrong inner merge means undoing a right outer one first. Nothing else
+    can bring that pair back: the detector never re-proposes a pair it has seen,
+    reverted ones included (`_already_considered`). This list is how it comes back.
+
+    One row per pair (the latest undo), and only while both docks stand alone:
+    a side merged elsewhere since would be a different merge, which is the
+    queue's to propose, not this list's to redo.
+    """
+    rows = list(
+        await session.scalars(
+            select(LocationMerge)
+            .where(LocationMerge.status == STATUS_REVERTED)
+            .order_by(LocationMerge.reverted_at.desc().nulls_last())
+        )
+    )
+    seen: set[frozenset[UUID]] = set()
+    redoable: list[LocationMerge] = []
+    for row in rows:
+        pair = frozenset((row.source_location_id, row.target_location_id))
+        if pair in seen:
+            continue
+        seen.add(pair)
+        source = await session.get(Location, row.source_location_id)
+        target = await session.get(Location, row.target_location_id)
+        if source is None or target is None:
+            continue
+        if source.merged_into_id is not None or target.merged_into_id is not None:
+            continue
+        redoable.append(row)
+        if len(redoable) >= limit:
+            break
+    return redoable
+
+
 async def confirm_merge(
     session: AsyncSession,
     proposal: LocationMerge,
@@ -355,7 +395,7 @@ async def revert_merge(
         if target.merged_into_id is not None:
             raise ValueError(
                 "the dock this was merged into has since been merged into another -"
-                " undo that merge first"
+                " undo that merge first; it can be redone from the undone list afterwards"
             )
         # The answers the merge carried over and are still waiting go back with
         # it (`DE-15`); the source kept its own record, so it returns as it was.
@@ -375,6 +415,47 @@ async def revert_merge(
     # merged is not recoverable from anywhere else.
     await session.flush()
     return merge
+
+
+async def redo_merge(
+    session: AsyncSession,
+    reverted: LocationMerge,
+    *,
+    ops_user_id: UUID,
+) -> LocationMerge:
+    """A person says an undone merge was right after all. Applies it again.
+
+    A new audit row, not the old one flipped back: the old row records that this
+    merge was made and undone, by whom and when, and a redo that overwrote it
+    would erase the undo. The new row goes through `_apply` with every check a
+    confirmation gets - both docks read again under the lock, the shops moved,
+    the answers carried.
+
+    Refused while either dock is merged into another. Redoing then would join
+    whatever that dock now belongs to, a bigger merge than the one undone, and
+    that is a new question for the queue rather than a redo.
+    """
+    if reverted.status != STATUS_REVERTED:
+        raise ValueError(f"cannot redo a merge that is {reverted.status}")
+    source = await session.get(Location, reverted.source_location_id)
+    target = await session.get(Location, reverted.target_location_id)
+    if source is None or target is None:
+        raise ValueError("a dock in this merge no longer exists")
+    if source.merged_into_id is not None or target.merged_into_id is not None:
+        raise ValueError(
+            "one of these docks has since been merged into another - undo that merge"
+            " before redoing this one"
+        )
+    _refuse_impossible_merge(source, target)
+    redo = LocationMerge(
+        source_location_id=source.id,
+        target_location_id=target.id,
+        status=STATUS_PROPOSED,
+        reason=f"Redone after an undo: {reverted.reason}"[:255],
+    )
+    session.add(redo)
+    await session.flush()
+    return await _apply(session, redo, decision_source=SOURCE_HUMAN, ops_user_id=ops_user_id)
 
 
 def _refuse_impossible_merge(source: Location, target: Location) -> None:

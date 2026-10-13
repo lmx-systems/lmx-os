@@ -38,7 +38,7 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
 
   async function load() {
     try {
-      setProposals(await api.mergeProposals(true))
+      setProposals(await api.mergeProposals(true, true))
     } catch (e) {
       setError(e as Error)
     }
@@ -48,11 +48,12 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
     void load()
   }, [])
 
-  async function decide(id: string, decision: 'confirm' | 'reject' | 'revert') {
+  async function decide(id: string, decision: 'confirm' | 'reject' | 'revert' | 'redo') {
     setBusy(id)
     try {
       if (decision === 'confirm') await api.confirmMerge(id)
       else if (decision === 'reject') await api.rejectMerge(id)
+      else if (decision === 'redo') await api.redoMerge(id)
       else await api.revertMerge(id)
       await load()
     } catch (e) {
@@ -64,8 +65,10 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
 
   const pending = (proposals ?? []).filter((p) => p.status === 'proposed')
   const applied = (proposals ?? []).filter((p) => p.status === 'applied')
+  const reverted = (proposals ?? []).filter((p) => p.status === 'reverted')
 
-  if (proposals !== null && pending.length === 0 && applied.length === 0) return null
+  if (proposals !== null && pending.length === 0 && applied.length === 0 && reverted.length === 0)
+    return null
 
   return (
     <Card title="Same place?" meta={proposals ? `${pending.length} to judge` : 'loading…'}>
@@ -139,6 +142,36 @@ export function MergeReviewPanel({ isAdmin }: { isAdmin: boolean }) {
                   className="flex-shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] disabled:opacity-40"
                 >
                   Undo
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {reverted.length > 0 && isAdmin && (
+        <section className="mt-3 border-t border-[var(--border)] pt-2.5">
+          <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            Recently undone
+          </h3>
+          {/* Only a chain's outer link comes undone, so taking out a wrong inner
+              merge undoes a right outer one on the way, and the detector never
+              proposes a pair twice. Redo is how that one comes back. */}
+          <ul className="space-y-1">
+            {reverted.map((merge) => (
+              <li
+                key={merge.id}
+                className="flex items-start justify-between gap-3 text-[12px]"
+              >
+                <span className="text-[var(--text-secondary)]">
+                  {merge.source_address} → {merge.target_address}
+                </span>
+                <button
+                  disabled={busy === merge.id}
+                  onClick={() => decide(merge.id, 'redo')}
+                  className="flex-shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                >
+                  Redo
                 </button>
               </li>
             ))}

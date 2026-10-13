@@ -377,3 +377,131 @@ class TestAKeepHolds:
         )
 
         assert answered.disputed == ["setting"]
+
+
+class TestAnUndoneMergeCanBeRedone:
+    """The #230 review: taking out a wrong inner merge (A->B under B->C) means
+    undoing the right outer one first, and nothing could bring B->C back - the
+    detector never proposes a pair twice and no route merged directly. Redo is a
+    new audited merge through the same checks as a confirmation."""
+
+    async def _chain_undone(self, db_session):
+        from app.models.shop import Shop
+        from tests.integration.test_merge_review_wiring import _admin
+
+        a, _stop, _driver, (hub, client, _shop, _d) = await _a_disputed_setting(db_session)
+        b, _stop_b, _driver_b, _ = await _a_disputed_setting(db_session)
+        c = await _site(db_session, setting="suburb")
+        shop_at_b = Shop(
+            id=uuid.uuid4(), client_id=client, name="Redo Test Panel", address="9 Example Row",
+            lat=30.27, lng=-97.73, location_id=b.id,
+        )
+        db_session.add(shop_at_b)
+        await db_session.commit()
+        inner = await merge_locations(db_session, source=a, target=b, reason="same place")
+        outer = await merge_locations(db_session, source=b, target=c, reason="same place")
+        await db_session.commit()
+        admin = await _admin(db_session)
+        await db_session.commit()
+        await revert_merge(db_session, outer, ops_user_id=uuid.UUID(admin.ops_user_id))
+        await revert_merge(db_session, inner, ops_user_id=uuid.UUID(admin.ops_user_id))
+        await db_session.commit()
+        return a, b, c, inner, outer, shop_at_b, admin
+
+    async def test_the_right_outer_merge_comes_back_and_the_wrong_inner_one_stays_out(self, db_session):
+        from app.api.routes import redo_reverted_merge
+        from app.identity.merge import recently_reverted_merges
+        from app.models.location_merge import STATUS_APPLIED, STATUS_REVERTED
+
+        a, b, c, inner, outer, shop_at_b, admin = await self._chain_undone(db_session)
+        listed = {row.id for row in await recently_reverted_merges(db_session)}
+        assert {inner.id, outer.id} <= listed
+
+        view = await redo_reverted_merge(outer.id, session=db_session, admin=admin)
+
+        assert view.id != outer.id and view.status == STATUS_APPLIED
+        for row in (a, b, c, shop_at_b, outer):
+            await db_session.refresh(row)
+        assert outer.status == STATUS_REVERTED  # the undo stays on the record
+        assert b.merged_into_id == c.id and a.merged_into_id is None
+        assert shop_at_b.location_id == c.id
+        # B's own open dispute is carried to C again; A's stays on A.
+        assert [d["value"] for d in c.site_fact_answers["setting"]["disputes"]] == ["city_core"]
+        assert [d["value"] for d in a.site_fact_answers["setting"]["disputes"]] == ["city_core"]
+        disputed = {d.location_id for d in await _list(db_session)}
+        assert str(c.id) in disputed and str(a.id) in disputed and str(b.id) not in disputed
+        # Redone, so it leaves the redo list. So does the wrong inner pair, now
+        # that B is merged again: redoing it would join C as well.
+        listed = {row.id for row in await recently_reverted_merges(db_session)}
+        assert outer.id not in listed and inner.id not in listed
+
+    async def test_the_redone_merge_can_be_undone_again(self, db_session):
+        from app.api.routes import redo_reverted_merge, revert_applied_merge
+
+        a, b, c, _inner, outer, shop_at_b, admin = await self._chain_undone(db_session)
+        view = await redo_reverted_merge(outer.id, session=db_session, admin=admin)
+        await revert_applied_merge(view.id, session=db_session, admin=admin)
+
+        for row in (b, c, shop_at_b):
+            await db_session.refresh(row)
+        assert b.merged_into_id is None and shop_at_b.location_id == b.id
+        assert (c.site_fact_answers or {}).get("setting", {}).get("disputes", []) == []
+
+    async def test_refused_while_a_side_is_merged_elsewhere(self, db_session):
+        from app.api.routes import redo_reverted_merge
+        from app.identity.merge import recently_reverted_merges
+
+        _a, b, c, _inner, outer, _shop, admin = await self._chain_undone(db_session)
+        d = await _site(db_session, setting="suburb")
+        d_id, outer_id = d.id, outer.id
+        await merge_locations(db_session, source=b, target=d, reason="same place")
+        await db_session.commit()
+
+        assert outer_id not in {row.id for row in await recently_reverted_merges(db_session)}
+        with pytest.raises(HTTPException) as refused:
+            await redo_reverted_merge(outer_id, session=db_session, admin=admin)
+        assert refused.value.status_code == 409
+        await db_session.rollback()
+        await db_session.refresh(b)
+        assert b.merged_into_id == d_id
+
+    async def test_only_an_undone_merge_can_be_redone(self, db_session):
+        from app.api.routes import redo_reverted_merge
+        from tests.integration.test_merge_review_wiring import _admin
+
+        a = await _site(db_session, setting="suburb")
+        b = await _site(db_session, setting="suburb")
+        applied = await merge_locations(db_session, source=a, target=b, reason="same place")
+        await db_session.commit()
+        admin = await _admin(db_session)
+        await db_session.commit()
+
+        with pytest.raises(HTTPException) as refused:
+            await redo_reverted_merge(applied.id, session=db_session, admin=admin)
+        assert refused.value.status_code == 409
+
+    async def test_the_inner_link_refusal_says_the_outer_can_be_redone(self, db_session):
+        a = await _site(db_session, setting="suburb")
+        b = await _site(db_session, setting="suburb")
+        c = await _site(db_session, setting="suburb")
+        inner = await merge_locations(db_session, source=a, target=b, reason="same place")
+        await merge_locations(db_session, source=b, target=c, reason="same place")
+        await db_session.commit()
+
+        with pytest.raises(ValueError, match="redone from the undone list"):
+            await revert_merge(db_session, inner, ops_user_id=uuid.UUID(OPS.ops_user_id))
+        await db_session.rollback()
+
+    async def test_the_review_list_carries_undone_merges_when_asked(self, db_session):
+        from app.api.routes import merge_proposals
+
+        _a, _b, _c, inner, outer, _shop, _admin_user = await self._chain_undone(db_session)
+        without = {p.id for p in await merge_proposals(include_applied=True, session=db_session, _ops=OPS)}
+        with_reverted = {
+            p.id
+            for p in await merge_proposals(
+                include_applied=True, include_reverted=True, session=db_session, _ops=OPS
+            )
+        }
+        assert outer.id not in without
+        assert {inner.id, outer.id} <= with_reverted
