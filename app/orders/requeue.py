@@ -26,6 +26,10 @@ from app.orders.sinks import emit_status_change
 
 logger = structlog.get_logger(__name__)
 
+# A stop nobody will drive to again: done, failed, taken off the route, or a
+# delivery logged off-platform (`DE-7`). The driver app's terminal set.
+_FINISHED_STOP_STATUSES = ("completed", "failed", "cancelled", "recorded")
+
 
 async def requeue_orders_from_offer(
     session: AsyncSession,
@@ -59,8 +63,11 @@ async def requeue_orders_from_offer(
     "still `assigned`" mean "still assigned on this offer": an order this offer
     lost and dispatch gave to somebody else is `assigned` too.
 
-    `wake=False` sends them back without waking the hub's cycle: the stranded
-    sweep below, which runs just before the scheduled cycles anyway.
+    `wake=False` sends them back without waking the hub's cycle, and without
+    the hold queue's wake-up at each order's hold deadline - for these, a
+    deadline already past, so the wake-up fired within a second and woke the
+    cycle anyway. For the stranded sweep below, which runs just before the
+    scheduled cycle for the same hub: that cycle reads them.
 
     `free_driver=False` for orders an offer never reached: the cycle moved them
     to `assigned` for a driver whom somebody else claimed before the cycle could
@@ -131,7 +138,8 @@ async def requeue_orders_from_offer(
             continue
         await hold_queue.add(
             hub_id,
-            HeldOrder(
+            schedule_wakeup=wake,
+            order=HeldOrder(
                 order_id=stop["order_id"],
                 shop_lat=stop["lat"],
                 shop_lng=stop["lng"],
@@ -183,7 +191,7 @@ async def return_stranded_assignments(
     sweep, every five minutes, not one a second.
 
     Stranded means: `assigned`, live, unchanged for the grace, on no open offer,
-    and on no stop that wasn't cancelled. Locked with `SKIP LOCKED`, so an order
+    and on no stop still to be done. Locked with `SKIP LOCKED`, so an order
     somebody is writing is left for the next sweep, and re-checked by the
     requeue's own `WHERE status = 'assigned'`. Commits nothing; the caller does.
     """
@@ -216,11 +224,19 @@ async def return_stranded_assignments(
         )
     )
     on_an_offer = {stop.get("order_id") for stops in open_payloads for stop in (stops or [])}
+    # A stop still to be done. A redelivery keeps its failed attempt's stops as
+    # history (app/delivery/resolution.py) - a completed pickup, a failed
+    # drop-off - and counting those left a redelivered order a failed cycle
+    # stranded `assigned` for good: on a stop, by this test, that nobody will
+    # ever drive to.
     on_a_stop = set(
         await session.scalars(
             select(StopOrder.order_id)
             .join(Stop, Stop.id == StopOrder.stop_id)
-            .where(StopOrder.order_id.in_(candidate_ids), Stop.status != "cancelled")
+            .where(
+                StopOrder.order_id.in_(candidate_ids),
+                Stop.status.notin_(_FINISHED_STOP_STATUSES),
+            )
         )
     )
     stranded = [

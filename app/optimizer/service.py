@@ -29,6 +29,7 @@ from app.batch_queue.store import HoldQueueStore
 from app.config import settings
 from app.db import session_scope
 from app.delivery.eta import refresh_route_etas
+from app.delivery.routes import lock_route
 from app.events.bus import WAKEUPS_KEY, wakeup_member
 from app.fleet_state.manager import FleetStateManager
 from app.hub_calendar import is_hub_closed_at
@@ -711,6 +712,13 @@ class DispatchOptimizerService:
                     )
                     continue
                 assigned_now[0].assigned_at = datetime.now(timezone.utc)
+                # The route before any of its stops are written, as every writer
+                # of a live route's stops takes it (app/delivery/routes.py). Its
+                # plan version and its other stops' ETAs change below; a driver
+                # completing a stop or a dispatch cancel waits here, or this waits
+                # for them. This holds an order row first - the one order nothing
+                # else holds a route for, since it is on no route yet.
+                await lock_route(session, route.id)
 
                 next_sequence = (
                     (await session.execute(select(func.max(Stop.sequence)).where(Stop.route_id == route.id))).scalar_one()
