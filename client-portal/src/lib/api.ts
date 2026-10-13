@@ -202,6 +202,10 @@ export const api = {
   cancelOrder: (orderId: string) =>
     request<ClientOrderDetailView>(`/client/orders/${orderId}/cancel`, { method: 'POST' }),
 
+  // "Was this sent twice?" - no, both are real (DEC-13). "Yes" is cancelOrder.
+  notADuplicate: (orderId: string) =>
+    request<ClientOrderDetailView>(`/client/orders/${orderId}/not-a-duplicate`, { method: 'POST' }),
+
   // Public signup - the only call here made with no token at all. The
   // endpoint is exempt from ops auth (app/ops_auth/middleware.py) and
   // rate-limited by IP.

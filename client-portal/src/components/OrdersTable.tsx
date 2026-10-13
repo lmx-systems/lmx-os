@@ -180,6 +180,10 @@ export function OrdersTable({
                 <span className={isFailedStatus(order.status) ? 'text-[var(--danger,#b4231f)]' : 'text-[var(--text-secondary)]'}>
                   {formatStatus(order.status)}
                 </span>
+                {order.duplicate_question_open && (
+                  // Answered on the order itself (DEC-13).
+                  <div className="text-xs text-[var(--amber)]">Sent twice? Open to answer</div>
+                )}
                 {order.status === 'delivery_failed' && order.failure_reason && (
                   <div className="text-xs text-[var(--text-muted)]">{formatFailureReason(order.failure_reason)}</div>
                 )}

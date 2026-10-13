@@ -2,8 +2,9 @@
 
 D-DUP: a portal order with no reference is checked against the same client's
 orders from the last ten minutes, to the same pickup and drop-off. A likely
-repeat is flagged, never merged: both orders exist, the client is told, and
-dispatch sees it in the exception queue until the driver collects it.
+repeat is flagged, never merged: both orders exist and the client is asked to
+answer in the portal (DEC-13); a person sees it in the exception queue only if
+it is unanswered with a driver on the way.
 
 D-UNK: an ERP field the adapter does not know is accepted and flagged on the
 order, where the order's explanation shows it.
@@ -14,7 +15,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import func, select, update
 
-from app.api.client_routes import submit_order
+from fastapi import HTTPException
+
+from app.api.client_routes import cancel_my_order, get_my_order, say_not_a_duplicate, submit_order
 from app.batch_queue.store import HoldQueueStore
 from app.client_auth.dependencies import AuthedClient
 from app.geocoding.base import BaseGeocoder, GeocodeResult
@@ -118,22 +121,82 @@ async def test_a_client_reference_is_not_second_guessed(db_session, real_redis_c
     assert second.possible_duplicate_of is None
 
 
-async def test_dispatch_sees_the_repeat_until_the_driver_collects_it(db_session, real_redis_client):
+async def _set_status(db_session, order_id, status):
+    await db_session.execute(update(Order).where(Order.id == uuid.UUID(order_id)).values(status=status))
+    await db_session.commit()
+
+
+async def _repeats(db_session) -> list[str]:
+    queue = await build_exception_queue(db_session)
+    return [str(i.order_id) for i in queue.items if i.kind == KIND_POSSIBLE_DUPLICATE]
+
+
+async def test_the_client_is_asked_and_a_person_only_once_a_driver_is_on_the_way(db_session, real_redis_client):
+    """DEC-13: the client answers in the portal while they can still cancel it.
+    Unanswered with a driver on the way, it becomes a person's - and leaves the
+    queue once collected."""
     client_id = await _client(db_session)
     first = await submit_order(_body(), client=_authed(client_id), session=db_session)
     second = await submit_order(_body(), client=_authed(client_id), session=db_session)
 
-    queue = await build_exception_queue(db_session)
-    repeats = [i for i in queue.items if i.kind == KIND_POSSIBLE_DUPLICATE]
-    assert [str(i.order_id) for i in repeats] == [second.order_id]
-    assert first.reference in repeats[0].detail
+    detail = await get_my_order(second.order_id, client=_authed(client_id), session=db_session)
+    assert (detail.possible_duplicate_of, detail.duplicate_answer) == (first.reference, None)
+    assert await _repeats(db_session) == []
 
-    await db_session.execute(
-        update(Order).where(Order.id == uuid.UUID(second.order_id)).values(status=OrderStatus.picked_up)
-    )
-    await db_session.commit()
+    await _set_status(db_session, second.order_id, OrderStatus.assigned)
     queue = await build_exception_queue(db_session)
-    assert not [i for i in queue.items if i.kind == KIND_POSSIBLE_DUPLICATE]
+    [repeat] = [i for i in queue.items if i.kind == KIND_POSSIBLE_DUPLICATE]
+    assert str(repeat.order_id) == second.order_id
+    assert first.reference in repeat.detail
+
+    await _set_status(db_session, second.order_id, OrderStatus.picked_up)
+    assert await _repeats(db_session) == []
+
+
+async def test_both_are_real_settles_it_for_everyone(db_session, real_redis_client):
+    client_id = await _client(db_session)
+    await submit_order(_body(), client=_authed(client_id), session=db_session)
+    second = await submit_order(_body(), client=_authed(client_id), session=db_session)
+    authed = _authed(client_id)
+
+    answered = await say_not_a_duplicate(second.order_id, client=authed, session=db_session)
+    assert answered.duplicate_answer == "separate"
+    order = await db_session.get(Order, uuid.UUID(second.order_id), populate_existing=True)
+    [flag] = [f for f in order.intake_flags if f["kind"] == "possible_duplicate"]
+    assert flag["answered_by"] == authed.client_user_id
+
+    # A replay changes nothing, and a driver on the way raises nothing.
+    again = await say_not_a_duplicate(second.order_id, client=_authed(client_id), session=db_session)
+    assert again.duplicate_answer == "separate"
+    order = await db_session.get(Order, uuid.UUID(second.order_id), populate_existing=True)
+    assert [f for f in order.intake_flags if f["kind"] == "possible_duplicate"][0]["answered_by"] == authed.client_user_id
+    await _set_status(db_session, second.order_id, OrderStatus.assigned)
+    assert await _repeats(db_session) == []
+
+
+async def test_yes_is_a_cancel(db_session, real_redis_client):
+    client_id = await _client(db_session)
+    await submit_order(_body(), client=_authed(client_id), session=db_session)
+    second = await submit_order(_body(), client=_authed(client_id), session=db_session)
+
+    cancelled = await cancel_my_order(second.order_id, client=_authed(client_id), session=db_session)
+
+    assert cancelled.status == "cancelled"
+    assert await _repeats(db_session) == []
+
+
+async def test_only_a_flagged_order_of_your_own_can_be_answered(db_session, real_redis_client):
+    client_id = await _client(db_session)
+    first = await submit_order(_body(), client=_authed(client_id), session=db_session)
+    second = await submit_order(_body(), client=_authed(client_id), session=db_session)
+    stranger = await _client(db_session)
+
+    with pytest.raises(HTTPException) as unflagged:
+        await say_not_a_duplicate(first.order_id, client=_authed(client_id), session=db_session)
+    assert unflagged.value.status_code == 409
+    with pytest.raises(HTTPException) as not_theirs:
+        await say_not_a_duplicate(second.order_id, client=_authed(stranger), session=db_session)
+    assert not_theirs.value.status_code == 404
 
 
 async def test_an_unknown_erp_field_is_kept_flagged_and_explained(db_session, real_redis_client):
@@ -158,3 +221,33 @@ async def test_an_unknown_erp_field_is_kept_flagged_and_explained(db_session, re
     explanation = await explain_order(db_session, order_id=order.id)
     statements = [f.statement for f in explanation.facts if f.engine == "intake"]
     assert statements and "CustPONum" in statements[0]
+
+
+async def test_a_cancelled_twin_settles_the_question(db_session, real_redis_client):
+    """The client cancelled the first copy themselves. Asking "cancel this one?"
+    of the second would invite them to cancel the only order left."""
+    client_id = await _client(db_session)
+    first = await submit_order(_body(), client=_authed(client_id), session=db_session)
+    second = await submit_order(_body(), client=_authed(client_id), session=db_session)
+
+    await cancel_my_order(first.order_id, client=_authed(client_id), session=db_session)
+
+    detail = await get_my_order(second.order_id, client=_authed(client_id), session=db_session)
+    assert detail.possible_duplicate_of == first.reference
+    assert detail.duplicate_question_open is False
+    await _set_status(db_session, second.order_id, OrderStatus.assigned)
+    assert await _repeats(db_session) == []
+
+
+async def test_a_collected_order_is_not_asked(db_session, real_redis_client):
+    client_id = await _client(db_session)
+    await submit_order(_body(), client=_authed(client_id), session=db_session)
+    second = await submit_order(_body(), client=_authed(client_id), session=db_session)
+    assert (await get_my_order(second.order_id, client=_authed(client_id), session=db_session)).duplicate_question_open
+
+    await _set_status(db_session, second.order_id, OrderStatus.delivered)
+
+    assert not (await get_my_order(second.order_id, client=_authed(client_id), session=db_session)).duplicate_question_open
+    with pytest.raises(HTTPException) as late:
+        await say_not_a_duplicate(second.order_id, client=_authed(client_id), session=db_session)
+    assert late.value.status_code == 409

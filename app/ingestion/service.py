@@ -469,8 +469,11 @@ async def _intake_flags(
 
     Flagged, never merged (D-DUP): two identical orders minutes apart are
     usually one form sent twice and occasionally two real orders, and only the
-    client can say which. Dispatch sees the flag in the exception queue
-    (`app/reporting/exceptions.py`) while the order can still be cancelled.
+    client can say which - so the client is asked, in the portal, and answers
+    by cancelling the repeat or saying both are real (`DEC-13`,
+    `answer_not_a_duplicate`). A person sees it in the exception queue
+    (`app/reporting/exceptions.py`) only if a driver is on the way to collect it
+    and the client has not answered.
     """
     flags = list(lmx.intake_flags)
     unknown = [f for f in flags if f.get("kind") == UNKNOWN_FIELDS]
@@ -507,6 +510,85 @@ def possible_duplicate_of(order: Order) -> str | None:
         if flag.get("kind") == POSSIBLE_DUPLICATE:
             return flag.get("of_reference")
     return None
+
+
+# The client's answer to "was this sent twice?" (`DEC-13`). "Yes" is a cancel of
+# the repeat, which needs no record of its own; "no" is kept on the flag.
+ANSWER_SEPARATE = "separate"
+
+
+# While the question still matters: before the parts are collected. Past it -
+# collected, delivered, returned, failed - "was this sent twice?" has nothing
+# left to save, and asking it would be noise on every flagged order ever.
+ASKABLE_STATUSES = (
+    OrderStatus.received,
+    OrderStatus.classified,
+    OrderStatus.held,
+    OrderStatus.queued,
+    OrderStatus.assigned,
+    OrderStatus.en_route_pickup,
+)
+
+
+async def open_duplicate_questions(session: AsyncSession, orders: list[Order]) -> set:
+    """The ids of the orders whose "sent twice?" question is still open (`DEC-13`).
+
+    Open means: flagged as a likely repeat, unanswered, not yet collected, and
+    the order it repeats still live. A twin since cancelled settles it - the
+    client cancelled the other copy, and asking again would invite them to
+    cancel the only one left.
+    """
+    flagged = {
+        order.id: _twin_id(order)
+        for order in orders
+        if order.status in ASKABLE_STATUSES and duplicate_answer(order) is None and _twin_id(order) is not None
+    }
+    if not flagged:
+        return set()
+    cancelled = set(
+        await session.scalars(
+            select(Order.id).where(Order.id.in_(set(flagged.values())), Order.status == OrderStatus.cancelled)
+        )
+    )
+    return {order_id for order_id, twin in flagged.items() if twin not in cancelled}
+
+
+def _twin_id(order: Order) -> uuid.UUID | None:
+    for flag in order.intake_flags or []:
+        if flag.get("kind") == POSSIBLE_DUPLICATE:
+            try:
+                return uuid.UUID(str(flag.get("of_order_id")))
+            except ValueError:
+                return None
+    return None
+
+
+def duplicate_answer(order: Order) -> str | None:
+    """What the client said about a likely repeat, or None while unanswered."""
+    for flag in order.intake_flags or []:
+        if flag.get("kind") == POSSIBLE_DUPLICATE:
+            return flag.get("answer")
+    return None
+
+
+def answer_not_a_duplicate(order: Order, *, answered_by: str, at: datetime) -> bool:
+    """Record the client saying both orders are real. False when there is no
+    likely-repeat flag to answer. Idempotent: a second answer keeps the first's
+    time and author.
+
+    A new list, not an edit in place: `intake_flags` is plain JSONB, and
+    SQLAlchemy only sees a change to the attribute itself.
+    """
+    flags = [dict(flag) for flag in order.intake_flags or []]
+    found = False
+    for flag in flags:
+        if flag.get("kind") == POSSIBLE_DUPLICATE:
+            found = True
+            if flag.get("answer") is None:
+                flag.update(answer=ANSWER_SEPARATE, answered_by=answered_by, answered_at=at.isoformat())
+    if found:
+        order.intake_flags = flags
+    return found
 
 
 @dataclass(frozen=True)

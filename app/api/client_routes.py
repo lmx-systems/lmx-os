@@ -37,6 +37,10 @@ from app.ingestion.service import (
     DestinationUnresolvableError,
     OriginUnresolvableError,
     ShopNotFoundError,
+    ASKABLE_STATUSES,
+    answer_not_a_duplicate,
+    duplicate_answer,
+    open_duplicate_questions,
     ingest_lmx_order,
     possible_duplicate_of,
 )
@@ -298,6 +302,8 @@ def _order_summary_view(order: Order, shop_name: str | None) -> ClientOrderSumma
         fee_cents=order.fee_cents,
         failure_reason=order.failure_reason,
         delivery_attempts=order.delivery_attempts,
+        possible_duplicate_of=possible_duplicate_of(order),
+        duplicate_answer=duplicate_answer(order),
     )
 
 
@@ -642,9 +648,11 @@ async def list_my_orders(
     # One query for the client's contract terms, not one per order.
     terms = await terms_for_client(session, client_id)
 
+    open_questions = await open_duplicate_questions(session, orders)
     items = []
     for order, shop_name in rows:
         view = _order_summary_view(order, shop_name)
+        view.duplicate_question_open = order.id in open_questions
         await _annotate_commitments(session, view, order, terms, facts.get(order.id))
         items.append(view)
 
@@ -701,6 +709,7 @@ async def get_my_order(
 
     shop = await session.get(Shop, order.shop_id)
     summary = _order_summary_view(order, shop.name if shop else None)
+    summary.duplicate_question_open = order.id in await open_duplicate_questions(session, [order])
     await _annotate_commitments(
         session,
         summary,
@@ -985,6 +994,32 @@ async def cancel_my_order(
             await cancel_before_collection(session, HoldQueueStore(), order)
         except OrderNotCancellable as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return await get_my_order(order_id, client=client, session=session)
+
+
+@router.post("/orders/{order_id}/not-a-duplicate", response_model=ClientOrderDetailView)
+async def say_not_a_duplicate(
+    order_id: str,
+    client: AuthedClient = Depends(get_current_client),
+    session: AsyncSession = Depends(get_db),
+) -> ClientOrderDetailView:
+    """The client's answer to "was this sent twice?": no, both are real (`DEC-13`).
+
+    A likely repeat (D-DUP) is the client's to settle, since only they know. "Yes"
+    is a cancel of the repeat (`/orders/{id}/cancel`); this is "no", recorded on
+    the flag so nobody - the client, or a person when a driver is on the way -
+    is asked again. 404 for another client's order, as `get_my_order`; 409 for
+    an order with nothing to answer. A second answer is a replay and changes
+    nothing.
+    """
+    order = await session.get(Order, uuid.UUID(order_id))
+    if order is None or str(order.client_id) != client.client_id:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.status not in ASKABLE_STATUSES:
+        raise HTTPException(status_code=409, detail="This order has been collected, so there is nothing left to answer.")
+    if not answer_not_a_duplicate(order, answered_by=client.client_user_id, at=datetime.now(timezone.utc)):
+        raise HTTPException(status_code=409, detail="This order was not flagged as a possible repeat.")
+    await session.commit()
     return await get_my_order(order_id, client=client, session=session)
 
 

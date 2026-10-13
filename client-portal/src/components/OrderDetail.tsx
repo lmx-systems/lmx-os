@@ -45,6 +45,10 @@ export function OrderDetail({ order, onBack, onCancelled }: OrderDetailProps) {
           <TierBadge tier={order.sla_tier} />
         </div>
 
+        {order.duplicate_question_open && (
+          <SentTwice order={order} onAnswered={onCancelled} />
+        )}
+
         {isFailedStatus(order.status) && (
           <div className="mt-4 rounded-[var(--radius)] border border-[var(--danger,#b4231f)] bg-[var(--surface-2)] px-3 py-2 text-sm">
             <div className="font-medium text-[var(--danger,#b4231f)]">
@@ -206,6 +210,69 @@ export function OrderDetail({ order, onBack, onCancelled }: OrderDetailProps) {
           <CancelOrder order={order} onCancelled={onCancelled} />
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * "Was this sent twice?" (docs/ROADMAP_1.5.md DEC-13, D-DUP).
+ *
+ * An order with no reference of its own that matches one you sent minutes
+ * earlier, to the same pickup and drop-off. We book both and ask, because only
+ * you know: cancel this one if it was a repeat, or say both are real so nobody
+ * asks again. Unanswered once a driver is on the way, dispatch calls you instead.
+ */
+function SentTwice({
+  order,
+  onAnswered,
+}: {
+  order: ClientOrderDetailView
+  onAnswered: (order: ClientOrderDetailView) => void
+}) {
+  const [busy, setBusy] = useState<'cancel' | 'keep' | null>(null)
+  const [refused, setRefused] = useState<string | null>(null)
+  const canCancel = CANCELLABLE.includes(order.status)
+
+  async function answer(kind: 'cancel' | 'keep') {
+    setBusy(kind)
+    setRefused(null)
+    try {
+      onAnswered(kind === 'cancel' ? await api.cancelOrder(order.order_id) : await api.notADuplicate(order.order_id))
+    } catch (err) {
+      setRefused(err instanceof ApiError ? err.message : 'Could not save your answer. Try again.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="mt-4 rounded-[var(--radius)] border border-[var(--amber)] bg-[var(--amber-dim)] px-3 py-2 text-sm">
+      <div className="font-medium text-[var(--text-primary)]">Sent twice?</div>
+      <div className="text-[var(--text-secondary)]">
+        This looks like a repeat of {order.possible_duplicate_of}, booked minutes earlier to the same address.
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        {canCancel && (
+          <button
+            onClick={() => answer('cancel')}
+            disabled={busy !== null}
+            className="rounded-[var(--radius)] bg-[var(--red)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+          >
+            {busy === 'cancel' ? 'Cancelling…' : 'Yes - cancel this one'}
+          </button>
+        )}
+        <button
+          onClick={() => answer('keep')}
+          disabled={busy !== null}
+          className="rounded-[var(--radius)] border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] disabled:opacity-60"
+        >
+          {busy === 'keep' ? 'Saving…' : 'No - both are real'}
+        </button>
+      </div>
+      {!canCancel && (
+        <p className="mt-2 text-xs text-[var(--text-muted)]">A driver already has it; to cancel, call dispatch.</p>
+      )}
+      {refused && <p className="mt-2 text-xs text-[var(--text-muted)]">{refused}</p>}
     </div>
   )
 }
