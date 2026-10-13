@@ -44,6 +44,23 @@ history, so a late retry of one is still recognised as a repeat.
 `set_site_fact` - the import, the desk and the survey. A fact with no entry is
 one written before that rule, and has the site's `site_source`.
 
+**A person's "keep" is a decision, not a deferral.** When a settlement keeps the
+fact as it was, the values it turned down are not raised again: the same answer
+from another stop is remembered (`overruled`) but makes no new dispute. Without
+this, keeping a shared address "unknown" against the import's pair re-raised
+every later door's "no". A different value still makes a dispute, and a
+settlement that takes a value lifts nothing it did not turn down.
+
+**A merge carries the answers to the dock it merges into** (`fold_answers`,
+called by `app/identity/merge.py`). An open dispute, or an applied answer that
+disagrees with the surviving dock's fact, becomes a dispute there; every stop's
+answer is remembered there (`absorbed`), so a retry from one of the merged
+dock's stops is still a repeat. Each carried entry names the dock it came from,
+and undoing the merge takes back exactly those still waiting (`unfold_answers`).
+The merged dock keeps its own record untouched, so it comes back as it was. The
+facts themselves are not carried: a surviving dock with an open fact is asked at
+its next door.
+
 **A test-site draw is not moved by an answer here (D-TEST).** `site_draws` keeps
 the group a site was drawn from (`app/record/site_draws.py`), and a site is drawn
 once, ever, so correcting the kind or setting of a drawn site changes what the
@@ -72,6 +89,9 @@ SOURCE_OPS = "ops"
 # should visit, not a longer list.
 MAX_DISPUTES = 20
 MAX_SETTLED = 20
+# Remembered answers a fact carries only so a retry is known as a repeat: those
+# a merge brought in, and those a settlement had already turned down.
+MAX_REMEMBERED = 100
 
 # The stops that may answer about a site, and when: the door of a drop-off or a
 # visit, or an off-platform record's counter (`DE-7`), once the stop is done.
@@ -84,6 +104,10 @@ class SiteFactRefused(ValueError):
 
 class AlreadyAnsweredHere(ValueError):
     """This stop already answered the fact differently. One answer per stop."""
+
+
+class NewerAnswer(ValueError):
+    """A dispute arrived after the one the person settling last saw."""
 
 
 def stop_refusal(stop: Stop) -> str | None:
@@ -250,6 +274,11 @@ async def record_site_facts(
             set_site_fact(site, name, value, SOURCE_SURVEY)
             record[name] = {**entry, **answer, "value": value, "disputes": list(entry.get("disputes", []))}
             outcome.applied.append(name)
+        elif getattr(site, name) != value and value in _turned_down(entry):
+            # A person already kept the fact against this very value; another
+            # door saying it again is remembered, not raised again.
+            overruled = [*entry.get("overruled", []), {**answer, "value": value}][-MAX_REMEMBERED:]
+            record[name] = {**entry, "overruled": overruled}
         elif getattr(site, name) != value:
             disputes = [*entry.get("disputes", []), {**answer, "value": value}][-MAX_DISPUTES:]
             record[name] = {**entry, "disputes": disputes}
@@ -268,6 +297,14 @@ async def record_site_facts(
 _UNANSWERED = object()
 
 
+def _turned_down(entry: dict) -> list:
+    """The values the fact's latest settlement kept it against, if it kept it."""
+    settled = entry.get("settled") or []
+    if not settled or not settled[-1].get("kept"):
+        return []
+    return [d.get("value") for d in settled[-1].get("disputes", [])]
+
+
 def _answered_at(entry: dict, stop_id: uuid.UUID) -> object:
     """What this stop already answered for one fact, or `_UNANSWERED`: as the
     applied answer, an open dispute, an agreement, or a settled dispute."""
@@ -277,6 +314,8 @@ def _answered_at(entry: dict, stop_id: uuid.UUID) -> object:
     given = [
         *entry.get("disputes", []),
         *entry.get("agreed", []),
+        *entry.get("overruled", []),
+        *entry.get("absorbed", []),
         *(d for settled in entry.get("settled", []) for d in settled.get("disputes", [])),
         *(settled["replaced"] for settled in entry.get("settled", []) if settled.get("replaced")),
     ]
@@ -323,11 +362,16 @@ async def settle_dispute(
     *,
     take: object | None,
     by: uuid.UUID,
+    seen_up_to: datetime | None = None,
 ) -> Location:
     """Settle a fact's open disputes: keep it as it is (`take` None) or take one
     of the disputed values. Either way the fact is now `ops` - a person looked -
     and the disputes move to its history with who settled them and when.
-    Flushes; the caller commits."""
+
+    `seen_up_to` is the time of the newest answer the person was shown. A dispute
+    newer than that is one they never saw, and settling would file it as decided,
+    so the settle is refused (`NewerAnswer`) and they look again. Flushes; the
+    caller commits."""
     if fact not in SITE_FACTS:
         raise NothingToSettle(f"not a site fact: {fact}")
     site = await _lock_canonical(session, location)
@@ -336,6 +380,11 @@ async def settle_dispute(
     disputes = list(entry.get("disputes", []))
     if not disputes:
         raise NothingToSettle("Nothing to settle: no answer disagrees with this fact")
+    if seen_up_to is not None:
+        if seen_up_to.tzinfo is None:
+            seen_up_to = seen_up_to.replace(tzinfo=timezone.utc)
+        if any(datetime.fromisoformat(d["at"]) > seen_up_to for d in disputes if d.get("at")):
+            raise NewerAnswer("Another answer has come in since this was loaded - look again")
     if take is not None and take not in [d.get("value") for d in disputes]:
         raise NothingToSettle("That value is not one the disputed answers gave")
     value = getattr(site, fact) if take is None else take
@@ -356,3 +405,88 @@ async def settle_dispute(
     site.site_fact_answers = record
     await session.flush()
     return site
+
+
+def _remembered(entry: dict) -> list[dict]:
+    """Every answer a fact's record holds from a stop, in the shape a repeat is
+    checked against: the applied one, disputes, agreements, overruled, settled
+    and absorbed."""
+    given: list[dict] = []
+    if entry.get("stop_id") is not None:
+        given.append({k: entry.get(k) for k in ("by", "at", "stop_id", "value")})
+    given += [
+        *entry.get("disputes", []),
+        *entry.get("agreed", []),
+        *entry.get("overruled", []),
+        *entry.get("absorbed", []),
+        *(d for settled in entry.get("settled", []) for d in settled.get("disputes", [])),
+        *(settled["replaced"] for settled in entry.get("settled", []) if settled.get("replaced")),
+    ]
+    return [{k: g.get(k) for k in ("by", "at", "stop_id", "value")} for g in given if g.get("stop_id")]
+
+
+def fold_answers(source: Location, target: Location) -> None:
+    """Carry a merged dock's answers to the dock it merges into. Both rows locked
+    by the caller. The source's own record is left as it was, for a revert.
+
+    Every stop's answer is remembered on the target (`absorbed`), so a retry from
+    one of the source's stops is a repeat there too. An open dispute, and an
+    applied answer the target's fact disagrees with, become disputes on the
+    target for a person to settle - two docks just found to be one place, whose
+    doors said different things. Each carried entry names the source
+    (`from_location`), which is what `unfold_answers` takes back.
+    """
+    tag = {"from_location": str(source.id)}
+    record = {name: dict(entry) for name, entry in (target.site_fact_answers or {}).items()}
+    for name, entry in (source.site_fact_answers or {}).items():
+        if name not in SITE_FACTS:
+            continue
+        current = getattr(target, name)
+        raise_here = [
+            {**d, **tag}
+            for d in entry.get("disputes", [])
+            if d.get("value") != current
+        ]
+        if entry.get("stop_id") is not None and entry.get("value") != current:
+            raise_here.append({**{k: entry.get(k) for k in ("by", "at", "stop_id", "value")}, **tag})
+        remembered = [{**g, **tag} for g in _remembered(entry)]
+        if not raise_here and not remembered:
+            continue
+        mine = dict(record.get(name, {}))
+        if raise_here:
+            mine["disputes"] = [*mine.get("disputes", []), *raise_here][-MAX_DISPUTES:]
+        mine["absorbed"] = [*mine.get("absorbed", []), *remembered][-MAX_REMEMBERED:]
+        record[name] = mine
+    # A new dict, so the JSONB column is seen as changed.
+    target.site_fact_answers = record
+
+
+def unfold_answers(source_id: uuid.UUID, target: Location) -> None:
+    """Take back what `fold_answers` carried from this source and is still
+    waiting: its disputes not yet settled, and the answers it remembered. A
+    dispute a person already settled on the target stays in the target's
+    history - that decision was made there."""
+    wanted = str(source_id)
+    record = {}
+    for name, entry in (target.site_fact_answers or {}).items():
+        mine = dict(entry)
+        for key in ("disputes", "absorbed"):
+            if key in mine:
+                mine[key] = [e for e in mine[key] if e.get("from_location") != wanted]
+        record[name] = mine
+    target.site_fact_answers = record
+
+
+async def lock_sites(session: AsyncSession, location_ids: list[uuid.UUID]) -> dict[uuid.UUID, Location]:
+    """Lock these sites' rows in id order, read fresh. In id order so two writers
+    holding several sites (a merge, the desk's run) queue rather than deadlock."""
+    rows = (
+        await session.scalars(
+            select(Location)
+            .where(Location.id.in_(location_ids))
+            .order_by(Location.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).all()
+    return {row.id: row for row in rows}
