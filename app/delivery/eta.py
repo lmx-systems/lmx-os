@@ -283,8 +283,7 @@ async def refresh_route_etas(
     # Writes every unreached stop on the route, so the route first, as every
     # path that writes its stops takes it (app/delivery/routes.py). Free when
     # the caller already holds it, which they all should.
-    await lock_route(session, route_id)
-    route = await session.get(Route, route_id)
+    route = await lock_route(session, route_id)
     if route is None:
         return {"written": 0, "reason": "no_route"}
 

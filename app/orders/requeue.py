@@ -64,10 +64,14 @@ async def requeue_orders_from_offer(
     lost and dispatch gave to somebody else is `assigned` too.
 
     `wake=False` sends them back without waking the hub's cycle, and without
-    the hold queue's wake-up at each order's hold deadline - for these, a
-    deadline already past, so the wake-up fired within a second and woke the
-    cycle anyway. For the stranded sweep below, which runs just before the
-    scheduled cycle for the same hub: that cycle reads them.
+    the hold queue's wake-up for an order whose hold deadline has already
+    passed - that wake-up fired within a second and woke the cycle anyway. For
+    the stranded sweep below, which runs just before the scheduled cycle for
+    the same hub: that cycle reads them. An order still inside its hold (one
+    the failed cycle released early, for a partner or a passing driver) keeps
+    its wake-up: the cycle after the sweep may hold it again, and the cycle
+    removed its wake-up when it planned it, so without one nothing looked at it
+    again until the next sweep or an unrelated event.
 
     `free_driver=False` for orders an offer never reached: the cycle moved them
     to `assigned` for a driver whom somebody else claimed before the cycle could
@@ -136,9 +140,10 @@ async def requeue_orders_from_offer(
             # History is held on purpose and never queued; nothing should have
             # offered it, and if anything did, the queue is not where it goes.
             continue
+        hold_deadline = order.hold_deadline or (now + timedelta(minutes=5))
         await hold_queue.add(
             hub_id,
-            schedule_wakeup=wake,
+            schedule_wakeup=wake or hold_deadline > now,
             order=HeldOrder(
                 order_id=stop["order_id"],
                 shop_lat=stop["lat"],
@@ -150,7 +155,7 @@ async def requeue_orders_from_offer(
                 # "past SLA deadline" rule force-release it immediately
                 # instead of holding it all over again behind the driver
                 # who just declined.
-                hold_deadline=(order.hold_deadline if order else None) or (now + timedelta(minutes=5)),
+                hold_deadline=hold_deadline,
                 held_since=now,
                 shop_name=stop.get("shop_name", ""),
                 # Read off the order rather than the offer payload: the offer only
