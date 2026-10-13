@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { api } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 import type { GigJob, GigPlatform, ItemSizeClass } from '../api/types';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
@@ -23,6 +24,7 @@ import {
 } from '../offline/offPlatformRecord';
 import type { ItemForm, JobForm, OffPlatformDraft } from '../offline/offPlatformRecord';
 import { outboxManager } from '../offline/outboxManager';
+import type { OutboxItem } from '../offline/types';
 import { radius, spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
 
@@ -63,13 +65,19 @@ export function OffPlatformRecordScreen({ navigation, route }: Props) {
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [surveying, setSurveying] = useState<'counter' | 'door' | null>(null);
+  // Known false once the server says the pickup address named no place: then
+  // there is no counter to capture, and it is not offered.
+  const [noCounter, setNoCounter] = useState(false);
+  const [refused, setRefused] = useState<OutboxItem[]>([]);
+  const driverId = useAuth().profile?.driver_id ?? null;
 
   useEffect(() => {
+    if (!driverId) return;
     let live = true;
     const wanted = route.params?.recordId;
     void (async () => {
-      const kept = wanted ? (await loadDrafts()).find((d) => d.recordId === wanted) : undefined;
-      if (live) setDraft(kept ?? newDraft());
+      const kept = wanted ? (await loadDrafts(driverId)).find((d) => d.recordId === wanted) : undefined;
+      if (live) setDraft(kept ?? newDraft(driverId));
     })();
     // Offline this fails and the job is typed instead.
     api
@@ -92,7 +100,21 @@ export function OffPlatformRecordScreen({ navigation, route }: Props) {
     return () => {
       live = false;
     };
-  }, [route.params?.recordId]);
+  }, [route.params?.recordId, driverId]);
+
+  // What the server refused for this record, so the driver can read why and
+  // discard the log rather than be stuck with it.
+  const recordId = draft?.recordId;
+  const pickupStopId = draft?.pickupStopId;
+  useEffect(
+    () =>
+      outboxManager.subscribe((items) =>
+        setRefused(
+          items.filter((i) => i.permanentlyFailed && (i.stopId === recordId || i.stopId === pickupStopId)),
+        ),
+      ),
+    [recordId, pickupStopId],
+  );
 
   if (!draft) return <ScreenContainer>{null}</ScreenContainer>;
 
@@ -141,9 +163,37 @@ export function OffPlatformRecordScreen({ navigation, route }: Props) {
   }
 
   async function atCounter() {
+    if (draft?.pickedUpAt) {
+      // Saving a correction to the item, maybe from the door: the counter's
+      // time and pin stay what they were when it was collected.
+      await send({}, {});
+      return;
+    }
     const pin = pinBody(await currentPin());
     const at = new Date().toISOString();
     await send({ pickup: { ...(pin ? { door_pin: pin } : {}), at } }, { pickedUpAt: at });
+  }
+
+  async function captureCounter() {
+    if (!draft) return;
+    try {
+      const record = await api.getOffPlatformRecord(draft.recordId);
+      if (!record.counter_resolved) {
+        setNoCounter(true);
+        return;
+      }
+    } catch {
+      // Offline, or not landed yet: offered anyway, and the server refuses it
+      // there if the counter turns out to have no place.
+    }
+    setSurveying('counter');
+  }
+
+  async function discard() {
+    if (!draft) return;
+    for (const item of refused) await outboxManager.dismiss(item.id);
+    await removeDraft(draft.recordId);
+    navigation.goBack();
   }
 
   async function delivered() {
@@ -260,11 +310,14 @@ export function OffPlatformRecordScreen({ navigation, route }: Props) {
           onPress={() => void atCounter()}
           loading={busy}
         />
-        {draft.pickedUpAt && (
+        {draft.pickedUpAt && !noCounter && (
           <>
             <View style={styles.gap} />
-            <Button label="Capture the counter (optional)" variant="outline" onPress={() => setSurveying('counter')} />
+            <Button label="Capture the counter (optional)" variant="outline" onPress={() => void captureCounter()} />
           </>
+        )}
+        {noCounter && (
+          <Text style={styles.body}>The pickup address didn't match a place, so there's no counter to capture.</Text>
         )}
       </Card>
 
@@ -280,6 +333,13 @@ export function OffPlatformRecordScreen({ navigation, route }: Props) {
       </Card>
 
       {problem && <Text style={styles.problem}>{problem}</Text>}
+      {refused.length > 0 && (
+        <>
+          <Text style={styles.problem}>Not accepted: {refused[0].lastError}</Text>
+          <Button label="Discard this log" variant="outline" onPress={() => void discard()} />
+          <View style={styles.gap} />
+        </>
+      )}
       {draft.deliveredAt && <Button label="Done" variant="outline" onPress={() => void done()} />}
 
       <DockSurveyModal

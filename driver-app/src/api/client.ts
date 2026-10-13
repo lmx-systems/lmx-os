@@ -281,6 +281,8 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+  getOffPlatformRecord: (recordId: string) =>
+    request<OffPlatformRecordView>(`/driver/me/off-platform-records/${recordId}`),
 
   // DE-5: what each order on a pickup carries, as known so far.
   stopItems: (stopId: string) => request<OrderItemView[]>(`/driver/stops/${stopId}/items`),

@@ -2165,6 +2165,14 @@ async def raise_cod_dispute(
     return await _stop_view_after_reload(session, stop)
 
 
+def _no_dock_to(what: str, stop: Stop) -> str:
+    """Why there is nothing to survey or photograph at this stop."""
+    if stop.stop_type == "pickup":
+        # An off-platform record's counter (`DE-7`) whose address named no place.
+        return f"This pickup's address did not name a place, so there is no counter to {what}"
+    return f"This stop's delivery address is not linked to a dock, so there is nothing to {what} against"
+
+
 @router.post("/stops/{stop_id}/dock-survey", response_model=DockSurveyResult)
 async def record_dock_survey(
     stop_id: str,
@@ -2197,13 +2205,7 @@ async def record_dock_survey(
     stop = await _get_owned_stop(session, stop_id, driver)
     location = await location_for_stop(session, stop)
     if location is None:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "This stop's delivery address is not linked to a dock, so there is "
-                "nothing to survey against"
-            ),
-        )
+        raise HTTPException(status_code=409, detail=_no_dock_to("survey", stop))
 
     driver_uuid = uuid.UUID(driver.driver_id)
     # At a visit (`DE-6`) access is unknown: a technician who hands nothing over
@@ -2271,10 +2273,7 @@ async def record_handoff_photo_route(
     stop = await _get_owned_stop(session, stop_id, driver)
     location = await location_for_stop(session, stop)
     if location is None:
-        raise HTTPException(
-            status_code=409,
-            detail="This stop's delivery address is not linked to a dock, so there is nothing to photograph against",
-        )
+        raise HTTPException(status_code=409, detail=_no_dock_to("photograph", stop))
     await record_handoff_photo(session, stop, location, slot=body.slot, url=body.url)
     await session.commit()
     profile = await profile_for(session, location, create=False)

@@ -52,6 +52,9 @@ export interface ItemForm {
 }
 
 export interface OffPlatformDraft {
+  // Whose it is. A shared phone shows a driver only their own drafts - the job,
+  // its addresses and pay - and a draft is never sent under someone else.
+  driverId: string;
   recordId: string;
   pickupStopId: string;
   // A job already in the store, or null when it is typed on the form.
@@ -80,8 +83,9 @@ export const EMPTY_JOB: JobForm = {
 
 export const EMPTY_ITEM: ItemForm = { description: '', weightKg: '', size: null, hazmat: null };
 
-export function newDraft(now: Date = new Date()): OffPlatformDraft {
+export function newDraft(driverId: string, now: Date = new Date()): OffPlatformDraft {
   return {
+    driverId,
     recordId: uuidV4(),
     pickupStopId: uuidV4(),
     gigJobId: null,
@@ -166,7 +170,7 @@ export function recordBody(
 
 const STORAGE_KEY = 'lmx_off_platform_drafts_v1';
 
-export async function loadDrafts(): Promise<OffPlatformDraft[]> {
+async function allDrafts(): Promise<OffPlatformDraft[]> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     return raw ? (JSON.parse(raw) as OffPlatformDraft[]) : [];
@@ -175,12 +179,26 @@ export async function loadDrafts(): Promise<OffPlatformDraft[]> {
   }
 }
 
+/** This driver's drafts, and nobody else's. */
+export async function loadDrafts(driverId: string): Promise<OffPlatformDraft[]> {
+  return (await allDrafts()).filter((d) => d.driverId === driverId);
+}
+
 export async function saveDraft(draft: OffPlatformDraft): Promise<void> {
-  const drafts = (await loadDrafts()).filter((d) => d.recordId !== draft.recordId);
+  const drafts = (await allDrafts()).filter((d) => d.recordId !== draft.recordId);
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([...drafts, draft]));
 }
 
 export async function removeDraft(recordId: string): Promise<void> {
-  const drafts = (await loadDrafts()).filter((d) => d.recordId !== recordId);
+  const drafts = (await allDrafts()).filter((d) => d.recordId !== recordId);
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(drafts));
+}
+
+/** Signing out: the next person to sign in on this phone sees none of them. */
+export async function clearDrafts(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Best-effort, as loading is: a draft is the screen's place, not the work.
+  }
 }

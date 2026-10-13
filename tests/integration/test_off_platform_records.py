@@ -21,7 +21,8 @@ from app.api.driver_routes import (
     record_dock_survey,
     record_handoff_photo_route,
 )
-from app.api.off_platform_routes import log_off_platform_delivery
+from app.api.off_platform_routes import get_off_platform_record, log_off_platform_delivery
+from app.gig_platform import service as gig_store
 from app.identity.node_class import is_a_served_dock
 from app.models.driver import Driver
 from app.models.gig_job import GigJob
@@ -36,6 +37,7 @@ from app.models.route import Route
 from app.models.stop import Stop
 from app.record.labelling import labelling_queue
 from app.record.off_platform import (
+    INTAKE_RECORD_FORM,
     PLACEHOLDER_RECORD_BONUS_CENTS,
     SOURCE_OFF_PLATFORM,
     off_platform_hub_name,
@@ -412,3 +414,127 @@ class TestNothingThatRunsTheBusinessReadsIt:
         queued = await labelling_queue(db_session, scorer_id="scorer-9", region="TX", limit=50)
 
         assert str(record_id) in {str(row["stop_id"]) for row in queued}
+
+
+class TestReviewFixes:
+    """The review of #218: what the first version let through."""
+
+    async def test_a_counter_with_no_place_is_not_surveyed_onto_the_door(self, db_session):
+        # The pickup address names no place, so the pickup has no counter; the
+        # counter's survey used to fall through to the order - the door.
+        driver, record_id, pickup_id, view = await _logged(db_session, job=_job(pickup_address="N/A"))
+        assert view.counter_resolved is False
+        door_before = await db_session.get(HandoffPoint, (await db_session.get(Stop, record_id)).handoff_point_id)
+        await db_session.refresh(door_before)
+        assert door_before.handoff_type is None
+
+        with pytest.raises(HTTPException) as refused:
+            await _capture(db_session, driver, pickup_id, who_receives="counter_staff")
+
+        assert refused.value.status_code == 409
+        assert "no counter" in refused.value.detail
+        await db_session.refresh(door_before)
+        assert door_before.handoff_type is None
+        assert (await db_session.get(Stop, pickup_id)).handoff_point_id is None
+
+    async def test_the_counter_is_resolved_when_its_address_names_a_place(self, db_session):
+        _, _, _, view = await _logged(db_session)
+        assert view.counter_resolved is True
+
+    async def test_a_later_save_does_not_move_the_pickup_time(self, db_session):
+        driver, record_id, pickup_id, view = await _logged(db_session)
+        first = view.picked_up_at
+
+        # A correction to the item made at the door, with a fresh time.
+        again = await _log(
+            db_session, driver, record_id, pickup_stop_id=pickup_id, gig_job_id=view.gig_job_id,
+            item=dict(item_weight_kg=12.0), pickup=dict(at=datetime.now(timezone.utc).isoformat()),
+        )
+
+        assert again.picked_up_at == first
+        assert again.picked_up_at < again.delivered_at
+
+    async def test_a_pickup_after_the_delivery_is_refused(self, db_session):
+        _, driver = await _driver(db_session)
+        record_id, pickup_id = uuid.uuid4(), uuid.uuid4()
+        job = _job()
+        delivered = datetime.now(timezone.utc) - timedelta(minutes=30)
+        await _log(db_session, driver, record_id, pickup_stop_id=pickup_id, job=job, dropoff=dict(at=delivered.isoformat()))
+
+        with pytest.raises(HTTPException) as refused:
+            await _log(
+                db_session, driver, record_id, pickup_stop_id=pickup_id, job=job,
+                pickup=dict(at=(delivered + timedelta(minutes=5)).isoformat()),
+            )
+
+        assert refused.value.status_code == 422
+
+    async def test_the_bonus_is_owed_for_a_delivery_not_a_record_started(self, db_session):
+        _, driver = await _driver(db_session)
+        record_id, pickup_id = uuid.uuid4(), uuid.uuid4()
+        job = _job()
+
+        started = await _log(db_session, driver, record_id, pickup_stop_id=pickup_id, job=job, pickup=_at_the_counter())
+        assert started.record_bonus_cents is None
+
+        delivered = await _log(db_session, driver, record_id, pickup_stop_id=pickup_id, job=job, dropoff=_at_the_door())
+        assert delivered.record_bonus_cents == PLACEHOLDER_RECORD_BONUS_CENTS
+
+    async def test_a_typed_job_is_marked_for_checking_and_a_picked_one_is_not(self, db_session):
+        _, _, _, typed = await _logged(db_session)
+        assert (await db_session.get(GigJob, uuid.UUID(typed.gig_job_id))).intake_source == INTAKE_RECORD_FORM
+
+        hub, driver = await _driver(db_session)
+        stored = GigJob(
+            hub_id=hub.id, driver_id=driver.id, source_platform="roadie", platform_job_ref=f"R-{uuid.uuid4().hex[:8]}",
+            pickup_address="1 Supply Way, Pflugerville, TX 78660", dropoff_address="2 Shop Ln, Pflugerville, TX 78660",
+            pay_cents=1000, status="accepted", intake_source="notification",
+            pickup_window_open=datetime.now(timezone.utc), pickup_window_close=datetime.now(timezone.utc),
+        )
+        db_session.add(stored)
+        await db_session.commit()
+        await _log(db_session, driver, uuid.uuid4(), pickup_stop_id=uuid.uuid4(), gig_job_id=str(stored.id), item=ITEM)
+        await db_session.refresh(stored)
+        assert stored.intake_source == "notification"
+
+    async def test_a_job_recorded_in_between_is_used_not_a_500(self, db_session, monkeypatch):
+        # Another request records the job between our lookup and the store's.
+        _, driver = await _driver(db_session)
+        job = _job()
+        real_find = gig_store.find_by_platform_ref
+        calls = {"n": 0}
+
+        async def first_misses(session, platform, ref):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return None
+            return await real_find(session, platform, ref)
+
+        hub = await db_session.get(Hub, driver.hub_id)
+        stored = GigJob(
+            hub_id=hub.id, driver_id=driver.id, source_platform=job["source_platform"],
+            platform_job_ref=job["platform_job_ref"], pickup_address=job["pickup_address"],
+            dropoff_address=job["dropoff_address"], pay_cents=job["pay_cents"], status="accepted",
+            pickup_window_open=datetime.now(timezone.utc), pickup_window_close=datetime.now(timezone.utc),
+        )
+        db_session.add(stored)
+        await db_session.commit()
+        monkeypatch.setattr(gig_store, "find_by_platform_ref", first_misses)
+
+        # Our lookup misses it; the store's own finds it and raises. The record
+        # uses that row rather than failing.
+        view = await _log(db_session, driver, uuid.uuid4(), pickup_stop_id=uuid.uuid4(), job=job)
+
+        assert view.gig_job_id == str(stored.id)
+
+    async def test_the_record_is_readable_by_its_driver_alone(self, db_session):
+        driver, record_id, _, view = await _logged(db_session)
+        _, other = await _driver(db_session)
+
+        mine = await get_off_platform_record(record_id, driver=_authed(driver.id, driver.hub_id), session=db_session)
+        assert (mine.record_id, mine.counter_resolved) == (view.record_id, True)
+
+        for who, rid in ((other, record_id), (driver, uuid.uuid4())):
+            with pytest.raises(HTTPException) as missing:
+                await get_off_platform_record(rid, driver=_authed(who.id, who.hub_id), session=db_session)
+            assert missing.value.status_code == 404

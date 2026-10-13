@@ -34,9 +34,13 @@ further, because these stops carry an order:
     gig-classified driver (`GigPayout`), so a logged job can never be paid that
     way.
 
-**The bonus** for logging a job is recorded on the job when the record is made
-(`PLACEHOLDER_RECORD_BONUS_CENTS`) and not paid: Stripe Connect is stubbed, and a
-payout keyed on a gig job does not exist yet.
+**The bonus** for logging a job is recorded on the job once the delivery is - a
+drop-off time, not just a record started (`PLACEHOLDER_RECORD_BONUS_CENTS`) - and
+not paid: Stripe Connect is stubbed, and a payout keyed on a gig job does not
+exist yet. A job typed on the record form rather than picked from the driver's
+jobs is recorded with `intake_source = 'record_form'`, which the console's gig
+panel shows as one to check before anything is paid: it rests on the driver's
+word alone.
 
 **Urgency and the pickup end** are graded the off-platform way (migration 0079):
 the platform's drop-off deadline is the job's urgency, since LMX never held it to
@@ -54,6 +58,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.gig_platform import service as gig_store
+from app.gig_platform.service import DuplicateGigJob
 from app.identity.handoff_capture import handoff_point_for
 from app.identity.resolution import resolve_location
 from app.models.gig_job import GigJob
@@ -75,6 +80,10 @@ STOP_STATUS_RECORDED = "recorded"
 # What logging one job earns the driver. A placeholder, as `PLACEHOLDER_HOURLY_RATE_CENTS`
 # is: the amount is a commercial call nobody has made, and it is owed, not paid.
 PLACEHOLDER_RECORD_BONUS_CENTS = 500
+
+# A job typed on the record form, not captured anywhere else: the driver's word
+# alone, so the console shows it as one to check before the bonus is paid.
+INTAKE_RECORD_FORM = "record_form"
 
 # How far ahead of our clock a phone may say something happened. The same bound
 # geofence crossings get: phones drift by seconds, not minutes.
@@ -107,7 +116,13 @@ def off_platform_hub_name(region: str | None) -> str:
 
 async def off_platform_hub(session: AsyncSession, region: str | None, *, timezone: str) -> Hub:
     """The region's off-platform hub, made on first use. Inactive, and at no
-    coordinates: a container for logged jobs, not a depot."""
+    coordinates: a container for logged jobs, not a depot.
+
+    Made under a transaction lock on its name, so two first records in a region
+    at once make one hub rather than two."""
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:name))"), {"name": off_platform_hub_name(region)}
+    )
     hub = (
         await session.scalars(
             select(Hub)
@@ -131,13 +146,19 @@ async def _the_job(session: AsyncSession, body: OffPlatformRecordBody, *, driver
         assert body.job is not None  # the body's validator
         existing = await gig_store.find_by_platform_ref(session, body.job.source_platform, body.job.platform_job_ref)
         if existing is None:
+            # Typed on the form: marked as such, so it is checked before any
+            # bonus on it is paid.
+            typed = body.job.model_copy(update={"intake_source": INTAKE_RECORD_FORM})
             try:
                 async with session.begin_nested():
                     created = await gig_store.record_job(
-                        session, body.job, hub_id=str(home.id), driver_id=str(driver_id),
+                        session, typed, hub_id=str(home.id), driver_id=str(driver_id),
                         status="accepted", commit=False,
                     )
                 job_id = created.id
+            except DuplicateGigJob as recorded:
+                # Recorded in between our lookup and the store's own.
+                existing = recorded.existing
             except IntegrityError:
                 # The same job recorded by another request in between - a retry
                 # racing its own first attempt. Theirs is the row.
@@ -262,7 +283,6 @@ async def _create(
     await session.flush()
     session.add_all([StopOrder(stop_id=pickup.id, order_id=order.id), StopOrder(stop_id=dropoff.id, order_id=order.id)])
     job.record_order_id = order.id
-    job.record_bonus_cents = PLACEHOLDER_RECORD_BONUS_CENTS
     await session.flush()
     return OffPlatformRecord(job=job, order=order, pickup=pickup, dropoff=dropoff)
 
@@ -320,10 +340,15 @@ async def log_off_platform_record(
         if "item_hazmat_or_liquid" in given:
             order.item_hazmat_or_liquid = given["item_hazmat_or_liquid"]
 
+    # Each end's time is the first one sent: the tap at the counter or the door.
+    # A later send from either end - a correction to the item made at the door -
+    # does not move it, and an end can never be later than the drop-off.
     if body.pickup is not None:
         _pin(record.pickup, body.pickup)
         picked_up_at = _when(body.pickup)
-        if picked_up_at is not None:
+        if picked_up_at is not None and record.pickup.completed_at is None:
+            if record.dropoff.completed_at is not None and picked_up_at > record.dropoff.completed_at:
+                raise RecordInvalid("the pickup cannot be after the delivery")
             record.pickup.completed_at = picked_up_at
             gig_store.advance_to(job, "picked_up", at=picked_up_at)
             if order.status == OrderStatus.accepted:
@@ -336,13 +361,42 @@ async def log_off_platform_record(
             # Located by the door itself when the job's address had no coordinates.
             order.delivery_lat, order.delivery_lng = door.lat, door.lng
         delivered_at = _when(body.dropoff)
-        if delivered_at is not None:
+        if delivered_at is not None and record.dropoff.completed_at is None:
+            if record.pickup.completed_at is not None and delivered_at < record.pickup.completed_at:
+                raise RecordInvalid("the delivery cannot be before the pickup")
             record.dropoff.completed_at = delivered_at
             order.delivered_at = delivered_at
             order.status = OrderStatus.delivered
             gig_store.advance_to(job, "delivered", at=delivered_at)
+            # Owed for a delivery, not for a record started.
+            if job.record_bonus_cents is None:
+                job.record_bonus_cents = PLACEHOLDER_RECORD_BONUS_CENTS
 
     await session.flush()
+    return record
+
+
+async def find_off_platform_record(
+    session: AsyncSession, *, driver_id: uuid.UUID, record_id: uuid.UUID
+) -> OffPlatformRecord:
+    """This driver's record by its id - the drop-off stop's. Someone else's reads
+    as none, as the gig-job endpoints do."""
+    dropoff = await session.get(Stop, record_id)
+    route = await session.get(Route, dropoff.route_id) if dropoff is not None else None
+    if (
+        dropoff is None
+        or route is None
+        or route.driver_id != driver_id
+        or dropoff.record_source != SOURCE_OFF_PLATFORM
+        or dropoff.stop_type != "dropoff"
+    ):
+        raise RecordNotFound("record not found")
+    order_id = (
+        await session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == dropoff.id).limit(1))
+    ).scalar_one()
+    job = (await session.scalars(select(GigJob).where(GigJob.record_order_id == order_id))).one()
+    record = await _existing(session, job, record_id)
+    assert record is not None  # the job points at this order
     return record
 
 

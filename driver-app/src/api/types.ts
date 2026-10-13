@@ -159,6 +159,8 @@ export interface OffPlatformRecordView {
   tier: string | null;
   elements_missing: number | null;
   record_bonus_cents: number | null;
+  // False when the pickup address named no place: no counter to capture.
+  counter_resolved: boolean;
 }
 
 /** Mirrors app/schemas/driver_app.py OrderItemView. Null = not known yet. */

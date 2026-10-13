@@ -56,13 +56,16 @@ export function TodayRouteScreen({ navigation }: Props) {
   // DE-7: off-platform deliveries started and not yet logged at the door.
   const [drafts, setDrafts] = useState<OffPlatformDraft[]>([]);
 
-  useEffect(
-    () =>
-      navigation.addListener('focus', () => {
-        void loadDrafts().then(setDrafts);
-      }),
-    [navigation],
-  );
+  const driverId = profile?.driver_id ?? null;
+  useEffect(() => {
+    // Only this driver's: a shared phone holds someone else's too.
+    const load = () => {
+      if (driverId) void loadDrafts(driverId).then(setDrafts);
+      else setDrafts([]);
+    };
+    load();
+    return navigation.addListener('focus', load);
+  }, [navigation, driverId]);
 
   useRouteEvents(route?.route_id ?? null, useCallback((event) => setRouteChangeEvent(event), []));
 

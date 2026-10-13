@@ -176,4 +176,6 @@ holding the item, a pickup and a drop-off stop with `record_source =
 
 Its stops' status is `recorded` and its route's `record`: something that
 happened elsewhere, written down, never LMX work. `gig_jobs.record_bonus_cents`
-is the bonus owed for logging it, recorded and not paid.
+is the bonus owed for logging it - set once the drop-off time is, recorded and
+not paid. A job typed on the record form has `gig_jobs.intake_source =
+'record_form'`: the driver's word alone, checked before any bonus is paid.
