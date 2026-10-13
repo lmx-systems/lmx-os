@@ -799,3 +799,270 @@ class TestOffersThatNeverCommit:
 
         state = await FleetStateManager().get_driver_state(str(hub_id), str(driver_id))
         assert state.status == "available"
+
+
+# ---------------------------------------------------------------------------
+# Review of #216: history, the hub lock, the claim, and one requeue per offer
+# ---------------------------------------------------------------------------
+
+
+def _past_the_grace() -> datetime:
+    return datetime.now(timezone.utc) - timedelta(seconds=settings.stuck_order_after_seconds + 60)
+
+
+async def _lapse(db_session, offer_id: str) -> None:
+    offer = await db_session.get(RouteOffer, uuid.UUID(offer_id))
+    offer.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await db_session.commit()
+
+
+class TestHistoryIsNeverDispatched:
+    """A backfill loads history as `held` with a deadline long past, on purpose
+    and never queued. The exceptions queue listed every imported order as
+    "nobody has it", with an Assign button that sent a driver to collect a
+    delivery that had already happened."""
+
+    async def test_a_backfilled_order_is_not_listed(self, db_session, real_redis_client):
+        hub_id, _client, _shop, _driver, order_id, _authed = await _idle(db_session)
+        order = await db_session.get(Order, order_id)
+        order.hold_deadline = _past_the_grace()
+        order.intake_mode = "backfill"
+        await db_session.commit()
+
+        queue = await build_exception_queue(db_session, hub_id=hub_id)
+
+        assert all(i.order_id != order_id for i in queue.items)
+
+    async def test_assigning_one_is_refused(self, db_session, real_redis_client):
+        hub_id, _client, _shop, driver_id, order_id, _authed = await _idle(db_session)
+        order = await db_session.get(Order, order_id)
+        order.intake_mode = "backfill"
+        await db_session.commit()
+
+        refused = await _refused(db_session, order_id, driver_id)
+
+        assert refused.status_code == 422
+        assert "history" in refused.detail
+        db_session.expire_all()
+        assert (await db_session.get(Order, order_id)).status == OrderStatus.held
+        assert (await db_session.scalar(select(RouteOffer.id).limit(1))) is None
+        state = await FleetStateManager().get_driver_state(str(hub_id), str(driver_id))
+        assert state.status == "available"
+
+    async def test_a_requeue_never_puts_one_in_the_hold_queue(self, db_session, real_redis_client):
+        from app.orders.requeue import requeue_orders_from_offer
+
+        hub_id, _client, _shop, driver_id, order_id, _authed = await _idle(db_session)
+        await HoldQueueStore().remove(str(hub_id), str(order_id))
+        order = await db_session.get(Order, order_id)
+        order.intake_mode = "backfill"
+        order.status = OrderStatus.assigned
+        await db_session.commit()
+
+        await requeue_orders_from_offer(
+            db_session,
+            str(hub_id),
+            str(driver_id),
+            [{"order_id": str(order_id), "lat": 34.051, "lng": -118.251, "sla_tier": "T2", "shop_name": "x"}],
+        )
+        await db_session.commit()
+
+        assert str(order_id) not in await _held_ids(hub_id)
+
+
+class TestTheAssignTakesTheHub:
+    """The rebuild reads the open offers once, then corrects each `offered`
+    driver it finds with none. An assign committed in between had its driver
+    put back in the pool, and the sweep's next cycle offered them a second job.
+    The assign now holds the hub lock every cycle and the rebuild take."""
+
+    async def test_it_waits_then_refuses_while_dispatch_runs(self, db_session, real_redis_client, monkeypatch):
+        import app.orders.assignment as assignment_module
+        from app.events.bus import release_hub_lock, try_acquire_hub_lock
+
+        monkeypatch.setattr(assignment_module, "HUB_LOCK_WAIT_SECONDS", 0.3)
+        hub_id, _client, _shop, driver_id, order_id, _authed = await _idle(db_session)
+        token = await try_acquire_hub_lock(str(hub_id))
+        assert token is not None
+        try:
+            refused = await _refused(db_session, order_id, driver_id)
+        finally:
+            await release_hub_lock(str(hub_id), token)
+
+        assert refused.status_code == 409
+        assert "Dispatch is running" in refused.detail
+        db_session.expire_all()
+        assert (await db_session.get(Order, order_id)).status == OrderStatus.held
+        state = await FleetStateManager().get_driver_state(str(hub_id), str(driver_id))
+        assert state.status == "available"
+
+    async def test_it_goes_through_once_dispatch_lets_go(self, db_session, real_redis_client):
+        from app.events.bus import release_hub_lock, try_acquire_hub_lock
+
+        hub_id, _client, _shop, driver_id, order_id, _authed = await _idle(db_session)
+        token = await try_acquire_hub_lock(str(hub_id))
+
+        async def let_go():
+            await asyncio.sleep(0.3)
+            await release_hub_lock(str(hub_id), token)
+
+        releasing = asyncio.create_task(let_go())
+        result = await _assign(db_session, order_id, driver_id)
+        await releasing
+
+        assert result.offer_id
+        # And the assign let go of it in turn, so the cycle its event wakes can run.
+        again = await try_acquire_hub_lock(str(hub_id))
+        assert again is not None
+        await release_hub_lock(str(hub_id), again)
+
+    async def test_the_rebuild_cannot_free_a_driver_mid_assign(self, db_session, real_redis_client):
+        """The rebuild under the hub lock finds the assign holding it and skips
+        the hub, rather than reading the offers before the assign's commit."""
+        from app.events.bus import hub_lock
+        from app.optimizer.redis_rebuild import reconcile_redis_state
+
+        hub_id, _client, _shop, driver_id, order_id, _authed = await _idle(db_session)
+        async with hub_lock(str(hub_id)) as held:
+            assert held
+            rebuilt = await reconcile_redis_state()
+        assert rebuilt["hubs"][str(hub_id)] == "skipped: a cycle is running"
+
+
+class TestTheClaimIsOneStep:
+    async def test_a_claim_takes_an_available_driver_once(self, db_session, real_redis_client):
+        hub_id, _client, _shop, driver_id, _order_id, _authed = await _idle(db_session)
+        manager = FleetStateManager()
+
+        first = await manager.claim_for_offer(str(hub_id), str(driver_id))
+        second = await manager.claim_for_offer(str(hub_id), str(driver_id))
+
+        assert first is not None and second is None
+        before, after = first
+        assert (before.status, after.status) == ("available", "offered")
+        assert before.capacity_units == after.capacity_units == 5
+        assert str(driver_id) not in await manager.get_available_driver_ids(str(hub_id))
+        assert (await manager.get_driver_state(str(hub_id), str(driver_id))).status == "offered"
+
+    async def test_a_driver_on_break_is_not_claimed(self, db_session, real_redis_client):
+        hub_id, _client, _shop, driver_id, _order_id, _authed = await _idle(db_session)
+        await _set_state(hub_id, driver_id, status="on_break")
+
+        assert await FleetStateManager().claim_for_offer(str(hub_id), str(driver_id)) is None
+        state = await FleetStateManager().get_driver_state(str(hub_id), str(driver_id))
+        assert state.status == "on_break"
+
+    async def test_giving_a_claim_back_does_not_undo_a_break(self, db_session, real_redis_client):
+        """The claim's commit failed, and in the meantime the driver went on
+        break. Writing the claim's `before` back put them in the pool."""
+        hub_id, _client, _shop, driver_id, _order_id, _authed = await _idle(db_session)
+        manager = FleetStateManager()
+        before, _ = await manager.claim_for_offer(str(hub_id), str(driver_id))
+        await _set_state(hub_id, driver_id, status="on_break")
+
+        assert await manager.give_back_claim(before) is False
+
+        assert (await manager.get_driver_state(str(hub_id), str(driver_id))).status == "on_break"
+        assert str(driver_id) not in await manager.get_available_driver_ids(str(hub_id))
+
+    async def test_a_decline_does_not_undo_a_break(self, db_session, real_redis_client):
+        hub_id, _client, _shop, driver_id, order_id, authed = await _idle(db_session)
+        result = await _assign(db_session, order_id, driver_id)
+        await _set_state(hub_id, driver_id, status="on_break")
+
+        await decline_offer(result.offer_id, driver=authed, session=db_session)
+
+        state = await FleetStateManager().get_driver_state(str(hub_id), str(driver_id))
+        assert state.status == "on_break"
+        db_session.expire_all()
+        assert (await db_session.get(Order, order_id)).status == OrderStatus.held
+
+
+class TestAnOfferIsSentBackOnce:
+    """The sweep, the driver's offer list and cancel each read open offers
+    without a lock. A stale copy processed after the offer was already settled
+    sent its orders back a second time - by then possibly given to somebody
+    else - and freed a driver who had been offered other work."""
+
+    async def test_a_stale_copy_of_a_lapsed_offer_sends_nothing_back(self, db_session, real_redis_client):
+        from app.api.driver_routes import _expire_if_lapsed
+        from app.db import session_scope
+
+        hub_id, _client, _shop, driver_id, order_id, authed = await _idle(db_session)
+        result = await _assign(db_session, order_id, driver_id)
+        await _lapse(db_session, result.offer_id)
+
+        async with session_scope() as sweep:
+            stale = await sweep.get(RouteOffer, uuid.UUID(result.offer_id))
+            assert stale.status == "offered"
+
+            # The driver's app expires it first: the order goes back, the driver
+            # is free - and then both are taken again by somebody else.
+            assert await list_my_offers(driver=authed, session=db_session) == []
+            order = await db_session.get(Order, order_id)
+            order.status = OrderStatus.assigned
+            await db_session.commit()
+            await HoldQueueStore().remove(str(hub_id), str(order_id))
+            await _set_state(hub_id, driver_id, status="offered")
+
+            await _expire_if_lapsed(sweep, stale)
+            await sweep.commit()
+
+        db_session.expire_all()
+        assert (await db_session.get(Order, order_id)).status == OrderStatus.assigned
+        assert str(order_id) not in await _held_ids(hub_id)
+        state = await FleetStateManager().get_driver_state(str(hub_id), str(driver_id))
+        assert state.status == "offered"
+
+    async def test_the_sweep_skips_an_offer_being_answered(self, db_session, real_redis_client):
+        from app.api.driver_routes import expire_lapsed_offers
+        from app.db import session_scope
+
+        _hub, _client, _shop, driver_id, order_id, _authed = await _idle(db_session)
+        result = await _assign(db_session, order_id, driver_id)
+        await _lapse(db_session, result.offer_id)
+
+        async with session_scope() as answering:
+            await answering.execute(
+                select(RouteOffer).where(RouteOffer.id == uuid.UUID(result.offer_id)).with_for_update()
+            )
+            async with session_scope() as sweep:
+                assert await asyncio.wait_for(expire_lapsed_offers(sweep), timeout=5) == 0
+                await sweep.commit()
+            await answering.rollback()
+
+        assert await expire_lapsed_offers(db_session) == 1
+        await db_session.commit()
+        db_session.expire_all()
+        assert (await db_session.get(Order, order_id)).status == OrderStatus.held
+
+    async def test_cancel_waits_for_an_answer_and_does_not_overwrite_it(self, db_session, real_redis_client):
+        """A cancel read the offer as open while the driver was declining it. It
+        marked the declined offer `withdrawn`, and its requeue ran a second time."""
+        from app.db import session_scope
+        from app.orders.cancellation import STOPS_REMOVED, cancel_live_order
+
+        _hub, _client, _shop, driver_id, order_id, _authed = await _idle(db_session)
+        result = await _assign(db_session, order_id, driver_id)
+        offer_id = uuid.UUID(result.offer_id)
+
+        async def the_cancel():
+            async with session_scope() as session:
+                order = await session.get(Order, order_id)
+                return await cancel_live_order(session, HoldQueueStore(), order)
+
+        async with session_scope() as declining:
+            offer = (
+                await declining.execute(select(RouteOffer).where(RouteOffer.id == offer_id).with_for_update())
+            ).scalar_one()
+            offer.status = "declined"
+            await declining.flush()
+            cancel = asyncio.create_task(the_cancel())
+            await asyncio.sleep(0.3)
+            assert not cancel.done()
+            await declining.commit()
+
+        assert await cancel == STOPS_REMOVED
+        db_session.expire_all()
+        assert (await db_session.get(RouteOffer, offer_id)).status == "declined"
+        assert (await db_session.get(Order, order_id)).status == OrderStatus.cancelled

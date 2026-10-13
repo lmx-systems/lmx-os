@@ -15,10 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.batch_queue.queue import HeldOrder
 from app.batch_queue.store import HoldQueueStore
 from app.fleet_state.manager import FleetStateManager
-from app.models.order import Order, OrderStatus
+from app.models.order import INTAKE_LIVE, Order, OrderStatus
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.orders.sinks import emit_status_change
-from app.schemas.fleet import DriverState
 
 
 async def requeue_orders_from_offer(
@@ -45,23 +44,23 @@ async def requeue_orders_from_offer(
     app/optimizer/service.py) precisely so they can't be offered a second,
     overlapping job while this one is still pending.
 
+    **Called once per offer.** Every caller moves the offer out of `offered`
+    with the row locked first (decline, accept's lapse check, the expiry sweep,
+    the driver's offer list, cancel's withdrawal), so a second, stale copy of
+    the same offer finds it answered and sends nothing back. Only that makes
+    "still `assigned`" mean "still assigned on this offer": an order this offer
+    lost and dispatch gave to somebody else is `assigned` too.
+
     `free_driver=False` for orders an offer never reached: the cycle moved them
     to `assigned` for a driver whom somebody else claimed before the cycle could
     (app/optimizer/service.py). That driver's `offered` belongs to the other
     offer, and must stand.
     """
-    manager = FleetStateManager()
-    existing_state = await manager.get_driver_state(hub_id, driver_id) if free_driver else None
-    if existing_state is not None and existing_state.status == "offered":
-        await manager.upsert_driver_state(
-            DriverState(
-                driver_id=driver_id,
-                hub_id=hub_id,
-                status="available",
-                capacity_units=existing_state.capacity_units,
-                load_units=existing_state.load_units,
-                current_route_id=existing_state.current_route_id,
-            )
+    if free_driver:
+        # Only from `offered`, in one step: a driver who went on break between a
+        # read and a write here was put back in the pool.
+        await FleetStateManager().set_status_if(
+            hub_id, driver_id, expect_status="offered", new_status="available"
         )
 
     hold_queue = HoldQueueStore()
@@ -115,6 +114,10 @@ async def requeue_orders_from_offer(
         order = orders_by_id.get(uuid.UUID(stop["order_id"]))
         if order is None:
             continue  # not this offer's to send back; see above
+        if order.intake_mode != INTAKE_LIVE:
+            # History is held on purpose and never queued; nothing should have
+            # offered it, and if anything did, the queue is not where it goes.
+            continue
         await hold_queue.add(
             hub_id,
             HeldOrder(
