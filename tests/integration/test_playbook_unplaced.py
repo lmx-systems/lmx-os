@@ -4,6 +4,7 @@ It recommends a free driver - every check a person's assign makes - or hands
 the order to a person, once per spell of being unplaced; a person's assign of
 the same driver agrees with it, anything else overrules it.
 """
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -15,7 +16,11 @@ from app.api.routes import override_order
 from app.config import settings
 from app.driver_auth.dependencies import AuthedDriver
 from app.fleet_state.manager import FleetStateManager
+from app.models.driver import Driver
 from app.models.order import Order, OrderStatus
+from app.models.route import Route
+from app.models.route_offer import RouteOffer
+from app.models.stop import Stop, StopOrder
 from app.models.playbook_decision import PlaybookDecision
 from app.ops_auth.dependencies import AuthedOpsUser
 from app.orders.status_service import advance_orders
@@ -247,11 +252,81 @@ async def test_the_bonus_is_owed_once_delivered(db_session, real_redis_client):
     await accept_offer(result.offer_id, driver=authed, session=db_session)
     assert (await get_my_earnings(driver=authed, session=db_session)).bonuses_owed_cents == 0
 
+    await _finish_drop_off(db_session, order_id, driver_id, status="completed")
+
+    assert (await get_my_earnings(driver=authed, session=db_session)).bonuses_owed_cents == 500
+
+
+async def _finish_drop_off(db_session, order_id, driver_id, *, status):
+    """The drop-off for this order on the driver's route, marked done or failed."""
+    stop_id = await db_session.scalar(
+        select(Stop.id)
+        .join(StopOrder, StopOrder.stop_id == Stop.id)
+        .join(Route, Route.id == Stop.route_id)
+        .where(StopOrder.order_id == order_id, Stop.stop_type == "dropoff", Route.driver_id == driver_id)
+    )
+    now = datetime.now(timezone.utc)
     await db_session.execute(
-        update(Order)
-        .where(Order.id == order_id)
-        .values(status=OrderStatus.delivered, delivered_at=datetime.now(timezone.utc))
+        update(Stop).where(Stop.id == stop_id).values(status=status, completed_at=now if status == "completed" else None)
+    )
+    if status == "completed":
+        await db_session.execute(
+            update(Order).where(Order.id == order_id).values(status=OrderStatus.delivered, delivered_at=now)
+        )
+    await db_session.commit()
+
+
+async def test_the_bonus_is_not_owed_when_somebody_else_delivers(db_session, real_redis_client):
+    """The drop-off failed on the bonus driver's route and another driver delivered
+    the redelivery: the bonus was for a delivery this driver did not make."""
+    hub_id, driver_id, order_id = await _unplaced(db_session)
+    result = await assign_order(
+        order_id, AssignOrderBody(driver_id=driver_id, with_bonus=True), session=db_session, ops=DISPATCHER
+    )
+    authed = AuthedDriver(driver_id=str(driver_id), hub_id=str(hub_id), device_id="test-device")
+    await accept_offer(result.offer_id, driver=authed, session=db_session)
+    await _finish_drop_off(db_session, order_id, driver_id, status="failed")
+
+    other = Driver(hub_id=hub_id, name="Other D.", phone=f"+1555{uuid.uuid4().int % 10**7:07d}", vehicle_capacity_units=5)
+    db_session.add(other)
+    await db_session.flush()
+    route = Route(hub_id=hub_id, driver_id=other.id, status="completed")
+    db_session.add(route)
+    await db_session.flush()
+    stop = Stop(route_id=route.id, sequence=1, stop_type="dropoff", status="completed",
+                completed_at=datetime.now(timezone.utc), parcel_count=1)
+    db_session.add(stop)
+    await db_session.flush()
+    db_session.add(StopOrder(stop_id=stop.id, order_id=order_id))
+    await db_session.execute(
+        update(Order).where(Order.id == order_id).values(status=OrderStatus.delivered, delivered_at=datetime.now(timezone.utc))
     )
     await db_session.commit()
 
-    assert (await get_my_earnings(driver=authed, session=db_session)).bonuses_owed_cents == 500
+    assert (await get_my_earnings(driver=authed, session=db_session)).bonuses_owed_cents == 0
+
+
+async def test_a_decline_between_sweeps_brings_the_call_up_to_date(db_session, real_redis_client):
+    """A cycle offers the order and the driver declines before the next sweep, so
+    no sweep sees it leave. The call must not go on advising the refused offer."""
+    hub_id, driver_id, order_id = await _unplaced(db_session)
+    await run_playbook(db_session, hub_id)
+    db_session.add(
+        RouteOffer(
+            hub_id=hub_id, driver_id=driver_id, status="declined",
+            stop_payload=[{"order_id": str(order_id), "lat": 34.051, "lng": -118.251, "sla_tier": "T2"}],
+            offered_at=datetime.now(timezone.utc), expires_at=datetime.now(timezone.utc),
+        )
+    )
+    await db_session.commit()
+
+    sweep = await run_playbook(db_session, hub_id)
+
+    assert (sweep.called, sweep.superseded) == (1, 1)
+    calls = await _calls(db_session, order_id)
+    assert [(c.attempt, c.action, c.outcome) for c in calls] == [
+        (1, "offer", "superseded"),
+        (2, "offer_bonus", "open"),
+    ]
+    # And unchanged, it is left alone.
+    assert (await run_playbook(db_session, hub_id)).called == 0

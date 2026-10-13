@@ -392,17 +392,21 @@ async def _close_unplaced_moved_on(session: AsyncSession, hub_id: uuid.UUID, now
 async def _call_unplaced(
     session: AsyncSession, hub_id: uuid.UUID, now: datetime, sweep: PlaybookSweep, fleet: FleetStateManager
 ) -> None:
-    """One call per spell of being unplaced: an order with no current call gets one.
+    """Decide every unplaced order again, and keep each one's current call in step.
 
-    A call stays current (`closed_at` null) until the order moves or a person
-    acts, escalations included - so an order nobody can take is escalated once,
-    not every sweep. The next spell, after a declined offer say, is a new call
-    with the next `attempt`.
+    A call stays current (`closed_at` null) until the order moves, a person acts,
+    or the rule's answer changes. Re-deciding every sweep is what makes the last
+    case work: event-driven cycles offer an order between sweeps, and a decline
+    sends it straight back unplaced - the sweep never sees it leave - so a call
+    made once would keep advising an offer the driver has already refused. An
+    unchanged answer leaves the call alone, so an order nobody can take is
+    escalated once, not every sweep; a changed one supersedes it (an escalation
+    simply ends) and a new call takes the next `attempt`.
     """
     called = PlaybookDecision.__table__.alias("called")
-    uncalled = list(
+    unplaced = list(
         await session.execute(
-            select(Order, Shop)
+            select(Order, Shop, called.c.id, called.c.action, called.c.target, called.c.outcome)
             .join(Shop, Shop.id == Order.shop_id)
             .outerjoin(
                 called,
@@ -412,17 +416,17 @@ async def _call_unplaced(
                     called.c.closed_at.is_(None),
                 ),
             )
-            .where(Order.hub_id == hub_id, unplaced_clause(now), called.c.id.is_(None))
+            .where(Order.hub_id == hub_id, unplaced_clause(now))
             .order_by(Order.requested_at, Order.id)
         )
     )
-    if not uncalled:
+    if not unplaced:
         return
     hub_closed = await is_hub_closed_at(session, str(hub_id), now)
     candidates = [] if hub_closed else await _free_drivers(session, hub_id, now, fleet)
     mode = rule_mode(RULE_UNPLACED)
-    for order, shop in uncalled:
-        history, turned_down_by = await _offer_history(session, order.id)
+    for order, shop, current_id, current_action, current_target, held_outcome in unplaced:
+        history, turned_down_by = await _offer_history(session, hub_id, order.id)
         call = decide_unplaced(
             [
                 Candidate(
@@ -442,6 +446,25 @@ async def _call_unplaced(
             history=history,
             bonus_cents=settings.offer_bonus_cents,
         )
+        if current_id is not None:
+            if (current_action, current_target) == (call.action, call.target):
+                continue
+            # The answer changed. Closed only if still current: a person acting on
+            # it right now holds the row, and once they commit this finds it closed
+            # and makes no new call over their action.
+            replaced = await session.execute(
+                update(PlaybookDecision)
+                .where(PlaybookDecision.id == current_id, PlaybookDecision.closed_at.is_(None))
+                .values(
+                    outcome=OUTCOME_SUPERSEDED if held_outcome == OUTCOME_OPEN else held_outcome,
+                    closed_at=now,
+                )
+                .returning(PlaybookDecision.id)
+            )
+            if replaced.first() is None:
+                continue
+            if held_outcome == OUTCOME_OPEN:
+                sweep.superseded += 1
         escalate = call.action == ESCALATE
         next_attempt = (
             select(func.coalesce(func.max(PlaybookDecision.attempt), 0) + 1)
@@ -472,11 +495,14 @@ async def _call_unplaced(
             sweep.escalated += 1
 
 
-async def _offer_history(session: AsyncSession, order_id: uuid.UUID) -> tuple[OfferHistory, set[str]]:
+async def _offer_history(
+    session: AsyncSession, hub_id: uuid.UUID, order_id: uuid.UUID
+) -> tuple[OfferHistory, set[str]]:
     """This order's offers that were declined or left to lapse, and by whom."""
     offers = list(
         await session.scalars(
             select(RouteOffer).where(
+                RouteOffer.hub_id == hub_id,
                 RouteOffer.stop_payload.contains([{"order_id": str(order_id)}]),
                 RouteOffer.status.in_(("declined", "expired")),
             )
