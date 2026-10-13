@@ -61,7 +61,7 @@ async def test_an_open_offer_is_withdrawn(db_session, real_redis_client):
     db_session.add(ClientWebhookEndpoint(client_id=client_id, url="https://consumer.example.com/lmx", secret=new_webhook_secret()))
     await db_session.commit()
 
-    result = await cancel_order_as_dispatch(str(order.id), session=db_session, _admin=ADMIN)
+    result = await cancel_order_as_dispatch(str(order.id), session=db_session, ops=ADMIN)
 
     assert (result.status, result.how) == ("cancelled", "offer_withdrawn")
     db_session.expire_all()
@@ -107,7 +107,7 @@ async def test_the_offers_other_orders_go_back_to_the_queue(db_session, real_red
     assert len(offers) == 1 and len(offers[0].stops) >= 2
     first_id, second_id = first.id, second.id
 
-    await cancel_order_as_dispatch(str(first_id), session=db_session, _admin=ADMIN)
+    await cancel_order_as_dispatch(str(first_id), session=db_session, ops=ADMIN)
 
     held = {h.order_id for h in await HoldQueueStore().get_all(str(hub_id))}
     assert str(second_id) in held and str(first_id) not in held
@@ -119,7 +119,7 @@ async def test_an_accepted_routes_untouched_stops_come_off(db_session, real_redi
     hub_id, client_id, driver_id, order, route, authed = await _accepted(db_session)
     order_id = order.id
 
-    result = await cancel_order_as_dispatch(str(order_id), session=db_session, _admin=ADMIN)
+    result = await cancel_order_as_dispatch(str(order_id), session=db_session, ops=ADMIN)
 
     assert (result.status, result.how) == ("cancelled", "stops_removed")
     db_session.expire_all()
@@ -176,7 +176,7 @@ async def test_cancelling_one_order_brings_the_rest_of_the_route_forward(db_sess
         await db_session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == first_drop.id))
     ).scalar_one()
 
-    await cancel_order_as_dispatch(str(cancel_id), session=db_session, _admin=ADMIN)
+    await cancel_order_as_dispatch(str(cancel_id), session=db_session, ops=ADMIN)
 
     db_session.expire_all()
     live = ordered(
@@ -203,7 +203,7 @@ async def test_once_the_driver_is_at_the_shop_it_is_a_return_not_a_cancel(db_ses
 
     order_id = order.id
     with pytest.raises(HTTPException) as refused:
-        await cancel_order_as_dispatch(str(order_id), session=db_session, _admin=ADMIN)
+        await cancel_order_as_dispatch(str(order_id), session=db_session, ops=ADMIN)
 
     assert refused.value.status_code == 409
     assert "return" in refused.value.detail
@@ -214,7 +214,7 @@ async def test_once_the_driver_is_at_the_shop_it_is_a_return_not_a_cancel(db_ses
 async def test_a_held_order_is_cancelled_the_clients_way(db_session, real_redis_client):
     hub_id, client_id, shop_id, driver_id, order = await driver_app._seed(db_session)
 
-    result = await cancel_order_as_dispatch(str(order.id), session=db_session, _admin=ADMIN)
+    result = await cancel_order_as_dispatch(str(order.id), session=db_session, ops=ADMIN)
 
     assert (result.status, result.how) == ("cancelled", "before_collection")
     assert await HoldQueueStore().get_all(str(hub_id)) == []
@@ -227,13 +227,13 @@ async def test_a_delivered_order_is_refused(db_session, real_redis_client):
     await db_session.commit()
 
     with pytest.raises(HTTPException) as refused:
-        await cancel_order_as_dispatch(str(order.id), session=db_session, _admin=ADMIN)
+        await cancel_order_as_dispatch(str(order.id), session=db_session, ops=ADMIN)
     assert refused.value.status_code == 409
 
 
 async def test_an_unknown_order_is_a_404(db_session, real_redis_client):
     with pytest.raises(HTTPException) as refused:
-        await cancel_order_as_dispatch(str(__import__("uuid").uuid4()), session=db_session, _admin=ADMIN)
+        await cancel_order_as_dispatch(str(__import__("uuid").uuid4()), session=db_session, ops=ADMIN)
     assert refused.value.status_code == 404
 
 
@@ -248,7 +248,7 @@ async def test_a_driver_on_break_is_not_put_back_to_work_by_a_cancel(db_session,
     await manager.upsert_driver_state(state)
     order_id = order.id
 
-    await cancel_order_as_dispatch(str(order_id), session=db_session, _admin=ADMIN)
+    await cancel_order_as_dispatch(str(order_id), session=db_session, ops=ADMIN)
 
     db_session.expire_all()
     assert (await db_session.get(Route, route.route_id)).status == "completed"
@@ -286,7 +286,7 @@ async def test_cancelling_the_stop_being_driven_to_promotes_the_next(db_session,
         await db_session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == current.id))
     ).scalar_one()
 
-    await cancel_order_as_dispatch(str(cancel_id), session=db_session, _admin=ADMIN)
+    await cancel_order_as_dispatch(str(cancel_id), session=db_session, ops=ADMIN)
 
     db_session.expire_all()
     live = (

@@ -80,6 +80,8 @@ export interface JobOffer {
   // Real per-delivery pay estimate (docs/ROADMAP.md A11) - only set for a
   // gig-classified driver; null for w2/1099, paid hourly/monthly instead.
   estimated_pay_cents: number | null;
+  // A bonus on top, owed once delivered (DEC-10). Absent or null for most offers.
+  bonus_cents?: number | null;
 }
 
 // `visit`: a technician at a site with no delivery, capturing its door (DE-6).
@@ -323,6 +325,9 @@ export interface Earnings {
   // lets EarningsScreen render the two differently.
   employment_type: string;
   note: string;
+  // Offer bonuses owed for orders delivered this period (DEC-10): recorded,
+  // not yet paid, and not in estimated_pay_cents.
+  bonuses_owed_cents?: number;
 }
 
 export interface TripSummary {

@@ -87,6 +87,7 @@ from app.optimizer.event_trigger import dispatch_event_bus
 from app.orders.requeue import requeue_orders_from_offer
 from app.orders.status_service import advance_orders
 from app.payroll import get_payout_provider
+from app.payroll.bonuses import offer_bonuses_owed_cents
 from app.payroll.gig_pricing import estimate_delivery_pay_cents
 from app.record.outcomes import record_delivery_outcomes
 from app.redis_client import get_client
@@ -1056,6 +1057,7 @@ async def list_my_offers(
                 expires_at=offer.expires_at,
                 stops=[OfferStopSummary(**s) for s in offer.stop_payload],
                 estimated_pay_cents=estimated_pay_cents,
+                bonus_cents=offer.bonus_cents,
             )
         )
     await session.commit()
@@ -3203,6 +3205,9 @@ async def get_my_earnings(
         estimated_pay_cents=estimated_pay_cents,
         is_placeholder=is_placeholder,
         employment_type=row.employment_type,
+        bonuses_owed_cents=await offer_bonuses_owed_cents(
+            session, driver_id=uuid.UUID(driver.driver_id), start=start, end=clipped_end
+        ),
     )
 
 

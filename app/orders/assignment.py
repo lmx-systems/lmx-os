@@ -15,12 +15,9 @@ route on a driver would mean a second copy of all of that. A decline or a lapse
 puts the order back in the hold queue the way every offer's does
 (`app/orders/requeue.py`).
 
-**A driver already on a route is refused, for now.** Adding the order after
-their last stop - what the cycle's in-flight insertion does for a passing
-driver - is the other half of the design doc's §6 answer, and it is left out on
-purpose: an appender writes a route a driver is tapping through, and doing that
-safely beside the driver's own paths needs one lock order for the route and to
-give way on a lock wait (`docs/ROADMAP_1.5.md`, `CON-5`'s second half). Every other status (`off_shift`, `on_break`,
+**A driver already on a route is refused.** Adding the order after their last
+stop is what the cycle's in-flight insertion does for a passing driver, without
+a person; doing it by hand is not being built (`docs/ROADMAP_1.5.md`, D-APPEND). Every other status (`off_shift`, `on_break`,
 `offered`) is refused too: the driver is not there to take it, or already has a
 question in front of them.
 
@@ -95,6 +92,8 @@ from app.optimizer.event_trigger import dispatch_event_bus
 from app.optimizer.service import _position_is_stale
 from app.orders.state_machine import TERMINAL
 from app.orders.status_service import advance_orders
+from app.playbook.rules import OFFER, OFFER_WITH_BONUS
+from app.playbook.sweep import record_person_action
 
 logger = structlog.get_logger(__name__)
 
@@ -138,6 +137,7 @@ class AssignmentOutcome:
     offer_id: str
     offer_expires_at: datetime
     driver_position_stale: bool = False
+    bonus_cents: int | None = None
 
 
 def why_not_assignable(order: Order) -> str:
@@ -175,8 +175,12 @@ async def assign_order_to_driver(
     ops_user_email: str,
     hold_queue: HoldQueueStore | None = None,
     fleet: FleetStateManager | None = None,
+    with_bonus: bool = False,
 ) -> AssignmentOutcome:
     """Offer `order_id` to `driver_id`, or raise `AssignmentRefused`.
+
+    `with_bonus` puts `settings.offer_bonus_cents` on the offer (`DEC-10`): the
+    playbook's step-up for an order already declined or left to lapse.
 
     Commits. The hold-queue removal and the driver's notice follow the commit,
     in the order cancel uses (app/orders/cancellation.py): an order taken out of
@@ -195,7 +199,7 @@ async def assign_order_to_driver(
     async with _hub_locked(str(hub_uuid)):
         offered = await _check_and_offer(
             session, fleet, order_id=order_id, driver_id=driver_id,
-            ops_user_id=ops_user_id, ops_user_email=ops_user_email,
+            ops_user_id=ops_user_id, ops_user_email=ops_user_email, with_bonus=with_bonus,
         )
     return await _after_commit(hold_queue, fleet, offered)
 
@@ -208,6 +212,7 @@ class _Offered:
     offer_id: str
     expires_at: datetime
     at: datetime
+    bonus_cents: int | None = None
 
 
 async def _check_and_offer(
@@ -218,8 +223,15 @@ async def _check_and_offer(
     driver_id: uuid.UUID,
     ops_user_id: str,
     ops_user_email: str,
+    with_bonus: bool = False,
 ) -> _Offered:
     """Every check, then the offer, committed. Run under the hub lock."""
+    # The playbook's call on this order, closed in this transaction: agreed if
+    # it named this driver (`DEC-10`). First, before the order - the call before
+    # the order, as the sweep takes them. Rolled back with any refusal below.
+    await record_person_action(
+        session, order_id, OFFER_WITH_BONUS if with_bonus else OFFER, ops_user_id, target=str(driver_id)
+    )
     # Locked, and read fresh: the cycle and a driver's decline write the status
     # from other sessions, and two dispatchers can press Assign at once.
     order = (
@@ -273,8 +285,8 @@ async def _check_and_offer(
     if state.status == "en_route":
         raise AssignmentRefused(
             409,
-            f"{driver.name} is on a route. Adding to a route by hand isn't built yet - "
-            "pick an idle driver, or leave it for the next cycle's in-flight insertion.",
+            f"{driver.name} is on a route, and orders are added to working routes by the "
+            "cycle's in-flight insertion, not by hand - pick an idle driver.",
         )
     if state.status != "available" or state.current_route_id:
         status = state.status.replace("_", " ")
@@ -296,6 +308,7 @@ async def _check_and_offer(
     return await _offer(
         session, fleet, order=order, driver=driver, shop=shop,
         ops_user_id=ops_user_id, ops_user_email=ops_user_email, now=now,
+        bonus_cents=settings.offer_bonus_cents if with_bonus else None,
     )
 
 
@@ -309,6 +322,7 @@ async def _offer(
     ops_user_id: str,
     ops_user_email: str,
     now: datetime,
+    bonus_cents: int | None = None,
 ) -> _Offered:
     """An offer to an idle driver, shaped as the cycle shapes one.
 
@@ -340,6 +354,7 @@ async def _offer(
         visit_payload=None,
         offered_at=now,
         expires_at=expires_at,
+        bonus_cents=bonus_cents,
     )
     session.add(offer)
     await session.flush()
@@ -376,7 +391,7 @@ async def _offer(
         raise
     return _Offered(
         hub_id=hub_id, order_id=order_id, driver_id=driver_id, offer_id=offer_id,
-        expires_at=expires_at, at=now,
+        expires_at=expires_at, at=now, bonus_cents=bonus_cents,
     )
 
 
@@ -403,4 +418,5 @@ async def _after_commit(
         offer_id=offered.offer_id,
         offer_expires_at=offered.expires_at,
         driver_position_stale=stale,
+        bonus_cents=offered.bonus_cents,
     )

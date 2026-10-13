@@ -364,6 +364,8 @@ export interface PlaybookReport {
     agreement: number | null
     ready_to_move_up: boolean
     next_mode: PlaybookMode | null
+    // False for a rule that only recommends until acting is built for it.
+    acts: boolean
     // The bar for moving up: this many decided calls, agreeing this often.
     min_decisions: number
     min_agreement: number
@@ -384,6 +386,8 @@ export interface ExceptionQueue {
   counts: Record<string, number>
   worst_wait_minutes: number
   items: ExceptionItem[]
+  // The placeholder bonus an offer can carry (DEC-10).
+  offer_bonus_cents: number
 }
 
 /** One thing the decision log says, and the row it says it in (AGT-4). */
@@ -444,6 +448,8 @@ export interface AssignmentResult {
   offer_id: string
   offer_expires_at: string
   driver_position_stale: boolean
+  // The bonus the offer carries, if one was added (DEC-10).
+  bonus_cents: number | null
 }
 
 export interface OrderResolutionResult {

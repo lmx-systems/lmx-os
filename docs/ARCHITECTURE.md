@@ -223,7 +223,10 @@ This closed three real gaps, not just "add some endpoints":
   - a playbook call before its order (`app/playbook/sweep.py`, `DEC-8`): the
     sweep claims the call with a conditional update and then resolves the
     order; a person's resolve locks the same call first
-    (`record_person_resolution`), so one of them finds it already closed;
+    (`record_person_resolution`), so one of them finds it already closed.
+    The assign, the hold override and dispatch's cancel close an unplaced
+    order's call (`record_person_action`) first too, before anything else
+    they lock;
   - **a route before any of its stops, and its stops before their orders.**
     Every path that changes a live route writes the ETAs of its *other*
     stops, so the route row (`lock_route`, `app/delivery/routes.py`) is the

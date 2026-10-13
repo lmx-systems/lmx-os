@@ -155,6 +155,9 @@ class ExceptionQueueView(BaseModel):
     counts: dict[str, int]
     worst_wait_minutes: float
     items: list[ExceptionItemView]
+    # The placeholder bonus an offer can carry (`DEC-10`), so the console's
+    # assign can offer it without hard-coding the amount.
+    offer_bonus_cents: int
 
 
 class DecisionFactView(BaseModel):
@@ -532,6 +535,8 @@ class PlaybookRuleView(BaseModel):
     agreement: float | None
     ready_to_move_up: bool
     next_mode: str | None
+    # False for a rule that only recommends until acting is built for it.
+    acts: bool
     min_decisions: int
     min_agreement: float
 

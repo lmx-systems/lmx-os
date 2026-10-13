@@ -96,7 +96,7 @@ from app.ops_auth.dependencies import (
 from app.optimizer.event_trigger import dispatch_event_bus
 from app.orders.cancellation import OrderNotCancellable, cancel_live_order
 from app.payroll import get_payroll_provider
-from app.playbook.sweep import record_person_resolution
+from app.playbook.sweep import record_person_action, record_person_resolution
 from app.playbook.touches import record_ops_touch
 from app.payroll.overtime_rules import overtime_rule_for_state
 from app.reporting.cod_disputes import build_cod_dispute_report
@@ -994,7 +994,7 @@ async def generate_client_invoice(
 async def cancel_order_as_dispatch(
     order_id: str,
     session: AsyncSession = Depends(get_db),
-    _admin: AuthedOpsUser = Depends(require_dispatcher),
+    ops: AuthedOpsUser = Depends(require_dispatcher),
 ) -> OrderCancellationResult:
     """Cancel an order a client can't cancel themselves (app/orders/cancellation.py).
 
@@ -1011,6 +1011,9 @@ async def cancel_order_as_dispatch(
     # accepts), so read it fresh rather than from this session's copy.
     await session.refresh(order)
     try:
+        # A cancel overrules the playbook's call on an order nobody had
+        # (`DEC-10`), in the cancel's transaction and before it locks anything.
+        await record_person_action(session, order.id, "cancel", ops.ops_user_id)
         how = await cancel_live_order(session, HoldQueueStore(), order)
     except OrderNotCancellable as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1044,6 +1047,7 @@ async def assign_order(
             driver_id=body.driver_id,
             ops_user_id=ops.ops_user_id,
             ops_user_email=ops.email,
+            with_bonus=body.with_bonus,
         )
     except AssignmentRefused as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -1053,6 +1057,7 @@ async def assign_order(
         offer_id=outcome.offer_id,
         offer_expires_at=outcome.offer_expires_at,
         driver_position_stale=outcome.driver_position_stale,
+        bonus_cents=outcome.bonus_cents,
     )
 
 

@@ -165,6 +165,9 @@ class JobOfferView(BaseModel):
     # driver; null for w2/1099, who are paid hourly/monthly instead
     # (app/payroll/hours.py), not per offer.
     estimated_pay_cents: int | None = None
+    # A bonus on top, owed once the order is delivered (`DEC-10`). Null for most
+    # offers: only the step-up for an order already declined carries one.
+    bonus_cents: int | None = None
 
     @property
     def stop_count(self) -> int:
@@ -652,6 +655,9 @@ class EarningsView(BaseModel):
     # round trip - previously missing entirely (see EarningsScreen.tsx's
     # own comment about inferring the pay period width instead).
     employment_type: str = "w2"
+    # Offer bonuses owed for orders delivered this period (`DEC-10`): recorded,
+    # not paid, until payouts exist. Not in `estimated_pay_cents`.
+    bonuses_owed_cents: int = 0
     note: str = (
         "Estimate only - pay formula and payroll integration are not finalized. "
         "Contact dispatch with pay questions."

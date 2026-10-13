@@ -49,12 +49,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.order import INTAKE_LIVE, Order, OrderStatus
+from app.models.order import Order, OrderStatus
 from app.models.stop import FLAG_SOURCE_DRIVER, Stop, StopFlag, StopOrder
+from app.orders.unplaced import unplaced_clause
 from app.playbook.sweep import current_calls
 
 # Ordered most-actionable-first for ties, not most-urgent-first: the clock does
@@ -211,14 +212,6 @@ async def build_exception_queue(
             )
         )
 
-    # The playbook's call on each failed order, flagged or not (`DEC-8`): what it
-    # recommends, when it will act, or that it has handed the order to a person.
-    calls = await current_calls(session, [o for o, _ in flagged] + failed)
-    if calls:
-        queue.items = [
-            replace(item, playbook=_call(calls[item.order_id])) if item.order_id in calls else item
-            for item in queue.items
-        ]
 
     # Past the promise and still open. The grace is the same one the health
     # check uses, so a dispatcher and a pager do not disagree about what late
@@ -266,26 +259,7 @@ async def build_exception_queue(
     # past (app/ingestion/service.py), on purpose and never queued; without
     # this every imported order showed here with an Assign button, as the
     # health check's stuck count has always excluded them.
-    unplaced = list(
-        await session.scalars(
-            _scope(
-                select(Order).where(
-                    Order.intake_mode == INTAKE_LIVE,
-                    or_(
-                        and_(
-                            Order.status == OrderStatus.queued,
-                            Order.requested_at < now - grace,
-                        ),
-                        and_(
-                            Order.status == OrderStatus.held,
-                            Order.hold_deadline.is_not(None),
-                            Order.hold_deadline < now - grace,
-                        ),
-                    )
-                )
-            )
-        )
-    )
+    unplaced = list(await session.scalars(_scope(select(Order).where(unplaced_clause(now)))))
     for order in unplaced:
         if order.id in seen:
             continue
@@ -325,6 +299,17 @@ async def build_exception_queue(
         queue.items.append(
             _item(KIND_POSSIBLE_DUPLICATE, order, now, detail=f"looks like a repeat of {original}")
         )
+
+    # The playbook's call on each order listed (`DEC-8`): what its rule
+    # recommends, when it will act, or that it has handed the order to a person.
+    # A failed delivery's call, or an unplaced order's (`DEC-10`), whatever kind
+    # the order is listed under.
+    calls = await current_calls(session, [o for o, _ in flagged] + failed + late + unplaced)
+    if calls:
+        queue.items = [
+            replace(item, playbook=_call(calls[item.order_id])) if item.order_id in calls else item
+            for item in queue.items
+        ]
 
     # Worst wait first, flagged stops lifted on a tie. See the module docstring:
     # the clock is a heuristic standing in for M2, and a flag is the earliest

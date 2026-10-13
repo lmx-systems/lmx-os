@@ -21,7 +21,7 @@ offer card (shop name, address) that StopCandidate doesn't carry.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,6 +31,7 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 
 class RouteOffer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "route_offers"
+    __table_args__ = (CheckConstraint("bonus_cents > 0", name="ck_route_offers_bonus_positive"),)
 
     hub_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("hubs.id"), nullable=False)
     driver_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("drivers.id"), nullable=False)
@@ -73,3 +74,9 @@ class RouteOffer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # Set once accept_offer() creates the real Route - lets the driver app
     # go straight from "I accepted" to "here's my route" with one id.
     route_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("routes.id"), nullable=True)
+
+    # A bonus on top, promised with the offer (`DEC-10`, migration 0084): the
+    # playbook's step-up for an order already declined or left to lapse. Copied
+    # from `settings.offer_bonus_cents` when the offer is made. Owed once the order
+    # is delivered on this offer; recorded, not paid, until payouts exist.
+    bonus_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)

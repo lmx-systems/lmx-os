@@ -29,8 +29,8 @@ function canBeOffered(driver: DriverState): boolean {
 function why(driver: DriverState): string {
   if (!hasRoom(driver)) return 'van full'
   if (driver.status === 'available' && driver.current_route_id) return 'finishing a route'
-  // Adding to a working driver's route by hand isn't built yet (CON-5).
-  if (driver.status === 'en_route') return 'on a route - not yet assignable by hand'
+  // Working routes are added to by the cycle's in-flight insertion, not by hand (D-APPEND).
+  if (driver.status === 'en_route') return 'on a route - the cycle adds to working routes'
   return STATUS_WORDS[driver.status] ?? driver.status
 }
 
@@ -40,7 +40,12 @@ function clock(iso: string): string {
 
 function doneText(label: string, driver: DriverState, result: AssignmentResult): string {
   const stale = result.driver_position_stale ? " (their app hasn't reported lately - call them)" : ''
-  return `${label} offered to ${nameOf(driver)} - expires ${clock(result.offer_expires_at)}${stale}.`
+  const bonus = result.bonus_cents ? ` with a ${dollars(result.bonus_cents)} bonus` : ''
+  return `${label} offered to ${nameOf(driver)}${bonus} - expires ${clock(result.offer_expires_at)}${stale}.`
+}
+
+function dollars(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`
 }
 
 /**
@@ -48,8 +53,8 @@ function doneText(label: string, driver: DriverState, result: AssignmentResult):
  *
  * The exceptions row said "assign it" and offered only Cancel. An idle driver
  * is *offered* the order and may decline it. Everyone else is listed but can't
- * be picked, with the reason - a driver on a route among them, until adding to
- * a route by hand is built (CON-5) - so "nobody can take it" is something a
+ * be picked, with the reason - a driver on a route among them, since working
+ * routes are added to by the cycle (D-APPEND) - so "nobody can take it" is something a
  * dispatcher can read rather than infer from an empty list.
  *
  * The inline confirm-then-act pattern of CancelOrderButton. A refusal (the
@@ -63,6 +68,7 @@ export function AssignDriverControl({
   driversError,
   onDone,
   onToast,
+  offerBonusCents = null,
 }: {
   orderId: string
   label: string
@@ -72,9 +78,13 @@ export function AssignDriverControl({
   driversError: boolean
   onDone: () => void
   onToast: (message: string) => void
+  // The placeholder bonus an offer can carry (DEC-10), from the server. Null
+  // hides the option.
+  offerBonusCents?: number | null
 }) {
   const [open, setOpen] = useState(false)
   const [chosenId, setChosenId] = useState('')
+  const [withBonus, setWithBonus] = useState(false)
   const [busy, setBusy] = useState(false)
   const [refused, setRefused] = useState<string | null>(null)
 
@@ -88,7 +98,7 @@ export function AssignDriverControl({
     setBusy(true)
     setRefused(null)
     try {
-      const result = await api.assignOrder(orderId, chosen.driver_id)
+      const result = await api.assignOrder(orderId, chosen.driver_id, withBonus)
       onToast(doneText(label, chosen, result))
       setOpen(false)
       setChosenId('')
@@ -155,6 +165,19 @@ export function AssignDriverControl({
           <span className="text-[11px] text-[var(--text-primary)]">
             {`Offer ${label} to ${nameOf(chosen)}? They can decline it.`}
           </span>
+          {offerBonusCents ? (
+            // For an order already turned down: the playbook's step-up. Owed to
+            // the driver once delivered; the amount is a placeholder.
+            <label className="inline-flex items-center gap-1 text-[11px] text-[var(--text-secondary)]">
+              <input
+                type="checkbox"
+                checked={withBonus}
+                disabled={busy}
+                onChange={(e) => setWithBonus(e.target.checked)}
+              />
+              {`Add a ${dollars(offerBonusCents)} bonus`}
+            </label>
+          ) : null}
           <button disabled={busy} onClick={assign} className={button}>
             {busy ? 'Assigning…' : 'Yes, offer it'}
           </button>

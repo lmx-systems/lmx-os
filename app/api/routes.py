@@ -51,6 +51,7 @@ from app.models.receiver_profile import ReceiverProfile
 from app.models.route_offer import RouteOffer
 from app.models.shop import Shop
 from app.playbook.report import build_playbook_report
+from app.playbook.sweep import record_person_action
 from app.playbook.touches import record_ops_touch
 from app.ops_auth.dependencies import (
     AuthedOpsUser,
@@ -1033,6 +1034,9 @@ async def override_order(
     who called shouldn't wait for the next event or the five-minute sweep.
     """
     try:
+        # An order nobody had, put back or released by a person: the playbook's
+        # call on it is overruled (`DEC-10`). Before the order is locked.
+        await record_person_action(session, order_id, body.action, ops.ops_user_id)
         outcome = await apply_override(
             session,
             order_id=order_id,
@@ -1270,6 +1274,7 @@ async def operations_exceptions(
         generated_at=queue.generated_at,
         counts=queue.by_kind(),
         worst_wait_minutes=queue.worst_wait_minutes,
+        offer_bonus_cents=settings.offer_bonus_cents,
         items=[
             ExceptionItemView(
                 kind=item.kind,
@@ -1343,6 +1348,7 @@ async def operations_playbook(
                 agreement=r.agreement,
                 ready_to_move_up=r.ready_to_move_up,
                 next_mode=r.next_mode,
+                acts=r.acts,
                 min_decisions=r.min_decisions,
                 min_agreement=r.min_agreement,
             )

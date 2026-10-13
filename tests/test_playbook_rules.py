@@ -75,3 +75,71 @@ def test_no_failed_stop_on_record_is_treated_as_a_drop_off():
 def test_every_call_says_why():
     assert "closed" in _call(SHOP_CLOSED).reason
     assert _call(COD_DISPUTE).reason.endswith("a person settles it.")
+
+
+# The unplaced rule (`DEC-10`).
+
+from app.playbook.rules import OFFER, Candidate, decide_unplaced  # noqa: E402
+
+
+def _c(driver_id, miles, stale=False):
+    return Candidate(driver_id=driver_id, name=f"Driver {driver_id}", miles=miles, position_stale=stale)
+
+
+def test_the_nearest_reporting_driver_is_chosen():
+    call = decide_unplaced([_c("far", 5.0), _c("near", 1.2), _c("nearest-but-quiet", 0.2, stale=True)], hub_closed=False)
+    assert (call.action, call.target) == (OFFER, "near")
+    assert "1.2 miles" in call.reason
+
+
+def test_when_every_app_is_quiet_the_nearest_is_named_to_phone_first():
+    call = decide_unplaced([_c("a", 3.0, stale=True), _c("b", 0.5, stale=True)], hub_closed=False)
+    assert (call.action, call.target) == (OFFER, "b")
+    assert "phone them" in call.reason
+
+
+def test_a_driver_with_no_position_comes_last():
+    call = decide_unplaced([_c("unknown", None), _c("known", 9.0)], hub_closed=False)
+    assert call.target == "known"
+
+
+def test_nobody_free_or_a_closed_hub_goes_to_a_person():
+    assert decide_unplaced([], hub_closed=False).action == ESCALATE
+    assert decide_unplaced([_c("a", 1.0)], hub_closed=True).action == ESCALATE
+    assert decide_unplaced([], hub_closed=False).target is None
+
+
+# The step-up (`DEC-10`, D-BONUS).
+
+from app.playbook.rules import OFFER_WITH_BONUS, OfferHistory  # noqa: E402
+
+
+def _cd(driver_id, miles, *, declined=False, stale=False):
+    return Candidate(
+        driver_id=driver_id, name=f"Driver {driver_id}", miles=miles, position_stale=stale, turned_it_down=declined
+    )
+
+
+def test_turned_down_once_it_goes_again_with_the_bonus_to_someone_new():
+    call = decide_unplaced(
+        [_cd("decliner", 0.5, declined=True), _cd("new", 2.0)],
+        hub_closed=False, history=OfferHistory(turned_down=1), bonus_cents=500,
+    )
+    assert (call.action, call.target) == (OFFER_WITH_BONUS, "new")
+    assert "$5.00 bonus" in call.reason
+
+
+def test_with_only_decliners_free_the_nearest_gets_the_bonus():
+    call = decide_unplaced(
+        [_cd("a", 3.0, declined=True), _cd("b", 1.0, declined=True)],
+        hub_closed=False, history=OfferHistory(turned_down=2), bonus_cents=500,
+    )
+    assert (call.action, call.target) == (OFFER_WITH_BONUS, "b")
+    assert "turned it down before" in call.reason
+
+
+def test_turned_down_with_a_bonus_too_goes_to_a_person():
+    call = decide_unplaced(
+        [_cd("a", 1.0)], hub_closed=False, history=OfferHistory(turned_down=2, bonus_tried=True), bonus_cents=500
+    )
+    assert call.action == ESCALATE

@@ -40,7 +40,7 @@ from app.models.playbook_decision import (
     OUTCOME_SUPERSEDED,
     PlaybookDecision,
 )
-from app.playbook.rules import RULES
+from app.playbook.rules import ACTING_RULES, RULES
 from app.playbook.sweep import rule_mode
 
 _NEXT_MODE = {MODE_RECOMMEND: MODE_VETO, MODE_VETO: MODE_ACT}
@@ -78,6 +78,8 @@ class RuleRecord:
     agreement: float | None
     ready_to_move_up: bool
     next_mode: str | None
+    # False for a rule that only recommends: there is no mode to move it to yet.
+    acts: bool
     # The bar, so the panel can say how far off it is.
     min_decisions: int
     min_agreement: float
@@ -183,8 +185,10 @@ async def _rule_record(
     yes = int(seen.get(OUTCOME_AGREED, 0)) + (int(seen.get(OUTCOME_ACTED, 0)) if mode == MODE_VETO else 0)
     no = int(seen.get(OUTCOME_OVERRULED, 0))
     agreement = yes / (yes + no) if yes + no else None
+    acts = rule in ACTING_RULES
     ready = (
-        mode != MODE_ACT
+        acts
+        and mode != MODE_ACT
         and yes + no >= settings.playbook_promotion_min_decisions
         and agreement is not None
         and agreement >= settings.playbook_promotion_min_agreement
@@ -197,7 +201,8 @@ async def _rule_record(
         no=no,
         agreement=round(agreement, 3) if agreement is not None else None,
         ready_to_move_up=ready,
-        next_mode=_NEXT_MODE.get(mode),
+        next_mode=_NEXT_MODE.get(mode) if acts else None,
+        acts=acts,
         min_decisions=settings.playbook_promotion_min_decisions,
         min_agreement=settings.playbook_promotion_min_agreement,
     )
