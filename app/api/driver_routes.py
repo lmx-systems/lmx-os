@@ -10,6 +10,7 @@ Bearer token - see app/driver_auth/dependencies.py.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -37,7 +38,7 @@ from app.delivery.cod import (
 from app.delivery.en_route import mark_current_stop_en_route
 from app.delivery.eta import refresh_after_ping, refresh_route_etas
 from app.delivery.proof import ProofNotSatisfied, assert_proof_satisfied, resolve_stop_proof
-from app.delivery.routes import lock_route
+from app.delivery.routes import FINISHED_STOP_STATUSES, lock_route, take_orders_off_stops
 from app.driver_auth import sign_in_codes
 from app.driver_auth.dependencies import AuthedDriver, get_current_driver
 from app.driver_auth.tokens import issue_token
@@ -2906,6 +2907,40 @@ async def flag_stop_issue(
 
     order_ids_result = await session.execute(select(StopOrder.order_id).where(StopOrder.stop_id == stop.id))
     order_ids = [row[0] for row in order_ids_result.all()]
+
+    # This attempt at these orders is over on this route, so their other stops
+    # still to be done here come off it: above all the drop-off after a flagged
+    # pickup, which had no parts to deliver. Left on, it sat `pending` forever -
+    # the driver could complete or flag a delivery of parts never collected,
+    # moving a redelivered order to delivered or failed; the stranded sweep
+    # counted it as the order being on a route; and dispatch's cancel read it as
+    # parts on the van (`CON-5`). Stops before orders: locked here, before
+    # advance_orders takes the orders (docs/ARCHITECTURE.md, lock order). A stop
+    # that also carries another order stays, without these.
+    taken_off: list[str] = []
+    plan_changed = False
+    if order_ids:
+        others = list(
+            (
+                await session.scalars(
+                    select(Stop)
+                    .join(StopOrder, StopOrder.stop_id == Stop.id)
+                    .where(
+                        StopOrder.order_id.in_(order_ids),
+                        Stop.route_id == stop.route_id,
+                        Stop.id != stop.id,
+                        Stop.status.notin_(FINISHED_STOP_STATUSES),
+                    )
+                    .order_by(Stop.sequence, Stop.id)
+                    .with_for_update(of=Stop)
+                    .execution_options(populate_existing=True)
+                )
+            ).unique()
+        )
+        if others:
+            taken_off = await take_orders_off_stops(session, others, order_ids)
+            plan_changed = True
+
     if order_ids:
         # delivery_failed is §1.4's EXCEPTION_RAISED - the same state under the
         # name this codebase already used, rather than a duplicate value.
@@ -2924,8 +2959,12 @@ async def flag_stop_issue(
         .where(Stop.route_id == stop.route_id, Stop.status.notin_(_TERMINAL_STOP_STATUSES))
     )
     route_finished = remaining_result.scalar_one() == 0
+    # Read fresh under the lock taken above (lock_route), so the version bumped
+    # is the current one.
+    route = await session.get_one(Route, stop.route_id)
+    if plan_changed:
+        route.plan_version += 1
     if route_finished:
-        route = await session.get_one(Route, stop.route_id)
         route.status = "completed"
     else:
         # A flagged stop is finished too, so the next one is promoted and the driver is
@@ -2936,6 +2975,25 @@ async def flag_stop_issue(
         await refresh_route_etas(session, stop.route_id)
 
     await session.commit()
+
+    if plan_changed:
+        # After the commit, as dispatch's cancel sends it, so the app is never
+        # told of a removal that was rolled back. The same event, so the app
+        # sees one kind of change.
+        await get_client().publish(
+            f"driver_route_events:{route.driver_id}",
+            json.dumps(
+                {
+                    "type": "route_updated",
+                    "route_id": str(route.id),
+                    "plan_version": route.plan_version,
+                    "change": "stop_removed",
+                    "affected_stop_ids": taken_off,
+                    "message": "A flagged pickup's delivery is off your route",
+                    "occurred_at": datetime.now(timezone.utc).isoformat(),
+                }
+            ),
+        )
 
     # Vehicle-load tracking, mirroring complete_stop's: a flagged *dropoff*
     # still means that weight leaves the vehicle (whatever the resolution

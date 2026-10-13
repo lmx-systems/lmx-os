@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.batch_queue.store import HoldQueueStore
 from app.delivery.en_route import mark_current_stop_en_route
 from app.delivery.eta import refresh_route_etas
-from app.delivery.routes import lock_route, try_lock_route
+from app.delivery.routes import lock_route, take_orders_off_stops, try_lock_route
 from app.fleet_state.manager import FleetStateManager
 from app.models.order import Order, OrderStatus
 from app.models.route import Route
@@ -61,11 +61,6 @@ STOPS_REMOVED = "stops_removed"
 # Mirrors app/api/driver_routes.py's set, as app/delivery/en_route.py does, so
 # this module doesn't depend on the API layer.
 _TERMINAL_STOP_STATUSES = ("completed", "failed", "cancelled")
-
-# A stop taken off a route by a cancellation. Beside pending, en_route, arrived,
-# completed and failed; never a stop the driver reached.
-STOP_CANCELLED = "cancelled"
-
 
 def why_not_cancellable(order: Order) -> str:
     if order.status == OrderStatus.cancelled:
@@ -349,39 +344,27 @@ async def _remove_stops(
     if not rows:
         return STOPS_REMOVED, None, None
     # The parts are on the van, or the driver is at the counter: the pickup
-    # being driven to is reached, or there is a drop-off left with no pickup
-    # still ahead of it - collected while this waited. A finished pickup with
-    # its finished drop-off is a failed attempt's history, not this one.
+    # being driven to is reached, or the open drop-off's own pickup - the last
+    # of the order's pickups before it on this route - was collected, perhaps
+    # while this waited. A finished pickup with its finished drop-off is a
+    # failed attempt's history, not this one; and a drop-off whose pickup was
+    # flagged never had parts to deliver (flagging takes it off since `CON-5`,
+    # and one left by older code must not hold the cancel).
     pickup = next((stop for stop, _ in rows if stop.stop_type == "pickup"), None)
-    has_dropoff = any(stop.stop_type == "dropoff" for stop, _ in rows)
-    if (pickup is not None and pickup.status == "arrived") or (pickup is None and has_dropoff):
+    dropoff = next((stop for stop, _ in rows if stop.stop_type == "dropoff"), None)
+    collected = False
+    if pickup is None and dropoff is not None:
+        before = [
+            stop for stop, _ in locked if stop.stop_type == "pickup" and stop.sequence < dropoff.sequence
+        ]
+        collected = bool(before) and before[-1].status == "completed"
+    if (pickup is not None and pickup.status == "arrived") or collected:
         raise OrderNotCancellable(
             "The driver is at the shop or already has the parts. When they report, "
             "resolve the delivery as a return."
         )
     route = rows[0][1]
-    removed: list[str] = []
-    for stop, _ in rows:
-        others = await session.scalar(
-            select(StopOrder).where(StopOrder.stop_id == stop.id, StopOrder.order_id != order.id).limit(1)
-        )
-        if others is not None:
-            # Other orders still visit this stop; this one just isn't among them.
-            link = await session.scalar(
-                select(StopOrder).where(StopOrder.stop_id == stop.id, StopOrder.order_id == order.id)
-            )
-            if link is not None:
-                await session.delete(link)
-            continue
-        # The stop was only ever this order's. Marked rather than deleted: the
-        # messages sent about it, and any flag or geofence crossing, refer to
-        # the row, and a record of a stop that was planned and then cancelled
-        # is worth more than a gap. The route view leaves cancelled stops out.
-        stop.status = STOP_CANCELLED
-        # No arrival to forecast for a visit that won't happen. `planned_eta`
-        # stays: it is the record of what was planned.
-        stop.eta = None
-        removed.append(str(stop.id))
+    removed = await take_orders_off_stops(session, [stop for stop, _ in rows], [order.id])
     route.plan_version += 1
     await session.flush()
     # A route whose every stop is now finished is over, the way `complete_stop`

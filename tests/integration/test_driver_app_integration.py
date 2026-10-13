@@ -583,10 +583,14 @@ async def test_flag_stop_rejects_an_already_terminal_stop(db_session, real_redis
     assert exc_info.value.status_code == 409
 
 
-async def test_dropoff_completes_after_its_pickup_was_flagged(db_session, real_redis_client):
+async def test_a_route_ends_when_its_only_pickup_is_flagged(db_session, real_redis_client):
     """Regression test for the route-finished bug this feature surfaced:
     a *failed* pickup must not count as "unfinished" forever, or a route
-    with one flagged stop could never be completed."""
+    with one flagged stop could never be completed.
+
+    It used to go on to complete the drop-off - a delivery of parts the
+    driver never collected. Since `CON-5` the flag takes that drop-off off
+    the route, so the route is over at the flag."""
     hub_id, client_id, shop_id, driver_id, order = await _seed(db_session)
     authed, pickup, dropoff = await _accept_one_offer(db_session, hub_id, driver_id)
 
@@ -595,19 +599,11 @@ async def test_dropoff_completes_after_its_pickup_was_flagged(db_session, real_r
         pickup.stop_id, FlagStopBody(reason=StopFailureReason.SHOP_CLOSED), driver=authed, session=db_session
     )
 
-    await arrive_at_stop(dropoff.stop_id, driver=authed, session=db_session)
-    completed_dropoff = await complete_stop(
-        dropoff.stop_id,
-        # A signature URL, because "method=signature" with nothing captured no longer
-        # counts as proof (app/delivery/proof.py). This test is about a flagged pickup
-        # not blocking its dropoff, not about proof.
-        CompleteStopBody(method="signature", signature_url="https://example.com/sig.png"),
-        driver=authed,
-        session=db_session,
-    )
-    assert completed_dropoff.status == "completed"
-
     db_session.expire_all()
+    assert (await db_session.get(Stop, uuid.UUID(dropoff.stop_id))).status == "cancelled"
+    with pytest.raises(HTTPException) as refused:
+        await arrive_at_stop(dropoff.stop_id, driver=authed, session=db_session)
+    assert refused.value.status_code == 409
     route = await get_my_route(driver=authed, session=db_session)
     # None of this route's stops are still non-terminal, so it's finished -
     # get_my_route only returns status="active" routes, so a None result

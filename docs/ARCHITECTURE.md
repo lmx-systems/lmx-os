@@ -224,7 +224,9 @@ This closed three real gaps, not just "add some endpoints":
     stops, so the route row (`lock_route`, `app/delivery/routes.py`) is the
     one lock they all queue on: `arrive_at_stop`, `complete_stop` and
     `flag_stop_issue` lock the route and then their stop
-    (`_get_owned_stop_on_locked_route`); dispatch's cancel finds the order's
+    (`_get_owned_stop_on_locked_route`) - a flag then locks the flagged
+    orders' other stops still to do on that route and takes them off before
+    it moves the orders; dispatch's cancel finds the order's
     route unlocked, locks it, then its stops; `mark_current_stop_en_route` and
     `refresh_route_etas` take it themselves (free when held). Holding a stop
     while waiting for the route deadlocked a cancel against a driver's

@@ -459,11 +459,17 @@ async def refresh_after_ping(session: AsyncSession, driver_id: uuid.UUID) -> dic
     key = f"eta_refresh:{route_id}"
     if not await redis.set(key, "1", nx=True, ex=PING_REFRESH_SECONDS):
         return None
-    if not await try_lock_route_and_stops(session, route_id):
-        # Somebody else is changing the route right now and will refresh it; let
-        # the next ping try again rather than waiting out the minute.
+    try:
+        if not await try_lock_route_and_stops(session, route_id):
+            # Somebody else is changing the route right now and will refresh it;
+            # let the next ping try again rather than waiting out the minute.
+            await redis.delete(key)
+            return None
+        summary = await refresh_route_etas(session, route_id)
+        await session.commit()
+    except Exception:
+        # Any other failure (a dropped connection, a timeout) also leaves the
+        # refresh undone, so the next ping tries again too.
         await redis.delete(key)
-        return None
-    summary = await refresh_route_etas(session, route_id)
-    await session.commit()
+        raise
     return summary

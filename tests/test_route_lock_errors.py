@@ -45,3 +45,34 @@ def test_any_other_database_error_is_raised(attempt):
     with pytest.raises(DBAPIError):
         asyncio.run(attempt(session, uuid.uuid4()))
     assert not session.rolled_back
+
+
+class _Redis:
+    def __init__(self) -> None:
+        self.keys: set[str] = set()
+
+    async def set(self, key, _value, nx=False, ex=None):
+        if nx and key in self.keys:
+            return False
+        self.keys.add(key)
+        return True
+
+    async def delete(self, key):
+        self.keys.discard(key)
+
+
+class _PingSession(_Session):
+    async def scalar(self, *_args, **_kwargs):
+        return uuid.uuid4()
+
+
+def test_a_failed_ping_refresh_leaves_the_next_ping_free_to_try(monkeypatch):
+    """The once-a-minute key was left set when the lock attempt raised, so a
+    database error cost the route a minute without a refresh."""
+    from app.delivery import eta
+
+    redis = _Redis()
+    monkeypatch.setattr(eta, "get_client", lambda: redis)
+    with pytest.raises(DBAPIError):
+        asyncio.run(eta.refresh_after_ping(_PingSession("57014"), uuid.uuid4()))
+    assert redis.keys == set()
