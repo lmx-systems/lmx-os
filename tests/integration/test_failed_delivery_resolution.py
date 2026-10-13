@@ -21,9 +21,12 @@ from app.models.hub import Hub
 from app.models.order import Order, OrderStatus
 from app.models.rules import ActiveRule
 from app.models.shop import Shop
+from app.ops_auth.dependencies import AuthedOpsUser
 from app.schemas.admin import ResolveFailedOrderBody
 
 pytestmark = pytest.mark.integration
+
+_OPS = AuthedOpsUser(ops_user_id=str(uuid.uuid4()), email="ops@example.com", name="Ops", role="admin")
 
 
 async def _seed_order(db_session, *, status=OrderStatus.delivery_failed, tier="T2", fee_cents=1_800, delivery_attempts=1):
@@ -155,7 +158,9 @@ async def test_resolve_endpoint_rejects_unknown_action_and_missing_order(db_sess
 async def test_resolve_endpoint_409s_for_a_non_failed_order(db_session):
     order, *_ = await _seed_order(db_session, status=OrderStatus.delivered)
     with pytest.raises(HTTPException) as exc:
-        await resolve_order(str(order.id), ResolveFailedOrderBody(action="cancel"), session=db_session)
+        await resolve_order(
+            str(order.id), ResolveFailedOrderBody(action="cancel"), session=db_session, ops=_OPS
+        )
     assert exc.value.status_code == 409
 
 

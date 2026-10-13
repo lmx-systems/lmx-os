@@ -177,8 +177,9 @@ This closed three real gaps, not just "add some endpoints":
 
   Since October 2026 **dispatch can make an offer** by hand, from the
   exceptions queue, to an idle driver (`app/orders/assignment.py`); a driver
-  already on a route is refused until appending to a working route is built
-  (`docs/ROADMAP_1.5.md` `CON-5`'s second half). Two writers now offer, so: **the cycle
+  already on a route is refused, and appending to a working route by hand is
+  not being built (`docs/ROADMAP_1.5.md` D-APPEND): the cycle's in-flight
+  insertion does it without a person. Two writers now offer, so: **the cycle
   offers only the orders it actually moved to `assigned`** - its status write
   and its in-flight insertion only move an order still held or queued
   (`advance_orders(only_from=...)`), so an order dispatch assigned
@@ -219,6 +220,10 @@ This closed three real gaps, not just "add some endpoints":
     guarantee (`CON-5`);
   - an offer row before its orders (accept, decline, expiry, cancel's
     withdrawal);
+  - a playbook call before its order (`app/playbook/sweep.py`, `DEC-8`): the
+    sweep claims the call with a conditional update and then resolves the
+    order; a person's resolve locks the same call first
+    (`record_person_resolution`), so one of them finds it already closed;
   - **a route before any of its stops, and its stops before their orders.**
     Every path that changes a live route writes the ETAs of its *other*
     stops, so the route row (`lock_route`, `app/delivery/routes.py`) is the

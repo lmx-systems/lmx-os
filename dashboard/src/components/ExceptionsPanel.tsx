@@ -8,7 +8,7 @@ import { AssignDriverControl } from './AssignDriverControl'
 import { CancelOrderButton } from './CancelOrderButton'
 import { ASSIGNABLE, DISPATCH_CANCELLABLE } from '../lib/orderStatus'
 import { OverrideForm } from './OverrideForm'
-import type { DriverState, ExceptionItem, ExceptionQueue, ResolutionAction } from '../lib/types'
+import type { DriverState, ExceptionItem, ExceptionQueue, PlaybookCall, ResolutionAction } from '../lib/types'
 
 interface ExceptionsPanelProps {
   data: ExceptionQueue | null
@@ -171,7 +171,8 @@ export function ExceptionsPanel({
                     </td>
                     <td className="py-2.5 text-[var(--text-secondary)]">
                       {item.next_action}
-                      {canDispatch && item.kind === 'delivery_failed' && (
+                      {item.playbook && <PlaybookLine call={item.playbook} />}
+                      {canDispatch && item.status === 'delivery_failed' && (
                         <Resolve item={item} onResolved={onResolved} onToast={onToast} />
                       )}
                       {canDispatch && ASSIGNABLE.includes(item.status) && (
@@ -194,7 +195,7 @@ export function ExceptionsPanel({
                         <PutBack item={item} onResolved={onResolved} onToast={onToast} />
                       )}
                       {canDispatch &&
-                        item.kind !== 'delivery_failed' &&
+                        item.status !== 'delivery_failed' &&
                         DISPATCH_CANCELLABLE.includes(item.status) && (
                           // A failed delivery's cancel is one of its resolutions
                           // above; an order already collected can only be returned.
@@ -222,6 +223,42 @@ export function ExceptionsPanel({
         </>
       )}
     </Card>
+  )
+}
+
+const ACTION_LABEL: Record<string, string> = {
+  redeliver: 'redeliver',
+  return_to_shop: 'return it to the shop',
+  cancel: 'cancel',
+}
+
+/**
+ * The playbook's call on this order (docs/ROADMAP_1.5.md DEC-8).
+ *
+ * The rule that is replacing this decision says what it would do and why. In
+ * recommend mode that is all it does - the buttons below are still the
+ * decision, and choosing the same or otherwise is how the rule earns more
+ * authority. In veto mode it says when it will act unless somebody does first.
+ * An escalation is the rule saying this one is a person's.
+ */
+function PlaybookLine({ call }: { call: PlaybookCall }) {
+  const action = ACTION_LABEL[call.action] ?? call.action.replace(/_/g, ' ')
+  let lead: string
+  if (call.outcome === 'escalated') {
+    lead = 'Playbook: a person decides this one.'
+  } else if (call.mode === 'recommend' || call.due_at === null) {
+    lead = `Playbook recommends: ${action}.`
+  } else {
+    const minutes = Math.round(minutesUntil(call.due_at))
+    lead =
+      minutes > 0
+        ? `Playbook will ${action} in ${minutes}m unless you choose first.`
+        : `Playbook will ${action} on its next pass unless you choose first.`
+  }
+  return (
+    <p className="mt-1 text-xs text-[var(--text-muted)]">
+      <span className="font-medium text-[var(--text-secondary)]">{lead}</span> {call.reason}
+    </p>
   )
 }
 

@@ -361,6 +361,23 @@ class Settings(BaseSettings):
     # legitimately in that state.
     stranded_assignment_grace_seconds: int = 120
 
+    # The playbook (`DEC-8`, app/playbook/): rules that make the calls a
+    # dispatcher made, toward nobody running the day (decision D-SEAT). Each rule
+    # has a mode, and earns its way up: `recommend` records its call and does
+    # nothing, `veto` acts after `playbook_veto_minutes` unless a person acted
+    # first, `act` acts at once. A rule starts at recommend and moves up when
+    # its calls agree with what people did (`playbook_promotion_*`); moving it is
+    # a setting a person changes, on the evidence the playbook panel shows.
+    playbook_failed_delivery_mode: str = "recommend"
+    playbook_veto_minutes: int = 5
+    # How many attempts a delivery gets before the rule stops retrying it
+    # (`DEC-9`). The first attempt is 1, so 2 means one redelivery.
+    playbook_max_delivery_attempts: int = 2
+    # The evidence a rule needs before the panel says it is ready to move up a
+    # mode: this many calls a person also decided, agreeing at least this often.
+    playbook_promotion_min_decisions: int = 30
+    playbook_promotion_min_agreement: float = 0.9
+
     # How old a driver's last position can be before dispatch stops offering
     # them work. The app reports every 30 seconds while it's open; a driver whose
     # reports stopped has closed it, can't see an offer, and one sent to them
