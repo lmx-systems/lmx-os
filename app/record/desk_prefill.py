@@ -61,10 +61,11 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.location import Location
+from app.identity.site_facts import SOURCE_DESK, set_site_fact
+from app.models.location import SITE_FACTS, Location
 
-DESK = "desk"
-FACTS = ("kind_of_site", "setting", "shares_address")
+DESK = SOURCE_DESK
+FACTS = SITE_FACTS
 
 # --- Setting -----------------------------------------------------------------
 CITY_CORE_UNITS_PER_SQ_MI = 2213
@@ -119,8 +120,11 @@ _SUFFIX = {
     "north": "n", "south": "s", "east": "e", "west": "w",
     "mount": "mt", "saint": "st", "fort": "ft",
 }
-_ROUTE = re.compile(r"\b(?:us|u\s*s|nj|state|county|co)?\s*(?:hwy|highway|route|rte|rt|road|rd)?\s*[-#]?\s*(\d{1,3})\b")
-_ROUTE_WORDS = re.compile(r"\b(?:us|u\s*s|nj|state|hwy|highway|route|rte|rt)\b")
+_ROUTE = re.compile(
+    r"\b(?:(?P<county>county|co)|us|u\s*s|nj|state)?\s*(?:hwy|highway|route|rte|rt|road|rd)?\s*[-#]?\s*(?P<n>\d{1,3})\b"
+)
+_ROUTE_WORDS = re.compile(r"\b(?:us|u\s*s|nj|state|county|hwy|highway|route|rte|rt)\b")
+_DIRECTIONS = {"n", "s", "e", "w", "north", "south", "east", "west"}
 _ZIP = re.compile(r"\b(\d{5})(?:-\d{4})?\s*$")
 _NUMBER = re.compile(r"^\s*(\d+[a-z]?)(?:\s*-\s*\d+[a-z]?)?\s+(.+)$")
 
@@ -137,10 +141,13 @@ class StreetAddress:
 def normalize_street(street: str) -> str:
     """Case, punctuation and the usual abbreviations folded, so "Route 46" meets "US Highway 46".
 
-    A numbered highway becomes `route N` whatever it was called; otherwise each
-    word maps to its USPS-style abbreviation. Deliberately no fuzzier than that:
-    a near miss leaves the site unmatched, which is unknown, while a fuzzy match
-    puts another business's facts on our site.
+    A numbered state or US highway becomes `route N` whatever it was called, and
+    a county road `cr N` - a county route 9 and US 9 are different roads that
+    can share a house number and a ZIP. Words before the route that are not a
+    direction stay ("Old Route 22" is not Route 22). Otherwise each word maps
+    to its USPS-style abbreviation. Deliberately no fuzzier than that: a near
+    miss leaves the site unmatched, which is unknown, while a fuzzy match puts
+    another business's facts on our site.
     """
     s = street.casefold().replace(".", " ").replace(",", " ")
     s = re.sub(r"[^a-z0-9#\- ]", " ", s)
@@ -148,9 +155,10 @@ def normalize_street(street: str) -> str:
     if _ROUTE_WORDS.search(s):
         m = _ROUTE.search(s)
         if m:
-            tail = s[m.end():].strip()
-            tail = " ".join(_SUFFIX.get(w, w) for w in tail.split() if w not in {"n", "s", "e", "w", "north", "south", "east", "west"})
-            return f"route {int(m.group(1))}" + (f" {tail}" if tail else "")
+            head = " ".join(_SUFFIX.get(w, w) for w in s[: m.start()].split() if w not in _DIRECTIONS)
+            tail = " ".join(_SUFFIX.get(w, w) for w in s[m.end():].split() if w not in _DIRECTIONS)
+            road = f"{'cr' if m.group('county') else 'route'} {int(m.group('n'))}"
+            return " ".join(part for part in (head, road, tail) if part)
     return " ".join(_SUFFIX.get(w, w) for w in s.split())
 
 
@@ -351,8 +359,11 @@ class PrefillReport:
 async def apply_desk_facts(session: AsyncSession, evidence: Iterable[SiteEvidence]) -> PrefillReport:
     """Write each desk fact where the site has none, marked `desk`; count the rest.
 
-    A fact already known - from the import, a technician or a person - is never
-    touched; where the desk would have said something else it is counted as a
+    Each fact goes through `set_site_fact`, so its own `site_fact_sources` entry
+    says `desk`; the site's `site_source` is left alone, because the per-fact
+    entry is what `record_tiers` reads and a site-wide `desk` would mislabel a
+    fact some later writer adds. A fact already known - from the import, a
+    technician or a person - is never touched; where the desk would have said something else it is counted as a
     disagreement, the first measure of how good the desk is. The caller commits.
     """
     report = PrefillReport()
@@ -364,7 +375,6 @@ async def apply_desk_facts(session: AsyncSession, evidence: Iterable[SiteEvidenc
             continue
         report.sites += 1
         report.matched += ev.matched
-        sources = dict(location.site_fact_sources or {})
         for name in FACTS:
             desk_value = ev.fact(name)
             current = getattr(location, name)
@@ -379,12 +389,8 @@ async def apply_desk_facts(session: AsyncSession, evidence: Iterable[SiteEvidenc
             if desk_value is None:
                 report.unknown[name] += 1
                 continue
-            setattr(location, name, desk_value)
-            sources[name] = DESK
+            set_site_fact(location, name, desk_value, DESK)
             report.filled[name] += 1
-        if sources != (location.site_fact_sources or {}):
-            location.site_fact_sources = sources
-            location.site_source = location.site_source or DESK
         if all(getattr(location, name) is not None for name in FACTS):
             report.place_known_after += 1
     await session.flush()
