@@ -162,7 +162,7 @@ export function HoldQueueTable({ data, error, loading, canDispatch, onCancelled,
                         <td className="py-2 text-right">
                           <button
                             onClick={() => setExplaining(open ? null : order.order_id)}
-                            className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+                            className="rounded-full px-1.5 py-0.5 text-[11px] font-semibold text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
                             aria-expanded={open}
                           >
                             {open ? 'Hide' : canDispatch ? 'Why? / Release' : 'Why?'}

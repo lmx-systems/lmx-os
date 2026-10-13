@@ -265,7 +265,7 @@ function ClosedDays({
           <button
             disabled={busy || !date}
             onClick={add}
-            className="rounded-md bg-[var(--accent)] px-2.5 py-1 text-[11.5px] font-medium text-white disabled:opacity-40"
+            className="rounded-full bg-[var(--accent)] px-2.5 py-1 text-[11.5px] font-semibold text-white disabled:opacity-40"
           >
             Close this day
           </button>

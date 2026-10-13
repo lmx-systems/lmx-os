@@ -82,7 +82,7 @@ export function PlaybookPanel({ hubId }: { hubId: string }) {
                 <span className="text-[var(--text-primary)]">No live orders came in, so there is no rate yet.</span>
               ) : (
                 <>
-                  <span className="text-2xl font-semibold tabular-nums text-[var(--text-primary)]">
+                  <span className="text-[44px] font-extrabold leading-none tracking-[-0.05em] tabular-nums text-[var(--text-primary)]">
                     {report.touches_per_100_orders}
                   </span>{' '}
                   person touches per 100 orders
@@ -122,13 +122,26 @@ export function PlaybookPanel({ hubId }: { hubId: string }) {
             const decided = rule.yes + rule.no
             const calls = Object.values(rule.outcomes).reduce((a, b) => a + b, 0)
             return (
-              <div key={rule.rule} className="rounded-[var(--radius)] border border-[var(--border)] px-3 py-2">
+              <div key={rule.rule} className="rounded-[20px] bg-[var(--surface-2)] px-4 py-3.5">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <span className="text-sm font-medium text-[var(--text-primary)]">
+                  <span className="text-[15px] font-bold text-[var(--text-primary)]">
                     {RULE_LABEL[rule.rule] ?? humanise(rule.rule)}
                   </span>
                   <span className="text-xs text-[var(--text-muted)]">{MODE_LABEL[rule.mode]}</span>
                 </div>
+                <Steps mode={rule.mode} acts={rule.acts} />
+                {rule.acts && rule.next_mode !== null && (
+                  <div
+                    className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--surface-3)]"
+                    role="img"
+                    aria-label={`${Math.min(decided, rule.min_decisions)} of ${rule.min_decisions} decided calls needed to move up`}
+                  >
+                    <div
+                      className="h-full rounded-full bg-[var(--accent)]"
+                      style={{ width: `${Math.min(100, Math.round((decided / Math.max(1, rule.min_decisions)) * 100))}%` }}
+                    />
+                  </div>
+                )}
                 <p className="mt-1 text-xs text-[var(--text-secondary)]">
                   {calls === 0
                     ? `No calls in the last ${DAYS} days.`
@@ -183,5 +196,44 @@ export function PlaybookPanel({ hubId }: { hubId: string }) {
         </div>
       )}
     </Card>
+  )
+}
+
+const STEPS: { mode: PlaybookMode; label: string }[] = [
+  { mode: 'recommend', label: 'Suggests' },
+  { mode: 'veto', label: 'Acts unless stopped' },
+  { mode: 'act', label: 'Acts alone' },
+]
+
+/**
+ * The three steps a rule climbs (docs/DESIGN_SYSTEM.md, "Rules"): the one it is
+ * on in ink, the ones behind it in lime, the ones ahead outlined. A rule that
+ * can only recommend shows the later steps as not built, not as merely ahead.
+ */
+function Steps({ mode, acts }: { mode: PlaybookMode; acts: boolean }) {
+  const at = STEPS.findIndex((s) => s.mode === mode)
+  return (
+    <ol className="mt-2.5 grid grid-cols-3 gap-1" aria-label="Steps to acting alone">
+      {STEPS.map((step, i) => {
+        const style =
+          i === at
+            ? 'bg-[var(--accent)] text-white'
+            : i < at
+              ? 'bg-[var(--accent-dim)] text-[var(--lime-ink)]'
+              : !acts
+                ? 'bg-transparent text-[var(--text-muted)] shadow-[inset_0_0_0_1px_var(--border)]'
+                : 'bg-[var(--surface)] text-[var(--text-secondary)] shadow-[inset_0_0_0_1px_var(--border-strong)]'
+        return (
+          <li
+            key={step.mode}
+            aria-current={i === at ? 'step' : undefined}
+            className={`truncate rounded-[10px] px-1 py-1.5 text-center text-[12px] font-bold ${style}`}
+          >
+            {step.label}
+            {i > at && !acts && <span className="sr-only"> (not built yet)</span>}
+          </li>
+        )
+      })}
+    </ol>
   )
 }

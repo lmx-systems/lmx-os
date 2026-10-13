@@ -81,7 +81,7 @@ export function SiteFactDisputesPanel({ canDispatch }: { canDispatch: boolean })
           const key = `${d.location_id}:${d.fact}`
           const offered = Array.from(new Set(d.answers.map((a) => a.value))).filter((v) => v !== null)
           return (
-            <li key={key} className="rounded-[var(--radius)] border border-[var(--border)] px-2.5 py-2">
+            <li key={key} className="rounded-[20px] bg-[var(--surface-2)] px-2.5 py-2">
               <div className="mb-1 flex items-baseline justify-between gap-3">
                 <span className="text-[13px] text-[var(--text-primary)]">{d.address ?? 'No address'}</span>
                 <span className="flex-shrink-0 text-[11px] text-[var(--text-muted)]">{FACT_LABELS[d.fact]}</span>
@@ -99,7 +99,7 @@ export function SiteFactDisputesPanel({ canDispatch }: { canDispatch: boolean })
                   <button
                     disabled={busy === key}
                     onClick={() => settle(d, null)}
-                    className="rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                    className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40"
                   >
                     Keep {shown(d.current)}
                   </button>
@@ -108,7 +108,7 @@ export function SiteFactDisputesPanel({ canDispatch }: { canDispatch: boolean })
                       key={String(value)}
                       disabled={busy === key}
                       onClick={() => settle(d, value)}
-                      className="rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                      className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40"
                     >
                       Change to {shown(value)}
                     </button>

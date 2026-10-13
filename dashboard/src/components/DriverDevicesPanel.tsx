@@ -219,7 +219,7 @@ export function DriverDevicesPanel({
             <button
               disabled={busy === 'code'}
               onClick={() => issueCode(selected)}
-              className="shrink-0 rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-primary)] disabled:opacity-40"
+              className="shrink-0 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--text-primary)] disabled:opacity-40"
             >
               New sign-in code
             </button>
@@ -228,7 +228,7 @@ export function DriverDevicesPanel({
             <button
               disabled={busy === 'driver'}
               onClick={() => switchOff(selected)}
-              className="shrink-0 rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-medium text-[var(--red)] disabled:opacity-40"
+              className="shrink-0 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--red)] disabled:opacity-40"
             >
               Switch off
             </button>
@@ -236,7 +236,7 @@ export function DriverDevicesPanel({
             <button
               disabled={busy === 'driver'}
               onClick={() => switchOn(selected)}
-              className="shrink-0 rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-primary)] disabled:opacity-40"
+              className="shrink-0 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--text-primary)] disabled:opacity-40"
             >
               Switch back on
             </button>
@@ -282,7 +282,7 @@ export function DriverDevicesPanel({
                 <button
                   disabled={busy === device.device_id}
                   onClick={() => revoke(device)}
-                  className="shrink-0 rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-medium text-[var(--red)] disabled:opacity-40"
+                  className="shrink-0 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--red)] disabled:opacity-40"
                 >
                   Revoke
                 </button>

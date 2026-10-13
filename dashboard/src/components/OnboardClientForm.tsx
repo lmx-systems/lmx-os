@@ -193,7 +193,7 @@ export function OnboardClientForm({ hubId, onToast }: OnboardClientFormProps) {
           <button
             type="submit"
             disabled={submitting}
-            className="w-fit rounded-[var(--radius)] bg-[var(--accent)] px-4 py-2 text-[13px] font-medium text-white disabled:opacity-60"
+            className="w-fit rounded-full bg-[var(--accent)] px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-60"
           >
             {submitting ? 'Onboarding…' : 'Onboard client'}
           </button>

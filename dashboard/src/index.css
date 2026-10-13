@@ -1,32 +1,35 @@
 @import "tailwindcss";
 
 /*
- * Design tokens for the orchestrator dashboard - plain CSS custom
- * properties rather than Tailwind's `@theme` color mapping so components
- * can reference them via arbitrary-value utilities (`bg-[var(--surface)]`).
- * Every existing variable name is kept stable across light/dark so no
- * consumer needs to change which token it reads - only the values swap.
+ * Design tokens for the ops console - plain CSS custom properties rather than
+ * Tailwind's `@theme` color mapping so components can reference them via
+ * arbitrary-value utilities (`bg-[var(--surface)]`).
+ *
+ * The LMX design system, October 2026 (docs/DESIGN_SYSTEM.md): a soft grey
+ * ground, white tiles with large radii and no borders, ink for anything you
+ * press, lime for the one number that matters, peach for what needs a person.
+ * Light only - there is no dark theme. The client portal and the driver app
+ * take the same tokens by the same names (docs/DESIGN_SYSTEM.md, "Where it
+ * applies").
  */
-@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 :root {
-  /* Neutral scale - cool gray, slight blue tint to pair with indigo */
   --neutral-0: #ffffff;
-  --neutral-50: #f7f8fa;
-  --neutral-100: #eef0f3;
-  --neutral-150: #e4e7ec;
-  --neutral-200: #e2e5ea;
-  --neutral-300: #cfd4dc;
-  --neutral-400: #aab1bd;
-  --neutral-500: #8b93a1;
-  --neutral-600: #5b6472;
-  --neutral-700: #3a4150;
-  --neutral-800: #22262e;
-  --neutral-900: #14171c;
+  --neutral-50: #f6f7f8;
+  --neutral-100: #eeeff1;
+  --neutral-150: #ecedf0;
+  --neutral-200: #e6e7ea;
+  --neutral-300: #d3d5da;
+  --neutral-400: #a9acb4;
+  --neutral-500: #6b6e78;
+  --neutral-600: #4b4e57;
+  --neutral-700: #2e3038;
+  --neutral-800: #1f2026;
+  --neutral-900: #15161a;
 
-  --bg-page: var(--neutral-50);
+  --bg-page: var(--neutral-100);
   --surface: var(--neutral-0);
-  --surface-2: var(--neutral-100);
+  --surface-2: var(--neutral-50);
   --surface-3: var(--neutral-150);
   --border: var(--neutral-200);
   --border-strong: var(--neutral-300);
@@ -34,95 +37,62 @@
   --text-secondary: var(--neutral-600);
   --text-muted: var(--neutral-500);
 
-  /* Primary - brand green #0A6644, per the July 2026 brand decision
-     (docs/LMX_Brand_Asset_Inventory.docx) applied across dashboard,
-     client portal, and driver app alike - retires the earlier indigo.
-     Distinct from the semantic --green (~150°, brighter/more saturated,
-     used for live/success states) and the --premium violet used for the
-     HOT_SHOT tier (~262°). */
-  --accent: #0a6644;
-  --accent-hover: #06412b;
-  --accent-dim: #e5faf2;
+  /* Ink: every primary button, the selected nav pill, focus. */
+  --accent: #15161a;
+  --accent-hover: #000000;
+  --accent-dim: #e6f2c0;
 
-  --green: #1f9254;
-  --green-dim: #e5f6ec;
-  --blue: #2f6fdb;
-  --blue-dim: #e8f0fe;
-  --amber: #a15c07;
-  --amber-dim: #fdf1de;
-  --red: #c62828;
-  --red-dim: #fbe9ea;
-  --gray: #6b7280;
-  --gray-dim: #eef0f2;
+  /* Lime: the headline number's tile and "done". Never text on white. */
+  --lime: #cdeb6b;
+  --lime-strong: #afcb52;
+  --lime-ink: #2e3a0c;
 
-  /* Premium / HOT_SHOT - promoted from a hardcoded color in Badge.tsx */
-  --premium: #7c3aed;
-  --premium-dim: #f1e8fd;
+  /* Peach: something a rule may not decide, so a person must. */
+  --needs: #a8330a;
+  --needs-dim: #ffe4d4;
 
-  --overlay: rgba(20, 23, 28, 0.45);
+  /* LMX brand green (docs/LMX_Brand_Asset_Inventory.docx): the logo only. */
+  --brand: #0a6644;
 
-  --radius-sm: 6px;
-  --radius: 10px;
-  --radius-lg: 14px;
+  --green: #1f7a4d;
+  --green-dim: #e3f3e9;
+  --blue: #2f5fd0;
+  --blue-dim: #e8eefc;
+  --amber: #8a5300;
+  --amber-dim: #fff1c7;
+  --red: #b42318;
+  --red-dim: #fde8e6;
+  --gray: #6b6e78;
+  --gray-dim: #ecedf0;
 
-  --shadow-sm: 0 1px 2px rgba(20, 23, 28, 0.06);
-  --shadow-md: 0 2px 8px rgba(20, 23, 28, 0.08), 0 1px 2px rgba(20, 23, 28, 0.06);
-  --shadow-lg: 0 8px 28px rgba(20, 23, 28, 0.18);
-  --shadow-focus: 0 0 0 3px var(--accent-dim);
-}
+  /* Premium / HOT_SHOT */
+  --premium: #6d3fd8;
+  --premium-dim: #efe8fd;
 
-[data-theme="dark"] {
-  --neutral-0: #14171c;
-  --neutral-50: #1a1e24;
-  --neutral-100: #20242c;
-  --neutral-150: #262b34;
-  --neutral-200: #2d323c;
-  --neutral-300: #3a4150;
-  --neutral-400: #545c6c;
-  --neutral-500: #7b8494;
-  --neutral-600: #a0a8b5;
-  --neutral-700: #c5cad3;
-  --neutral-800: #e4e7ec;
-  --neutral-900: #f5f6f8;
+  --overlay: rgba(21, 22, 26, 0.4);
 
-  --bg-page: #101317;
-  --surface: var(--neutral-50);
-  --surface-2: var(--neutral-100);
-  --surface-3: var(--neutral-150);
-  --border: var(--neutral-200);
-  --border-strong: var(--neutral-300);
-  --text-primary: var(--neutral-900);
-  --text-secondary: var(--neutral-600);
-  --text-muted: var(--neutral-500);
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 28px;
+  --radius-pill: 999px;
 
-  --accent: #10a76f;
-  --accent-hover: #15d58e;
-  --accent-dim: #0b4731;
+  --shadow-sm: 0 1px 2px rgba(21, 22, 26, 0.05);
+  --shadow-md: 0 4px 14px rgba(21, 22, 26, 0.08);
+  --shadow-lg: 0 16px 40px rgba(21, 22, 26, 0.16);
+  --shadow-focus: 0 0 0 3px var(--lime);
 
-  --green: #34d399;
-  --green-dim: #103622;
-  --blue: #60a5fa;
-  --blue-dim: #12233f;
-  --amber: #fbbf24;
-  --amber-dim: #3a2a08;
-  --red: #f87171;
-  --red-dim: #3d1414;
-  --gray: #9aa2b1;
-  --gray-dim: #262b34;
-
-  --premium: #a78bfa;
-  --premium-dim: #2c2350;
-
-  --overlay: rgba(0, 0, 0, 0.6);
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.5);
+  color-scheme: light;
 }
 
 body {
   margin: 0;
   background-color: var(--bg-page);
   color: var(--text-primary);
-  font-family: 'Inter Variable', system-ui, sans-serif;
+  font-family: 'Plus Jakarta Sans Variable', 'Helvetica Neue', Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

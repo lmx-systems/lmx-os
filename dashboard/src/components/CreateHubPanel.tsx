@@ -165,7 +165,7 @@ export function CreateHubPanel({
           <button
             type="submit"
             disabled={!ready || saving}
-            className="rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-50"
+            className="rounded-full border border-[var(--accent)] bg-[var(--accent)] px-3 py-1.5 text-[13px] font-semibold text-white disabled:opacity-50"
           >
             {saving ? 'Creating…' : 'Create hub'}
           </button>

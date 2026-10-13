@@ -89,7 +89,7 @@ export function GigPathPanel({ hubId }: { hubId: string }) {
 
       {density && (
         <>
-          <div className="mb-3 rounded-[var(--radius)] border border-[var(--border)] px-3 py-2">
+          <div className="mb-3 rounded-[20px] bg-[var(--surface-2)] px-3 py-2">
             <p className="text-[11px] font-medium text-[var(--text-muted)]">
               Delivered as part of a sequence
             </p>

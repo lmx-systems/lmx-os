@@ -101,7 +101,7 @@ function Shell({
   children: React.ReactNode
 }) {
   return (
-    <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+    <div className="rounded-[20px] bg-[var(--surface-2)] px-4 py-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3">
         <span className="text-sm text-[var(--text-primary)]">{name}</span>
         <span className="text-xs text-[var(--text-muted)]">{target}</span>
@@ -195,13 +195,13 @@ function CreditsSection({ exposure }: { exposure: CreditExposure }) {
       </header>
 
       <div className="mb-2 grid grid-cols-2 gap-2">
-        <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+        <div className="rounded-[20px] bg-[var(--surface-2)] px-4 py-3">
           <p className="text-xs text-[var(--text-muted)]">Accruing (not yet invoiced)</p>
           <p className="text-lg font-semibold text-[var(--text-primary)]">
             {money(exposure.accruing_cents)}
           </p>
         </div>
-        <div className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+        <div className="rounded-[20px] bg-[var(--surface-2)] px-4 py-3">
           <p className="text-xs text-[var(--text-muted)]">Already credited</p>
           <p className="text-lg font-semibold text-[var(--text-primary)]">
             {money(exposure.issued_cents)}
@@ -214,7 +214,7 @@ function CreditsSection({ exposure }: { exposure: CreditExposure }) {
         .map((tier) => (
           <div
             key={tier.sla_tier}
-            className="mb-1 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+            className="mb-1 rounded-[20px] bg-[var(--surface-2)] px-4 py-3"
           >
             <div className="flex flex-wrap items-baseline justify-between gap-x-3">
               <span className="text-sm text-[var(--text-primary)]">{tier.sla_tier}</span>
@@ -239,7 +239,7 @@ function CreditsSection({ exposure }: { exposure: CreditExposure }) {
         ))}
 
       {exposure.by_client.length > 0 && (
-        <div className="mt-2 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+        <div className="mt-2 rounded-[20px] bg-[var(--surface-2)] px-4 py-3">
           <p className="mb-1 text-xs text-[var(--text-muted)]">By client</p>
           {exposure.by_client.map((c) => (
             <p key={c.client_id} className="text-sm text-[var(--text-secondary)]">
