@@ -365,9 +365,13 @@ async def apply_desk_facts(session: AsyncSession, evidence: Iterable[SiteEvidenc
     fact some later writer adds. A fact already known - from the import, a
     technician or a person - is never touched; where the desk would have said something else it is counted as a
     disagreement, the first measure of how good the desk is. The caller commits.
+
+    Sites are taken in id order and held to the commit, the order `lock_sites`
+    takes them in, so this run and a merge holding two sites queue rather than
+    deadlock.
     """
     report = PrefillReport()
-    for ev in evidence:
+    for ev in sorted(evidence, key=lambda e: e.location_id):
         location = (
             await session.execute(select(Location).where(Location.id == ev.location_id).with_for_update())
         ).scalar_one_or_none()

@@ -50,13 +50,12 @@ export function SiteFactDisputesPanel({ canDispatch }: { canDispatch: boolean })
   async function settle(d: SiteFactDispute, take: string | boolean | null) {
     const key = `${d.location_id}:${d.fact}`
     setBusy(key)
-    // The newest answer shown here: one that came in after it is one nobody saw.
-    const seenUpTo = d.answers.reduce<string | null>(
-      (newest, a) => (a.at && (!newest || Date.parse(a.at) > Date.parse(newest)) ? a.at : newest),
-      null,
-    )
+    // Exactly the answers shown here: the server refuses unless they are the
+    // ones still open, so one that came in since - or that a merge brought,
+    // with its own older time - is never filed unseen.
+    const seen = d.answers.map((a) => a.key)
     try {
-      await api.settleSiteFact(d.location_id, d.fact, take, seenUpTo)
+      await api.settleSiteFact(d.location_id, d.fact, take, seen)
       setDisputes((current) =>
         (current ?? []).filter((x) => !(x.location_id === d.location_id && x.fact === d.fact)),
       )

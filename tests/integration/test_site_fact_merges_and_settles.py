@@ -12,7 +12,6 @@ settles, and a person's "keep" holds.
   - keeping a fact against an answer re-raised the same answer at every door.
 """
 import uuid
-from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -62,6 +61,11 @@ async def _a_disputed_setting(db_session):
 
 async def _list(db_session):
     return await site_fact_disputes(limit=100, session=db_session, _ops=OPS)
+
+async def _seen(db_session, location, fact) -> list[str]:
+    """The keys of the answers the panel shows for this fact, as it sends them."""
+    listed = await _list(db_session)
+    return [a.key for d in listed if d.location_id == str(location.id) and d.fact == fact for a in d.answers]
 
 
 class TestAMergeCarriesTheAnswers:
@@ -121,11 +125,89 @@ class TestAMergeCarriesTheAnswers:
         assert (str(source.id), "setting") in listed
 
 
+class TestOnlyAChainsOutermostLinkComesUndone:
+    """The #229 review: undoing A->B after B->C left A's carried answers open on
+    C and back on A, and its shops to be moved a second time when B->C was
+    undone. Only the outermost link of a chain comes undone now."""
+
+    async def test_undoing_an_inner_link_is_refused(self, db_session):
+        a, _stop, _authed_driver, _ = await _a_disputed_setting(db_session)
+        b = await _site(db_session, setting="suburb")
+        c = await _site(db_session, setting="suburb")
+        inner = await merge_locations(db_session, source=a, target=b, reason="same place")
+        await merge_locations(db_session, source=b, target=c, reason="same place")
+        await db_session.commit()
+        b_id = b.id
+
+        with pytest.raises(ValueError, match="undo that merge first"):
+            await revert_merge(db_session, inner, ops_user_id=uuid.UUID(OPS.ops_user_id))
+        await db_session.rollback()
+
+        await db_session.refresh(a)
+        await db_session.refresh(c)
+        assert a.merged_into_id == b_id
+        assert [d["value"] for d in c.site_fact_answers["setting"]["disputes"]] == ["city_core"]
+
+    async def test_undoing_outer_then_inner_puts_every_answer_back(self, db_session):
+        a, _stop, _authed_driver, _ = await _a_disputed_setting(db_session)
+        b = await _site(db_session, setting="suburb")
+        c = await _site(db_session, setting="suburb")
+        inner = await merge_locations(db_session, source=a, target=b, reason="same place")
+        outer = await merge_locations(db_session, source=b, target=c, reason="same place")
+        await db_session.commit()
+
+        await revert_merge(db_session, outer, ops_user_id=uuid.UUID(OPS.ops_user_id))
+        await revert_merge(db_session, inner, ops_user_id=uuid.UUID(OPS.ops_user_id))
+        await db_session.commit()
+
+        for site in (a, b, c):
+            await db_session.refresh(site)
+        assert (a.merged_into_id, b.merged_into_id) == (None, None)
+        for emptied in (b, c):
+            entry = (emptied.site_fact_answers or {}).get("setting", {})
+            assert entry.get("disputes", []) == [] and entry.get("absorbed", []) == []
+        assert [d["value"] for d in a.site_fact_answers["setting"]["disputes"]] == ["city_core"]
+        listed = [(d.location_id, d.fact) for d in await _list(db_session)]
+        assert (str(a.id), "setting") in listed
+        assert not any(location_id in (str(b.id), str(c.id)) for location_id, _ in listed)
+
+
+async def test_a_merge_refuses_a_dock_merged_elsewhere_after_it_was_resolved(db_session, monkeypatch):
+    """The #229 review: two proposals naming one dock, confirmed together. Each
+    resolves the dock before taking the lock; the second must see, under the
+    lock, that the first has moved it on, rather than fold its answers into a
+    second dock as well. Simulated by resolving to the stale row."""
+    import app.identity.merge as merge_module
+    from app.identity.merge import confirm_merge, propose_merge
+    from app.models.location_merge import STATUS_PROPOSED
+
+    a, _stop, _authed_driver, _ = await _a_disputed_setting(db_session)
+    b = await _site(db_session, setting="suburb")
+    c = await _site(db_session, setting="suburb")
+    second = await propose_merge(db_session, source=a, target=c, reason="queued second")
+    await merge_locations(db_session, source=a, target=b, reason="confirmed first")
+    await db_session.commit()
+
+    async def as_it_was(_session, location):
+        # What the second confirmation resolved before the first committed.
+        return location
+
+    monkeypatch.setattr(merge_module, "canonical_location", as_it_was)
+    with pytest.raises(ValueError, match="a moment ago"):
+        await confirm_merge(db_session, second, ops_user_id=uuid.UUID(OPS.ops_user_id))
+    await db_session.rollback()
+
+    await db_session.refresh(second)
+    await db_session.refresh(c)
+    assert second.status == STATUS_PROPOSED
+    assert (c.site_fact_answers or {}).get("setting", {}).get("disputes", []) == []
+
+
 class TestASettleSeesWhatItSettles:
     async def test_a_settle_refuses_an_answer_the_panel_never_showed(self, db_session):
         location, _stop, _authed_driver, (hub, client, shop, driver) = await _a_disputed_setting(db_session)
         [shown] = await _list(db_session)
-        seen = datetime.fromisoformat(shown.answers[-1].at)
+        seen = [a.key for a in shown.answers]
         # Another door disagrees after the panel loaded.
         later = await _dropoff(db_session, hub, client, shop, driver, dock=location)
         await record_stop_site_facts(
@@ -134,7 +216,7 @@ class TestASettleSeesWhatItSettles:
 
         with pytest.raises(HTTPException) as refused:
             await settle_site_fact_dispute(
-                location.id, "setting", SettleSiteFactBody(take=None, seen_up_to=seen), session=db_session, ops=OPS
+                location.id, "setting", SettleSiteFactBody(take=None, seen=seen), session=db_session, ops=OPS
             )
         assert refused.value.status_code == 409
         await db_session.refresh(location)
@@ -147,7 +229,7 @@ class TestASettleSeesWhatItSettles:
         await settle_site_fact_dispute(
             location.id,
             "setting",
-            SettleSiteFactBody(take="city_core", seen_up_to=datetime.fromisoformat(shown.answers[-1].at)),
+            SettleSiteFactBody(take="city_core", seen=[a.key for a in shown.answers]),
             session=db_session,
             ops=OPS,
         )
@@ -155,15 +237,46 @@ class TestASettleSeesWhatItSettles:
         await db_session.refresh(location)
         assert (location.setting, location.site_fact_sources["setting"]) == ("city_core", SOURCE_OPS)
 
-    async def test_an_old_snapshot_is_still_refused_after_its_own_answer(self, db_session):
+    async def test_a_snapshot_missing_an_answer_is_refused(self, db_session):
         location, *_ = await _a_disputed_setting(db_session)
-        before_any = datetime.now(timezone.utc) - timedelta(hours=1)
 
         with pytest.raises(HTTPException) as refused:
             await settle_site_fact_dispute(
-                location.id, "setting", SettleSiteFactBody(seen_up_to=before_any), session=db_session, ops=OPS
+                location.id, "setting", SettleSiteFactBody(seen=[]), session=db_session, ops=OPS
             )
         assert refused.value.status_code == 409
+
+    async def test_a_settle_refuses_an_older_answer_a_merge_brought_in(self, db_session):
+        """The #229 review: a merge carries a dispute over with the time it was
+        given at its own door. A check on the newest time shown let it through -
+        older than anything on the panel, never seen - and a "keep" then filed it
+        as turned down for good."""
+        source, *_ = await _a_disputed_setting(db_session)
+        target, _stop, _authed_driver, _ = await _a_disputed_setting(db_session)
+        # The source's answer is the older of the two; the panel shows only the
+        # target's.
+        shown = await _seen(db_session, target, "setting")
+        assert len(shown) == 1
+
+        await merge_locations(db_session, source=source, target=target, reason="same place")
+        await db_session.commit()
+
+        with pytest.raises(HTTPException) as refused:
+            await settle_site_fact_dispute(
+                target.id, "setting", SettleSiteFactBody(take=None, seen=shown), session=db_session, ops=OPS
+            )
+        assert refused.value.status_code == 409
+        await db_session.refresh(target)
+        assert len(target.site_fact_answers["setting"]["disputes"]) == 2
+        assert not target.site_fact_answers["setting"].get("settled")
+        # Looked at again, with both shown, it settles.
+        await settle_site_fact_dispute(
+            target.id,
+            "setting",
+            SettleSiteFactBody(take=None, seen=await _seen(db_session, target, "setting")),
+            session=db_session,
+            ops=OPS,
+        )
 
 
 async def test_the_badge_counts_facts_as_the_panel_does(db_session):
@@ -190,7 +303,13 @@ async def test_the_badge_counts_facts_as_the_panel_does(db_session):
 class TestAKeepHolds:
     async def test_the_same_answer_after_a_keep_is_not_raised_again(self, db_session):
         location, _stop, _authed_driver, (hub, client, shop, driver) = await _a_disputed_setting(db_session)
-        await settle_site_fact_dispute(location.id, "setting", SettleSiteFactBody(), session=db_session, ops=OPS)
+        await settle_site_fact_dispute(
+            location.id,
+            "setting",
+            SettleSiteFactBody(seen=await _seen(db_session, location, "setting")),
+            session=db_session,
+            ops=OPS,
+        )
 
         again = await _dropoff(db_session, hub, client, shop, driver, dock=location)
         answered = await record_stop_site_facts(
@@ -221,7 +340,13 @@ class TestAKeepHolds:
         await record_stop_site_facts(
             str(first.id), SiteFactsBody(shares_address=False), driver=_authed(driver, hub), session=db_session
         )
-        await settle_site_fact_dispute(location.id, "shares_address", SettleSiteFactBody(), session=db_session, ops=OPS)
+        await settle_site_fact_dispute(
+            location.id,
+            "shares_address",
+            SettleSiteFactBody(seen=await _seen(db_session, location, "shares_address")),
+            session=db_session,
+            ops=OPS,
+        )
 
         second = await _dropoff(db_session, hub, client, shop, driver, dock=location)
         answered = await record_stop_site_facts(
@@ -235,7 +360,13 @@ class TestAKeepHolds:
 
     async def test_a_different_answer_after_a_keep_is_still_a_dispute(self, db_session):
         location, _stop, _authed_driver, (hub, client, shop, driver) = await _a_disputed_setting(db_session)
-        await settle_site_fact_dispute(location.id, "setting", SettleSiteFactBody(), session=db_session, ops=OPS)
+        await settle_site_fact_dispute(
+            location.id,
+            "setting",
+            SettleSiteFactBody(seen=await _seen(db_session, location, "setting")),
+            session=db_session,
+            ops=OPS,
+        )
         location.setting = "city_core"
         location.site_fact_sources = {"setting": SOURCE_OPS}
         await db_session.commit()

@@ -68,6 +68,7 @@ site is now, never whether it is a test site or which block it was drawn in.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -325,6 +326,16 @@ def _answered_at(entry: dict, stop_id: uuid.UUID) -> object:
     return _UNANSWERED
 
 
+def dispute_key(answer: dict) -> str:
+    """One answer's fingerprint, stable for as long as the answer exists: the stop
+    that gave it, who, when and what. A merge carries an answer over unchanged in
+    all four, so the same answer has the same key on the site it lands on."""
+    return "|".join(
+        [str(answer.get("stop_id") or ""), str(answer.get("by") or ""), str(answer.get("at") or ""),
+         json.dumps(answer.get("value"))]
+    )
+
+
 @dataclass
 class OpenDispute:
     """One fact at one site where the people at the door disagreed."""
@@ -362,16 +373,18 @@ async def settle_dispute(
     *,
     take: object | None,
     by: uuid.UUID,
-    seen_up_to: datetime | None = None,
+    seen: list[str],
 ) -> Location:
     """Settle a fact's open disputes: keep it as it is (`take` None) or take one
     of the disputed values. Either way the fact is now `ops` - a person looked -
     and the disputes move to its history with who settled them and when.
 
-    `seen_up_to` is the time of the newest answer the person was shown. A dispute
-    newer than that is one they never saw, and settling would file it as decided,
-    so the settle is refused (`NewerAnswer`) and they look again. Flushes; the
-    caller commits."""
+    `seen` is the `dispute_key` of every answer the person was shown. Settling
+    files every open dispute as decided, so unless the open ones are exactly
+    those, the settle is refused (`NewerAnswer`) and they look again. A set
+    rather than the newest time shown, because a merge carries a dispute over
+    with the time it was given at its own door - older than anything shown, and
+    still never seen. Flushes; the caller commits."""
     if fact not in SITE_FACTS:
         raise NothingToSettle(f"not a site fact: {fact}")
     site = await _lock_canonical(session, location)
@@ -380,11 +393,8 @@ async def settle_dispute(
     disputes = list(entry.get("disputes", []))
     if not disputes:
         raise NothingToSettle("Nothing to settle: no answer disagrees with this fact")
-    if seen_up_to is not None:
-        if seen_up_to.tzinfo is None:
-            seen_up_to = seen_up_to.replace(tzinfo=timezone.utc)
-        if any(datetime.fromisoformat(d["at"]) > seen_up_to for d in disputes if d.get("at")):
-            raise NewerAnswer("Another answer has come in since this was loaded - look again")
+    if {dispute_key(d) for d in disputes} != set(seen):
+        raise NewerAnswer("The answers here have changed since this was loaded - look again")
     if take is not None and take not in [d.get("value") for d in disputes]:
         raise NothingToSettle("That value is not one the disputed answers gave")
     value = getattr(site, fact) if take is None else take
@@ -479,7 +489,9 @@ def unfold_answers(source_id: uuid.UUID, target: Location) -> None:
 
 async def lock_sites(session: AsyncSession, location_ids: list[uuid.UUID]) -> dict[uuid.UUID, Location]:
     """Lock these sites' rows in id order, read fresh. In id order so two writers
-    holding several sites (a merge, the desk's run) queue rather than deadlock."""
+    holding several sites queue rather than deadlock: a merge and its revert take
+    both sites here before any shop, and the desk's run (`apply_desk_facts`)
+    takes its sites one by one in the same id order."""
     rows = (
         await session.scalars(
             select(Location)

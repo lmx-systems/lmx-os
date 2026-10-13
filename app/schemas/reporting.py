@@ -441,6 +441,8 @@ class SiteFactAnswerView(BaseModel):
     value: str | bool | None
     at: str | None
     driver_name: str | None
+    # What a settle sends back to say which answers it was shown (`dispute_key`).
+    key: str
 
 
 class SiteFactDisputeView(BaseModel):
@@ -458,12 +460,12 @@ class SiteFactDisputeView(BaseModel):
 class SettleSiteFactBody(BaseModel):
     """Keep the fact as recorded (`take` omitted), or take a disputed value.
 
-    `seen_up_to` is the time of the newest answer the panel showed; a settle is
-    refused when a newer one has arrived since, so nobody files an answer they
-    never saw."""
+    `seen` is the `key` of every answer the panel showed for this fact; a settle
+    is refused unless those are exactly the answers still open, so nobody files
+    an answer they never saw - one that arrived since, or one a merge brought."""
 
     take: str | bool | None = None
-    seen_up_to: datetime | None = None
+    seen: list[str]
 
 
 class OrderLookupRow(BaseModel):

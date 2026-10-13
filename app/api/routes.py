@@ -29,7 +29,7 @@ from app.identity.merge import (
     revert_merge,
 )
 from app.identity.node_class import classification_coverage, is_a_served_dock, set_node_class
-from app.identity.site_facts import NewerAnswer, NothingToSettle, open_disputes, settle_dispute
+from app.identity.site_facts import NewerAnswer, NothingToSettle, dispute_key, open_disputes, settle_dispute
 from app.learning_loop.service import run_nightly_job
 from app.models.dispatcher_override import (
     ACTION_RELEASE,
@@ -342,6 +342,7 @@ async def site_fact_disputes(
                     value=a.get("value"),
                     at=a.get("at"),
                     driver_name=names.get(uuid.UUID(a["by"])) if a.get("by") else None,
+                    key=dispute_key(a),
                 )
                 for a in d.disputes
             ],
@@ -372,7 +373,7 @@ async def settle_site_fact_dispute(
             fact,
             take=body.take,
             by=uuid.UUID(ops.ops_user_id),
-            seen_up_to=body.seen_up_to,
+            seen=body.seen,
         )
     except (NothingToSettle, NewerAnswer) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
