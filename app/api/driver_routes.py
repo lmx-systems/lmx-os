@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 from sse_starlette.sse import EventSourceResponse
 
 import app.payroll.hours as payroll_hours
@@ -930,11 +931,26 @@ async def _expire_if_lapsed(session: AsyncSession, offer: RouteOffer) -> bool:
     three offer-reading endpoints, which is exactly how decline_offer ended
     up as the one that forgot this check.
     """
-    if offer.expires_at > datetime.now(timezone.utc):
+    now = datetime.now(timezone.utc)
+    if offer.expires_at > now:
         return False
-    offer.status = "expired"
-    offer.responded_at = datetime.now(timezone.utc)
-    await _requeue_orders_from_offer(session, str(offer.hub_id), str(offer.driver_id), offer.stop_payload)
+    # Out of `offered` only if it still is, whatever this copy of the row says:
+    # a caller holding a stale copy - read before the driver's app expired it,
+    # and dispatch gave its orders to someone else - would otherwise send those
+    # orders back to the queue a second time and free a driver now offered
+    # other work. Every caller also locks the row it read, so this is the
+    # backstop, not the guard.
+    won = await session.scalar(
+        update(RouteOffer)
+        .where(RouteOffer.id == offer.id, RouteOffer.status == "offered")
+        .values(status="expired", responded_at=now)
+        .returning(RouteOffer.id)
+        .execution_options(synchronize_session=False)
+    )
+    if won is not None:
+        set_committed_value(offer, "status", "expired")
+        set_committed_value(offer, "responded_at", now)
+        await _requeue_orders_from_offer(session, str(offer.hub_id), str(offer.driver_id), offer.stop_payload)
     return True
 
 
@@ -946,13 +962,20 @@ async def expire_lapsed_offers(session: AsyncSession) -> int:
     assigned to someone who wasn't there until they opened it again. The
     dispatch sweep calls this. Does not commit.
     """
+    # Locked, skipping any a driver is answering this instant: that answer
+    # settles the offer, and a lapse processed beside it would send its orders
+    # back twice. Read fresh, so a row expired since this session last saw it
+    # is not processed again.
     lapsed = list(
         (
             await session.execute(
-                select(RouteOffer).where(
+                select(RouteOffer)
+                .where(
                     RouteOffer.status == "offered",
                     RouteOffer.expires_at <= datetime.now(timezone.utc),
                 )
+                .with_for_update(skip_locked=True)
+                .execution_options(populate_existing=True)
             )
         ).scalars()
     )
@@ -991,10 +1014,13 @@ async def _estimate_offer_pay_cents(session: AsyncSession, stop_payload: list[di
 async def list_my_offers(
     driver: AuthedDriver = Depends(get_current_driver), session: AsyncSession = Depends(get_db)
 ) -> list[JobOfferView]:
+    # Locked for the lapse check below, as the sweep locks them; one being
+    # answered right now is skipped, since it is no longer the driver's to see.
     result = await session.execute(
-        select(RouteOffer).where(
-            RouteOffer.driver_id == uuid.UUID(driver.driver_id), RouteOffer.status == "offered"
-        )
+        select(RouteOffer)
+        .where(RouteOffer.driver_id == uuid.UUID(driver.driver_id), RouteOffer.status == "offered")
+        .with_for_update(skip_locked=True)
+        .execution_options(populate_existing=True)
     )
     offers = result.scalars().all()
 

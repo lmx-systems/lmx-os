@@ -172,13 +172,22 @@ async def _free_driver(hub_id: str, driver_id: str, route_id: str) -> None:
 
 
 async def _withdraw_offer(session: AsyncSession, order: Order) -> str | None:
+    # Locked and read fresh. A driver accepting or declining holds the row, and
+    # this waits for them: then the offer is no longer `offered`, nothing is
+    # withdrawn, and the caller takes the order off the route an accept built.
+    # Unlocked, a stale copy marked an accepted offer `withdrawn` over the
+    # accept, and sent back orders a decline had already sent back - by then
+    # possibly given to somebody else.
     offer = (
         await session.execute(
-            select(RouteOffer).where(
+            select(RouteOffer)
+            .where(
                 RouteOffer.hub_id == order.hub_id,
                 RouteOffer.status == "offered",
                 RouteOffer.stop_payload.contains([{"order_id": str(order.id)}]),
             )
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).scalars().first()
     if offer is None:

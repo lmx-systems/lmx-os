@@ -95,6 +95,37 @@ return 1
 """
 
 
+# KEYS: state, available set. ARGV: driver_id.
+# Takes an available driver for an offer in one step. Returns the state before
+# as (capacity_units, load_units, current_route_id), or nil if they were not
+# available.
+_CLAIM_IF_AVAILABLE = """
+if redis.call('hget', KEYS[1], 'status') ~= 'available' then
+    return nil
+end
+local before = redis.call('hmget', KEYS[1], 'capacity_units', 'load_units', 'current_route_id')
+redis.call('hset', KEYS[1], 'status', 'offered')
+redis.call('srem', KEYS[2], ARGV[1])
+return before
+"""
+
+# KEYS: state, available set. ARGV: driver_id, expected status, new status.
+# The status alone, and only if it is still the expected one; capacity, load and
+# route stay as they are.
+_SET_STATUS_IF = """
+if redis.call('hget', KEYS[1], 'status') ~= ARGV[2] then
+    return 0
+end
+redis.call('hset', KEYS[1], 'status', ARGV[3])
+if ARGV[3] == 'available' then
+    redis.call('sadd', KEYS[2], ARGV[1])
+else
+    redis.call('srem', KEYS[2], ARGV[1])
+end
+return 1
+"""
+
+
 class FleetStateManager:
     def __init__(self) -> None:
         self._redis = get_client()
@@ -162,37 +193,65 @@ class FleetStateManager:
     async def claim_for_offer(self, hub_id: str, driver_id: str) -> tuple[DriverState, DriverState] | None:
         """Take an available driver out of the pool for an offer, or say no.
 
-        Two writers make offers now - the dispatch cycle and a dispatcher
-        assigning by hand - and "one open offer per driver" holds only because
-        an offered driver leaves the available set. Each read the driver as
-        available and then wrote `offered`, so between one's read and its write
-        the other could offer the same driver: two open offers, and two active
-        routes if both were accepted. A short per-driver lock makes the
-        read-and-mark one step.
+        Two writers make offers - the dispatch cycle and a dispatcher assigning
+        by hand - and "one open offer per driver" holds only because an offered
+        driver leaves the available set. One script reads `available` and
+        writes `offered`, so nothing lands between the two: not another
+        claimer, and not a writer that doesn't claim, such as the driver's own
+        app going on break. (A per-driver lock did this before; it kept out
+        other claimers only, and a break written between its read and its write
+        was overwritten with `offered`.)
 
         Returns (state before, state after) when the driver was available, so
-        a caller whose commit then fails can put them back; None when they were
-        not, or another writer is claiming them this instant.
+        a caller whose commit then fails can give them back
+        (`give_back_claim`); None when they were not.
         """
-        lock = f"driver_offer_claim:{hub_id}:{driver_id}"
-        if not await self._redis.set(lock, "1", nx=True, px=5000):
-            return None
-        try:
-            before = await self.get_driver_state(hub_id, driver_id)
-            if before is None or before.status != "available":
-                return None
-            after = DriverState(
-                driver_id=driver_id,
-                hub_id=hub_id,
-                status="offered",
-                capacity_units=before.capacity_units,
-                load_units=before.load_units,
-                current_route_id=before.current_route_id,
+        async with timed_operation("fleet.claim_for_offer"):
+            reply = await self._redis.eval(
+                _CLAIM_IF_AVAILABLE,
+                2,
+                _state_key(hub_id, driver_id),
+                _available_set_key(hub_id),
+                driver_id,
             )
-            await self.upsert_driver_state(after)
-            return before, after
-        finally:
-            await self._redis.delete(lock)
+        if reply is None:
+            return None
+        capacity, load, route = (as_text(value) for value in reply)
+        before = DriverState(
+            driver_id=driver_id,
+            hub_id=hub_id,
+            status="available",
+            capacity_units=int(capacity),
+            load_units=float(load),
+            current_route_id=route or None,
+        )
+        return before, before.model_copy(update={"status": "offered"})
+
+    async def set_status_if(self, hub_id: str, driver_id: str, *, expect_status: str, new_status: str) -> bool:
+        """Change a driver's status only if it is still `expect_status`; True if it
+        changed. Capacity, load and route are left as they are."""
+        async with timed_operation("fleet.set_status_if"):
+            changed = await self._redis.eval(
+                _SET_STATUS_IF,
+                2,
+                _state_key(hub_id, driver_id),
+                _available_set_key(hub_id),
+                driver_id,
+                expect_status,
+                new_status,
+            )
+        return bool(changed)
+
+    async def give_back_claim(self, before: DriverState) -> bool:
+        """Undo `claim_for_offer` when the offer was never made.
+
+        Only while the driver is still `offered`: a driver who went on break or
+        off shift since the claim chose that, and writing the claim's `before`
+        back would put them in the pool against their own choice.
+        """
+        return await self.set_status_if(
+            before.hub_id, before.driver_id, expect_status="offered", new_status=before.status
+        )
 
     async def get_driver_state(self, hub_id: str, driver_id: str) -> DriverState | None:
         async with timed_operation("fleet.get_driver_state"):

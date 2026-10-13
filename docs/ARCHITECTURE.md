@@ -184,9 +184,11 @@ This closed three real gaps, not just "add some endpoints":
   (`advance_orders(only_from=...)`), so an order dispatch assigned
   while the solver ran is left off the offer rather than handed to a second
   driver; and **both claim the driver** (`FleetStateManager.claim_for_offer`,
-  read-and-mark under a per-driver lock), so a driver dispatch took since the
+  read-and-mark in one Redis script), so a driver dispatch took since the
   cycle's snapshot gets no second offer, and the cycle's share of the plan
-  goes back to the queue.
+  goes back to the queue. The assign also holds the hub lock the cycle and the
+  Redis rebuild take, so the rebuild never frees a driver whose offer is being
+  committed.
 - **The first Route/Stop endpoints this codebase has ever had.** The
   `routes`/`stops` tables existed since the initial migration but had zero
   API surface. Accepting an offer now builds one pickup `Stop` per shop

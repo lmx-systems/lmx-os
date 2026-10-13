@@ -456,8 +456,8 @@ class DispatchOptimizerService:
                     # straight to "en_route" instead.
                     #
                     # Claimed, so reading `available` and writing `offered` is
-                    # one step under the per-driver lock a dispatcher's offer
-                    # takes too: whoever is second finds them taken. A driver
+                    # one step in Redis, as a dispatcher's offer claims too:
+                    # whoever is second finds them taken. A driver
                     # taken since the snapshot - by a dispatcher, or gone on
                     # break - gets nothing from this cycle, and their share of
                     # the plan goes back to the queue.
@@ -582,8 +582,11 @@ class DispatchOptimizerService:
         try:
             yield
         except BaseException:
+            # Only a driver still `offered`: one who has gone on break or off
+            # shift since the claim chose that, and the claim's `before` would
+            # overwrite it (`give_back_claim`).
             for before in claims:
-                await self._fleet_state.upsert_driver_state(before)
+                await self._fleet_state.give_back_claim(before)
             logger.warning("dispatch_offers_failed_claims_returned", drivers=len(claims))
             raise
 
