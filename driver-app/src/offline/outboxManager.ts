@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 
 import type {
   DockSurveyBody,
+  SiteFactsBody,
   HandoffPhotoSlot,
   ItemFactsBody,
   OffPlatformRecordBody,
@@ -457,6 +458,10 @@ export class OutboxManager {
         // dock and re-stamps `surveyed_at`. It cannot create a second profile -
         // `profile_for` is keyed on the canonical dock.
         return api.recordDockSurvey(item.stopId, item.payload as DockSurveyBody);
+      case 'site-facts':
+        // Safe to retry: an answer fills only a fact still open, and one that
+        // disagrees with a person's is kept as a dispute, not applied.
+        return api.recordSiteFacts(item.stopId, item.payload as SiteFactsBody);
       case 'off-platform-record':
         // Safe to retry: the record is named by its id and each field is
         // overwritten with what was sent.

@@ -25,6 +25,7 @@ jest.mock('../api/client', () => ({
     completeStop: jest.fn(),
     flagStop: jest.fn(),
     recordDockSurvey: jest.fn(),
+    recordSiteFacts: jest.fn(),
     logOffPlatformRecord: jest.fn(),
     refreshToken: jest.fn(),
   },
@@ -43,6 +44,7 @@ const mockApi = api as unknown as Record<
   | 'completeStop'
   | 'flagStop'
   | 'recordDockSurvey'
+  | 'recordSiteFacts'
   | 'logOffPlatformRecord',
   jest.Mock
 >;
@@ -235,6 +237,19 @@ describe('the queue on a shift', () => {
   });
 
   // DE-5: a correction to an order's weight replaces the unsent first entry.
+  // DE-15: the site facts alone, after a drop-off where the survey is not due.
+  it('sends the site facts on their own, not as a survey', async () => {
+    mockApi.recordSiteFacts.mockResolvedValue({});
+    const queue = new OutboxManager();
+
+    await queue.enqueue('site-facts', 's1', { shares_address: true, setting: 'suburb' });
+    await settle();
+
+    expect(mockApi.recordSiteFacts).toHaveBeenCalledWith('s1', { shares_address: true, setting: 'suburb' });
+    expect(mockApi.recordDockSurvey).not.toHaveBeenCalled();
+    expect(itemsOf(queue)).toEqual([]);
+  });
+
   it('sends the corrected weight, once, and each order its own', async () => {
     mockApi.recordItemFacts.mockRejectedValueOnce(new ApiError(503, 'unavailable')).mockResolvedValue({});
     const queue = new OutboxManager();

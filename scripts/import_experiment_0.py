@@ -63,7 +63,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.config import settings  # noqa: E402
 from app.identity import resolve_location  # noqa: E402
-from app.identity.site_facts import set_site_fact  # noqa: E402
+from app.identity.site_facts import fact_is_open, set_site_fact  # noqa: E402
 from app.models.driver import Driver  # noqa: E402
 from app.models.handoff_point import HandoffPoint  # noqa: E402
 from app.models.hub import Hub  # noqa: E402
@@ -276,10 +276,12 @@ async def import_workbook(session: AsyncSession, workbook: Workbook) -> Report:
         location.region = location.region or REGION
         # Each fact with its own source (`set_site_fact`): a shared-address
         # answer the desk filled first is the import's once the distributor's
-        # own accounts say it, and must not stay marked `desk`.
+        # own accounts say it, and must not stay marked `desk`. Only an open
+        # fact is filled (`fact_is_open`): a person's answer at the door is not
+        # relabelled the import's, nor overwritten by it.
         if location.kind_of_site is None and KIND_OF_SITE.get(site.kind_label):
             set_site_fact(location, "kind_of_site", KIND_OF_SITE[site.kind_label], SOURCE_IMPORT)
-        if site.shares_with:
+        if site.shares_with and fact_is_open(location, "shares_address"):
             set_site_fact(location, "shares_address", True, SOURCE_IMPORT)
         location.site_source = location.site_source or SOURCE_IMPORT
         if location.id not in points:

@@ -57,7 +57,7 @@ class TestAddresses:
 
     def test_a_county_route_is_not_the_us_route_of_the_same_number(self):
         assert normalize_street("County Route 9") != normalize_street("US Route 9")
-        assert {normalize_street(n) for n in ("County Route 9", "County Road 9", "CR 9")} == {"cr 9"}
+        assert {normalize_street(n) for n in ("County Route 9", "County Road 9", "CR 9", "Co Rd 9")} == {"cr 9"}
 
 
 class TestVocabulary:

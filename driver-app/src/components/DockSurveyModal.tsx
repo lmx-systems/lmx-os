@@ -212,6 +212,14 @@ const HANDOFF_QUESTIONS: HandoffQuestion[] = [
 // visit (DE-6) access is recorded as unknown, so they are not asked.
 const DELIVERY_ONLY: (keyof DockSurveyBody)[] = ['who_receives', 'appointment_required'];
 
+const SITE_FACT_KEYS = ['kind_of_site', 'setting', 'shares_address'] as const;
+
+// An off-platform record's stop exists on the server only once the record is
+// sent, so asking for its site facts straight after logging the door can find
+// nothing yet. Asked again a few times while the modal is open.
+const SITE_FACTS_TRIES = 5;
+const SITE_FACTS_RETRY_MS = 2000;
+
 export function DockSurveyModal({
   visible,
   stopId,
@@ -219,11 +227,16 @@ export function DockSurveyModal({
   atPickup = false,
   queueAfter,
   siteFacts,
+  factsOnly = false,
   onClose,
 }: {
   visible: boolean;
   stopId: string;
   visit?: boolean;
+  // The site's place facts alone (DE-15): after a drop-off at a door already
+  // captured, where the survey is not due but a fact is still open. Sent as
+  // its own action, so it counts against neither the year nor the shift cap.
+  factsOnly?: boolean;
   // The site's place facts and which to ask (DE-15), from the stop. Left out
   // for a stop the app holds no route for (an off-platform record), when the
   // modal asks the server instead - and, without signal, asks none of them.
@@ -250,12 +263,21 @@ export function DockSurveyModal({
     }
     if (!visible) return;
     let live = true;
-    api
-      .getSiteFacts(stopId)
-      .then((got) => live && setFacts(got))
-      .catch(() => live && setFacts(null));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ask = (tries: number) => {
+      api
+        .getSiteFacts(stopId)
+        .then((got) => live && setFacts(got))
+        .catch(() => {
+          if (!live) return;
+          setFacts(null);
+          if (tries > 1) timer = setTimeout(() => ask(tries - 1), SITE_FACTS_RETRY_MS);
+        });
+    };
+    ask(SITE_FACTS_TRIES);
     return () => {
       live = false;
+      if (timer) clearTimeout(timer);
     };
   }, [siteFacts, stopId, visible]);
 
@@ -268,7 +290,15 @@ export function DockSurveyModal({
     try {
       // Through the outbox, like every other stop event. A dock is surveyed in
       // a stockroom about as often as a parcel is delivered in one.
-      await outboxManager.enqueue('survey', stopId, answers as Record<string, unknown>, { after: queueAfter });
+      if (factsOnly) {
+        const facts: Record<string, unknown> = {};
+        for (const key of SITE_FACT_KEYS) {
+          if (answers[key] !== null && answers[key] !== undefined) facts[key] = answers[key];
+        }
+        await outboxManager.enqueue('site-facts', stopId, facts, { after: queueAfter });
+      } else {
+        await outboxManager.enqueue('survey', stopId, answers as Record<string, unknown>, { after: queueAfter });
+      }
       onClose();
     } finally {
       setBusy(false);
@@ -283,10 +313,18 @@ export function DockSurveyModal({
       <View style={styles.screen}>
         <View style={styles.header}>
           <Text style={styles.title}>
-            {atPickup ? 'The pickup counter' : visit ? 'This site\'s door' : 'About this dock'}
+            {factsOnly
+              ? 'About this address'
+              : atPickup
+                ? 'The pickup counter'
+                : visit
+                  ? 'This site\'s door'
+                  : 'About this dock'}
           </Text>
           <Text style={styles.subtitle}>
-            {atPickup
+            {factsOnly
+              ? 'What we could not tell from a map. Skip anything you are not sure of — a blank answer is better than a guess.'
+              : atPickup
               ? 'Where you collected it, as you found it. Skip anything you did not see — a blank answer is better than a guess.'
               : visit
                 ? 'The door a delivery would use, as you see it from outside. Skip anything you cannot see — a blank answer is better than a guess.'
@@ -338,7 +376,7 @@ export function DockSurveyModal({
             </View>
           ))}
 
-          {QUESTIONS.filter((q) => !noAccess || !DELIVERY_ONLY.includes(q.key)).map((question) => (
+          {!factsOnly && QUESTIONS.filter((q) => !noAccess || !DELIVERY_ONLY.includes(q.key)).map((question) => (
             <View key={question.key as string} style={styles.question}>
               <Text style={styles.prompt}>{question.prompt}</Text>
               <View style={styles.options}>
@@ -360,7 +398,7 @@ export function DockSurveyModal({
             </View>
           ))}
 
-          {HANDOFF_QUESTIONS.filter((q) => !q.when || q.when(answers)).map((question) => (
+          {!factsOnly && HANDOFF_QUESTIONS.filter((q) => !q.when || q.when(answers)).map((question) => (
             <View key={question.key} style={styles.question}>
               <Text style={styles.prompt}>{question.prompt}</Text>
               <View style={styles.options}>
@@ -433,9 +471,9 @@ export function DockSurveyModal({
             </View>
           ))}
 
-          <HandoffPhotosPanel stopId={stopId} queueAfter={queueAfter} />
+          {!factsOnly && <HandoffPhotosPanel stopId={stopId} queueAfter={queueAfter} />}
 
-          {!noAccess && (
+          {!factsOnly && !noAccess && (
             <View style={styles.question}>
               <Text style={styles.prompt}>Did you need an appointment or booking?</Text>
               <View style={styles.options}>

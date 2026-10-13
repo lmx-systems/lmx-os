@@ -26,6 +26,10 @@ export type OutboxActionType =
   // DRV-7. Idempotent on the server by overwrite: a retry writes the same
   // answers to the same columns rather than creating a second profile.
   | 'survey'
+  // DE-15: a site's place facts alone, after a drop-off at a door already
+  // captured. Safe to retry: an answer fills only an open fact, so a repeat
+  // agrees with what the first wrote.
+  | 'site-facts'
   // DE-7: a gig job logged as a record. `stopId` is the record's id, chosen by
   // the phone. Each send writes what it carries; an unsent one absorbs the next
   // half, so the counter and the door go as one request when there is no signal.

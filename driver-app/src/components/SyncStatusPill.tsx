@@ -22,6 +22,7 @@ const ACTION_NAME: Record<OutboxActionType, string> = {
   'return-not-ready': 'Marking the return not ready',
   'return-to-shop': 'Returning it to the shop',
   survey: 'Your dock survey',
+  'site-facts': 'Your answers about this address',
   'off-platform-record': 'The off-platform delivery you logged',
 };
 
