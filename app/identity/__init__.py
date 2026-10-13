@@ -21,6 +21,8 @@ from app.identity.merge import (
     propose_duplicate_locations,
     propose_merge,
     recently_applied_merges,
+    recently_reverted_merges,
+    redo_merge,
     reject_merge,
     revert_merge,
 )
@@ -61,6 +63,8 @@ __all__ = [
     "merge_locations",
     "pending_merges",
     "recently_applied_merges",
+    "recently_reverted_merges",
+    "redo_merge",
     "profile_for",
     "propose_duplicate_locations",
     "propose_merge",

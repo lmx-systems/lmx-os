@@ -25,6 +25,8 @@ from app.identity.merge import (
     merge_scale,
     pending_merges,
     recently_applied_merges,
+    recently_reverted_merges,
+    redo_merge,
     reject_merge,
     revert_merge,
 )
@@ -584,6 +586,10 @@ async def merge_proposals(
         bool,
         Query(description="Also return recently applied merges, so one can be undone"),
     ] = False,
+    include_reverted: Annotated[
+        bool,
+        Query(description="Also return recently undone merges, so one can be redone"),
+    ] = False,
     session: AsyncSession = Depends(get_db),
     _ops: AuthedOpsUser = Depends(get_current_ops_user),
 ) -> list[MergeProposalView]:
@@ -610,6 +616,11 @@ async def merge_proposals(
         # are work already done, and a reviewer scanning for the next decision
         # should not have to read past four merges they already made.
         proposals = proposals + await recently_applied_merges(session)
+    if include_reverted:
+        # Only a chain's outer link comes undone, so taking out a wrong inner
+        # merge undoes a right outer one on the way; this is how that one comes
+        # back, since the detector never proposes a pair twice.
+        proposals = proposals + await recently_reverted_merges(session)
     return [await _merge_view(session, proposal) for proposal in proposals]
 
 
@@ -716,6 +727,31 @@ async def revert_applied_merge(
         raise HTTPException(status_code=409, detail=str(exc))
     await session.commit()
     return await _merge_view(session, merge)
+
+
+@router.post("/operations/merges/{merge_id}/redo", response_model=MergeProposalView)
+async def redo_reverted_merge(
+    merge_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    admin: AuthedOpsUser = Depends(require_admin),
+) -> MergeProposalView:
+    """Apply an undone merge again (`IDN-2`), as a new audited merge.
+
+    Only the outermost link of a chain can be undone, so taking out a wrong
+    inner merge means undoing a right outer one first, and the detector never
+    proposes a pair it has seen. Without this, the right merge was lost for good.
+    Admin, as confirming is. Refused while either dock is merged elsewhere.
+    Returns the new merge, whose id is the one to undo next time.
+    """
+    merge = await session.get(LocationMerge, merge_id)
+    if merge is None:
+        raise HTTPException(status_code=404, detail="No such merge")
+    try:
+        redone = await redo_merge(session, merge, ops_user_id=uuid.UUID(admin.ops_user_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    await session.commit()
+    return await _merge_view(session, redone)
 
 
 @router.get("/operations/record-health", response_model=RecordHealthView)
