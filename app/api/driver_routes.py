@@ -52,7 +52,14 @@ from app.identity.dock_survey import (
     surveys_recorded_today,
 )
 from app.identity.handoff_capture import CaptureRefused, capture_handoff, record_handoff_photo
-from app.identity.site_facts import SiteFactRefused, record_site_facts, site_facts_for
+from app.identity.site_facts import (
+    AlreadyAnsweredHere,
+    SiteFactRefused,
+    record_site_facts,
+    site_facts_for,
+    stop_refusal,
+    validate_site_facts,
+)
 from app.identity.profile import profile_for, set_access, set_autonomy_fit
 from app.messaging.cod_notifications import ESCALATION_SENT, notify_client_of_cod_dispute
 from app.messaging.delivery_pin import MAX_PIN_VERIFICATION_ATTEMPTS, generate_delivery_pin
@@ -2255,7 +2262,9 @@ async def record_dock_survey(
     the same answers to the same columns and re-stamps `surveyed_at`; a driver
     correcting themselves at the same door writes the better answer. Neither is
     a conflict. What it must not do is create a second profile, and it cannot -
-    `profile_for` is keyed on the canonical dock.
+    `profile_for` is keyed on the canonical dock. The site facts it carries are
+    the exception: they are answered once per stop (`record_site_facts`), so a
+    retry repeats them and changes nothing.
     """
     stop = await _get_owned_stop(session, stop_id, driver)
     location = await location_for_stop(session, stop)
@@ -2304,15 +2313,26 @@ async def record_dock_survey(
 
     # The site's place facts (`DE-15`), as `survey` even when unchanged: a
     # confirmation of the desk's guess is what lifts its cap on the grade. An
-    # answer that disagrees with a person's is kept, not applied.
+    # answer that disagrees with a person's is kept, not applied. Only from a
+    # finished door (`stop_refusal`), and once per stop: a replay repeating
+    # them changes nothing, and one contradicting them leaves the facts alone
+    # rather than refusing the survey's other answers.
+    answered = None
     try:
-        answered = await record_site_facts(
-            session, location,
-            kind_of_site=body.kind_of_site, setting=body.setting, shares_address=body.shares_address,
-            by=driver_uuid, stop_id=stop.id,
-        )
+        validate_site_facts(kind_of_site=body.kind_of_site, setting=body.setting)
     except SiteFactRefused as bad_value:
         raise HTTPException(status_code=422, detail=str(bad_value)) from bad_value
+    if stop_refusal(stop) is None:
+        try:
+            answered = await record_site_facts(
+                session, location,
+                kind_of_site=body.kind_of_site, setting=body.setting, shares_address=body.shares_address,
+                by=driver_uuid, stop_id=stop.id,
+            )
+        except SiteFactRefused as bad_value:
+            raise HTTPException(status_code=422, detail=str(bad_value)) from bad_value
+        except AlreadyAnsweredHere:
+            answered = None
 
     await session.commit()
     remaining = MAX_SURVEYS_PER_SHIFT - await surveys_recorded_today(session, driver_uuid)
@@ -2356,9 +2376,17 @@ async def record_stop_site_facts(
     Writes the facts and nothing else: no `surveyed_at`, so it counts against
     neither the year nor the shift's survey cap. An answer fills only an open
     fact; one disagreeing with a person's or the import's is kept as a dispute.
-    Safe to retry - a repeat agrees with what the first wrote.
+
+    A 409 from a stop that is not a finished door (`stop_refusal`) - a pending,
+    failed or cancelled stop, or a distributor's counter - and from a second,
+    different answer at the same stop. Safe to retry: a repeat of what this stop
+    already answered changes nothing, so a retry after a lost response leaves
+    one answer or one dispute, never two.
     """
     stop = await _get_owned_stop(session, stop_id, driver)
+    refusal = stop_refusal(stop)
+    if refusal is not None:
+        raise HTTPException(status_code=409, detail=refusal)
     location = await location_for_stop(session, stop)
     if location is None:
         raise HTTPException(status_code=409, detail=_no_dock_to("answer about", stop))
@@ -2370,6 +2398,8 @@ async def record_stop_site_facts(
         )
     except SiteFactRefused as bad_value:
         raise HTTPException(status_code=422, detail=str(bad_value)) from bad_value
+    except AlreadyAnsweredHere as repeat:
+        raise HTTPException(status_code=409, detail=str(repeat)) from repeat
     await session.commit()
     return SiteFactsAnsweredView(
         **await site_facts_for(session, location),

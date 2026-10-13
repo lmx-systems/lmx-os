@@ -7,6 +7,7 @@ import { ExceptionsPanel } from './components/ExceptionsPanel'
 import { Tabs } from './components/ui/Tabs'
 import { DockLabellingPanel } from './components/DockLabellingPanel'
 import { LabellingQueuePanel } from './components/LabellingQueuePanel'
+import { SiteFactDisputesPanel } from './components/SiteFactDisputesPanel'
 import { DockLogReviewPanel } from './components/DockLogReviewPanel'
 import { HubSettingsPanel } from './components/HubSettingsPanel'
 import { CreateHubPanel } from './components/CreateHubPanel'
@@ -215,7 +216,8 @@ function App() {
                       badge: attention.data
                         ? attention.data.late_orders +
                           attention.data.merge_proposals +
-                          attention.data.unlabelled_docks
+                          attention.data.unlabelled_docks +
+                          attention.data.site_fact_disputes
                         : undefined,
                     },
                   ]}
@@ -298,6 +300,12 @@ function App() {
                         a place and a machine, and the re-drive's records are not
                         in any hub the dropdown lists (DE-9). */}
                     <LabellingQueuePanel canDispatch={canDispatch} />
+                    {/* Not hub-scoped either: answers at the door that
+                        disagree with a site's facts, kept rather than applied
+                        so a stale phone cannot undo a newer answer - and so
+                        somebody has to settle them (DE-15). In the badge,
+                        because settling them makes the count fall. */}
+                    <SiteFactDisputesPanel canDispatch={canDispatch} />
                     {/* Beside dock labelling because it is the same act on the
                         same rows - deciding what a dock is. This queue is why
                         dock_log_submissions exists as a separate table: a

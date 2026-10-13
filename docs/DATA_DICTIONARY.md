@@ -40,7 +40,7 @@ missing, and a missing element lowers the tier.
 | `site_address_shares` | Which other sites share it, one row per pair, recorded from the site that was checked | — |
 | `locations.site_source` | Where the site facts came from, site-wide. The desk does not set it | e.g. `import` |
 | `locations.site_fact_sources` | Where each site fact came from (`DE-15`). Every writer sets its fact's entry, even when the value is unchanged; a fact with no entry was written before that rule and has `site_source` | JSON object, fact to source: `{"setting": "desk", "shares_address": "survey"}`. Sources: `import`, `desk`, `survey` (the door survey) |
-| `locations.site_fact_answers` | Who gave each site fact's answer at the door, and later answers that disagreed (`DE-15`, migration `0081`). An answer fills a fact only while it is open - unknown, or only the desk's; one disagreeing with a person's or the import's is kept here as a dispute and not applied | JSON object, fact to `{"value", "by" (driver id), "at", "stop_id", "disputes": [{"value", "by", "at", "stop_id"}]}`. Null where nobody has answered at a door |
+| `locations.site_fact_answers` | Who gave each site fact's answer at the door, and later answers that disagreed (`DE-15`, migration `0081`). An answer fills a fact only while it is open - unknown, or only the desk's; one disagreeing with a person's or the import's is kept here as a dispute and not applied | JSON object, fact to `{"value", "by" (driver id, or the ops user who settled it), "at", "stop_id", "disputes": [{"value", "by", "at", "stop_id"}] (open, at most 20), "agreed": [...] (answers that agreed with a person's, kept so a stop answers once), "settled": [{"by" (ops user), "at", "kept", "value", "disputes", "replaced"}]}`. One answer per stop, from a finished door only. Null where nobody has answered at a door |
 | `receiver_profiles.receiving_hours` | When the site receives. Already existed before `DE-1` | Per weekday, open and close times |
 | `receiver_profiles.who_receives` | Who takes the delivery. Already existed before `DE-1` | The survey's vocabulary |
 
@@ -171,7 +171,7 @@ thanks to one, `record_tiers` sets `desk_site` and grades the record bronze if
 it would otherwise be gold or silver - a visit included. Bronze and reference
 records are unchanged. The cap lifts when a person answers the fact at the door:
 the survey asks a fact that is unknown or only the desk's, and writes the answer
-as `survey` even when it confirms the desk's value. An answer fills only a fact still open (unknown or the desk's); one that disagrees with a person's or the import's is kept in `locations.site_fact_answers` as a dispute and not applied.
+as `survey` even when it confirms the desk's value. An answer fills only a fact still open (unknown or the desk's); one that disagrees with a person's or the import's is kept in `locations.site_fact_answers` as a dispute and not applied, until a person settles it on the console (`ops`), which lifts the cap the same way.
 
 **An off-platform delivery is graded like any delivery (`DE-7`)**, with two
 readings of the delivery profile, because LMX never held the job. A driver who

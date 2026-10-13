@@ -633,6 +633,18 @@ export interface AttentionCounts {
   late_orders: number
   merge_proposals: number
   unlabelled_docks: number
+  /** Sites where an answer at the door disagreed with a fact (DE-15). */
+  site_fact_disputes: number
+}
+
+/** A fact at a site where an answer at the door disagreed (DE-15). */
+export interface SiteFactDispute {
+  location_id: string
+  address: string | null
+  fact: 'kind_of_site' | 'setting' | 'shares_address'
+  current: string | boolean | null
+  current_source: string | null
+  answers: { value: string | boolean | null; at: string | null; driver_name: string | null }[]
 }
 
 /** One order as a dispatcher on the phone needs to see it (CON-1). */

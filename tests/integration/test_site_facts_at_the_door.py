@@ -279,6 +279,9 @@ class TestTheFactsOnTheirOwn:
     async def test_answering_them_alone_lifts_the_cap_and_is_not_a_survey(self, db_session):
         stop, location, authed, driver = await _desk_dock(db_session)
         surveys_before = await surveys_recorded_today(db_session, driver)
+        # Asked after the drop-off: only a finished door answers about its site.
+        stop.status = "completed"
+        await db_session.commit()
 
         answered = await record_stop_site_facts(
             str(stop.id),

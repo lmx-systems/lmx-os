@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import metrics
@@ -29,6 +29,7 @@ from app.identity.merge import (
     revert_merge,
 )
 from app.identity.node_class import classification_coverage, is_a_served_dock, set_node_class
+from app.identity.site_facts import NothingToSettle, open_disputes, settle_dispute
 from app.learning_loop.service import run_nightly_job
 from app.models.dispatcher_override import (
     ACTION_RELEASE,
@@ -119,6 +120,9 @@ from app.schemas.reporting import (
     OverrideView,
     RateView,
     RecordHealthView,
+    SettleSiteFactBody,
+    SiteFactAnswerView,
+    SiteFactDisputeView,
     TierExposureView,
     UnlabelledDockView,
     WriterHealthView,
@@ -254,11 +258,101 @@ async def attention_counts(
         .select_from(Location)
         .where(Location.node_class.is_(None), Location.merged_into_id.is_(None), is_a_served_dock())
     )
+    disputed = await session.scalar(
+        select(func.count()).select_from(Location).where(_has_open_site_fact_dispute())
+    )
     return AttentionCountsView(
         late_orders=late,
         merge_proposals=merges,
         unlabelled_docks=int(unlabelled or 0),
+        site_fact_disputes=int(disputed or 0),
     )
+
+
+def _has_open_site_fact_dispute() -> ColumnElement[bool]:
+    """A site with an answer at the door waiting for a person (`DE-15`): some
+    fact's `disputes` list in `site_fact_answers` is not empty. Disputes are only
+    ever written to the site as it is now, never to a merged alias."""
+    return func.coalesce(
+        func.jsonb_path_exists(Location.site_fact_answers, literal_column("'$.*.disputes[0]'::jsonpath")),
+        False,
+    ) & Location.merged_into_id.is_(None)
+
+
+@router.get("/operations/site-fact-disputes", response_model=list[SiteFactDisputeView])
+async def site_fact_disputes(
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> list[SiteFactDisputeView]:
+    """The site facts a driver's answer disagreed with (`DE-15`), for a person
+    to settle.
+
+    An answer at the door fills a fact only while it is unknown or the desk's
+    guess; one that disagrees with a person's or the import's is kept beside it
+    rather than applied, so a stale offline answer cannot undo a newer one. That
+    is only safe if somebody reads them: without this they were written, tested
+    and read by nothing, and a wrong first answer stood for good.
+
+    Not hub-scoped, like dock labelling: a site is a physical place.
+    """
+    sites = list(
+        await session.scalars(
+            select(Location).where(_has_open_site_fact_dispute()).order_by(Location.id).limit(limit)
+        )
+    )
+    disputes = [d for site in sites for d in open_disputes(site)]
+    driver_ids = {
+        uuid.UUID(a["by"]) for d in disputes for a in d.disputes if a.get("by")
+    }
+    names = (
+        dict((await session.execute(select(Driver.id, Driver.name).where(Driver.id.in_(driver_ids)))).all())
+        if driver_ids
+        else {}
+    )
+    return [
+        SiteFactDisputeView(
+            location_id=str(d.location.id),
+            address=d.location.address,
+            fact=d.fact,
+            current=d.current,
+            current_source=d.current_source,
+            answers=[
+                SiteFactAnswerView(
+                    value=a.get("value"),
+                    at=a.get("at"),
+                    driver_name=names.get(uuid.UUID(a["by"])) if a.get("by") else None,
+                )
+                for a in d.disputes
+            ],
+        )
+        for d in disputes
+    ]
+
+
+@router.post("/operations/site-fact-disputes/{location_id}/{fact}", status_code=204)
+async def settle_site_fact_dispute(
+    location_id: uuid.UUID,
+    fact: str,
+    body: SettleSiteFactBody,
+    session: AsyncSession = Depends(get_db),
+    ops: AuthedOpsUser = Depends(require_dispatcher),
+) -> None:
+    """Settle one fact's disputes (`DE-15`): keep it as recorded, or take a
+    value an answer at the door gave. Either way the fact is now a person's
+    (`ops`) and the disputes go to its history with who settled them and when.
+    A dispatcher's call, like labelling a dock."""
+    location = await session.get(Location, location_id)
+    if location is None:
+        raise HTTPException(status_code=404, detail="No such site")
+    try:
+        await settle_dispute(
+            session, location, fact, take=body.take, by=uuid.UUID(ops.ops_user_id)
+        )
+    except NothingToSettle as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await session.commit()
+    return None
 
 
 @router.get("/operations/unlabelled-docks", response_model=list[UnlabelledDockView])
