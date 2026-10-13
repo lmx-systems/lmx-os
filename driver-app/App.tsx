@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { DarkTheme, DefaultTheme, NavigationContainer } from '@react-navigation/native';
+import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import type { Theme as NavigationTheme } from '@react-navigation/native';
 import {
-  Inter_400Regular,
-  Inter_600SemiBold,
-  Inter_700Bold,
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_600SemiBold,
+  PlusJakartaSans_700Bold,
+  PlusJakartaSans_800ExtraBold,
   useFonts,
-} from '@expo-google-fonts/inter';
+} from '@expo-google-fonts/plus-jakarta-sans';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -21,9 +22,10 @@ SplashScreen.preventAutoHideAsync();
 
 export default function App() {
   const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular,
-    Inter_600SemiBold,
-    Inter_700Bold,
+    PlusJakartaSans_400Regular,
+    PlusJakartaSans_600SemiBold,
+    PlusJakartaSans_700Bold,
+    PlusJakartaSans_800ExtraBold,
   });
   // Which server this install talks to, if somebody has set one. Read before
   // the first request rather than lazily: AuthContext refreshes a token on
@@ -61,11 +63,11 @@ export default function App() {
 }
 
 function ThemedApp() {
-  const { mode, colors } = useTheme();
+  const { colors } = useTheme();
   const navigationTheme: NavigationTheme = {
-    ...(mode === 'dark' ? DarkTheme : DefaultTheme),
+    ...DefaultTheme,
     colors: {
-      ...(mode === 'dark' ? DarkTheme.colors : DefaultTheme.colors),
+      ...DefaultTheme.colors,
       primary: colors.primary,
       background: colors.bg,
       card: colors.surface,
@@ -78,7 +80,7 @@ function ThemedApp() {
   return (
     <NavigationContainer theme={navigationTheme}>
       <RootNavigator />
-      <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
+      <StatusBar style="dark" />
     </NavigationContainer>
   );
 }

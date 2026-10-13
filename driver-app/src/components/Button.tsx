@@ -49,8 +49,8 @@ export function Button({ label, onPress, variant = 'primary', disabled, loading 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     base: {
-      minHeight: 52,
-      borderRadius: radius.md,
+      minHeight: 56,
+      borderRadius: radius.pill,
       paddingVertical: spacing.md + 4,
       alignItems: 'center',
       justifyContent: 'center',
@@ -60,7 +60,7 @@ const makeStyles = (colors: ColorScheme) =>
     danger: { backgroundColor: colors.danger },
     disabled: { opacity: 0.5 },
     pressed: { opacity: 0.85 },
-    label: { color: colors.primaryText, fontSize: 17, fontWeight: '700' },
+    label: { color: colors.primaryText, fontSize: 17, fontWeight: '700', fontFamily: 'PlusJakartaSans_700Bold' },
     outlineLabel: { color: colors.textPrimary },
     dangerLabel: { color: '#ffffff' },
   });
