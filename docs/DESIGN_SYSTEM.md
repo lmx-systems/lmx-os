@@ -28,8 +28,8 @@ does not cover extends it here first, in the same change.
 
 ## Colour
 
-The same names in all three apps: `dashboard/src/index.css`,
-`client-portal/src/index.css`, `driver-app/src/theme/colors.ts`.
+One set of names for all three apps, defined in `dashboard/src/index.css`
+and copied by name into each app as it moves over (see "Where it applies").
 
 | Token | Value | Use |
 |---|---|---|
@@ -76,8 +76,7 @@ the bundled font in the driver app), falling back to Helvetica.
 | `--radius-pill` | 999px | Every button, nav pill, chip and badge |
 
 Tiles have 24px padding; the gap between tiles is 16px. Pages are at most
-1440px wide with a 32px side gutter (16px on phones). Touch targets are at
-least 44px tall wherever a person acts on a phone.
+1440px wide with a 32px side gutter (16px on phones).
 
 ## Components
 
@@ -97,10 +96,14 @@ least 44px tall wherever a person acts on a phone.
 
 ## Where it applies
 
-- **Ops console**: Home (Needs you, Going ahead, person touches, Rules, map,
-  the day's numbers), then Orders, Drivers, Rules, Record, and for admins
-  Clients and Settings.
-- **Client portal** and its public **tracking page**: the same tokens and
-  components.
-- **Driver app**: the same colours, type and radii in `src/theme`; one primary
-  action per screen, large touch targets for use in sunlight and gloves.
+| App | State |
+|---|---|
+| Ops console (`dashboard/`) | **Done.** Home (Needs you, Going ahead, person touches, Rules, map, the day's numbers), then Orders, Drivers, Rules, Record, and for admins Clients and Settings |
+| Client portal (`client-portal/`) and its public tracking page | In progress: same tokens and components; still on the old green theme until that change lands |
+| Driver app (`driver-app/`) | In progress: same colours, type and radii in `src/theme/tokens.ts`; one primary action per screen, large touch targets for sunlight and gloves |
+
+Update this table in the change that moves an app over.
+
+Touch targets of at least 44px are a requirement for the portal's and the
+driver app's phone screens; the console is a desk screen and uses smaller
+pills inside dense tiles.

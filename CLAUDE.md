@@ -153,7 +153,8 @@ never a follow-up ticket.
 
 ## Product UI
 
-Every screen follows `docs/DESIGN_SYSTEM.md`: light only (no dark theme), a
+All UI follows `docs/DESIGN_SYSTEM.md` (its last table says which apps have
+moved over): light only (no dark theme), a
 grey ground with white tiles, ink pill buttons, one lime headline tile, peach
 for what needs a person, Plus Jakarta Sans. Use the existing tokens and
 components rather than new colours or one-off styles; extend the design system

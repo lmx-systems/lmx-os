@@ -8,8 +8,9 @@
  * The LMX design system, October 2026 (docs/DESIGN_SYSTEM.md): a soft grey
  * ground, white tiles with large radii and no borders, ink for anything you
  * press, lime for the one number that matters, peach for what needs a person.
- * Light only - there is no dark theme. The same tokens, by the same names, are
- * in client-portal/src/index.css and driver-app/src/theme/colors.ts.
+ * Light only - there is no dark theme. The client portal and the driver app
+ * take the same tokens by the same names (docs/DESIGN_SYSTEM.md, "Where it
+ * applies").
  */
 
 :root {

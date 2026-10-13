@@ -144,6 +144,13 @@ function App() {
     enabled,
   )
 
+  // Drivers waiting on a reply count as needing a person, on Home's headline
+  // and its badge - a driver at a locked gate is the plainest case of it. Only
+  // for roles that can read the inbox (a viewer gets a 403), and on its own
+  // slower tick, the same as the inbox panel's.
+  const canReadSupport = opsProfile !== null && (opsProfile.role === 'admin' || opsProfile.role === 'dispatcher')
+  const support = usePolling(() => api.supportInbox(hubId), 15_000, [hubId], enabled && canReadSupport)
+
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null)
   useEffect(() => {
     if (fleet.data || held.data || summary.data) {
@@ -170,7 +177,10 @@ function App() {
   const isAdmin = opsProfile.role === 'admin'
   const canDispatch = isAdmin || opsProfile.role === 'dispatcher'
 
-  const needsCount = exceptions.data ? exceptions.data.items.filter((i) => !isGoingAhead(i)).length : undefined
+  const driversWaiting = canDispatch && support.data ? support.data.filter((t) => t.awaiting_reply).length : 0
+  const needsCount = exceptions.data
+    ? exceptions.data.items.filter((i) => !isGoingAhead(i)).length + driversWaiting
+    : undefined
   const recordBadge = attention.data
     ? attention.data.late_orders +
       attention.data.merge_proposals +
@@ -250,7 +260,9 @@ function App() {
                   kicker={greeting()}
                   title={
                     needsCount === undefined
-                      ? 'Loading…'
+                      ? exceptions.error
+                        ? "Couldn't load what needs you."
+                        : 'Loading…'
                       : needsCount === 0
                         ? 'Nothing needs you.'
                         : needsCount === 1

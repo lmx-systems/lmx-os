@@ -86,6 +86,8 @@ export function TopBar({
                 href={`#${p.id}`}
                 aria-current={selected ? 'page' : undefined}
                 onClick={(e) => {
+                  // A modified click (new tab, new window) is the browser's.
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
                   e.preventDefault()
                   onPage(p.id)
                 }}

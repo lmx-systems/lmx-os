@@ -109,12 +109,17 @@ export function ExceptionsPanel({
     () => (data ? data.items.filter((i) => (group === 'soon') === isGoingAhead(i)) : []),
     [data, group],
   )
-  const rows = useMemo(() => (kind === 'all' ? mine : mine.filter((i) => i.kind === kind)), [mine, kind])
   const counts = useMemo(() => {
     const c: Partial<Record<ExceptionItem['kind'], number>> = {}
     for (const i of mine) c[i.kind] = (c[i.kind] ?? 0) + 1
     return c
   }, [mine])
+  // The chips show only on a long list. A filter the list has outgrown - its
+  // chips hidden, or its kind all resolved - falls back to everything, so a
+  // stale choice can never leave the tile empty with no way to clear it.
+  const showChips = group === 'needs' && mine.length > 3
+  const filter = showChips && kind !== 'all' && counts[kind] ? kind : 'all'
+  const rows = useMemo(() => (filter === 'all' ? mine : mine.filter((i) => i.kind === filter)), [mine, filter])
 
   const title = group === 'needs' ? 'Needs you' : 'Going ahead unless you choose first'
   const meta = loading && !data ? 'loading…' : data ? `${mine.length}` : undefined
@@ -134,7 +139,7 @@ export function ExceptionsPanel({
                 <path d="m5 12 4 4 10-10" />
               </svg>
             </span>
-            <span className="text-lg font-extrabold tracking-[-0.02em]">Nothing needs you</span>
+            <span className="text-lg font-extrabold tracking-[-0.02em]">No orders need you</span>
             <span className="text-sm text-[var(--text-secondary)]">Every order is moving, delivered, or in the playbook's hands.</span>
           </div>
         ) : (
@@ -144,13 +149,13 @@ export function ExceptionsPanel({
 
       {!error && mine.length > 0 && (
         <>
-          {group === 'needs' && mine.length > 3 && (
+          {showChips && (
             <div className="mb-3 flex flex-wrap items-center gap-2">
               {KINDS.filter((k) => k === 'all' || counts[k]).map((k) => (
                 <Chip
                   key={k}
                   label={k === 'all' ? `All ${mine.length}` : `${KIND_LABEL[k]} ${counts[k] ?? 0}`}
-                  active={kind === k}
+                  active={filter === k}
                   onClick={() => setKind(k)}
                 />
               ))}

@@ -130,7 +130,7 @@ export function AssignDriverControl({
           setChosenId(e.target.value)
           setRefused(null)
         }}
-        className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-[12.5px] text-[var(--text-primary)]"
+        className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-2.5 py-1.5 text-[12.5px] text-[var(--text-primary)]"
       >
         <option value="">
           {drivers === null
