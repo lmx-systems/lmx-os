@@ -8,20 +8,18 @@ interface CardProps {
 }
 
 /**
- * The one card shell every dashboard section uses - replaces each
- * component hand-rolling its own `rounded-lg border ...` string (the
- * "no design system" gap flagged in the pre-redesign dashboard).
+ * The one tile every console section uses (docs/DESIGN_SYSTEM.md): white on the
+ * grey ground, a large radius, no border and no rule under the title - the
+ * ground is what separates one tile from the next.
  */
 export function Card({ title, meta, children, className = '' }: CardProps) {
   return (
-    <section
-      className={`overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)] ${className}`}
-    >
-      <div className="flex items-center gap-2.5 border-b border-[var(--border)] px-4 py-3">
-        <h2 className="text-[14.5px] font-medium text-[var(--text-primary)]">{title}</h2>
-        {meta && <span className="text-xs font-medium text-[var(--text-muted)]">{meta}</span>}
+    <section className={`rounded-[var(--radius-lg)] bg-[var(--surface)] p-6 ${className}`}>
+      <div className="mb-4 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+        <h2 className="text-base font-bold tracking-[-0.01em] text-[var(--text-primary)]">{title}</h2>
+        {meta && <span className="text-[13px] font-medium text-[var(--text-muted)]">{meta}</span>}
       </div>
-      <div className="p-4">{children}</div>
+      {children}
     </section>
   )
 }

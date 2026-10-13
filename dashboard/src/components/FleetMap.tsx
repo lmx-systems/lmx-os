@@ -164,7 +164,7 @@ export function FleetMap({ data, error, loading }: FleetMapProps) {
           "nobody is being assigned work" and "nobody is reporting" are the same
           fact, and this is where that becomes visible instead of mysterious. */}
       {unlocated.length > 0 && (
-        <div className="mt-3 rounded-[var(--radius)] border border-[var(--border)] p-3">
+        <div className="mt-3 rounded-[20px] bg-[var(--surface-2)] p-3">
           <div className="text-[13px] font-medium text-[var(--text-primary)]">
             {unlocated.length} driver{unlocated.length === 1 ? '' : 's'} not reporting a position
           </div>

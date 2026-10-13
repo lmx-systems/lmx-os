@@ -101,7 +101,7 @@ export function RecordLayerPanel({ hubId, canDispatch }: { hubId: string; canDis
             {flags.map((flag) => (
               <li
                 key={flag.id}
-                className="flex items-start justify-between gap-3 rounded-[var(--radius)] border border-[var(--border)] px-2.5 py-2"
+                className="flex items-start justify-between gap-3 rounded-[20px] bg-[var(--surface-2)] px-2.5 py-2"
               >
                 <div>
                   <p className="text-[13px] text-[var(--text-primary)]">{flag.detail}</p>
@@ -115,7 +115,7 @@ export function RecordLayerPanel({ hubId, canDispatch }: { hubId: string; canDis
                       await api.resolveLinkageFlag(flag.id)
                       await load()
                     }}
-                    className="flex-shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+                    className="flex-shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
                   >
                     Looked at it
                   </button>
@@ -203,7 +203,7 @@ function LateOrderRow({
     'rounded-md border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-[12px] text-[var(--text-primary)]'
 
   return (
-    <li className="rounded-[var(--radius)] border border-[var(--border)] px-2.5 py-2">
+    <li className="rounded-[20px] bg-[var(--surface-2)] px-2.5 py-2">
       <div className="mb-1.5 flex items-baseline justify-between gap-3">
         <span className="text-[13px] font-medium text-[var(--text-primary)]">
           {order.external_ref}
@@ -260,7 +260,7 @@ function LateOrderRow({
             <button
               disabled={saving || !!costProblem}
               onClick={record}
-              className="rounded-md bg-[var(--accent)] px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-40"
+              className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-[11px] font-semibold text-white disabled:opacity-40"
             >
               {saving ? 'Recording…' : 'Record'}
             </button>
@@ -280,7 +280,7 @@ function LateOrderRow({
               key={kind.code}
               disabled={saving}
               onClick={() => choose(kind)}
-              className="rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40"
+              className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40"
             >
               {kind.label}
             </button>

@@ -108,7 +108,7 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
   if (submitted) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--bg-page)] px-4">
-        <div className="w-full max-w-md rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 text-center shadow-[var(--shadow-md)]">
+        <div className="w-full max-w-md rounded-[var(--radius-lg)] bg-[var(--surface)] p-6 text-center shadow-[var(--shadow-md)]">
           <img src="/lmx-mark.png" alt="LMX" className="mx-auto mb-4 h-10 w-10 rounded-[var(--radius)]" />
           <h1 className="text-[17px] font-semibold text-[var(--text-primary)]">Thanks — we've got your details</h1>
           <p className="mt-2 text-sm text-[var(--text-secondary)]">
@@ -117,7 +117,7 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
           </p>
           <button
             onClick={onSignedIn}
-            className="mt-5 text-sm font-medium text-[var(--accent)] hover:underline"
+            className="mt-5 text-sm font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
           >
             Already approved? Sign in
           </button>
@@ -128,7 +128,7 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg-page)] px-4 py-8">
-      <div className="w-full max-w-md rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
+      <div className="w-full max-w-md rounded-[var(--radius-lg)] bg-[var(--surface)] p-6 shadow-[var(--shadow-md)]">
         <div className="mb-5 flex items-center gap-2">
           <img src="/lmx-mark.png" alt="LMX" className="h-8 w-8 rounded-[var(--radius)]" />
           <div>
@@ -165,7 +165,7 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
               drafts. Said plainly rather than by a dead button: an applicant who
               cannot tell why the form does nothing assumes it is broken. */}
           {legal && !legal.signup_open && (
-            <p className="rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface-sunk,transparent)] px-3 py-2 text-[13px] text-[var(--text-secondary)]">
+            <p className="rounded-[20px] bg-[var(--surface-2)] px-3 py-2 text-[13px] text-[var(--text-secondary)]">
               We are not taking new accounts through this page yet. Our terms of service
               are being finalised, and we will not ask you to agree to something you
               cannot read.
@@ -191,7 +191,7 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
                 href={legal ? legal.terms.path : '/terms'}
                 target="_blank"
                 rel="noreferrer"
-                className="font-medium text-[var(--accent)] hover:underline"
+                className="font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
               >
                 terms of service
               </a>{' '}
@@ -200,7 +200,7 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
                 href={legal ? legal.privacy.path : '/privacy'}
                 target="_blank"
                 rel="noreferrer"
-                className="font-medium text-[var(--accent)] hover:underline"
+                className="font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2"
               >
                 privacy policy
               </a>
@@ -217,14 +217,14 @@ export function SignupPage({ onSignedIn }: SignupPageProps) {
           <button
             type="submit"
             disabled={submitting || !legal || !legal.signup_open}
-            className="mt-1 rounded-[var(--radius)] bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+            className="mt-1 rounded-full bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
           >
             {submitting ? 'Sending…' : 'Request an account'}
           </button>
 
           <p className="text-center text-xs text-[var(--text-muted)]">
             Already have an account?{' '}
-            <button type="button" onClick={onSignedIn} className="font-medium text-[var(--accent)] hover:underline">
+            <button type="button" onClick={onSignedIn} className="font-medium text-[var(--accent)] underline underline-offset-2 hover:decoration-2">
               Sign in
             </button>
           </p>

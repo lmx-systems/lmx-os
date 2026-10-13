@@ -20,14 +20,14 @@ function formatPeriod(periodStart: string, periodEnd: string): string {
 export function InvoicesTable({ invoices, onSelect }: InvoicesTableProps) {
   if (invoices.length === 0) {
     return (
-      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-8 text-center text-sm text-[var(--text-muted)]">
+      <div className="rounded-[var(--radius-lg)] bg-[var(--surface)] p-8 text-center text-sm text-[var(--text-muted)]">
         No invoices yet.
       </div>
     )
   }
 
   return (
-    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+    <div className="overflow-hidden rounded-[var(--radius-lg)] bg-[var(--surface)]">
       <table className="w-full text-left text-sm">
         <thead>
           <tr className="border-b border-[var(--border)] text-xs font-medium text-[var(--text-muted)]">

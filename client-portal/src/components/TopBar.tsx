@@ -1,33 +1,63 @@
 import type { ClientProfileView } from '../lib/types'
-import { ThemeToggle } from './ThemeToggle'
+
+export interface NavItem {
+  id: string
+  label: string
+  active: boolean
+  onSelect: () => void
+}
 
 interface TopBarProps {
   profile: ClientProfileView
   onLogout: () => void
+  nav: NavItem[]
 }
 
-export function TopBar({ profile, onLogout }: TopBarProps) {
+/**
+ * The portal's one bar (docs/DESIGN_SYSTEM.md): the mark, the sections as a
+ * pill group with the open one in ink, then who is signed in.
+ */
+export function TopBar({ profile, onLogout, nav }: TopBarProps) {
   return (
-    <header className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-6 py-3 print:hidden">
-      <div className="flex items-center gap-2.5">
-        <img src="/lmx-mark.png" alt="LMX" className="h-8 w-8 rounded-[var(--radius)]" />
-        <div>
-          <div className="text-[14.5px] font-semibold text-[var(--text-primary)]">{profile.name}</div>
-          <div className="text-xs text-[var(--text-muted)]">
-            {profile.email}
-            {profile.role === 'admin' && (
-              <span className="ml-1.5 rounded-full bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-                Admin
-              </span>
-            )}
-          </div>
-        </div>
+    <header className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-x-5 gap-y-3 px-4 pt-6 sm:px-8 print:hidden">
+      <div className="flex items-center gap-2 text-xl font-extrabold tracking-[-0.04em]">
+        <img src="/lmx-mark.png" alt="" className="h-[26px] w-[26px] rounded-[8px]" />
+        lmx
       </div>
-      <div className="flex items-center gap-2.5">
-        <ThemeToggle />
+      <nav aria-label="Portal" className="flex flex-wrap gap-1 rounded-full bg-[var(--surface)] p-1">
+        {nav.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            aria-current={item.active ? 'page' : undefined}
+            onClick={item.onSelect}
+            className={`rounded-full px-4 py-1.5 text-[13.5px] transition-colors ${
+              item.active
+                ? 'bg-[var(--accent)] font-semibold text-white'
+                : 'font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      <div className="ml-auto flex min-w-0 max-w-full items-center gap-2 rounded-full bg-[var(--surface)] py-1 pl-1 pr-1 text-[13px] font-semibold">
+        <span
+          aria-hidden="true"
+          className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--lime)] text-[11px] font-bold text-[var(--lime-ink)]"
+        >
+          {profile.name.trim().charAt(0).toUpperCase() || '?'}
+        </span>
+        <span className="flex min-w-0 max-w-[220px] flex-col leading-tight">
+          <span className="truncate">{profile.name}</span>
+          <span className="truncate text-[11.5px] font-medium text-[var(--text-muted)]">
+            {profile.email}
+            {profile.role === 'admin' && ' · Admin'}
+          </span>
+        </span>
         <button
           onClick={onLogout}
-          className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)]"
+          className="ml-1 rounded-full px-3 py-1 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
         >
           Sign out
         </button>

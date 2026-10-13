@@ -53,20 +53,20 @@ export function InvoiceDetail({ invoice, profile, onBack }: InvoiceDetailProps) 
           <button
             onClick={handleDownloadPdf}
             disabled={downloading}
-            className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-60"
+            className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-60"
           >
             {downloading ? 'Preparing…' : 'Download PDF'}
           </button>
           <button
             onClick={() => window.print()}
-            className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)]"
+            className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--surface-2)]"
           >
             Print
           </button>
         </div>
       </div>
 
-      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-8 print:rounded-none print:border-0 print:p-0">
+      <div className="rounded-[var(--radius-lg)] bg-[var(--surface)] p-8 print:rounded-none  print:p-0">
         <div className="flex items-start justify-between border-b border-[var(--border)] pb-6">
           <div>
             <div className="text-[13px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Invoice</div>

@@ -124,7 +124,7 @@ export function ReturnsPanel({
               <button
                 disabled={busy === item.return_id}
                 onClick={() => act(item, 'reschedule')}
-                className="shrink-0 rounded-md border border-[var(--border)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-primary)] disabled:opacity-40"
+                className="shrink-0 rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--text-primary)] disabled:opacity-40"
               >
                 Collect again
               </button>
@@ -133,7 +133,7 @@ export function ReturnsPanel({
               <button
                 disabled={busy === item.return_id}
                 onClick={() => act(item, 'returned')}
-                className="shrink-0 rounded-md bg-[var(--accent)] px-2 py-0.5 text-[11px] font-medium text-white disabled:opacity-40"
+                className="shrink-0 rounded-full bg-[var(--accent)] px-2 py-0.5 text-[11px] font-semibold text-white disabled:opacity-40"
               >
                 Returned
               </button>

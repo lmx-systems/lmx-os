@@ -53,8 +53,8 @@ export function ReturnsPanel() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-[16px] font-semibold text-[var(--text-primary)]">Returns &amp; cores</h1>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <h1 className="text-[clamp(28px,4vw,40px)] font-extrabold leading-[1.05] tracking-[-0.045em] text-[var(--text-primary)]">Returns &amp; cores</h1>
         <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
           <input
             type="checkbox"
@@ -73,7 +73,7 @@ export function ReturnsPanel() {
 
       <form
         onSubmit={handleFlag}
-        className="mb-6 grid grid-cols-1 gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]"
+        className="mb-6 grid grid-cols-1 gap-3 rounded-[var(--radius-lg)] bg-[var(--surface)] p-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]"
       >
         <select
           required
@@ -102,7 +102,7 @@ export function ReturnsPanel() {
         <button
           type="submit"
           disabled={flagging || !shopId || !manifest.trim()}
-          className="rounded-[var(--radius)] bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-60"
+          className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-60"
         >
           {flagging ? 'Flagging…' : 'Flag ready'}
         </button>
@@ -111,11 +111,11 @@ export function ReturnsPanel() {
       {returns === null ? (
         <div className="text-sm text-[var(--text-muted)]">Loading returns…</div>
       ) : returns.length === 0 ? (
-        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] px-4 py-8 text-center text-sm text-[var(--text-muted)]">
+        <div className="rounded-[var(--radius-lg)] bg-[var(--surface)] px-4 py-8 text-center text-sm text-[var(--text-muted)]">
           {awaitingOnly ? 'Nothing awaiting pickup.' : 'No returns yet.'}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)]">
+        <div className="overflow-hidden rounded-[var(--radius-lg)] bg-[var(--surface)]">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-[var(--border)] text-xs font-medium text-[var(--text-muted)]">

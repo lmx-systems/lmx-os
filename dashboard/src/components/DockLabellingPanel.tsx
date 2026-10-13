@@ -94,7 +94,7 @@ export function DockLabellingPanel({ canDispatch }: { canDispatch: boolean }) {
         {(docks ?? []).map((dock) => (
           <li
             key={dock.location_id}
-            className="rounded-[var(--radius)] border border-[var(--border)] px-2.5 py-2"
+            className="rounded-[20px] bg-[var(--surface-2)] px-2.5 py-2"
           >
             <div className="mb-1 flex items-baseline justify-between gap-3">
               <span className="text-[13px] text-[var(--text-primary)]">
@@ -120,7 +120,7 @@ export function DockLabellingPanel({ canDispatch }: { canDispatch: boolean }) {
                     key={klass.code}
                     disabled={busy === dock.location_id}
                     onClick={() => label(dock.location_id, klass.code)}
-                    className="rounded-md border border-[var(--border)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                    className="rounded-full border border-[var(--border-strong)] bg-[var(--surface)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-40"
                   >
                     {klass.label}
                   </button>

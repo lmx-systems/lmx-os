@@ -82,14 +82,14 @@ export function TrackingPage({ token }: TrackingPageProps) {
   if (notFound) {
     return (
       <Shell>
-        <h1 className="text-2xl font-semibold text-slate-900">
+        <h1 className="text-[32px] font-extrabold leading-[1.1] tracking-[-0.04em] text-[var(--text-primary)]">
           We couldn&rsquo;t find that delivery
         </h1>
-        <p className="mt-3 text-slate-600">
+        <p className="mt-3 text-[var(--text-secondary)]">
           This tracking link may have expired. Tracking links stay active for a day
           after a delivery is completed.
         </p>
-        <p className="mt-6 text-sm text-slate-500">
+        <p className="mt-6 text-sm text-[var(--text-muted)]">
           If you&rsquo;re still waiting on a part, the shop you ordered from can help.
         </p>
       </Shell>
@@ -99,32 +99,31 @@ export function TrackingPage({ token }: TrackingPageProps) {
   if (view === null) {
     return (
       <Shell>
-        <p className="text-slate-500">Loading your delivery&hellip;</p>
+        <p className="text-[var(--text-muted)]">Loading your delivery&hellip;</p>
       </Shell>
     )
   }
 
   return (
     <Shell>
-      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-        LMX Delivery
-      </p>
-      <h1 className="mt-2 text-3xl font-semibold text-slate-900">{view.headline}</h1>
-      <p className="mt-2 text-slate-600">{view.detail}</p>
+      <h1 className="text-[40px] font-extrabold leading-[1.05] tracking-[-0.045em] text-[var(--text-primary)] [text-wrap:balance]">
+        {view.headline}
+      </h1>
+      <p className="mt-2 text-[16px] text-[var(--text-secondary)]">{view.detail}</p>
 
       {view.destination_hint && (
-        <p className="mt-4 text-sm text-slate-500">
-          Delivering to <span className="font-medium text-slate-700">{view.destination_hint}</span>
+        <p className="mt-4 text-sm text-[var(--text-muted)]">
+          Delivering to <span className="font-medium text-[var(--text-primary)]">{view.destination_hint}</span>
         </p>
       )}
 
       <Arrival view={view} />
 
       {view.delivery_pin && (
-        <div className="mt-6 rounded-lg border border-slate-200 bg-white px-4 py-3">
-          <p className="text-sm text-slate-600">Your delivery code</p>
-          <p className="mt-1 font-mono text-3xl tracking-[0.3em] text-slate-900">{view.delivery_pin}</p>
-          <p className="mt-1 text-xs text-slate-500">
+        <div className="mt-6 rounded-[22px] bg-[var(--lime)] px-5 py-4">
+          <p className="text-sm font-semibold text-[var(--lime-ink)]">Your delivery code</p>
+          <p className="mt-1 font-mono text-[40px] font-bold leading-tight tracking-[0.3em] text-[var(--text-primary)]">{view.delivery_pin}</p>
+          <p className="mt-1 text-xs text-[var(--lime-ink)]">
             Give this to your driver when they hand over the delivery. It proves it reached you.
           </p>
         </div>
@@ -136,7 +135,7 @@ export function TrackingPage({ token }: TrackingPageProps) {
         <DriverMap position={view.driver_position} />
       ) : (
         view.is_live && (
-          <p className="mt-6 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <p className="mt-6 rounded-[16px] bg-[var(--surface-2)] px-4 py-3 text-sm text-[var(--text-secondary)]">
             {/* Said plainly rather than left as an empty space where a map should
                 be. The map appears when the driver is on their way to this
                 address - not while they're completing someone else's delivery. */}
@@ -146,7 +145,7 @@ export function TrackingPage({ token }: TrackingPageProps) {
       )}
 
       {offline && (
-        <p className="mt-4 text-xs text-amber-700">
+        <p className="mt-4 text-xs text-[var(--amber)]">
           Having trouble refreshing &mdash; showing the last update.
         </p>
       )}
@@ -197,8 +196,8 @@ function RatingPrompt({
   }
 
   return (
-    <div className="mt-8 border-t border-slate-200 pt-6">
-      <p className="text-sm font-medium text-slate-900">
+    <div className="mt-8 border-t border-[var(--border)] pt-6">
+      <p className="text-sm font-medium text-[var(--text-primary)]">
         {score ? 'Thanks for the feedback.' : 'How was this delivery?'}
       </p>
 
@@ -211,10 +210,10 @@ function RatingPrompt({
             aria-label={`${value} out of 5`}
             aria-pressed={score === value}
             onClick={() => submit(value, draftComment)}
-            className={`h-10 w-10 rounded-lg border text-base transition-colors disabled:opacity-50 ${
+            className={`h-11 w-11 rounded-full border text-base font-semibold transition-colors disabled:opacity-50 ${
               score !== null && value <= score
-                ? 'border-slate-900 bg-slate-900 text-white'
-                : 'border-slate-200 bg-white text-slate-400 hover:border-slate-400'
+                ? 'border-[var(--accent)] bg-[var(--accent)] text-white'
+                : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:border-[var(--accent)]'
             }`}
           >
             {value}
@@ -224,7 +223,7 @@ function RatingPrompt({
 
       {score !== null && (
         <div className="mt-4">
-          <label htmlFor="rating-comment" className="text-xs text-slate-500">
+          <label htmlFor="rating-comment" className="text-xs text-[var(--text-muted)]">
             Anything you want us to know? (optional)
           </label>
           <textarea
@@ -234,13 +233,13 @@ function RatingPrompt({
             rows={3}
             onChange={(e) => setDraftComment(e.target.value)}
             placeholder="Driver couldn't find the loading dock…"
-            className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-sm text-slate-900 placeholder:text-slate-400"
+            className="mt-1 w-full rounded-[16px] border border-[var(--border)] p-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
           <button
             type="button"
             disabled={saving || draftComment.trim() === (comment ?? '')}
             onClick={() => submit(score, draftComment)}
-            className="mt-2 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+            className="mt-2 rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
           >
             {saving ? 'Saving…' : comment ? 'Update' : 'Send'}
           </button>
@@ -248,7 +247,7 @@ function RatingPrompt({
       )}
 
       {failed && (
-        <p role="alert" className="mt-2 text-xs text-amber-700">
+        <p role="alert" className="mt-2 text-xs text-[var(--amber)]">
           We couldn&rsquo;t save that just now. Your delivery is unaffected.
         </p>
       )}
@@ -299,9 +298,9 @@ function ProofOfDelivery({
             src={photo}
             alt="Photo taken at the delivery"
             loading="lazy"
-            className="w-full max-w-sm rounded-lg border border-slate-200"
+            className="w-full max-w-sm rounded-[16px] border border-[var(--border)]"
           />
-          <figcaption className="mt-1.5 text-xs text-slate-500">
+          <figcaption className="mt-1.5 text-xs text-[var(--text-muted)]">
             Taken by the driver at the door.
           </figcaption>
         </figure>
@@ -314,9 +313,9 @@ function ProofOfDelivery({
             loading="lazy"
             // White ground: a signature is dark ink on transparency, which
             // disappears entirely if the page ever renders dark.
-            className="w-full max-w-sm rounded-lg border border-slate-200 bg-white"
+            className="w-full max-w-sm rounded-[16px] border border-[var(--border)] bg-[var(--surface)]"
           />
-          <figcaption className="mt-1.5 text-xs text-slate-500">
+          <figcaption className="mt-1.5 text-xs text-[var(--text-muted)]">
             Signed for at the door.
           </figcaption>
         </figure>
@@ -329,7 +328,7 @@ function Arrival({ view }: { view: TrackingView }) {
   if (view.delivered_at) {
     return (
       <>
-        <p className="mt-6 text-lg text-slate-900">
+        <p className="mt-6 text-lg text-[var(--text-primary)]">
           Delivered at{' '}
           <span className="font-semibold">{formatTime(view.delivered_at)}</span>
         </p>
@@ -343,14 +342,14 @@ function Arrival({ view }: { view: TrackingView }) {
   if (!view.estimated_arrival) return null
   return (
     <div className="mt-6">
-      <p className="text-sm text-slate-500">Estimated arrival</p>
-      <p className="text-2xl font-semibold text-slate-900">
+      <p className="text-sm text-[var(--text-muted)]">Estimated arrival</p>
+      <p className="text-2xl font-semibold text-[var(--text-primary)]">
         {formatTime(view.estimated_arrival)}
       </p>
       {/* Labelled an estimate on the page, not just in the field name. There is
           still no verified travel-time model (E1), so presenting this as a
           promise would be overstating what we know. */}
-      <p className="mt-1 text-xs text-slate-500">An estimate, not a guaranteed time.</p>
+      <p className="mt-1 text-xs text-[var(--text-muted)]">An estimate, not a guaranteed time.</p>
     </div>
   )
 }
@@ -364,16 +363,16 @@ function DriverMap({ position }: { position: NonNullable<TrackingView['driver_po
   const bbox = [lng - span, lat - span / 2, lng + span, lat + span / 2].join('%2C')
   if (!shown) {
     return (
-      <div className="mt-6 rounded-xl border border-slate-200 px-4 py-3">
-        <p className="text-sm text-slate-700">Your driver is on the way to you.</p>
+      <div className="mt-6 rounded-[20px] border border-[var(--border)] px-4 py-3">
+        <p className="text-sm text-[var(--text-primary)]">Your driver is on the way to you.</p>
         <button
           type="button"
           onClick={() => setShown(true)}
-          className="mt-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-800 focus-visible:outline focus-visible:outline-2"
+          className="mt-2 rounded-[16px] border border-[var(--border-strong)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2"
         >
           Show the driver on a map
         </button>
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-[var(--text-muted)]">
           The map comes from OpenStreetMap, which will see your IP address and the
           driver&rsquo;s current position.
         </p>
@@ -382,7 +381,7 @@ function DriverMap({ position }: { position: NonNullable<TrackingView['driver_po
   }
   return (
     <div className="mt-6">
-      <div className="overflow-hidden rounded-xl border border-slate-200">
+      <div className="overflow-hidden rounded-[20px] border border-[var(--border)]">
         <iframe
           title="Driver location"
           className="h-64 w-full"
@@ -391,7 +390,7 @@ function DriverMap({ position }: { position: NonNullable<TrackingView['driver_po
           src={`https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat}%2C${lng}`}
         />
       </div>
-      <p className="mt-2 text-xs text-slate-500">
+      <p className="mt-2 text-xs text-[var(--text-muted)]">
         Driver location updated {relativeTime(position.recorded_at)}. Map &copy;
         OpenStreetMap contributors.
       </p>
@@ -401,8 +400,15 @@ function DriverMap({ position }: { position: NonNullable<TrackingView['driver_po
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-white px-5 py-10">
-      <div className="mx-auto max-w-md">{children}</div>
+    <div className="min-h-screen bg-[var(--bg-page)] px-4 py-8">
+      <div className="mx-auto flex max-w-md flex-col gap-4">
+        <div className="flex items-center gap-2 px-1 text-xl font-extrabold tracking-[-0.04em] text-[var(--text-primary)]">
+          <img src="/lmx-mark.png" alt="" className="h-[26px] w-[26px] rounded-[8px]" />
+          lmx
+          <span className="ml-1 text-[13px] font-medium tracking-normal text-[var(--text-secondary)]">delivery tracking</span>
+        </div>
+        <main className="rounded-[var(--radius-lg)] bg-[var(--surface)] p-7">{children}</main>
+      </div>
     </div>
   )
 }

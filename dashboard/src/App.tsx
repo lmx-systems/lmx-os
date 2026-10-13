@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { TopBar } from './components/TopBar'
+import { TopBar, type PageSpec } from './components/TopBar'
 import { KpiStrip } from './components/KpiStrip'
 import { OrderPipeline } from './components/OrderPipeline'
 import { HoldQueueTable } from './components/HoldQueueTable'
 import { ExceptionsPanel } from './components/ExceptionsPanel'
-import { Tabs } from './components/ui/Tabs'
+import { isGoingAhead } from './lib/exceptions'
+import { RulesTile, TouchesTile } from './components/HomeTiles'
+import { Card } from './components/ui/Card'
 import { DockLabellingPanel } from './components/DockLabellingPanel'
 import { LabellingQueuePanel } from './components/LabellingQueuePanel'
 import { SiteFactDisputesPanel } from './components/SiteFactDisputesPanel'
@@ -56,11 +58,21 @@ function App() {
   // loggedIn/profile gating exactly.
   const [loggedIn, setLoggedIn] = useState(() => getToken() !== null)
   const [opsProfile, setOpsProfile] = useState<OpsProfileView | null>(null)
-  // Which horizon the left column is showing (CON-1). Not persisted: a
-  // dispatcher opening the board is starting a shift, and the thing they came
-  // for is the live queue - restoring "To record" from last night would put the
-  // wrong half in front of them at the worst moment.
-  const [tab, setTab] = useState('now')
+  // Which page is open, kept in the address (#orders) so a link or a reload
+  // lands on the same page. No hash is Home: somebody opening the console is
+  // starting a shift, and Home is the live work (CON-1).
+  const [page, setPage] = useState(pageFromHash)
+  useEffect(() => {
+    const onHash = () => setPage(pageFromHash())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+  function goTo(id: string) {
+    if (id === page) return
+    window.location.hash = id
+    setPage(id)
+    window.scrollTo({ top: 0 })
+  }
   const [profileError, setProfileError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -132,6 +144,13 @@ function App() {
     enabled,
   )
 
+  // Drivers waiting on a reply count as needing a person, on Home's headline
+  // and its badge - a driver at a locked gate is the plainest case of it. Only
+  // for roles that can read the inbox (a viewer gets a 403), and on its own
+  // slower tick, the same as the inbox panel's.
+  const canReadSupport = opsProfile !== null && (opsProfile.role === 'admin' || opsProfile.role === 'dispatcher')
+  const support = usePolling(() => api.supportInbox(hubId), 15_000, [hubId], enabled && canReadSupport)
+
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null)
   useEffect(() => {
     if (fleet.data || held.data || summary.data) {
@@ -158,9 +177,50 @@ function App() {
   const isAdmin = opsProfile.role === 'admin'
   const canDispatch = isAdmin || opsProfile.role === 'dispatcher'
 
+  const driversWaiting = canDispatch && support.data ? support.data.filter((t) => t.awaiting_reply).length : 0
+  const needsCount = exceptions.data
+    ? exceptions.data.items.filter((i) => !isGoingAhead(i)).length + driversWaiting
+    : undefined
+  const recordBadge = attention.data
+    ? attention.data.late_orders +
+      attention.data.merge_proposals +
+      attention.data.unlabelled_docks +
+      attention.data.site_fact_disputes
+    : undefined
+  const pages: PageSpec[] =
+    hubId.length === 0
+      ? []
+      : [
+          { id: 'home', label: 'Home', badge: needsCount },
+          { id: 'orders', label: 'Orders' },
+          { id: 'drivers', label: 'Drivers' },
+          { id: 'rules', label: 'Rules' },
+          // The badge is what keeps this page honest (CON-1): a page with no
+          // count is a page nobody opens, which would trade a cluttered board
+          // for work that silently stops getting done.
+          { id: 'record', label: 'Record', badge: recordBadge },
+          ...(isAdmin
+            ? [
+                { id: 'clients', label: 'Clients' },
+                { id: 'settings', label: 'Settings' },
+              ]
+            : []),
+        ]
+  // A page this role cannot see (a bookmarked #settings on a dispatcher's
+  // account) falls back to Home rather than to a blank screen.
+  const current = pages.some((p) => p.id === page) ? page : 'home'
+
+  const refreshAfterException = () => {
+    exceptions.refetchNow()
+    // A redelivery is back in the hold queue.
+    held.refetchNow()
+    // An offer takes a driver out of the available pool.
+    fleet.refetchNow()
+  }
+
   return (
     <div className="min-h-screen">
-      <div className="mx-auto max-w-[1320px] px-7 py-5 pb-16">
+      <div className="mx-auto max-w-[1440px] px-4 py-6 pb-16 sm:px-8">
         <TopBar
           hubId={hubId}
           hubsVersion={hubsVersion}
@@ -168,11 +228,14 @@ function App() {
           lastUpdatedAt={hubId.length > 0 ? lastUpdatedAt : null}
           opsProfile={opsProfile}
           onLogout={handleLogout}
+          pages={pages}
+          page={current}
+          onPage={goTo}
         />
 
         {hubId.length === 0 ? (
           <div className="mx-auto max-w-xl space-y-4">
-            <p className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-muted)]">
+            <p className="rounded-[var(--radius-lg)] bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-secondary)]">
               Select a hub above to load fleet state, the hold queue, and order status for that
               hub.
             </p>
@@ -187,113 +250,177 @@ function App() {
           </div>
         ) : (
           <>
-            <KpiStrip
-              fleet={fleet.data}
-              fleetError={fleet.error}
-              held={held.data}
-              heldError={held.error}
-              summary={summary.data}
-              summaryError={summary.error}
-              lastCycle={lastCycle.data}
-            />
-
-            <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr]">
-              {/* Two horizons, not one scroll (CON-1: "a working dispatcher can
-                  run a day on it"). Everything under "To record" is real work
-                  and none of it is urgent; interleaved with the hold queue it
-                  put a fortnight-old labelling question between a dispatcher
-                  and the thing they came to the screen for.
-
-                  The badge is what keeps the split honest. A tab with no count
-                  is a tab nobody opens, which would trade a cluttered board for
-                  work that silently stops getting done. */}
-              <div className="flex flex-col gap-4">
-                <Tabs
-                  tabs={[
-                    { id: 'now', label: 'Dispatching' },
-                    {
-                      id: 'record',
-                      label: 'To record',
-                      badge: attention.data
-                        ? attention.data.late_orders +
-                          attention.data.merge_proposals +
-                          attention.data.unlabelled_docks +
-                          attention.data.site_fact_disputes
-                        : undefined,
-                    },
-                  ]}
-                  active={tab}
-                  onChange={setTab}
+            {current === 'home' && (
+              <>
+                {/* Home is the on-call view (decision D-SEAT): what a rule may
+                    not decide, what the playbook is about to do, and how much
+                    of the day still needed a person. Everything else is a
+                    page away, so a good day is a mostly empty screen. */}
+                <PageHeader
+                  kicker={greeting()}
+                  title={
+                    needsCount === undefined
+                      ? exceptions.error
+                        ? "Couldn't load what needs you."
+                        : 'Loading…'
+                      : needsCount === 0
+                        ? 'Nothing needs you.'
+                        : needsCount === 1
+                          ? 'One thing needs you.'
+                          : `${needsCount} things need you.`
+                  }
+                  description="The playbook handles what its rules cover. These are the ones it isn't allowed to decide, and the ones it is about to."
                 />
-
-                {tab === 'now' && (
-                  <>
-                    {/* First, because it is what somebody reaches for when the
-                        phone rings - and that is not a scheduled moment. Before
-                        this a dispatcher could not look up an order at all once
-                        it left the hold queue (CON-1). */}
-                    <OrderLookupPanel
-                      key={`lookup-${hubId}`}
-                      hubId={hubId}
-                      canDispatch={canDispatch}
-                      onToast={showToast}
-                    />
-                    {/* A driver's message is somebody standing at a locked gate,
-                        so it belongs with the live work, not the record-keeping.
-                        It used to be texted to a support number through Twilio
-                        and never shown here at all. */}
-                    {canDispatch && (
-                      <SupportInboxPanel key={`support-${hubId}`} hubId={hubId} onToast={showToast} />
-                    )}
-                    <OrderPipeline summary={summary.data} error={summary.error} loading={summary.loading} />
-                    {/* Above the hold queue on purpose: the hold queue is work
-                        going to plan and this is work that is not, so a
-                        dispatcher scanning top-down should meet the exceptions
-                        first. Deliberately outside the admin block - it is a
-                        read, and a dispatcher on a viewer account who cannot
-                        see their own exceptions cannot run a day (CON-1). */}
+                <div className="flex flex-wrap items-start gap-4">
+                  <div className="flex min-w-0 flex-[7_1_560px] flex-col gap-4">
                     <ExceptionsPanel
+                      group="needs"
                       data={exceptions.data}
                       error={exceptions.error}
                       loading={exceptions.loading}
                       canDispatch={canDispatch}
                       drivers={fleet.data}
                       driversError={fleet.error !== null}
-                      onResolved={() => {
-                        exceptions.refetchNow()
-                        // A redelivery is back in the hold queue.
-                        held.refetchNow()
-                        // An offer takes a driver out of the available pool.
-                        fleet.refetchNow()
-                      }}
+                      onResolved={refreshAfterException}
                       onToast={showToast}
                     />
-                    <HoldQueueTable
-                      key={hubId}
-                      data={held.data}
-                      error={held.error}
-                      loading={held.loading}
+                    {/* A driver's message is somebody standing at a locked
+                        gate - a person's, so it sits under Needs you. */}
+                    {canDispatch && (
+                      <SupportInboxPanel key={`support-${hubId}`} hubId={hubId} onToast={showToast} />
+                    )}
+                  </div>
+                  <div className="flex min-w-0 flex-[5_1_360px] flex-col gap-4">
+                    <TouchesTile key={`touches-${hubId}`} hubId={hubId} />
+                    <ExceptionsPanel
+                      group="soon"
+                      data={exceptions.data}
+                      error={exceptions.error}
+                      loading={exceptions.loading}
                       canDispatch={canDispatch}
-                      onCancelled={() => {
-                        held.refetchNow()
-                        exceptions.refetchNow()
-                      }}
+                      drivers={fleet.data}
+                      driversError={fleet.error !== null}
+                      onResolved={refreshAfterException}
                       onToast={showToast}
                     />
-                    {/* Last on the board: not work to do, but how much of it
-                        still needs a person, and how the rules taking it over
-                        are doing (DEC-7, DEC-8). The goal is that this is the
-                        only panel left worth opening. */}
-                    <PlaybookPanel key={`playbook-${hubId}`} hubId={hubId} />
-                  </>
-                )}
+                    <RulesTile key={`rules-${hubId}`} hubId={hubId} onOpen={() => goTo('rules')} />
+                    <FleetMap key={`map-${hubId}`} data={fleet.data} error={fleet.error} loading={fleet.loading} />
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <KpiStrip
+                    fleet={fleet.data}
+                    fleetError={fleet.error}
+                    held={held.data}
+                    heldError={held.error}
+                    summary={summary.data}
+                    summaryError={summary.error}
+                    lastCycle={lastCycle.data}
+                  />
+                </div>
+              </>
+            )}
 
-                {/* Mounted only when the tab is open, which is what makes the
-                    loading lazy: each of these fetches on mount, and before the
-                    split all four ran on every page view whether anybody looked
-                    or not. */}
-                {tab === 'record' && (
-                  <>
+            {current === 'orders' && (
+              <>
+                <PageHeader title="Orders" description="Find any order, see where the day's orders are, and what is waiting to go out." />
+                <div className="flex flex-col gap-4">
+                  {/* First, because it is what somebody reaches for when the
+                      phone rings - and that is not a scheduled moment (CON-1). */}
+                  <OrderLookupPanel key={`lookup-${hubId}`} hubId={hubId} canDispatch={canDispatch} onToast={showToast} />
+                  <OrderPipeline summary={summary.data} error={summary.error} loading={summary.loading} />
+                  <HoldQueueTable
+                    key={hubId}
+                    data={held.data}
+                    error={held.error}
+                    loading={held.loading}
+                    canDispatch={canDispatch}
+                    onCancelled={() => {
+                      held.refetchNow()
+                      exceptions.refetchNow()
+                    }}
+                    onToast={showToast}
+                  />
+                </div>
+              </>
+            )}
+
+            {current === 'drivers' && (
+              <>
+                <PageHeader title="Drivers" description="Where the fleet is, who is free, and the paperwork that keeps them on the road." />
+                <div className="grid items-start gap-4 lg:grid-cols-[1.4fr_1fr]">
+                  <div className="flex min-w-0 flex-col gap-4">
+                    {/* Map above the roster: "where is my fleet" is the
+                        glance, and the roster is the detail. Both read the
+                        same polled fleet data, so they cannot disagree. */}
+                    <FleetMap key={`map-${hubId}`} data={fleet.data} error={fleet.error} loading={fleet.loading} />
+                    <FleetRoster data={fleet.data} error={fleet.error} loading={fleet.loading} />
+                  </div>
+                  <div className="flex min-w-0 flex-col gap-4">
+                    {/* Forcing a dispatch cycle is the day's work, so a
+                        dispatcher may; running the nightly job by hand is an
+                        admin's, and the panel shows that card only to one. */}
+                    {canDispatch && (
+                      <OperationsPanel
+                        key={hubId}
+                        hubId={hubId}
+                        isAdmin={isAdmin}
+                        onAfterRun={() => {
+                          fleet.refetchNow()
+                          held.refetchNow()
+                          summary.refetchNow()
+                          lastCycle.refetchNow()
+                        }}
+                        onToast={showToast}
+                      />
+                    )}
+                    {isAdmin && (
+                      <>
+                        {/* No hub key: compliance review is whole-company, since
+                            an unreviewed license keeps a driver off the road
+                            everywhere. */}
+                        <DriverDocumentsPanel onToast={showToast} />
+                        {/* Nothing created a driver before this - every row was
+                            a hand-written insert (docs/ROADMAP_AUDIT_2026-09.md). */}
+                        <OnboardDriverForm hubId={hubId} onToast={showToast} />
+                        {/* The other half of the same job: a driver who lost
+                            their phone needs an admin who can list their
+                            devices, not just revoke one by id. */}
+                        <DriverDevicesPanel key={`devices-${hubId}`} hubId={hubId} onToast={showToast} />
+                      </>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {current === 'rules' && (
+              <>
+                <PageHeader
+                  title="How much the playbook decides alone"
+                  description="Every rule starts by suggesting. When people agree with it often enough, it earns the next step. Moving a rule up is a setting a person changes."
+                />
+                <div className="grid items-start gap-4 lg:grid-cols-2">
+                  {/* How much still needs a person, and how the rules taking it
+                      over are doing (DEC-7, DEC-8). */}
+                  <PlaybookPanel key={`playbook-${hubId}`} hubId={hubId} />
+                  {isAdmin && (
+                    <div className="flex min-w-0 flex-col gap-4">
+                      <UrgencyRulesPanel key={`urgency-${hubId}`} hubId={hubId} onToast={showToast} />
+                      <ProposedRulesPanel key={`proposed-${hubId}`} hubId={hubId} onToast={showToast} />
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Mounted only when the page is open, which is what makes the
+                loading lazy: each of these fetches on mount. */}
+            {current === 'record' && (
+              <>
+                <PageHeader title="Record" description="Real work and none of it urgent: the facts about places, docks and returns the next delivery depends on." />
+                <div className="grid items-start gap-4 lg:grid-cols-2">
+                  <div className="flex min-w-0 flex-col gap-4">
                     <RecordLayerPanel key={`record-${hubId}`} hubId={hubId} canDispatch={canDispatch} />
                     {/* Not hub-scoped: the same physical dock can be reached
                         from two hubs and that pair is the most valuable merge
@@ -302,161 +429,129 @@ function App() {
                     {/* Also not hub-scoped: a dock is a physical place and its
                         class does not change with which hub serves it (IDN-3). */}
                     <DockLabellingPanel canDispatch={canDispatch} />
-                    {/* Not hub-scoped either: the golden record's labels are about
-                        a place and a machine, and the re-drive's records are not
-                        in any hub the dropdown lists (DE-9). */}
+                    {/* Not hub-scoped either: the golden record's labels are
+                        about a place and a machine (DE-9). */}
                     <LabellingQueuePanel canDispatch={canDispatch} />
-                    {/* Not hub-scoped either: answers at the door that
-                        disagree with a site's facts, kept rather than applied
-                        so a stale phone cannot undo a newer answer - and so
-                        somebody has to settle them (DE-15). In the badge,
-                        because settling them makes the count fall. */}
+                  </div>
+                  <div className="flex min-w-0 flex-col gap-4">
+                    {/* Answers at the door that disagree with a site's facts,
+                        kept rather than applied so a stale phone cannot undo a
+                        newer answer - and so somebody has to settle them
+                        (DE-15). In the badge, because settling them makes the
+                        count fall. */}
                     <SiteFactDisputesPanel canDispatch={canDispatch} />
                     {/* Beside dock labelling because it is the same act on the
-                        same rows - deciding what a dock is. This queue is why
-                        dock_log_submissions exists as a separate table: a
-                        stranger's answers never reach receiver_profiles, the
-                        layer M5 trains on, without a person here matching them
-                        to a dock (docs/ROADMAP.md DRV-7). */}
+                        same rows - deciding what a dock is (DRV-7). */}
                     <DockLogReviewPanel onToast={showToast} isAdmin={isAdmin} />
+                    {/* Deliberately NOT in the badge: with no mail server every
+                        dispute is un-escalated by definition, so the count would
+                        never fall. Its list is a dispatcher's read on the
+                        server; a viewer would only see it fail to load. */}
+                    {canDispatch && <CodDisputesPanel key={`cod-${hubId}`} hubId={hubId} />}
+                    {/* The half of W1 that shipped without a front end. Hides
+                        itself when nothing is outstanding. */}
+                    {canDispatch && <ReturnsPanel key={`returns-${hubId}`} hubId={hubId} onToast={showToast} />}
                     {/* Last, because it is the read-back rather than the work:
                         is the record being written at all (REC-1..REC-4). */}
                     <RecordHealthPanel key={`health-${hubId}`} hubId={hubId} />
-                    {/* Recording work rather than dispatching work: a repeat
-                        disputer is a conversation to have this month, not this
-                        minute. Deliberately NOT in the tab badge — with no mail
-                        server configured every dispute is un-escalated by
-                        definition, so the count would never fall and a badge that
-                        never falls is the "tab nobody opens" failure inverted. */}
-                    {/* Its list is a dispatcher's read on the server; a viewer
-                        would only see it fail to load. */}
-                    {canDispatch && <CodDisputesPanel key={`cod-${hubId}`} hubId={hubId} />}
+                  </div>
+                </div>
+              </>
+            )}
 
-                    {/* Recording work too, and the half of W1 that shipped
-                        without a front end: a driver could never collect a core
-                        and nobody could close one out. Hides itself when
-                        nothing is outstanding. */}
-                    {canDispatch && (
-                      <ReturnsPanel
-                        key={`returns-${hubId}`}
-                        hubId={hubId}
-                        onToast={showToast}
-                      />
-                    )}
-                  </>
-                )}
-              </div>
-              <div className="flex flex-col gap-4">
-                {/* Map above the roster: "where is my fleet" is the glance a
-                    dispatcher takes, and the roster is the detail they drop to.
-                    Both read the same polled fleet data, so they cannot
-                    disagree with each other. */}
-                <FleetMap key={`map-${hubId}`} data={fleet.data} error={fleet.error} loading={fleet.loading} />
-                <FleetRoster data={fleet.data} error={fleet.error} loading={fleet.loading} />
-                {/* Forcing a dispatch cycle is the day's work, so a dispatcher
-                    may; running the nightly job by hand is an admin's, and the
-                    panel shows that card only to one. */}
-                {canDispatch && (
-                  <OperationsPanel
-                    key={hubId}
-                    hubId={hubId}
-                    isAdmin={isAdmin}
-                    onAfterRun={() => {
-                      fleet.refetchNow()
-                      held.refetchNow()
-                      summary.refetchNow()
-                      lastCycle.refetchNow()
-                    }}
-                    onToast={showToast}
-                  />
-                )}
-                {isAdmin && (
-                  <>
-                    {/* Configuring the hub (onboarding, rates, terms, rules,
-                        devices) is admin-only on the backend
-                        (app/ops_auth/dependencies.py's require_admin) - a
-                        dispatcher or viewer never sees the controls for
-                        actions they'd get a 403 from. */}
-                    {/* Above the manual onboarding form on purpose: an applicant
-                        who is already waiting should be approved, not
-                        re-created by hand as a second client record. */}
+            {/* Configuring the business is admin-only on the backend
+                (app/ops_auth/dependencies.py's require_admin) - a dispatcher
+                or viewer never sees the controls for actions they'd get a 403
+                from, and never sees these pages. */}
+            {current === 'clients' && isAdmin && (
+              <>
+                <PageHeader title="Clients" description="Who is waiting to join, and each client's price, promise and bill." />
+                <div className="grid items-start gap-4 lg:grid-cols-2">
+                  <div className="flex min-w-0 flex-col gap-4">
+                    {/* Above the manual form on purpose: an applicant who is
+                        already waiting should be approved, not re-created by
+                        hand as a second client record. */}
                     <PendingSignupsPanel key={`signups-${hubId}`} hubId={hubId} onToast={showToast} />
-                    {/* No hub key: compliance review is whole-company, since an
-                        unreviewed license keeps a driver off the road everywhere. */}
-                    <DriverDocumentsPanel onToast={showToast} />
                     <OnboardClientForm hubId={hubId} onToast={showToast} />
-                    {/* Beside client onboarding because it is what happens next:
-                        rates were set once inside signup approval and then could
-                        not be read back at all, so "what are we charging them?"
-                        lived only in the database
-                        (docs/ROADMAP_AUDIT_2026-09.md). Nothing listed clients
-                        either, which is why this needed an endpoint and not just
-                        a form. */}
+                  </div>
+                  <div className="flex min-w-0 flex-col gap-4">
+                    {/* Price, then promise, then the bill computed from both:
+                        a credit is a percentage of the fee the rate card
+                        produced. */}
                     <ClientRatesPanel key={`rates-${hubId}`} hubId={hubId} onToast={showToast} />
-                    {/* Directly beneath the rates panel because price and
-                        promise are one contract and a credit is computed from
-                        both - credit_percent is a percentage of the fee the
-                        rate card produced. Both endpoints existed with no
-                        caller, so an operator could set a term with a script
-                        and then had no way to read back what they agreed to,
-                        which is the half that matters when a client disputes a
-                        credit (tests/test_no_unreachable_routes.py). */}
                     <ClientSlaTermsPanel key={`sla-${hubId}`} hubId={hubId} onToast={showToast} />
-                    {/* Third of the client-contract trio, and last for a
-                        reason: price, then promise, then the bill that is
-                        computed from both. Nothing in this system had ever
-                        raised an invoice - generate_invoice's only call site
-                        was an endpoint no front end reached - while the client
-                        portal shipped a full viewer reading a table nothing
-                        could write. */}
                     <ClientInvoicesPanel key={`invoices-${hubId}`} hubId={hubId} onToast={showToast} />
-                    {/* Beside client onboarding, because it is the same kind of
-                        act: creating the identity somebody logs in with. Nothing
-                        created a driver before this - every row was a
-                        hand-written insert (docs/ROADMAP_AUDIT_2026-09.md). */}
-                    <OnboardDriverForm hubId={hubId} onToast={showToast} />
-                    {/* Beside the two onboarding forms, because it is the third
-                        thing nothing could do: `Hub.state_code` selects a
-                        driver's overtime rule and was set by nothing at all
-                        (docs/ROADMAP_AUDIT_2026-09.md). */}
-                    <HubSettingsPanel
-                      key={`hub-${hubId}`}
-                      hubId={hubId}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {current === 'settings' && isAdmin && (
+              <>
+                <PageHeader title="Settings" description="The hub itself, new hubs, and the measurements behind the numbers." />
+                <div className="grid items-start gap-4 lg:grid-cols-2">
+                  <div className="flex min-w-0 flex-col gap-4">
+                    {/* `Hub.state_code` selects a driver's overtime rule and
+                        was set by nothing at all before this panel. */}
+                    <HubSettingsPanel key={`hub-${hubId}`} hubId={hubId} isAdmin={isAdmin} onToast={showToast} />
+                    <CreateHubPanel
                       isAdmin={isAdmin}
-                      onToast={showToast}
+                      onCreated={(hub) => {
+                        setHubsVersion((v) => v + 1)
+                        setHubId(hub.id)
+                        showToast(`${hub.name} created.`)
+                      }}
                     />
-                    {/* Beside the driver form, because it is the other half of
-                        the same job. The revocation endpoint had existed for
-                        "the driver lost their phone and rings dispatch" — with
-                        nothing that could list a driver's devices to an admin,
-                        so ops had to already know an id only the driver could
-                        give them (docs/ROADMAP_AUDIT_2026-09.md). */}
-                    <DriverDevicesPanel key={`devices-${hubId}`} hubId={hubId} onToast={showToast} />
-                    <UrgencyRulesPanel key={`urgency-${hubId}`} hubId={hubId} onToast={showToast} />
-                    <ProposedRulesPanel key={`proposed-${hubId}`} hubId={hubId} onToast={showToast} />
-                    {/* Jobs and density in one card: the density report is a
-                        summary of exactly those jobs, and split apart a reader
-                        would have to join them by eye to know whether 12%
-                        sequenced is 3 of 25 or 300 of 2500. Hides itself when
-                        the path is empty, which is today. */}
+                  </div>
+                  <div className="flex min-w-0 flex-col gap-4">
+                    {/* Jobs and density in one card; hides itself when the
+                        path is empty, which is today. */}
                     <GigPathPanel key={`gig-${hubId}`} hubId={hubId} />
-                    {/* No hub key: these are fleet-wide distributions over durable
-                        rows, so they do not change when the hub picker does. Both
-                        endpoints had existed with no consumer at all (F7). */}
-                    <MeasurementPanel />
-                  </>
-                )}
-              </div>
-            </div>
+                    {/* No hub key: fleet-wide distributions over durable rows (F7). */}
+                    <Card title="Measurement">
+                      <MeasurementPanel />
+                    </Card>
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
 
-        <p className="mt-6 border-t border-[var(--border)] pt-3.5 text-xs text-[var(--text-muted)]">
-          Internal use only — Phase 1 core backend. See docs/ARCHITECTURE.md for known gaps.
+        <p className="mt-10 text-xs text-[var(--text-secondary)]">
+          Internal use only. See docs/ARCHITECTURE.md for known gaps.
         </p>
       </div>
 
       <Toast message={message} />
+    </div>
+  )
+}
+
+const PAGE_IDS = ['home', 'orders', 'drivers', 'rules', 'record', 'clients', 'settings']
+
+function pageFromHash(): string {
+  const id = window.location.hash.slice(1)
+  return PAGE_IDS.includes(id) ? id : 'home'
+}
+
+function greeting(): string {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'Good morning.'
+  if (hour < 18) return 'Good afternoon.'
+  return 'Good evening.'
+}
+
+function PageHeader({ kicker, title, description }: { kicker?: string; title: string; description: string }) {
+  return (
+    <div className="mb-5 flex flex-wrap items-end justify-between gap-x-8 gap-y-2 px-1">
+      <div className="flex flex-col gap-1">
+        {kicker && <span className="text-[15px] text-[var(--text-secondary)]">{kicker}</span>}
+        <h1 className="text-[clamp(30px,4vw,44px)] font-extrabold leading-[1.05] tracking-[-0.045em] [text-wrap:balance]">
+          {title}
+        </h1>
+      </div>
+      <p className="max-w-[52ch] text-[15px] text-[var(--text-secondary)]">{description}</p>
     </div>
   )
 }

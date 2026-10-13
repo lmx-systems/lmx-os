@@ -31,14 +31,15 @@ export function DeadlinePicker({ value, onChange }: DeadlinePickerProps) {
               key={option.value}
               type="button"
               onClick={() => onChange(option.value)}
-              className={`flex flex-col items-start rounded-[var(--radius)] border px-3 py-2 text-left transition-colors ${
+              aria-pressed={selected}
+              className={`flex min-h-[52px] flex-col items-start rounded-[16px] border px-3 py-2 text-left transition-colors ${
                 selected
-                  ? 'border-[var(--accent)] bg-[var(--accent)]/10'
-                  : 'border-[var(--border-strong)] hover:border-[var(--accent)]'
+                  ? 'border-[var(--accent)] bg-[var(--lime)]'
+                  : 'border-[var(--border-strong)] bg-[var(--surface)] hover:border-[var(--accent)]'
               }`}
             >
-              <span className="text-[14px] font-medium text-[var(--text-primary)]">{option.label}</span>
-              <span className="text-[11px] text-[var(--text-muted)]">{option.hint}</span>
+              <span className="text-[14px] font-bold text-[var(--text-primary)]">{option.label}</span>
+              <span className={`text-[11.5px] ${selected ? 'text-[var(--lime-ink)]' : 'text-[var(--text-muted)]'}`}>{option.hint}</span>
             </button>
           )
         })}

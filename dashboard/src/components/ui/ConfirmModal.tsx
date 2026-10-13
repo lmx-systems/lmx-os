@@ -30,23 +30,23 @@ export function ConfirmModal({
       onClick={busy ? undefined : onCancel}
     >
       <div
-        className="w-[420px] max-w-[90vw] rounded-[var(--radius-lg)] border border-[var(--border-strong)] bg-[var(--surface)] p-5"
+        className="w-[440px] max-w-[90vw] rounded-[var(--radius-lg)] bg-[var(--surface)] p-7 shadow-[var(--shadow-lg)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-2 text-[15px] font-medium text-[var(--text-primary)]">{title}</h3>
+        <h3 className="mb-2 text-lg font-extrabold tracking-[-0.02em] text-[var(--text-primary)]">{title}</h3>
         <p className="mb-4.5 text-[13px] text-[var(--text-secondary)]">{description}</p>
         <div className="flex justify-end gap-2">
           <button
             onClick={onCancel}
             disabled={busy}
-            className="rounded-[var(--radius)] border border-[var(--border-strong)] bg-[var(--surface-2)] px-3.5 py-2 text-[13px] font-medium text-[var(--text-primary)] disabled:opacity-50"
+            className="rounded-full bg-[var(--surface)] px-4 py-2.5 text-[13.5px] font-bold text-[var(--text-primary)] shadow-[inset_0_0_0_1.5px_var(--border-strong)] disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
             disabled={busy}
-            className="rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-3.5 py-2 text-[13px] font-medium text-white transition-colors duration-150 hover:border-[var(--accent-hover)] hover:bg-[var(--accent-hover)] disabled:opacity-50"
+            className="rounded-full bg-[var(--accent)] px-4 py-2.5 text-[13.5px] font-bold text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-50"
           >
             {busy ? 'Running…' : confirmLabel}
           </button>

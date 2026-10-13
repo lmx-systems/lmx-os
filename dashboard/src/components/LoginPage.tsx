@@ -73,7 +73,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
           <button
             type="submit"
             disabled={submitting}
-            className="mt-2 rounded-[var(--radius)] bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-60"
+            className="mt-2 rounded-full bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-60"
           >
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>

@@ -119,7 +119,7 @@ export function OverrideForm({
         <button
           onClick={submit}
           disabled={!canSubmit}
-          className="rounded-[var(--radius)] bg-[var(--accent)] px-2.5 py-1 text-[12px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-full bg-[var(--accent)] px-2.5 py-1 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
         >
           {submitting ? words.busy : words.button}
         </button>

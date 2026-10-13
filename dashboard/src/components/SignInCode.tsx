@@ -24,7 +24,7 @@ export function SignInCode({ name, code }: { name: string; code: DriverSignInCod
   }, [code.qr_payload])
 
   return (
-    <div className="mt-2 flex gap-3 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-2.5">
+    <div className="mt-2 flex gap-3 rounded-[20px] bg-[var(--surface-2)] p-2.5">
       <img
         src={image}
         alt={`Sign-in QR code for ${name}`}
