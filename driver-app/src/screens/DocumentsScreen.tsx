@@ -208,7 +208,7 @@ const makeStyles = (colors: ColorScheme) =>
       paddingVertical: 2,
       borderRadius: radius.sm,
       overflow: 'hidden',
-      fontWeight: '700',
+      fontFamily: 'PlusJakartaSans_700Bold',
     },
     statusText: { ...typography.small, marginTop: 2 },
     ok: { color: colors.success },
@@ -225,7 +225,7 @@ const makeStyles = (colors: ColorScheme) =>
       alignItems: 'center',
     },
     primaryActionDisabled: { opacity: 0.5 },
-    primaryActionLabel: { ...typography.body, color: colors.primaryText, fontWeight: '700' },
+    primaryActionLabel: { ...typography.body, color: colors.primaryText, fontFamily: 'PlusJakartaSans_700Bold' },
     spinner: { marginTop: spacing.md },
     errorText: { color: colors.danger, marginTop: spacing.sm, fontSize: 13 },
   });

@@ -51,6 +51,6 @@ const makeStyles = (colors: ColorScheme) =>
       marginBottom: spacing.md,
       gap: 2,
     },
-    title: { ...typography.body, color: colors.warning, fontWeight: '700', marginBottom: 2 },
+    title: { ...typography.body, color: colors.warning, fontFamily: 'PlusJakartaSans_700Bold', marginBottom: 2 },
     line: { ...typography.small, color: colors.warning },
   });

@@ -90,11 +90,15 @@ export const radius = {
   pill: 999,
 };
 
+// Weight comes from the family, never from fontWeight: expo-font registers each
+// file as a regular face, and on Android a fontWeight of 700+ asks for a bold
+// variant that isn't there and falls back to Roboto Bold. Pick the family
+// (PlusJakartaSans_700Bold, _800ExtraBold) instead of setting a weight.
 export const typography = {
-  title: { fontFamily: 'PlusJakartaSans_800ExtraBold', fontWeight: '800' as const, fontSize: 26, letterSpacing: -0.8 },
+  title: { fontFamily: 'PlusJakartaSans_800ExtraBold', fontSize: 26, letterSpacing: -0.8 },
   subtitle: { fontFamily: 'PlusJakartaSans_400Regular', fontSize: 15 },
   body: { fontFamily: 'PlusJakartaSans_400Regular', fontSize: 15 },
-  label: { fontFamily: 'PlusJakartaSans_600SemiBold', fontWeight: '600' as const, fontSize: 13 },
+  label: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 13 },
   small: { fontFamily: 'PlusJakartaSans_400Regular', fontSize: 12 },
 };
 

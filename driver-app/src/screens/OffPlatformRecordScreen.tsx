@@ -398,5 +398,5 @@ const makeStyles = (colors: ColorScheme) =>
     },
     chipActive: { borderColor: colors.primary, backgroundColor: colors.accentDim },
     chipLabel: { ...typography.small, color: colors.textSecondary },
-    chipLabelActive: { color: colors.primary, fontWeight: '700' },
+    chipLabelActive: { color: colors.primary, fontFamily: 'PlusJakartaSans_700Bold' },
   });

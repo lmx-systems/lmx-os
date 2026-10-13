@@ -229,7 +229,7 @@ const makeStyles = (colors: ColorScheme) =>
     segmentRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
     segment: { flex: 1, paddingVertical: spacing.sm + 2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
     segmentActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-    segmentLabel: { color: colors.textPrimary, fontWeight: '600' },
+    segmentLabel: { color: colors.textPrimary, fontFamily: 'PlusJakartaSans_600SemiBold' },
     segmentLabelActive: { color: colors.primaryText },
     captureText: { ...typography.small, color: colors.textMuted },
     requirement: {
@@ -238,10 +238,10 @@ const makeStyles = (colors: ColorScheme) =>
       padding: spacing.md,
       marginBottom: spacing.md,
     },
-    requirementTitle: { ...typography.small, color: colors.textSecondary, fontWeight: '700' },
+    requirementTitle: { ...typography.small, color: colors.textSecondary, fontFamily: 'PlusJakartaSans_700Bold' },
     requirementLine: { ...typography.small, color: colors.textSecondary },
     retake: { paddingVertical: spacing.sm, alignItems: 'center' },
-    retakeLabel: { ...typography.small, color: colors.accent, fontWeight: '600' },
+    retakeLabel: { ...typography.small, color: colors.accent, fontFamily: 'PlusJakartaSans_600SemiBold' },
     errorText: { ...typography.small, color: colors.danger, marginTop: -spacing.md, marginBottom: spacing.md },
     capturePlaceholder: {
       height: 140,

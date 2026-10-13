@@ -166,7 +166,7 @@ const makeStyles = (colors: ColorScheme) =>
     card: { marginBottom: spacing.lg, gap: spacing.xs },
     headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     headerTitle: { ...typography.title, color: colors.textPrimary, fontSize: 18 },
-    payText: { fontSize: 28, fontWeight: '700', color: colors.primary, marginTop: spacing.xs },
+    payText: { fontSize: 28, fontFamily: 'PlusJakartaSans_700Bold', color: colors.primary, marginTop: spacing.xs },
     // The bonus on the design system's lime: the one thing on the offer worth
     // noticing first, and never colour alone - the amount is in the words.
     bonusText: {
@@ -183,7 +183,7 @@ const makeStyles = (colors: ColorScheme) =>
     cardLabel: { ...typography.label, color: colors.textPrimary, marginTop: spacing.sm },
     cardBody: { ...typography.body, color: colors.textPrimary },
     countdownText: { ...typography.small, color: colors.textMuted },
-    urgent: { color: colors.danger, fontWeight: '700' },
+    urgent: { color: colors.danger, fontFamily: 'PlusJakartaSans_700Bold' },
     error: { color: colors.danger, marginTop: spacing.sm, fontSize: 13 },
     buttonRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
     buttonHalf: { flex: 1 },

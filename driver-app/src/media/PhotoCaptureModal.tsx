@@ -40,13 +40,13 @@ export function PhotoCaptureModal({ visible, onCaptured, onCancel }: PhotoCaptur
             <Image source={{ uri: previewUri }} style={styles.preview} resizeMode="cover" />
             <View style={styles.footer}>
               <Button label="Retake" variant="outline" onPress={() => setPreviewUri(null)} />
-              <Button label="Use photo" onPress={() => onCaptured(previewUri)} />
+              <Button label="Use photo" variant="lime" onPress={() => onCaptured(previewUri)} />
             </View>
           </>
         ) : !permission?.granted ? (
           <View style={styles.permissionPrompt}>
             <Text style={styles.permissionText}>Camera access is needed to capture proof of delivery.</Text>
-            <Button label="Allow camera access" onPress={requestPermission} />
+            <Button label="Allow camera access" variant="lime" onPress={requestPermission} />
             <Button label="Cancel" variant="outline" onPress={handleClose} />
           </View>
         ) : (
@@ -54,7 +54,7 @@ export function PhotoCaptureModal({ visible, onCaptured, onCancel }: PhotoCaptur
             <CameraView ref={cameraRef} style={styles.camera} facing="back" />
             <View style={styles.footer}>
               <Button label="Cancel" variant="outline" onPress={handleClose} />
-              <Button label="Capture" onPress={handleShutter} />
+              <Button label="Capture" variant="lime" onPress={handleShutter} />
             </View>
           </>
         )}
@@ -70,5 +70,6 @@ const makeStyles = (colors: ColorScheme) =>
     preview: { flex: 1 },
     footer: { flexDirection: 'row', gap: spacing.md, padding: spacing.lg },
     permissionPrompt: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md },
-    permissionText: { ...typography.body, color: colors.textPrimary, textAlign: 'center' },
+    // White on the black camera screen; the palette's ink would be invisible here.
+    permissionText: { ...typography.body, color: '#ffffff', textAlign: 'center' },
   });
