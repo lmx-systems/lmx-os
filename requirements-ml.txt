@@ -36,3 +36,8 @@ xgboost>=2.0.0
 
 numpy>=1.26.0
 pandas>=2.2.0
+
+# DE-15's desk pre-fill (scripts/desk_prefill.py): reads Overture's public
+# parquet and the Census block shapefile in bulk, and matches sites against
+# them locally. Its spatial extension is installed by DuckDB on first use.
+duckdb>=1.1.0

@@ -60,3 +60,8 @@ lmx-dwell/
 # it exactly (scripts/generate_m2_corpus.py), so there is nothing to keep.
 ml/out/
 m2_corpus*.csv
+
+# DE-15's bulk open-data files (scripts/desk_prefill.py fetch): public, but
+# several hundred megabytes of a state's places, address points and Census
+# blocks. `fetch` rebuilds them.
+ml/cache/
