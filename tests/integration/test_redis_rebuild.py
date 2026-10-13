@@ -198,16 +198,16 @@ async def test_the_health_check_sees_held_orders_missing_from_the_queue(db_sessi
 
 
 async def test_a_route_that_ends_on_a_flag_puts_the_driver_back_in_the_pool(db_session, real_redis_client):
-    """It used to stay en_route until the driver toggled off and on."""
+    """It used to stay en_route until the driver toggled off and on. Flagging
+    the only pickup ends the route: its drop-off comes off with it."""
     from app.api.driver_routes import flag_stop_issue
     from app.schemas.driver_app import FlagStopBody, StopFailureReason
 
     hub_id, _client_id, _shop_id, driver_id, _order = await driver_app._seed(db_session)
-    authed, pickup, dropoff = await driver_app._accept_one_offer(db_session, hub_id, driver_id)
-    for stop in (pickup, dropoff):
-        await flag_stop_issue(
-            stop.stop_id, FlagStopBody(reason=StopFailureReason.SHOP_CLOSED), driver=authed, session=db_session
-        )
+    authed, pickup, _dropoff = await driver_app._accept_one_offer(db_session, hub_id, driver_id)
+    await flag_stop_issue(
+        pickup.stop_id, FlagStopBody(reason=StopFailureReason.SHOP_CLOSED), driver=authed, session=db_session
+    )
 
     state = await FleetStateManager().get_driver_state(str(hub_id), str(driver_id))
     assert (state.status, state.current_route_id) == ("available", None)

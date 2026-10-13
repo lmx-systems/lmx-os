@@ -8,7 +8,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.route import Route
-from app.models.stop import Stop
+from app.models.stop import Stop, StopOrder
 
 
 async def lock_route(session: AsyncSession, route_id: uuid.UUID) -> Route | None:
@@ -48,6 +48,52 @@ async def lock_route(session: AsyncSession, route_id: uuid.UUID) -> Route | None
             .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
+
+
+# A stop's finished states. `cancelled` is a stop taken off its route
+# (app/orders/cancellation.py); `recorded` an off-platform record's (`DE-7`).
+FINISHED_STOP_STATUSES = ("completed", "failed", "cancelled", "recorded")
+
+
+async def take_orders_off_stops(
+    session: AsyncSession, stops: list[Stop], order_ids: list[uuid.UUID]
+) -> list[str]:
+    """Take these orders off these stops, on a route the caller has locked and
+    with the stops locked too. Returns the ids of the stops cancelled outright.
+
+    A stop that still carries another order stays on the route; only these
+    orders' links to it go. A stop that carried nothing else is marked
+    `cancelled` rather than deleted: the messages sent about it, and any flag or
+    geofence crossing, refer to the row, and the route view leaves cancelled
+    stops out. Its `eta` goes - there is no arrival to forecast - and its
+    `planned_eta` stays, as the record of what was planned.
+
+    The caller bumps the route's `plan_version`, refreshes its ETAs, promotes
+    its next stop and tells the driver's app, after the commit.
+    """
+    leaving = set(order_ids)
+    removed: list[str] = []
+    for stop in stops:
+        carried = set(
+            (await session.scalars(select(StopOrder.order_id).where(StopOrder.stop_id == stop.id))).all()
+        )
+        if carried - leaving:
+            # Other orders still visit this stop; these just aren't among them.
+            links = (
+                await session.scalars(
+                    select(StopOrder).where(
+                        StopOrder.stop_id == stop.id, StopOrder.order_id.in_(carried & leaving)
+                    )
+                )
+            ).all()
+            for link in links:
+                await session.delete(link)
+            continue
+        stop.status = "cancelled"
+        stop.eta = None
+        removed.append(str(stop.id))
+    await session.flush()
+    return removed
 
 
 # Postgres's lock_not_available: what NOWAIT raises on a row somebody holds.
