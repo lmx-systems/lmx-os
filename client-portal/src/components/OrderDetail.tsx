@@ -45,7 +45,7 @@ export function OrderDetail({ order, onBack, onCancelled }: OrderDetailProps) {
           <TierBadge tier={order.sla_tier} />
         </div>
 
-        {order.possible_duplicate_of && order.duplicate_answer === null && order.status !== 'cancelled' && (
+        {order.duplicate_question_open && (
           <SentTwice order={order} onAnswered={onCancelled} />
         )}
 

@@ -40,6 +40,9 @@ export interface ClientOrderSummaryView {
   // unanswered, 'separate' once you said both are real (DEC-13).
   possible_duplicate_of: string | null
   duplicate_answer: string | null
+  // Whether to ask now, decided by the server: unanswered, not yet collected,
+  // and the other order still live (a cancelled twin settles it).
+  duplicate_question_open: boolean
   // What we committed to collecting by - the same value the confirmation screen showed.
   collect_by: string | null
   // When we now expect it to arrive: the route-aware ETA once it is on a driver's route,

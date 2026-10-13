@@ -54,7 +54,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.order import Order, OrderStatus
-from app.ingestion.service import duplicate_answer
+from app.ingestion.service import open_duplicate_questions
 from app.models.stop import FLAG_SOURCE_DRIVER, Stop, StopFlag, StopOrder
 from app.orders.unplaced import unplaced_clause
 from app.playbook.sweep import current_calls
@@ -290,8 +290,10 @@ async def build_exception_queue(
             )
         )
     )
+    # Answered, or settled by the other copy being cancelled, is not a question.
+    still_open = await open_duplicate_questions(session, repeats)
     for order in repeats:
-        if order.id in seen or duplicate_answer(order) is not None:
+        if order.id in seen or order.id not in still_open:
             continue
         seen.add(order.id)
         original = next(

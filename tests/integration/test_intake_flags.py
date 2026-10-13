@@ -221,3 +221,33 @@ async def test_an_unknown_erp_field_is_kept_flagged_and_explained(db_session, re
     explanation = await explain_order(db_session, order_id=order.id)
     statements = [f.statement for f in explanation.facts if f.engine == "intake"]
     assert statements and "CustPONum" in statements[0]
+
+
+async def test_a_cancelled_twin_settles_the_question(db_session, real_redis_client):
+    """The client cancelled the first copy themselves. Asking "cancel this one?"
+    of the second would invite them to cancel the only order left."""
+    client_id = await _client(db_session)
+    first = await submit_order(_body(), client=_authed(client_id), session=db_session)
+    second = await submit_order(_body(), client=_authed(client_id), session=db_session)
+
+    await cancel_my_order(first.order_id, client=_authed(client_id), session=db_session)
+
+    detail = await get_my_order(second.order_id, client=_authed(client_id), session=db_session)
+    assert detail.possible_duplicate_of == first.reference
+    assert detail.duplicate_question_open is False
+    await _set_status(db_session, second.order_id, OrderStatus.assigned)
+    assert await _repeats(db_session) == []
+
+
+async def test_a_collected_order_is_not_asked(db_session, real_redis_client):
+    client_id = await _client(db_session)
+    await submit_order(_body(), client=_authed(client_id), session=db_session)
+    second = await submit_order(_body(), client=_authed(client_id), session=db_session)
+    assert (await get_my_order(second.order_id, client=_authed(client_id), session=db_session)).duplicate_question_open
+
+    await _set_status(db_session, second.order_id, OrderStatus.delivered)
+
+    assert not (await get_my_order(second.order_id, client=_authed(client_id), session=db_session)).duplicate_question_open
+    with pytest.raises(HTTPException) as late:
+        await say_not_a_duplicate(second.order_id, client=_authed(client_id), session=db_session)
+    assert late.value.status_code == 409

@@ -99,6 +99,9 @@ class ClientOrderSummaryView(BaseModel):
     # real (`DEC-13`). Answering "yes" is cancelling it.
     possible_duplicate_of: str | None = None
     duplicate_answer: str | None = None
+    # Whether to ask now: unanswered, not yet collected, and the other order still
+    # live (`open_duplicate_questions`). The portal asks only when this is true.
+    duplicate_question_open: bool = False
     # What we committed to collecting by. `Order.hold_deadline` - the same value the
     # confirmation screen showed as "we'll collect by", so a counter person searching for
     # an order sees the promise they read out to their customer.
