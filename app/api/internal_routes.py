@@ -61,6 +61,7 @@ from app.learning_loop.service import run_nightly_job
 from app.legal.retention import prune_all
 from app.models.hub import Hub
 from app.optimizer.redis_rebuild import reconcile_redis_state
+from app.orders.requeue import return_stranded_assignments
 from app.optimizer.service import DispatchOptimizerService
 from app.webhooks.delivery import deliver_pending
 
@@ -122,6 +123,7 @@ async def run_dispatch_for_all_hubs(session: AsyncSession = Depends(get_db)) -> 
         rebuilt = f"error: {type(exc).__name__}"
 
     results: dict[str, int | str] = {}
+    stranded: dict[str, int] = {}
     for hub_id in await _active_hub_ids(session):
         try:
             # The same per-hub lock the event-driven cycle and the rebuild take.
@@ -131,13 +133,40 @@ async def run_dispatch_for_all_hubs(session: AsyncSession = Depends(get_db)) -> 
                 if not acquired:
                     results[hub_id] = "skipped: a cycle is already running"
                     continue
+                # Orders a failed cycle left `assigned` to nobody, back in the
+                # queue for the cycle below (`CON-5`). Under the hub lock, so no
+                # cycle is between its status write and its offers right now.
+                returned = await _return_stranded(session, hub_id)
+                if returned:
+                    stranded[hub_id] = returned
                 outcome = await DispatchOptimizerService().run_cycle(hub_id)
                 results[hub_id] = len(outcome.assignments)
         except Exception as exc:  # noqa: BLE001 - one hub must not stop the rest
             logger.exception("scheduled_dispatch_failed", hub_id=hub_id)
             results[hub_id] = f"error: {type(exc).__name__}"
-    logger.info("scheduled_dispatch_complete", hubs=len(results), offers_expired=expired)
-    return {"hubs": results, "offers_expired": expired, "redis_rebuild": rebuilt}
+    logger.info(
+        "scheduled_dispatch_complete",
+        hubs=len(results),
+        offers_expired=expired,
+        stranded_returned=sum(stranded.values()),
+    )
+    return {
+        "hubs": results,
+        "offers_expired": expired,
+        "stranded_returned": stranded,
+        "redis_rebuild": rebuilt,
+    }
+
+
+async def _return_stranded(session: AsyncSession, hub_id: str) -> int:
+    try:
+        returned = await return_stranded_assignments(session, hub_id)
+        await session.commit()
+        return returned
+    except Exception:  # noqa: BLE001 - the cycle still runs for what is queued
+        await session.rollback()
+        logger.exception("stranded_assignment_return_failed", hub_id=hub_id)
+        return 0
 
 
 @router.post("/learning-loop/run-all", dependencies=[Depends(require_internal_secret)])

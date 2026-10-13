@@ -141,6 +141,12 @@ def assert_transition(current: OrderStatus, new: OrderStatus) -> None:
         raise InvalidOrderTransition(current, new)
 
 
+def legal_sources(new: OrderStatus) -> frozenset[OrderStatus]:
+    """Every status an order can legally leave for `new` - the precondition a
+    writer that names none of its own puts on the write (`advance_orders`)."""
+    return frozenset(s for s in OrderStatus if s != new and new in allowed_next(s))
+
+
 def public_label(status: OrderStatus) -> str:
     """The §1.4 vocabulary name for a status, for anything customer-facing."""
     return PUBLIC_LABELS[status]

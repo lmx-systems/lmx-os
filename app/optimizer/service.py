@@ -424,13 +424,41 @@ class DispatchOptimizerService:
                         )
                     ).scalars()
                 )
+                # The orders the status write moved, read again and locked to
+                # the commit, after the drivers (`CON-5`). A dispatcher's cancel
+                # landing between that write and this commit used to go through
+                # with the order still on an offer. Now it either lands first,
+                # and the order is left off the offer, or it waits for this
+                # commit and then withdraws the offer
+                # (app/orders/cancellation.py). For update rather than share:
+                # this session may write them back to `held` below (a driver
+                # switched off or taken), and upgrading a share lock that a
+                # cancel is queued behind deadlocks.
+                still_assigned = (
+                    {
+                        str(order_id)
+                        for order_id in (
+                            await session.execute(
+                                select(Order.id)
+                                .where(
+                                    Order.id.in_([uuid.UUID(order_id) for order_id in moved_ids]),
+                                    Order.status == OrderStatus.assigned,
+                                )
+                                .order_by(Order.id)
+                                .with_for_update()
+                            )
+                        ).scalars()
+                    }
+                    if moved_ids
+                    else set()
+                )
                 switched_off: list[tuple[str, list[dict]]] = []
                 taken: list[tuple[str, list[dict]]] = []
                 for assignment in assignments:
                     offer_stops = []
                     for stop_id in assignment.stop_ids:
                         candidate = stops_by_id.get(stop_id)
-                        if candidate is None or stop_id not in moved_ids:
+                        if candidate is None or stop_id not in still_assigned:
                             continue
                         offer_stops.append(
                             {
@@ -575,9 +603,10 @@ class DispatchOptimizerService:
         """Put back every driver the cycle claimed if its offers don't commit.
 
         Only the drivers. The orders the status write moved stay `assigned`
-        with no offer, as they did before claims existed; sending them back to
-        the queue from here would re-trigger the cycle into the same failure
-        every second, and is left to the cycle's own hardening (`CON-5`).
+        with no offer; sending them back to the queue from here re-triggered
+        the cycle into the same failure every second. The scheduled sweep
+        returns them instead, once they have sat past a grace
+        (`return_stranded_assignments` in app/orders/requeue.py, `CON-5`).
         """
         try:
             yield
