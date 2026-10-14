@@ -28,6 +28,7 @@ export interface ColorScheme {
   accent: string;
   accentDim: string;
   lime: string;
+  limeStrong: string;
   limeInk: string;
   needs: string;
   needsDim: string;
@@ -58,6 +59,7 @@ export const palette: { light: ColorScheme } = {
     accent: '#15161a',
     accentDim: '#e6f2c0',
     lime: '#cdeb6b',
+    limeStrong: '#afcb52',
     limeInk: '#2e3a0c',
     needs: '#a8330a',
     needsDim: '#ffe4d4',
@@ -95,6 +97,15 @@ export const radius = {
 // variant that isn't there and falls back to Roboto Bold. Pick the family
 // (PlusJakartaSans_700Bold, _800ExtraBold) instead of setting a weight.
 export const typography = {
+  // The console's scale, sized for a phone (docs/DESIGN_SYSTEM.md "Type"): a page
+  // title, a card headline, a tile title, a row title, quiet meta, and big numbers.
+  display: { fontFamily: 'PlusJakartaSans_800ExtraBold', fontSize: 30, letterSpacing: -1.3, lineHeight: 34 },
+  headline: { fontFamily: 'PlusJakartaSans_800ExtraBold', fontSize: 22, letterSpacing: -0.7, lineHeight: 27 },
+  tileTitle: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 16, letterSpacing: -0.2 },
+  rowTitle: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 15.5 },
+  meta: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 12.5 },
+  number: { fontFamily: 'PlusJakartaSans_800ExtraBold', fontSize: 30, letterSpacing: -1.2 },
+  hero: { fontFamily: 'PlusJakartaSans_800ExtraBold', fontSize: 56, letterSpacing: -3, lineHeight: 60 },
   title: { fontFamily: 'PlusJakartaSans_800ExtraBold', fontSize: 26, letterSpacing: -0.8 },
   subtitle: { fontFamily: 'PlusJakartaSans_400Regular', fontSize: 15 },
   body: { fontFamily: 'PlusJakartaSans_400Regular', fontSize: 15 },

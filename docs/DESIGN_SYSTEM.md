@@ -95,13 +95,29 @@ Tiles have 24px padding; the gap between tiles is 16px. Pages are at most
 | Steps | `PlaybookPanel` `Steps` | Three pills a rule climbs: Suggests → Acts unless stopped → Acts alone; current in ink, passed in lime, ahead outlined |
 | Toast | `ui/Toast` | White pill at the bottom with a lime check |
 
+On the phone (`driver-app/src/components/ui/`), the same components by the
+same rules, sized for a thumb:
+
+| Component | Where | What it is |
+|---|---|---|
+| Page header | `StackHeader` | Every stack's header: a round white back button and a 30px left-aligned title on the ground; a tab's first screen shows the lmx bar instead of the back button |
+| Nav | `PillTabBar` | The tabs as a white pill group, the open tab an ink pill, 50px tall |
+| Brand bar | `kit` `BrandBar` | The lmx mark and wordmark, with one control on the right (Home's duty switch) |
+| Kind pill | `kit` `KindPill` | Uppercase label on a tinted pill: Pickup (grey), Drop-off and New offer (lime) |
+| Facts | `kit` `Facts` | Two or three grey wells in a row inside a white tile: a small label, a bold number |
+| Segments | `kit` `Segments` | One bar per stop on the route: done ink, current lime, ahead grey |
+| Steps | `kit` `Steps` | A stop's own track (Arrive, Scan, Collect / Arrive, Proof, Done): passed lime with a check, current ink, ahead outlined |
+| Row | `kit` `Row` | The decision row: 44px icon tile (peach when a person must act), bold title, one quiet line, a chevron or an action |
+| Banner | `kit` `Banner` | A tinted tile with an icon and a title: amber for a warning, peach for what blocks the driver, white for news |
+| Headline tile | `EarningsScreen` | The page's one lime tile: this period's pay |
+
 ## Where it applies
 
 | App | State |
 |---|---|
 | Ops console (`dashboard/`) | **Done.** Home (Needs you, Going ahead, person touches, Rules, map, the day's numbers), then Orders, Drivers, Rules, Record, and for admins Clients and Settings |
 | Client portal (`client-portal/`) and its public tracking page | **Done.** Sections as a pill nav; each order leads with its delivery track (Booked → Collected → On the way → Delivered); the tracking page a single white tile with the delivery code on lime. Text links are underlined, since ink alone doesn't set them apart |
-| Driver app (`driver-app/`) | **Done** in `src/theme/tokens.ts`: same colours, type and radii; 56px pill buttons; light only (`app.json` too). Weight comes from the font family (`PlusJakartaSans_700Bold`), never `fontWeight`, which Android renders as Roboto Bold. Black camera screens use white text and the `lime` button variant. Checked screen by screen on an iOS simulator (Expo Go): stack headers sit on the grey ground in the app's type with no divider, `ScreenContainer` keeps the 16px gutter whether or not it scrolls and takes the top inset only where no header does, and the duty switch is ink when on |
+| Driver app (`driver-app/`) | **Done** in `src/theme/tokens.ts`: same colours, type and radii; 56px pill buttons; light only (`app.json` too). Weight comes from the font family (`PlusJakartaSans_700Bold`), never `fontWeight`, which Android renders as Roboto Bold. Black camera screens use white text and the `lime` button variant. Every screen is built from the phone components above, in the on-call phone's layout (one big card per decision: kind pill, headline, fact wells, choices stacked with the first in ink), and checked on an iOS simulator (Expo Go). `ScreenContainer` keeps the 16px gutter whether or not it scrolls and takes the top inset only where no header does |
 
 Update this table in the change that moves an app over.
 

@@ -61,14 +61,16 @@ export function primaryActionForStop(stop: Stop): StopAction {
   return { kind: 'confirmDelivery' };
 }
 
-export function primaryActionLabel(action: StopAction): string {
+// The stop type matters for one label: at a pickup nothing is delivered yet, so
+// Home's card said "Confirm delivery" to a driver loading the van at a shop.
+export function primaryActionLabel(action: StopAction, stopType?: Stop['stop_type']): string {
   switch (action.kind) {
     case 'arrive':
       return 'Arrived';
     case 'scan':
       return `Scan (${action.scanned}/${action.total})`;
     case 'confirmDelivery':
-      return 'Confirm delivery';
+      return stopType === 'pickup' ? 'Confirm collection' : 'Confirm delivery';
     case 'captureDoor':
       return 'Capture the door';
     case 'done':

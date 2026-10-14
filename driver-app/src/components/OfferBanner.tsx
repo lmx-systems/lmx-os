@@ -7,6 +7,7 @@ import { radius, spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
 import { Button } from './Button';
 import { Card } from './Card';
+import { Facts, KindPill } from './ui/kit';
 
 interface OfferBannerProps {
   offer: JobOffer;
@@ -119,13 +120,13 @@ export function OfferBanner({ offer, onAccept, onDecline }: OfferBannerProps) {
     );
   }
 
+  const count = offer.stops.length;
   return (
+    // The on-call phone's card: what it is, where, the facts, then the choices
+    // stacked with the one that moves the day forward in ink.
     <Card style={styles.card}>
       <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>
-          {/* One entry per order - a pickup and its drop - so "stops" undercounted by half. */}
-          {offer.stops.length} {offer.stops.length === 1 ? 'delivery' : 'deliveries'}
-        </Text>
+        <KindPill label="New offer" tone="lime" />
         {secondsLeft !== null && (
           <Text style={[styles.countdownText, secondsLeft <= 15 && styles.urgent]}>
             {secondsLeft > 0 ? `Expires in ${secondsLeft}s` : 'Expired'}
@@ -133,30 +134,36 @@ export function OfferBanner({ offer, onAccept, onDecline }: OfferBannerProps) {
         )}
       </View>
 
-      {/* Real per-delivery pay (docs/ROADMAP.md A11) - only present for a
-          gig-classified driver; w2/1099 never see a dollar amount here,
-          since they're paid hourly/monthly instead. */}
-      {offer.estimated_pay_cents !== null && (
-        <Text style={styles.payText}>${(offer.estimated_pay_cents / 100).toFixed(2)}</Text>
-      )}
+      <View style={styles.titleBlock}>
+        <Text style={styles.headline}>{shopName}</Text>
+        {/* One entry per order - a pickup and its drop - so "stops" undercounted by half. */}
+        <Text style={styles.cardBody}>
+          {count} {count === 1 ? 'delivery' : 'deliveries'} · first pickup
+        </Text>
+      </View>
+
+      <Facts
+        items={[
+          { k: 'Deliveries', v: String(count) },
+          // No stop count: pickups at one shop merge into one stop, so twice the
+          // deliveries overstated the job a driver is deciding on.
+          // Real per-delivery pay (docs/ROADMAP.md A11) - only for a gig-classified
+          // driver; w2/1099 are paid hourly, so the well says so instead of a dollar figure.
+          { k: 'Pay', v: offer.estimated_pay_cents !== null ? `$${(offer.estimated_pay_cents / 100).toFixed(2)}` : 'Hourly' },
+        ]}
+      />
+
       {/* A bonus on top (DEC-10): offered again after it was turned down. Shown
           to every driver, hourly or not, because it is paid per job. */}
       {offer.bonus_cents ? (
         <Text style={styles.bonusText}>+${(offer.bonus_cents / 100).toFixed(2)} bonus when delivered</Text>
       ) : null}
 
-      <Text style={styles.cardLabel}>Pickup</Text>
-      <Text style={styles.cardBody}>{shopName}</Text>
-
       {error && <Text style={styles.error}>{error}</Text>}
 
-      <View style={styles.buttonRow}>
-        <View style={styles.buttonHalf}>
-          <Button label="Decline" variant="outline" onPress={handleDecline} disabled={busy} />
-        </View>
-        <View style={styles.buttonHalf}>
-          <Button label="Accept job" onPress={handleAccept} loading={busy} disabled={secondsLeft === 0} />
-        </View>
+      <View style={styles.buttonStack}>
+        <Button label="Accept job" onPress={handleAccept} loading={busy} disabled={secondsLeft === 0} />
+        <Button label="Decline" variant="outline" onPress={handleDecline} disabled={busy} />
       </View>
     </Card>
   );
@@ -164,7 +171,10 @@ export function OfferBanner({ offer, onAccept, onDecline }: OfferBannerProps) {
 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    card: { marginBottom: spacing.lg, gap: spacing.xs },
+    card: { marginBottom: spacing.lg, gap: spacing.lg, borderRadius: 28 },
+    titleBlock: { gap: 4 },
+    headline: { ...typography.headline, color: colors.textPrimary },
+    buttonStack: { gap: spacing.sm },
     headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     headerTitle: { ...typography.title, color: colors.textPrimary, fontSize: 18 },
     payText: { fontSize: 28, fontFamily: 'PlusJakartaSans_700Bold', color: colors.primary, marginTop: spacing.xs },
@@ -179,10 +189,9 @@ const makeStyles = (colors: ColorScheme) =>
       borderRadius: radius.pill,
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.xs,
-      marginTop: spacing.sm,
     },
     cardLabel: { ...typography.label, color: colors.textPrimary, marginTop: spacing.sm },
-    cardBody: { ...typography.body, color: colors.textPrimary },
+    cardBody: { ...typography.body, color: colors.textSecondary },
     countdownText: { ...typography.small, color: colors.textMuted },
     urgent: { color: colors.danger, fontFamily: 'PlusJakartaSans_700Bold' },
     error: { color: colors.danger, marginTop: spacing.sm, fontSize: 13 },

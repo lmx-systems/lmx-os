@@ -15,6 +15,8 @@ import { siteFactQuestions } from '../components/siteFactQuestions';
 import { PodCapture } from '../components/PodCapture';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SyncStatusPill } from '../components/SyncStatusPill';
+import { KindPill, PillAction, Row, Steps } from '../components/ui/kit';
+import { Flag, MessageSquare, Navigation, Phone } from 'lucide-react-native';
 import type { PodMethod, Stop } from '../api/types';
 import type { HomeStackParamList } from '../navigation/types';
 import { applyPendingToStop } from '../offline/applyOptimistic';
@@ -273,37 +275,61 @@ export function StopDetailScreen({ route, navigation }: Props) {
   }
 
   const action = primaryActionForStop(stop);
+  // The portal's delivery track, for one stop: where the driver is in it.
+  const stepLabels =
+    stop.stop_type === 'pickup' ? ['Arrive', 'Scan', 'Collect'] : stop.stop_type === 'visit' ? ['Arrive', 'Capture'] : ['Arrive', 'Proof', 'Done'];
+  const stepIndex =
+    action.kind === 'arrive'
+      ? 0
+      : action.kind === 'scan' || action.kind === 'captureDoor'
+        ? 1
+        : action.kind === 'confirmDelivery'
+          ? stop.stop_type === 'pickup'
+            ? 2
+            : 1
+          : stepLabels.length;
 
   return (
     <ScreenContainer>
-      <Text style={styles.stopTypeLabel}>{stopTypeLabel(stop)}</Text>
-      <Text style={styles.title}>{stopLabel(stop)}</Text>
-      {stop.stop_type === 'dropoff' && stop.notes && <Text style={styles.notes}>{stop.notes}</Text>}
+      <View style={styles.hero}>
+        <KindPill label={stopTypeLabel(stop)} tone={stop.stop_type === 'pickup' ? 'neutral' : 'lime'} />
+        <Text style={styles.title} accessibilityRole="header">
+          {stopLabel(stop)}
+        </Text>
+        {stop.stop_type === 'pickup' && stop.address ? <Text style={styles.address}>{stop.address}</Text> : null}
+        {stop.stop_type === 'dropoff' && stop.notes && <Text style={styles.notes}>{stop.notes}</Text>}
+      </View>
 
       <SyncStatusPill stopId={stopId} />
 
-      {action.kind !== 'done' && (
-        <View style={styles.navigateRow}>
-          <Button label="Navigate" variant="outline" onPress={handleNavigate} />
+      {/* A flagged stop is closed but not done: no track of passed steps for it. */}
+      {stop.status !== 'failed' && (
+        <View style={styles.stepsWrap}>
+          <Steps labels={stepLabels} current={stepIndex} />
         </View>
       )}
 
       {stop.stop_type === 'dropoff' && stop.contact_phone && (
-        <>
-          {/* The number as the sender gave it, so the driver can check what the
-              dialer will show - and still has it when it can't be dialled. */}
-          <Text style={styles.contactNumber}>
-            {stop.contact_name ? `${stop.contact_name} · ` : ''}
-            {stop.contact_phone}
-          </Text>
-          {dialable(stop.contact_phone) && (
-            <View style={styles.contactRow}>
-              <Button label="Call" variant="outline" onPress={() => contactRecipient('tel')} />
-              <Button label="Text" variant="outline" onPress={() => contactRecipient('sms')} />
-            </View>
-          )}
-        </>
+        // The number as the sender gave it, so the driver can check what the
+        // dialer will show - and still has it when it can't be dialled.
+        <Text style={styles.contactNumber}>
+          {stop.contact_name ? `${stop.contact_name} · ` : ''}
+          {stop.contact_phone}
+        </Text>
       )}
+
+      {/* Secondary actions as small white pills, so the one ink button below stays the thing to press. */}
+      {/* Navigate only while there is somewhere to go; Call and Text stay after the
+          drop, as they always have, for a driver who needs the recipient again. */}
+      <View style={styles.actionsRow}>
+        {action.kind !== 'done' && <PillAction label="Navigate" icon={Navigation} onPress={handleNavigate} />}
+        {stop.stop_type === 'dropoff' && stop.contact_phone && dialable(stop.contact_phone) && (
+          <>
+            <PillAction label="Call" icon={Phone} onPress={() => contactRecipient('tel')} />
+            <PillAction label="Text" icon={MessageSquare} onPress={() => contactRecipient('sms')} />
+          </>
+        )}
+      </View>
 
       <Card style={styles.card}>
         {action.kind === 'arrive' && <Button label="Arrived" onPress={handleArrive} />}
@@ -413,9 +439,11 @@ export function StopDetailScreen({ route, navigation }: Props) {
       </Card>
 
       {action.kind !== 'done' && (
-        <Button
-          label="Flag issue"
-          variant="outline"
+        <Row
+          icon={Flag}
+          tone="needs"
+          title="Flag an issue"
+          detail="Closed, no access, refused, parts missing"
           onPress={() => navigation.navigate('FlagIssue', { stopId })}
         />
       )}
@@ -426,13 +454,14 @@ export function StopDetailScreen({ route, navigation }: Props) {
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     loadingText: { ...typography.subtitle, color: colors.textSecondary },
-    stopTypeLabel: { ...typography.label, color: colors.textPrimary },
-    title: { ...typography.title, color: colors.textPrimary, marginBottom: spacing.sm },
-    notes: { ...typography.small, color: colors.textMuted, marginBottom: spacing.md },
-    navigateRow: { marginBottom: spacing.lg },
-    contactRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
-    contactNumber: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.sm },
-    card: { marginBottom: spacing.lg, gap: spacing.sm },
+    hero: { gap: spacing.sm, marginBottom: spacing.lg },
+    title: { ...typography.display, color: colors.textPrimary },
+    address: { ...typography.body, color: colors.textSecondary },
+    notes: { ...typography.small, fontSize: 13, color: colors.textSecondary },
+    stepsWrap: { marginBottom: spacing.md },
+    actionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.lg },
+    contactNumber: { ...typography.meta, color: colors.textSecondary, marginBottom: spacing.sm },
+    card: { marginBottom: spacing.md, gap: spacing.md, borderRadius: 28 },
     doneText: { ...typography.body, color: colors.textPrimary, textAlign: 'center' },
     visitText: { ...typography.small, color: colors.textSecondary },
     error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },

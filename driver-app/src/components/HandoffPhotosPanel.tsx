@@ -5,7 +5,7 @@ import type { HandoffPhotoSlot } from '../api/types';
 import { PhotoCaptureModal } from '../media/PhotoCaptureModal';
 import { discardPhoto, keepPhoto } from '../offline/handoffPhotos';
 import { outboxManager } from '../offline/outboxManager';
-import { radius, spacing, typography, useThemeColors } from '../theme';
+import { spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
 
 const SLOTS: { slot: HandoffPhotoSlot; label: string; hint: string }[] = [
@@ -72,16 +72,15 @@ export function HandoffPhotosPanel({ stopId, queueAfter }: { stopId: string; que
 function makeStyles(colors: ColorScheme) {
   return StyleSheet.create({
     panel: { gap: spacing.sm },
-    title: { ...typography.label, color: colors.textPrimary },
+    title: { ...typography.tileTitle, color: colors.textPrimary },
     warning: { ...typography.small, color: colors.danger },
+    // Wells, not outlined boxes; a taken photo turns the passed-step lime.
     slot: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: radius.sm,
+      borderRadius: 16,
       padding: spacing.md,
-      backgroundColor: colors.surface,
+      backgroundColor: colors.surfaceAlt,
     },
-    slotDone: { borderColor: colors.primary },
+    slotDone: { backgroundColor: colors.accentDim },
     slotLabel: { ...typography.body, color: colors.textPrimary },
     slotHint: { ...typography.small, color: colors.textMuted },
   });

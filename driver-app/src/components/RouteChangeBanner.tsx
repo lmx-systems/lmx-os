@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import type { RouteChangeEvent } from '../realtime/routeEventsClient';
-import { radius, spacing, typography, useThemeColors } from '../theme';
+import { spacing, typography, useThemeColors } from '../theme';
+import { Shuffle } from 'lucide-react-native';
+import { Banner } from './ui/kit';
 import type { ColorScheme } from '../theme';
 import { Button } from './Button';
 
@@ -23,8 +25,7 @@ export function RouteChangeBanner({ event, onAccept }: RouteChangeBannerProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <View style={styles.banner}>
-      <Text style={styles.message}>{event.message}</Text>
+    <Banner icon={Shuffle} tone="neutral" title="Your route changed" body={event.message}>
       {expanded && (
         <Text style={styles.details}>
           {event.affected_stop_ids.length} stop{event.affected_stop_ids.length === 1 ? '' : 's'} affected
@@ -38,21 +39,13 @@ export function RouteChangeBanner({ event, onAccept }: RouteChangeBannerProps) {
           <Button label="Accept" onPress={onAccept} />
         </View>
       </View>
-    </View>
+    </Banner>
   );
 }
 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    banner: {
-      backgroundColor: colors.accentDim,
-      borderRadius: radius.lg,
-      padding: spacing.md,
-      marginBottom: spacing.lg,
-      gap: spacing.sm,
-    },
-    message: { ...typography.label, color: colors.textPrimary },
     details: { ...typography.small, color: colors.textSecondary },
-    buttonRow: { flexDirection: 'row', gap: spacing.sm },
+    buttonRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
     buttonHalf: { flex: 1 },
   });

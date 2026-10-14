@@ -30,20 +30,16 @@ import type {
   ProfileStackParamList,
 } from './types';
 import { useThemeColors } from '../theme';
+import { PillTabBar } from '../components/ui/PillTabBar';
+import { StackHeader } from '../components/ui/StackHeader';
 import type { ColorScheme } from '../theme';
 import type { NativeStackNavigationOptions } from '@react-navigation/native-stack';
 
-// Every stack's header in the design system: on the page's grey ground with no
-// divider (the ground separates, not borders), title and back arrow in ink and
-// the app's own type rather than the platform's.
+// Every stack's header in the design system: the console's page header on the
+// grey ground (components/ui/StackHeader.tsx), not the platform's bar.
 function stackHeader(colors: ColorScheme): NativeStackNavigationOptions {
   return {
-    headerStyle: { backgroundColor: colors.bg },
-    headerShadowVisible: false,
-    headerTintColor: colors.textPrimary,
-    headerTitleStyle: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 17, color: colors.textPrimary },
-    headerBackTitleStyle: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 16 },
-    headerBackTitleVisible: false,
+    header: (props) => <StackHeader {...props} />,
     contentStyle: { backgroundColor: colors.bg },
   };
 }
@@ -58,7 +54,7 @@ function AuthNavigator() {
   const colors = useThemeColors();
   return (
     <AuthStack.Navigator screenOptions={{ ...stackHeader(colors), headerShown: false }}>
-      <AuthStack.Screen name="SignIn" component={SignInScreen} />
+      <AuthStack.Screen name="SignIn" component={SignInScreen} options={{ title: 'Sign in' }} />
       <AuthStack.Screen
         name="Server"
         component={ServerScreen}
@@ -77,7 +73,8 @@ function HomeNavigator() {
   return (
     <HomeStack.Navigator screenOptions={{ ...stackHeader(colors), headerShown: false }}>
       <HomeStack.Screen name="Home" component={TodayRouteScreen} />
-      <HomeStack.Screen name="StopDetail" component={StopDetailScreen} options={{ headerShown: true, title: 'Stop' }} />
+      {/* No header title: the stop's own name is the page title, under its kind. */}
+      <HomeStack.Screen name="StopDetail" component={StopDetailScreen} options={{ headerShown: true, title: '' }} />
       <HomeStack.Screen name="FlagIssue" component={FlagIssueScreen} options={{ headerShown: true, title: 'Flag an issue' }} />
       <HomeStack.Screen
         name="OffPlatform"
@@ -112,7 +109,8 @@ function ProfileNavigator() {
       <ProfileStack.Screen
         name="LocationDisclosure"
         component={LocationDisclosureRoute}
-        options={{ title: 'Arrival times' }}
+        // No header title: the screen carries its own, as it also shows on Home with no header.
+        options={{ title: '' }}
       />
     </ProfileStack.Navigator>
   );
@@ -141,15 +139,11 @@ const TAB_ICONS: Record<keyof MainTabParamList, typeof Home> = {
 };
 
 function MainNavigator() {
-  const colors = useThemeColors();
   return (
     <Tab.Navigator
+      tabBar={(props) => <PillTabBar {...props} />}
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: { borderTopColor: colors.border, backgroundColor: colors.surface },
-        tabBarLabelStyle: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 11 },
         tabBarIcon: ({ color, size }) => {
           const Icon = TAB_ICONS[route.name as keyof MainTabParamList];
           return <Icon color={color} size={size} />;

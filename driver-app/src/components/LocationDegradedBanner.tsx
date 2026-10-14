@@ -1,9 +1,7 @@
-import { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { MapPinOff } from 'lucide-react-native';
 
 import type { DegradedState } from '../location/permissionState';
-import { radius, spacing, typography, useThemeColors } from '../theme';
-import type { ColorScheme } from '../theme';
+import { Banner } from './ui/kit';
 
 /**
  * What stopped being measured when location permission went away (DRV-5).
@@ -23,32 +21,16 @@ import type { ColorScheme } from '../theme';
  * nagging is how an app earns a permanent denial.
  */
 export function LocationDegradedBanner({ state }: { state: DegradedState }) {
-  const colors = useThemeColors();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
-
   if (state.message === null) {
     return null;
   }
 
   return (
-    <View style={styles.banner}>
-      <Text style={styles.title}>
-        {state.loss === 'all' ? 'Location is off' : 'Automatic arrivals are off'}
-      </Text>
-      <Text style={styles.line}>{state.message}</Text>
-    </View>
+    <Banner
+      icon={MapPinOff}
+      tone="warning"
+      title={state.loss === 'all' ? 'Location is off' : 'Automatic arrivals are off'}
+      body={state.message}
+    />
   );
 }
-
-const makeStyles = (colors: ColorScheme) =>
-  StyleSheet.create({
-    banner: {
-      backgroundColor: colors.warningDim,
-      borderRadius: radius.md,
-      padding: spacing.md,
-      marginBottom: spacing.md,
-      gap: 2,
-    },
-    title: { ...typography.body, color: colors.warning, fontFamily: 'PlusJakartaSans_700Bold', marginBottom: 2 },
-    line: { ...typography.small, color: colors.warning },
-  });

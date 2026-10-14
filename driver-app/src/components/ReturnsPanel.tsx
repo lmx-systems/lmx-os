@@ -178,12 +178,11 @@ export function ReturnsPanel({ stop, onDone }: ReturnsPanelProps) {
 
 function makeStyles(colors: ColorScheme) {
   return StyleSheet.create({
+    // A grey well inside the stop's white card, no outline.
     card: {
-      backgroundColor: colors.surface,
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      padding: spacing.md,
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: 20,
+      padding: spacing.lg,
       gap: spacing.sm,
     },
     heading: { ...typography.label, color: colors.textPrimary },
@@ -192,16 +191,19 @@ function makeStyles(colors: ColorScheme) {
     grow: { flex: 1 },
     primary: {
       backgroundColor: colors.primary,
-      borderRadius: radius.sm,
-      paddingVertical: spacing.sm,
+      borderRadius: radius.pill,
+      minHeight: 48,
+      justifyContent: 'center',
       alignItems: 'center',
     },
     primaryLabel: { ...typography.label, color: colors.primaryText },
     secondary: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: radius.sm,
-      paddingVertical: spacing.sm,
+      borderWidth: 1.5,
+      borderColor: colors.borderStrong,
+      backgroundColor: colors.surface,
+      borderRadius: radius.pill,
+      minHeight: 48,
+      justifyContent: 'center',
       alignItems: 'center',
     },
     secondaryLabel: { ...typography.label, color: colors.textPrimary },

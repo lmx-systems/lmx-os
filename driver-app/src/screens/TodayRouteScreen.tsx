@@ -12,6 +12,8 @@ import { ComplianceBanner } from '../components/ComplianceBanner';
 import { LocationDegradedBanner } from '../components/LocationDegradedBanner';
 import { RouteChangeBanner } from '../components/RouteChangeBanner';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { BrandBar, Facts, KindPill, Row, SectionLabel, Segments } from '../components/ui/kit';
+import { ClipboardList, Package, Radio } from 'lucide-react-native';
 import type { DriverCompliance } from '../api/types';
 import type { HomeStackParamList, MainTabParamList } from '../navigation/types';
 import { startReportingLocation, stopReportingLocation } from '../location/reportDriverLocation';
@@ -152,90 +154,152 @@ export function TodayRouteScreen({ navigation }: Props) {
       />
     );
   }
-  return (
-    <ScreenContainer scroll={!route}>
-      <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.statusTitle}>{isOnline ? "You're online" : "You're offline"}</Text>
-          <Text style={styles.statusSubtitle}>
-            {route
-              ? `Stop ${doneCount + 1} of ${route.stops.length}`
-              : isOnline
-                ? `${profile?.delivery_zone ?? 'Your zone'} · looking for jobs`
-                : 'Go online to receive jobs'}
-          </Text>
-        </View>
-        <Switch
-          value={isOnline}
-          onValueChange={handleToggle}
-          disabled={togglingOnline}
-          // Ink when on, like every other selected control; not the platform's green.
-          trackColor={{ false: colors.borderStrong, true: colors.primary }}
-          ios_backgroundColor={colors.borderStrong}
-        />
-      </View>
+  const zone = profile?.delivery_zone ?? 'Your zone';
+  const nextStops = route ? route.stops.filter((st) => st.stop_id !== currentStop?.stop_id) : [];
 
-      {/* Below the compliance banner, which refuses to let a driver work at
-          all. This one says a measurement is off while everything else keeps
-          working, and putting it above would rank it wrongly (DRV-5). */}
-      <LocationDegradedBanner state={locationState} />
-
-      {compliance && !compliance.can_go_on_shift && (
-        <ComplianceBanner
-          compliance={compliance}
-          // Documents lives in the Profile stack under a different tab, so this
-          // crosses navigators rather than pushing within Home's - getParent()
-          // is what makes that reachable from here.
-          onOpenDocuments={() =>
-            navigation
-              .getParent<BottomTabNavigationProp<MainTabParamList>>()
-              ?.navigate('ProfileTab', { screen: 'Documents' })
-          }
-        />
-      )}
-
-      {toggleError && <Text style={styles.error}>{toggleError}</Text>}
-
-      {routeChangeEvent && (
-        <RouteChangeBanner
-          event={routeChangeEvent}
-          onAccept={() => {
-            setRouteChangeEvent(null);
-            refresh();
-          }}
-        />
-      )}
-
-      {route && currentStop && (
-        <Card style={styles.currentCard} onPress={() => navigation.navigate('StopDetail', { stopId: currentStop.stop_id })}>
-          <Text style={styles.stopTypeLabel}>{stopTypeLabel(currentStop)}</Text>
-          <Text style={styles.stopBodyText}>{stopLabel(currentStop)}</Text>
-          {etaLabel(currentStop) && <Text style={styles.cardSmall}>{etaLabel(currentStop)}</Text>}
-          <Button
-            label={primaryActionLabel(primaryActionForStop(currentStop))}
-            onPress={() => navigation.navigate('StopDetail', { stopId: currentStop.stop_id })}
+  const top = (
+    <>
+    <BrandBar
+      right={
+        <View style={styles.duty}>
+          <Text style={styles.dutyText}>{isOnline ? 'On duty' : 'Off duty'}</Text>
+          <Switch
+            value={isOnline}
+            onValueChange={handleToggle}
+            disabled={togglingOnline}
+            accessibilityLabel={isOnline ? 'Go off duty' : 'Go on duty'}
+            // Ink when on, like every other selected control; not the platform's green.
+            trackColor={{ false: colors.borderStrong, true: colors.primary }}
+            ios_backgroundColor={colors.borderStrong}
           />
-        </Card>
-      )}
+        </View>
+      }
+    />
 
+    {/* The page title, as on the console: what the driver is doing, in one line. */}
+    <View style={styles.titleBlock}>
+      <Text style={styles.kicker}>
+        {route ? zone : isOnline ? `${zone} · looking for jobs` : 'Go online to receive jobs'}
+      </Text>
+      <Text style={styles.display} accessibilityRole="header">
+        {route
+          ? doneCount >= route.stops.length
+            ? 'Route complete'
+            : `Stop ${doneCount + 1} of ${route.stops.length}`
+          : isOnline
+            ? "You're online"
+            : "You're offline"}
+      </Text>
+      {/* Each bar from its own stop, so a stop finished out of order still reads right. */}
       {route && (
+        <Segments
+          states={route.stops.map((st) => (isStopTerminal(st) ? 'done' : st.stop_id === currentStop?.stop_id ? 'current' : 'ahead'))}
+        />
+      )}
+    </View>
+
+    {/* Below the compliance banner, which refuses to let a driver work at
+        all. This one says a measurement is off while everything else keeps
+        working, and putting it above would rank it wrongly (DRV-5). */}
+    <LocationDegradedBanner state={locationState} />
+
+    {compliance && !compliance.can_go_on_shift && (
+      <ComplianceBanner
+        compliance={compliance}
+        // Documents lives in the Profile stack under a different tab, so this
+        // crosses navigators rather than pushing within Home's - getParent()
+        // is what makes that reachable from here.
+        onOpenDocuments={() =>
+          navigation
+            .getParent<BottomTabNavigationProp<MainTabParamList>>()
+            ?.navigate('ProfileTab', { screen: 'Documents' })
+        }
+      />
+    )}
+
+    {toggleError && <Text style={styles.error}>{toggleError}</Text>}
+
+    {routeChangeEvent && (
+      <RouteChangeBanner
+        event={routeChangeEvent}
+        onAccept={() => {
+          setRouteChangeEvent(null);
+          refresh();
+        }}
+      />
+    )}
+
+    {route && currentStop && (
+      // The one card that matters, as on the on-call phone: what kind of stop,
+      // where, the facts at a glance, and one thing to press.
+      <Card style={styles.currentCard} onPress={() => navigation.navigate('StopDetail', { stopId: currentStop.stop_id })}>
+        <View style={styles.currentTop}>
+          <KindPill label={stopTypeLabel(currentStop)} tone={currentStop.stop_type === 'pickup' ? 'neutral' : 'lime'} />
+          <Text style={styles.meta}>Next stop</Text>
+        </View>
+        <View style={styles.currentText}>
+          <Text style={styles.headline}>{stopLabel(currentStop)}</Text>
+          {currentStop.stop_type === 'pickup' && currentStop.address ? (
+            <Text style={styles.secondary}>{currentStop.address}</Text>
+          ) : null}
+        </View>
+        <Facts
+          items={[
+            // The forecast the customer was shown, not a deadline.
+            { k: 'ETA', v: etaLabel(currentStop)?.replace(/^ETA /, '') ?? '—' },
+            // Only a pickup carries a real parcel count; a drop-off's is always 1
+            // on the server, which would tell a driver to hand over one of three.
+            ...(currentStop.stop_type === 'pickup' ? [{ k: 'Parcels', v: String(currentStop.parcel_count) }] : []),
+            { k: 'Then', v: `${route.stops.length - doneCount - 1} more` },
+          ]}
+        />
+        <Button
+          label={primaryActionLabel(primaryActionForStop(currentStop), currentStop.stop_type)}
+          onPress={() => navigation.navigate('StopDetail', { stopId: currentStop.stop_id })}
+        />
+      </Card>
+    )}
+    </>
+  );
+
+  if (route) {
+    // The whole page scrolls as one list: the header, banners and the next-stop
+    // card ride above the stops, so a small phone with a banner up never pushes
+    // the card's button out of reach.
+    return (
+      <ScreenContainer scroll={false}>
         <FlatList
-          data={route.stops}
-          keyExtractor={(s) => s.stop_id}
+          data={nextStops}
+          keyExtractor={(st) => st.stop_id}
           contentContainerStyle={styles.list}
+          ListHeaderComponent={
+            <>
+              {top}
+              {nextStops.length > 0 && <SectionLabel>Every stop</SectionLabel>}
+            </>
+          }
           renderItem={({ item }) => (
             <View style={[styles.stopRow, isStopTerminal(item) && styles.stopRowDone]}>
               <View style={[styles.sequenceBadge, item.status === 'completed' && styles.sequenceDone]}>
                 <Text style={styles.sequenceText}>{item.status === 'completed' ? '✓' : item.status === 'failed' ? '✕' : item.sequence + 1}</Text>
               </View>
               <View style={styles.stopTextCol}>
-                <Text style={isStopTerminal(item) ? styles.stopLabelDone : styles.stopBodyText}>{stopLabel(item)}</Text>
-                {etaLabel(item) && <Text style={styles.cardSmall}>{etaLabel(item)}</Text>}
+                <Text style={isStopTerminal(item) ? styles.stopLabelDone : styles.stopTitle} numberOfLines={1}>
+                  {stopLabel(item)}
+                </Text>
+                <Text style={styles.stopMeta}>{stopTypeLabel(item)}</Text>
               </View>
+              {etaLabel(item) && <Text style={styles.stopEta}>{etaLabel(item)?.replace(/^ETA /, '')}</Text>}
             </View>
           )}
         />
-      )}
+      </ScreenContainer>
+    );
+  }
+
+  return (
+    <ScreenContainer>
+      {top}
 
       {!route && primaryOffer && (
         <>
@@ -248,21 +312,23 @@ export function TodayRouteScreen({ navigation }: Props) {
             }}
           />
           {otherOffers.map((offer) => (
-            <Card key={offer.offer_id} style={styles.otherOfferCard} onPress={() => setSelectedOfferId(offer.offer_id)}>
-              <Text style={styles.cardBody}>{offer.stops[0]?.shop_name || 'Pickup'}</Text>
-              <Text style={styles.cardSmall}>
-                {offer.stops.length} {offer.stops.length === 1 ? 'delivery' : 'deliveries'}
-                {offer.estimated_pay_cents !== null ? ` · $${(offer.estimated_pay_cents / 100).toFixed(2)}` : ''}
-              </Text>
-            </Card>
+            <Row
+              key={offer.offer_id}
+              icon={Package}
+              title={offer.stops[0]?.shop_name || 'Pickup'}
+              detail={`${offer.stops.length} ${offer.stops.length === 1 ? 'delivery' : 'deliveries'}${
+                offer.estimated_pay_cents !== null ? ` · $${(offer.estimated_pay_cents / 100).toFixed(2)}` : ''
+              }`}
+              onPress={() => setSelectedOfferId(offer.offer_id)}
+            />
           ))}
         </>
       )}
 
       {!route && !primaryOffer && (
-        // Said in words: a grey box labelled "Map view" read as a broken map.
+        // Said in words: there is no map, and an empty grey box read as a broken one.
         <Card style={styles.waiting}>
-          {isOnline && <ActivityIndicator color={colors.textMuted} />}
+          {isOnline ? <ActivityIndicator color={colors.textMuted} /> : <Radio size={22} color={colors.textMuted} />}
           <Text style={styles.waitingText}>
             {isOnline ? 'Looking for jobs near you. An offer appears here.' : 'Go online and jobs near you appear here.'}
           </Text>
@@ -280,9 +346,14 @@ export function TodayRouteScreen({ navigation }: Props) {
           {drafts
             .filter((d) => !d.deliveredAt)
             .map((d) => (
-              <Card key={d.recordId} style={styles.otherOfferCard} onPress={() => navigation.navigate('OffPlatform', { recordId: d.recordId })}>
-                <Text style={styles.cardBody}>Finish logging {d.jobLabel || 'a job'}</Text>
-              </Card>
+              <Row
+                key={d.recordId}
+                icon={ClipboardList}
+                tone="needs"
+                title={`Finish logging ${d.jobLabel || 'a job'}`}
+                detail="Started, not logged at the door yet"
+                onPress={() => navigation.navigate('OffPlatform', { recordId: d.recordId })}
+              />
             ))}
           <Button label="Log an off-platform delivery" variant="outline" onPress={() => navigation.navigate('OffPlatform', {})} />
         </View>
@@ -293,29 +364,21 @@ export function TodayRouteScreen({ navigation }: Props) {
 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    headerRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'flex-start',
-      marginBottom: spacing.lg,
-    },
-    statusTitle: { ...typography.title, color: colors.textPrimary },
-    offPlatform: { marginTop: spacing.lg },
-    statusSubtitle: { ...typography.subtitle, color: colors.textSecondary },
-    currentCard: { marginBottom: spacing.lg, gap: spacing.sm },
-    stopTypeLabel: { ...typography.label, color: colors.textPrimary },
-    stopBodyText: { ...typography.body, color: colors.textPrimary },
-    waiting: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: spacing.md,
-      marginBottom: spacing.lg,
-    },
+    duty: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+    dutyText: { ...typography.meta, color: colors.textSecondary },
+    titleBlock: { gap: spacing.sm, marginTop: spacing.lg, marginBottom: spacing.lg },
+    kicker: { ...typography.subtitle, color: colors.textSecondary },
+    display: { ...typography.display, color: colors.textPrimary },
+    meta: { ...typography.meta, color: colors.textMuted },
+    headline: { ...typography.headline, color: colors.textPrimary },
+    secondary: { ...typography.body, color: colors.textSecondary },
+    offPlatform: { marginTop: spacing.sm, gap: spacing.sm },
+    currentCard: { marginBottom: spacing.lg, gap: spacing.lg, borderRadius: 28 },
+    currentTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    currentText: { gap: 4 },
+    waiting: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: spacing.lg },
     waitingText: { ...typography.body, color: colors.textSecondary, flex: 1 },
     error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
-    otherOfferCard: { marginBottom: spacing.sm },
-    cardBody: { ...typography.body, color: colors.textPrimary, marginBottom: spacing.xs },
-    cardSmall: { ...typography.small, color: colors.textMuted },
     list: { paddingBottom: spacing.lg, gap: spacing.sm },
     // White rows on the grey ground, no dividers.
     stopRow: {
@@ -325,19 +388,22 @@ const makeStyles = (colors: ColorScheme) =>
       paddingVertical: spacing.md,
       paddingHorizontal: spacing.lg,
       backgroundColor: colors.surface,
-      borderRadius: radius.md,
+      borderRadius: 20,
     },
+    stopRowDone: { opacity: 0.55 },
     sequenceBadge: {
-      width: 30,
-      height: 30,
+      width: 32,
+      height: 32,
       borderRadius: radius.pill,
-      backgroundColor: colors.bg,
+      backgroundColor: colors.surfaceAlt,
       alignItems: 'center',
       justifyContent: 'center',
     },
     sequenceDone: { backgroundColor: colors.lime },
-    stopRowDone: { opacity: 0.5 },
-    stopTextCol: { flex: 1 },
-    sequenceText: { ...typography.label, fontSize: 13, color: colors.textPrimary },
-    stopLabelDone: { ...typography.body, color: colors.textPrimary, textDecorationLine: 'line-through' as const },
+    stopTextCol: { flex: 1, minWidth: 0, gap: 1 },
+    sequenceText: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 13, color: colors.textPrimary },
+    stopTitle: { ...typography.rowTitle, fontSize: 15, color: colors.textPrimary },
+    stopMeta: { ...typography.small, color: colors.textMuted },
+    stopEta: { ...typography.meta, color: colors.textSecondary },
+    stopLabelDone: { ...typography.rowTitle, fontSize: 15, color: colors.textPrimary, textDecorationLine: 'line-through' as const },
   });

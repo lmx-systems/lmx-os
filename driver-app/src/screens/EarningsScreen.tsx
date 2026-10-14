@@ -3,9 +3,10 @@ import { StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { api } from '../api/client';
-import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { Banner, Facts, Row } from '../components/ui/kit';
+import { BarChart3, Gift, History, Info } from 'lucide-react-native';
 import type { Earnings } from '../api/types';
 import type { EarningsStackParamList } from '../navigation/types';
 import { spacing, typography, useThemeColors } from '../theme';
@@ -52,76 +53,64 @@ export function EarningsScreen({ navigation }: Props) {
     return null;
   }
 
+  const facts = [
+    { k: earnings.employment_type === 'gig' ? 'Hours online' : 'Hours worked', v: earnings.hours_worked.toFixed(1) },
+    earnings.employment_type === 'gig'
+      ? { k: 'Pay model', v: 'Per delivery' }
+      : { k: `Rate${earnings.is_placeholder ? ' (placeholder)' : ''}`, v: `${formatCents(earnings.hourly_rate_cents)}/hr` },
+  ];
+  if (earnings.overtime_hours > 0) facts.push({ k: 'Overtime', v: `${earnings.overtime_hours.toFixed(1)} h` });
+
   return (
     <ScreenContainer>
-      {earnings.is_placeholder && (
-        <Card style={styles.placeholderBanner}>
-          <Text style={styles.placeholderTitle}>Estimate, not final pay</Text>
-          <Text style={styles.noteText}>{earnings.note}</Text>
-        </Card>
-      )}
-
-      <Text style={styles.weekLabel}>
-        {periodLabel(earnings.period_start, earnings.period_end)} · {formatDate(earnings.period_start)} - {formatDate(earnings.period_end)}
-      </Text>
-      <Text style={styles.bigNumber}>{formatCents(earnings.estimated_pay_cents)}</Text>
-
-      <View style={styles.statsRow}>
-        <Card style={styles.statCard}>
-          <Text style={styles.statLabel}>{earnings.employment_type === 'gig' ? 'Hours online' : 'Hours worked'}</Text>
-          <Text style={styles.statValue}>{earnings.hours_worked.toFixed(1)}</Text>
-        </Card>
-        {earnings.employment_type === 'gig' ? (
-          <Card style={styles.statCard}>
-            <Text style={styles.statLabel}>Pay model</Text>
-            <Text style={styles.statValue}>Per delivery</Text>
-          </Card>
-        ) : (
-          <Card style={styles.statCard}>
-            <Text style={styles.statLabel}>Rate{earnings.is_placeholder ? ' (placeholder)' : ''}</Text>
-            <Text style={styles.statValue}>{formatCents(earnings.hourly_rate_cents)}/hr</Text>
-          </Card>
-        )}
+      {/* The page's one lime tile, as on the console's Home: the number that matters here. */}
+      <View style={styles.headline}>
+        <Text style={styles.headlineLabel}>{periodLabel(earnings.period_start, earnings.period_end)}</Text>
+        <Text style={styles.bigNumber} numberOfLines={1} adjustsFontSizeToFit accessibilityLabel={`Estimated pay ${formatCents(earnings.estimated_pay_cents)}`}>
+          {formatCents(earnings.estimated_pay_cents)}
+        </Text>
+        <Text style={styles.headlineMeta}>
+          {formatDate(earnings.period_start)} – {formatDate(earnings.period_end)}
+          {earnings.is_placeholder ? ' · an estimate' : ''}
+        </Text>
       </View>
+
+      <Card style={styles.factsCard}>
+        <Facts items={facts} />
+        {earnings.overtime_hours > 0 && <Text style={styles.noteText}>Overtime is hours over 40 a week, paid at 1.5x.</Text>}
+      </Card>
 
       {(earnings.bonuses_owed_cents ?? 0) > 0 && (
         // DEC-10: bonuses on offers taken after an order was turned down.
         // Recorded as owed; nothing pays per job yet, so they are not in the
         // estimate above.
-        <Card style={styles.overtimeCard}>
-          <Text style={styles.statLabel}>Bonuses owed</Text>
-          <Text style={styles.statValue}>{formatCents(earnings.bonuses_owed_cents ?? 0)}</Text>
-          <Text style={styles.noteText}>For deliveries you took after others turned them down. Not in the estimate above.</Text>
-        </Card>
+        <Row
+          icon={Gift}
+          tone="lime"
+          title={`${formatCents(earnings.bonuses_owed_cents ?? 0)} in bonuses owed`}
+          detail="For deliveries you took after others turned them down. Not in the estimate above."
+        />
       )}
 
-      {earnings.overtime_hours > 0 && (
-        <Card style={styles.overtimeCard}>
-          <Text style={styles.statLabel}>Includes overtime</Text>
-          <Text style={styles.noteText}>
-            {earnings.overtime_hours.toFixed(1)} hour{earnings.overtime_hours === 1 ? '' : 's'} over 40/week, paid at 1.5x
-          </Text>
-        </Card>
-      )}
+      {earnings.is_placeholder && <Banner icon={Info} tone="warning" title="Estimate, not final pay" body={earnings.note} />}
 
-      <Button label="View trip history" variant="outline" onPress={() => navigation.navigate('TripHistory')} />
-      {/* W4: the same metrics the dispatch team sees. Under Earnings because it is a
-          fact about the work done, which is what this tab already is. */}
-      <Button label="Your numbers" variant="outline" onPress={() => navigation.navigate('Scorecard')} />
+      <View style={styles.rows}>
+        <Row icon={History} title="Trip history" detail="Every route you've finished" onPress={() => navigation.navigate('TripHistory')} />
+        {/* W4: the same metrics the dispatch team sees. Under Earnings because it is a
+            fact about the work done, which is what this tab already is. */}
+        <Row icon={BarChart3} title="Your numbers" detail="Your figures beside the hub's" onPress={() => navigation.navigate('Scorecard')} />
+      </View>
     </ScreenContainer>
   );
 }
 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    placeholderBanner: { backgroundColor: colors.warningDim, marginBottom: spacing.lg, gap: spacing.xs },
-    placeholderTitle: { fontSize: 14, fontFamily: 'PlusJakartaSans_700Bold', color: colors.warning },
+    headline: { backgroundColor: colors.lime, borderRadius: 28, padding: spacing.xl, gap: spacing.xs, marginBottom: spacing.md },
+    headlineLabel: { ...typography.tileTitle, color: colors.textPrimary },
+    bigNumber: { ...typography.hero, color: colors.textPrimary },
+    headlineMeta: { ...typography.meta, color: colors.limeInk },
+    factsCard: { gap: spacing.md, marginBottom: spacing.md, borderRadius: 28 },
     noteText: { ...typography.small, color: colors.textMuted },
-    weekLabel: { ...typography.label, color: colors.textPrimary },
-    bigNumber: { fontSize: 40, fontFamily: 'PlusJakartaSans_700Bold', color: colors.textPrimary, marginTop: spacing.xs, marginBottom: spacing.lg },
-    statsRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
-    overtimeCard: { backgroundColor: colors.accentDim, marginBottom: spacing.lg, gap: spacing.xs },
-    statCard: { flex: 1 },
-    statLabel: { ...typography.label, color: colors.textPrimary },
-    statValue: { fontSize: 20, fontFamily: 'PlusJakartaSans_700Bold', color: colors.textPrimary, marginTop: spacing.xs },
+    rows: { gap: spacing.sm, marginTop: spacing.sm },
   });

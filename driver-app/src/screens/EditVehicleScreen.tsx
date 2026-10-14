@@ -85,13 +85,14 @@ const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     fieldLabel: { ...typography.label, color: colors.textPrimary },
     segmentRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs, marginBottom: spacing.lg },
+    // The same pill group as vehicle setup: white, the chosen one ink.
     segment: {
       flex: 1,
-      paddingVertical: spacing.sm + 2,
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
+      minHeight: 48,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surface,
       alignItems: 'center',
+      justifyContent: 'center',
     },
     segmentActive: { backgroundColor: colors.primary, borderColor: colors.primary },
     segmentLabel: { color: colors.textPrimary, fontFamily: 'PlusJakartaSans_600SemiBold' },
