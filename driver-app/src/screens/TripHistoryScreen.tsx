@@ -53,7 +53,7 @@ export function TripHistoryScreen() {
 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    list: { padding: spacing.lg, gap: spacing.sm },
+    list: { paddingBottom: spacing.lg, gap: spacing.sm },
     emptyText: { ...typography.subtitle, color: colors.textSecondary },
     tripDate: { ...typography.body, color: colors.textPrimary },
     tripMeta: { ...typography.small, color: colors.textMuted },

@@ -117,7 +117,7 @@ export function PodCapture({
         {METHODS.map((m) => (
           <Pressable key={m} onPress={() => onChangeMethod(m)} style={[styles.segment, method === m && styles.segmentActive]}>
             <Text style={[styles.segmentLabel, method === m && styles.segmentLabelActive]}>
-              {m[0].toUpperCase() + m.slice(1)}
+              {m === 'pin' ? 'PIN' : m[0].toUpperCase() + m.slice(1)}
             </Text>
           </Pressable>
         ))}

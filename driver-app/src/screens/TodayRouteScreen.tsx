@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, Switch, Text, View, StyleSheet } from 'react-native';
+import { ActivityIndicator, FlatList, Switch, Text, View, StyleSheet } from 'react-native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -18,7 +18,7 @@ import { startReportingLocation, stopReportingLocation } from '../location/repor
 import { useLocationDegradation } from '../location/useLocationDegradation';
 import type { RouteChangeEvent } from '../realtime/routeEventsClient';
 import { useRouteEvents } from '../realtime/useRouteEvents';
-import { spacing, typography, useThemeColors } from '../theme';
+import { radius, spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
 import { isStopTerminal, primaryActionForStop, primaryActionLabel, stopLabel, stopTypeLabel } from '../utils/stopStatus';
 import { etaLabel } from '../utils/etaLabel';
@@ -165,7 +165,14 @@ export function TodayRouteScreen({ navigation }: Props) {
                 : 'Go online to receive jobs'}
           </Text>
         </View>
-        <Switch value={isOnline} onValueChange={handleToggle} disabled={togglingOnline} />
+        <Switch
+          value={isOnline}
+          onValueChange={handleToggle}
+          disabled={togglingOnline}
+          // Ink when on, like every other selected control; not the platform's green.
+          trackColor={{ false: colors.borderStrong, true: colors.primary }}
+          ios_backgroundColor={colors.borderStrong}
+        />
       </View>
 
       {/* Below the compliance banner, which refuses to let a driver work at
@@ -218,7 +225,9 @@ export function TodayRouteScreen({ navigation }: Props) {
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
             <View style={[styles.stopRow, isStopTerminal(item) && styles.stopRowDone]}>
-              <Text style={styles.sequenceText}>{item.status === 'completed' ? '✓' : item.status === 'failed' ? '✕' : item.sequence + 1}</Text>
+              <View style={[styles.sequenceBadge, item.status === 'completed' && styles.sequenceDone]}>
+                <Text style={styles.sequenceText}>{item.status === 'completed' ? '✓' : item.status === 'failed' ? '✕' : item.sequence + 1}</Text>
+              </View>
               <View style={styles.stopTextCol}>
                 <Text style={isStopTerminal(item) ? styles.stopLabelDone : styles.stopBodyText}>{stopLabel(item)}</Text>
                 {etaLabel(item) && <Text style={styles.cardSmall}>{etaLabel(item)}</Text>}
@@ -242,7 +251,7 @@ export function TodayRouteScreen({ navigation }: Props) {
             <Card key={offer.offer_id} style={styles.otherOfferCard} onPress={() => setSelectedOfferId(offer.offer_id)}>
               <Text style={styles.cardBody}>{offer.stops[0]?.shop_name || 'Pickup'}</Text>
               <Text style={styles.cardSmall}>
-                {offer.stops.length} stop{offer.stops.length > 1 ? 's' : ''}
+                {offer.stops.length} {offer.stops.length === 1 ? 'delivery' : 'deliveries'}
                 {offer.estimated_pay_cents !== null ? ` · $${(offer.estimated_pay_cents / 100).toFixed(2)}` : ''}
               </Text>
             </Card>
@@ -251,8 +260,12 @@ export function TodayRouteScreen({ navigation }: Props) {
       )}
 
       {!route && !primaryOffer && (
-        <Card style={styles.mapPlaceholder}>
-          <Text style={styles.mapLabel}>{isOnline ? 'Looking for jobs…' : 'Map view'}</Text>
+        // Said in words: a grey box labelled "Map view" read as a broken map.
+        <Card style={styles.waiting}>
+          {isOnline && <ActivityIndicator color={colors.textMuted} />}
+          <Text style={styles.waitingText}>
+            {isOnline ? 'Looking for jobs near you. An offer appears here.' : 'Go online and jobs near you appear here.'}
+          </Text>
         </Card>
       )}
 
@@ -292,29 +305,39 @@ const makeStyles = (colors: ColorScheme) =>
     currentCard: { marginBottom: spacing.lg, gap: spacing.sm },
     stopTypeLabel: { ...typography.label, color: colors.textPrimary },
     stopBodyText: { ...typography.body, color: colors.textPrimary },
-    mapPlaceholder: {
-      height: 220,
+    waiting: {
+      flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.border,
+      gap: spacing.md,
       marginBottom: spacing.lg,
     },
-    mapLabel: { ...typography.small, color: colors.textMuted },
+    waitingText: { ...typography.body, color: colors.textSecondary, flex: 1 },
     error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
     otherOfferCard: { marginBottom: spacing.sm },
     cardBody: { ...typography.body, color: colors.textPrimary, marginBottom: spacing.xs },
     cardSmall: { ...typography.small, color: colors.textMuted },
     list: { paddingBottom: spacing.lg, gap: spacing.sm },
+    // White rows on the grey ground, no dividers.
     stopRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: spacing.md,
       paddingVertical: spacing.md,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
+      paddingHorizontal: spacing.lg,
+      backgroundColor: colors.surface,
+      borderRadius: radius.md,
     },
+    sequenceBadge: {
+      width: 30,
+      height: 30,
+      borderRadius: radius.pill,
+      backgroundColor: colors.bg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    sequenceDone: { backgroundColor: colors.lime },
     stopRowDone: { opacity: 0.5 },
     stopTextCol: { flex: 1 },
-    sequenceText: { ...typography.label, fontSize: 15, color: colors.textPrimary },
+    sequenceText: { ...typography.label, fontSize: 13, color: colors.textPrimary },
     stopLabelDone: { ...typography.body, color: colors.textPrimary, textDecorationLine: 'line-through' as const },
   });

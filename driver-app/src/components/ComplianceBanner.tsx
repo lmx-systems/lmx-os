@@ -63,8 +63,6 @@ const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     banner: {
       backgroundColor: colors.dangerDim,
-      borderColor: colors.danger,
-      borderWidth: 1,
       borderRadius: radius.md,
       padding: spacing.md,
       marginBottom: spacing.md,

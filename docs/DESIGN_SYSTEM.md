@@ -101,7 +101,7 @@ Tiles have 24px padding; the gap between tiles is 16px. Pages are at most
 |---|---|
 | Ops console (`dashboard/`) | **Done.** Home (Needs you, Going ahead, person touches, Rules, map, the day's numbers), then Orders, Drivers, Rules, Record, and for admins Clients and Settings |
 | Client portal (`client-portal/`) and its public tracking page | **Done.** Sections as a pill nav; each order leads with its delivery track (Booked → Collected → On the way → Delivered); the tracking page a single white tile with the delivery code on lime. Text links are underlined, since ink alone doesn't set them apart |
-| Driver app (`driver-app/`) | **Done** in `src/theme/tokens.ts`: same colours, type and radii; 56px pill buttons; light only (`app.json` too). Weight comes from the font family (`PlusJakartaSans_700Bold`), never `fontWeight`, which Android renders as Roboto Bold. Black camera screens use white text and the `lime` button variant |
+| Driver app (`driver-app/`) | **Done** in `src/theme/tokens.ts`: same colours, type and radii; 56px pill buttons; light only (`app.json` too). Weight comes from the font family (`PlusJakartaSans_700Bold`), never `fontWeight`, which Android renders as Roboto Bold. Black camera screens use white text and the `lime` button variant. Checked screen by screen on an iOS simulator (Expo Go): stack headers sit on the grey ground in the app's type with no divider, `ScreenContainer` keeps the 16px gutter whether or not it scrolls and takes the top inset only where no header does, and the duty switch is ink when on |
 
 Update this table in the change that moves an app over.
 
