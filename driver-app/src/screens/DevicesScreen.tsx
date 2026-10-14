@@ -138,7 +138,7 @@ export function DevicesScreen() {
             // No button on purpose. See the note at the top of this file: the
             // queued stop events go out under this session, and Log out on the
             // previous screen is the thing that counts them first.
-            <Text style={styles.currentHint}>Use Log out</Text>
+            <Text style={styles.currentHint}>Log out from Profile</Text>
           ) : (
             <Pressable
               disabled={revoking !== null}

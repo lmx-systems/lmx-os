@@ -123,7 +123,8 @@ export function OfferBanner({ offer, onAccept, onDecline }: OfferBannerProps) {
     <Card style={styles.card}>
       <View style={styles.headerRow}>
         <Text style={styles.headerTitle}>
-          {offer.stops.length} stop{offer.stops.length > 1 ? 's' : ''}
+          {/* One entry per order - a pickup and its drop - so "stops" undercounted by half. */}
+          {offer.stops.length} {offer.stops.length === 1 ? 'delivery' : 'deliveries'}
         </Text>
         {secondsLeft !== null && (
           <Text style={[styles.countdownText, secondsLeft <= 15 && styles.urgent]}>

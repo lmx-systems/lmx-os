@@ -47,8 +47,6 @@ const makeStyles = (colors: ColorScheme) =>
     banner: {
       backgroundColor: colors.accentDim,
       borderRadius: radius.lg,
-      borderWidth: 1,
-      borderColor: colors.accent,
       padding: spacing.md,
       marginBottom: spacing.lg,
       gap: spacing.sm,

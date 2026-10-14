@@ -114,7 +114,7 @@ export function EarningsScreen({ navigation }: Props) {
 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    placeholderBanner: { backgroundColor: colors.warningDim, borderWidth: 1.5, borderColor: colors.warning, marginBottom: spacing.lg, gap: spacing.xs },
+    placeholderBanner: { backgroundColor: colors.warningDim, marginBottom: spacing.lg, gap: spacing.xs },
     placeholderTitle: { fontSize: 14, fontFamily: 'PlusJakartaSans_700Bold', color: colors.warning },
     noteText: { ...typography.small, color: colors.textMuted },
     weekLabel: { ...typography.label, color: colors.textPrimary },

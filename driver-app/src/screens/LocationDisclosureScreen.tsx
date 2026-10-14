@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import * as Location from 'expo-location';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -62,7 +62,7 @@ export function LocationDisclosureScreen({
 
   return (
     <ScreenContainer>
-      <ScrollView contentContainerStyle={styles.content}>
+      <View style={styles.content}>
         <Text style={styles.title}>Arrival times, without the tapping</Text>
 
         <Text style={styles.lede}>
@@ -103,20 +103,19 @@ export function LocationDisclosureScreen({
           <Button label="Not now" variant="outline" onPress={() => onDecided(false)} />
           <Button label="Continue" onPress={handleContinue} loading={asking} />
         </View>
-      </ScrollView>
+      </View>
     </ScreenContainer>
   );
 }
 
 function makeStyles(colors: ColorScheme) {
   return StyleSheet.create({
-    content: { padding: spacing.lg, gap: spacing.lg },
+    // ScreenContainer scrolls and holds the gutter; a second one inset the tiles twice.
+    content: { gap: spacing.lg },
     title: { ...typography.title, color: colors.textPrimary },
     lede: { ...typography.body, color: colors.textSecondary, lineHeight: 22 },
     card: {
       backgroundColor: colors.surface,
-      borderColor: colors.border,
-      borderWidth: 1,
       borderRadius: radius.md,
       padding: spacing.lg,
       gap: spacing.xs,

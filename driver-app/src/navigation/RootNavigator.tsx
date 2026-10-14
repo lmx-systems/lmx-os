@@ -30,6 +30,23 @@ import type {
   ProfileStackParamList,
 } from './types';
 import { useThemeColors } from '../theme';
+import type { ColorScheme } from '../theme';
+import type { NativeStackNavigationOptions } from '@react-navigation/native-stack';
+
+// Every stack's header in the design system: on the page's grey ground with no
+// divider (the ground separates, not borders), title and back arrow in ink and
+// the app's own type rather than the platform's.
+function stackHeader(colors: ColorScheme): NativeStackNavigationOptions {
+  return {
+    headerStyle: { backgroundColor: colors.bg },
+    headerShadowVisible: false,
+    headerTintColor: colors.textPrimary,
+    headerTitleStyle: { fontFamily: 'PlusJakartaSans_700Bold', fontSize: 17, color: colors.textPrimary },
+    headerBackTitleStyle: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 16 },
+    headerBackTitleVisible: false,
+    contentStyle: { backgroundColor: colors.bg },
+  };
+}
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const HomeStack = createNativeStackNavigator<HomeStackParamList>();
@@ -38,8 +55,9 @@ const EarningsStack = createNativeStackNavigator<EarningsStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 function AuthNavigator() {
+  const colors = useThemeColors();
   return (
-    <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+    <AuthStack.Navigator screenOptions={{ ...stackHeader(colors), headerShown: false }}>
       <AuthStack.Screen name="SignIn" component={SignInScreen} />
       <AuthStack.Screen
         name="Server"
@@ -55,8 +73,9 @@ function AuthNavigator() {
 // not pushed), StopDetail covers what used to be three more
 // (arrive/scan/POD collapsed into one state-driven screen).
 function HomeNavigator() {
+  const colors = useThemeColors();
   return (
-    <HomeStack.Navigator screenOptions={{ headerShown: false }}>
+    <HomeStack.Navigator screenOptions={{ ...stackHeader(colors), headerShown: false }}>
       <HomeStack.Screen name="Home" component={TodayRouteScreen} />
       <HomeStack.Screen name="StopDetail" component={StopDetailScreen} options={{ headerShown: true, title: 'Stop' }} />
       <HomeStack.Screen name="FlagIssue" component={FlagIssueScreen} options={{ headerShown: true, title: 'Flag an issue' }} />
@@ -80,8 +99,9 @@ function LocationDisclosureRoute({ navigation }: { navigation: { goBack: () => v
 }
 
 function ProfileNavigator() {
+  const colors = useThemeColors();
   return (
-    <ProfileStack.Navigator screenOptions={{ headerShown: true }}>
+    <ProfileStack.Navigator screenOptions={{ ...stackHeader(colors), headerShown: true }}>
       <ProfileStack.Screen name="ProfileHome" component={ProfileScreen} options={{ title: 'Profile' }} />
       <ProfileStack.Screen name="EditVehicle" component={EditVehicleScreen} options={{ title: 'Edit vehicle' }} />
       <ProfileStack.Screen name="Documents" component={DocumentsScreen} options={{ title: 'Documents' }} />
@@ -101,8 +121,9 @@ function ProfileNavigator() {
 // Screens 1n/1o, "Earnings" - Phase 3. Its own tab: earnings isn't part
 // of the delivery loop (Home) or account/compliance settings (Profile).
 function EarningsNavigator() {
+  const colors = useThemeColors();
   return (
-    <EarningsStack.Navigator screenOptions={{ headerShown: true }}>
+    <EarningsStack.Navigator screenOptions={{ ...stackHeader(colors), headerShown: true }}>
       <EarningsStack.Screen name="EarningsHome" component={EarningsScreen} options={{ title: 'Earnings' }} />
       <EarningsStack.Screen name="TripHistory" component={TripHistoryScreen} options={{ title: 'Trip history' }} />
       <EarningsStack.Screen name="Scorecard" component={ScorecardScreen} options={{ title: 'Your numbers' }} />
@@ -128,6 +149,7 @@ function MainNavigator() {
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: { borderTopColor: colors.border, backgroundColor: colors.surface },
+        tabBarLabelStyle: { fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 11 },
         tabBarIcon: ({ color, size }) => {
           const Icon = TAB_ICONS[route.name as keyof MainTabParamList];
           return <Icon color={color} size={size} />;
