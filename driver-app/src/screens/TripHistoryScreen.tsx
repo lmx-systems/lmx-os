@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { FlatList, StyleSheet, Text } from 'react-native';
 
 import { api } from '../api/client';
-import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { Row } from '../components/ui/kit';
+import { Route as RouteIcon } from 'lucide-react-native';
 import type { TripSummary } from '../api/types';
 import { spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
@@ -37,14 +38,11 @@ export function TripHistoryScreen() {
         contentContainerStyle={styles.list}
         ListEmptyComponent={<Text style={styles.emptyText}>No completed trips yet.</Text>}
         renderItem={({ item }) => (
-          <Card>
-            <View>
-              <Text style={styles.tripDate}>{formatDate(item.completed_at)}</Text>
-              <Text style={styles.tripMeta}>
-                {item.stop_count} stop{item.stop_count === 1 ? '' : 's'} · {item.hours.toFixed(1)}h (est.)
-              </Text>
-            </View>
-          </Card>
+          <Row
+            icon={RouteIcon}
+            title={formatDate(item.completed_at)}
+            detail={`${item.stop_count} stop${item.stop_count === 1 ? '' : 's'} · ${item.hours.toFixed(1)}h (est.)`}
+          />
         )}
       />
     </ScreenContainer>

@@ -93,7 +93,7 @@ export function ServerScreen() {
 
 function makeStyles(colors: ColorScheme) {
   return StyleSheet.create({
-    content: { padding: spacing.lg, gap: spacing.lg },
+    content: { gap: spacing.lg },
     body: { ...typography.body, color: colors.textSecondary, lineHeight: 22 },
     problem: { ...typography.small, color: colors.danger },
     saved: { ...typography.small, color: colors.success },

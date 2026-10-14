@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -10,6 +10,8 @@ import { getApiBaseUrl } from '../api/serverUrl';
 import { useAuth } from '../auth/AuthContext';
 import { getOrCreateDeviceId } from '../auth/deviceId';
 import { Button } from '../components/Button';
+import { Card } from '../components/Card';
+import { BrandBar } from '../components/ui/kit';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { TextField } from '../components/TextField';
 import { BarcodeScannerModal } from '../media/BarcodeScannerModal';
@@ -70,37 +72,40 @@ export function SignInScreen({ navigation }: Props) {
 
   return (
     <ScreenContainer>
-      <View style={styles.logo}>
-        <Image source={require('../../assets/lmx-mark.png')} style={styles.logoBox} />
+      <BrandBar />
+      <View style={styles.titleBlock}>
+        <Text style={styles.kicker}>LMX Driver</Text>
+        <Text style={styles.titleText} accessibilityRole="header">
+          Sign in to start your shift
+        </Text>
       </View>
-      <Text style={[styles.titleText, styles.centered]}>LMX Driver</Text>
-      <Text style={[styles.subtitleText, styles.centered, styles.tagline]}>
-        Deliver more, drive smarter.
-      </Text>
 
-      <Button label="Scan sign-in code" onPress={() => setScanning(true)} disabled={loading} />
+      {/* One tile, one thing to press first: the code on the dispatcher's screen. */}
+      <Card style={styles.card}>
+        <Button label="Scan sign-in code" onPress={() => setScanning(true)} disabled={loading} />
 
-      <Text style={[styles.footerText, styles.centered, styles.or]}>or type it</Text>
+        <Text style={[styles.footerText, styles.centered, styles.or]}>or type it</Text>
 
-      <TextField
-        label="Sign-in code"
-        placeholder="XXXXX-XXXXX"
-        autoCapitalize="characters"
-        autoCorrect={false}
-        autoComplete="off"
-        maxLength={24}
-        value={code}
-        onChangeText={setCode}
-      />
-      {error && <Text style={styles.error}>{error}</Text>}
+        <TextField
+          label="Sign-in code"
+          placeholder="XXXXX-XXXXX"
+          autoCapitalize="characters"
+          autoCorrect={false}
+          autoComplete="off"
+          maxLength={24}
+          value={code}
+          onChangeText={setCode}
+        />
+        {error && <Text style={styles.error}>{error}</Text>}
 
-      <Button
-        label="Sign in"
-        variant="outline"
-        onPress={() => submit(code)}
-        loading={loading}
-        disabled={!code.trim()}
-      />
+        <Button
+          label="Sign in"
+          variant="outline"
+          onPress={() => submit(code)}
+          loading={loading}
+          disabled={!code.trim()}
+        />
+      </Card>
 
       <Text style={[styles.footerText, styles.centered, styles.footer]}>
         No code? The ops team at your hub can give you one.
@@ -132,13 +137,12 @@ export function SignInScreen({ navigation }: Props) {
 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    logo: { alignItems: 'center', marginTop: spacing.xxl, marginBottom: spacing.lg },
-    logoBox: { width: 64, height: 64, borderRadius: 16 },
-    titleText: { ...typography.title, color: colors.textPrimary },
-    subtitleText: { ...typography.subtitle, color: colors.textSecondary },
+    titleBlock: { gap: spacing.sm, marginTop: spacing.xxl, marginBottom: spacing.xl },
+    kicker: { ...typography.subtitle, color: colors.textSecondary },
+    titleText: { ...typography.display, color: colors.textPrimary },
+    card: { borderRadius: 28, gap: spacing.xs },
     footerText: { ...typography.small, color: colors.textMuted },
     centered: { textAlign: 'center' },
-    tagline: { marginBottom: spacing.xxl },
     footer: { marginTop: spacing.lg },
     or: { marginVertical: spacing.md },
     serverRow: { marginTop: spacing.md, minHeight: 44, justifyContent: 'center' },

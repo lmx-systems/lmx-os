@@ -159,12 +159,11 @@ function Chip({
 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
+    // A grey well inside the stop's white card: no outline (docs/DESIGN_SYSTEM.md).
     panel: {
       backgroundColor: colors.surfaceAlt,
-      borderColor: colors.borderStrong,
-      borderWidth: 1,
-      borderRadius: radius.md,
-      padding: spacing.md,
+      borderRadius: 20,
+      padding: spacing.lg,
       marginBottom: spacing.md,
     },
     title: { ...typography.body, color: colors.textPrimary, fontFamily: 'PlusJakartaSans_700Bold' },
@@ -174,18 +173,20 @@ const makeStyles = (colors: ColorScheme) =>
     fieldLabel: { ...typography.small, color: colors.textSecondary, marginBottom: spacing.sm },
     warning: { ...typography.small, color: colors.danger, marginBottom: spacing.sm },
     chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
+    // Chips as the console's: white pills, the chosen one ink.
     chip: {
-      borderWidth: 1,
+      borderWidth: 1.5,
       borderColor: colors.borderStrong,
-      borderRadius: radius.md,
-      paddingVertical: spacing.sm,
+      borderRadius: radius.pill,
+      minHeight: 40,
+      justifyContent: 'center',
       paddingHorizontal: spacing.md,
       backgroundColor: colors.surface,
     },
-    chipActive: { borderColor: colors.primary, backgroundColor: colors.accentDim },
-    chipLabel: { ...typography.small, color: colors.textSecondary },
-    chipLabelActive: { color: colors.primary, fontFamily: 'PlusJakartaSans_700Bold' },
-    save: { backgroundColor: colors.primary, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
+    chipActive: { borderColor: colors.primary, backgroundColor: colors.primary },
+    chipLabel: { ...typography.small, fontSize: 13, fontFamily: 'PlusJakartaSans_600SemiBold', color: colors.textPrimary },
+    chipLabelActive: { color: colors.primaryText, fontFamily: 'PlusJakartaSans_700Bold' },
+    save: { backgroundColor: colors.primary, borderRadius: radius.pill, minHeight: 48, justifyContent: 'center', alignItems: 'center' },
     saveDisabled: { opacity: 0.4 },
     saveLabel: { ...typography.body, color: colors.primaryText, fontFamily: 'PlusJakartaSans_700Bold' },
   });

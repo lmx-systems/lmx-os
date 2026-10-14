@@ -108,7 +108,7 @@ const makeStyles = (colors: ColorScheme) =>
       minHeight: 44,
       justifyContent: 'center',
       paddingHorizontal: spacing.md,
-      borderRadius: radius.md,
+      borderRadius: radius.pill,
       borderWidth: 1.5,
       borderColor: colors.borderStrong,
       backgroundColor: colors.surface,

@@ -227,7 +227,7 @@ const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     sectionLabel: { ...typography.label, color: colors.textPrimary, marginBottom: spacing.xs },
     segmentRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
-    segment: { flex: 1, paddingVertical: spacing.sm + 2, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, alignItems: 'center' },
+    segment: { flex: 1, minHeight: 44, justifyContent: 'center', borderRadius: radius.pill, borderWidth: 1.5, borderColor: colors.borderStrong, backgroundColor: colors.surface, alignItems: 'center' },
     segmentActive: { backgroundColor: colors.primary, borderColor: colors.primary },
     segmentLabel: { color: colors.textPrimary, fontFamily: 'PlusJakartaSans_600SemiBold' },
     segmentLabelActive: { color: colors.primaryText },

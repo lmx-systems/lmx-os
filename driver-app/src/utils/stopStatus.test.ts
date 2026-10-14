@@ -106,3 +106,11 @@ describe('a technician visit (DE-6)', () => {
     expect(stopLabel(stop({ stop_type: 'visit', address: undefined }))).toBe('Site visit');
   });
 });
+
+describe('primaryActionLabel by stop type', () => {
+  it('calls the last step at a pickup a collection, not a delivery', () => {
+    expect(primaryActionLabel({ kind: 'confirmDelivery' }, 'pickup')).toBe('Confirm collection');
+    expect(primaryActionLabel({ kind: 'confirmDelivery' }, 'dropoff')).toBe('Confirm delivery');
+    expect(primaryActionLabel({ kind: 'confirmDelivery' })).toBe('Confirm delivery');
+  });
+});

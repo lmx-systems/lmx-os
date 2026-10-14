@@ -5,6 +5,7 @@ import { api, ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { Button } from '../components/Button';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { BrandBar } from '../components/ui/kit';
 import { TextField } from '../components/TextField';
 import { radius, spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
@@ -45,8 +46,13 @@ export function VehicleSetupScreen() {
 
   return (
     <ScreenContainer>
-      <Text style={styles.stepText}>Step 2 of 2</Text>
-      <Text style={styles.title}>Your vehicle</Text>
+      <BrandBar />
+      <View style={styles.titleBlock}>
+        <Text style={styles.stepText}>Step 2 of 2</Text>
+        <Text style={styles.title} accessibilityRole="header">
+          Your vehicle
+        </Text>
+      </View>
 
       <Text style={styles.fieldLabel}>Vehicle type</Text>
       <View style={styles.segmentRow}>
@@ -80,17 +86,19 @@ export function VehicleSetupScreen() {
 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    stepText: { ...typography.small, color: colors.textMuted },
-    title: { ...typography.title, color: colors.textPrimary, marginBottom: spacing.lg },
+    titleBlock: { gap: spacing.sm, marginTop: spacing.xl },
+    stepText: { ...typography.subtitle, color: colors.textSecondary },
+    title: { ...typography.display, color: colors.textPrimary, marginBottom: spacing.xl },
     fieldLabel: { ...typography.label, color: colors.textPrimary },
     segmentRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs, marginBottom: spacing.lg },
+    // A pill group, as the console's filter chips: white, the chosen one ink.
     segment: {
       flex: 1,
-      paddingVertical: spacing.sm + 2,
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
+      minHeight: 48,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surface,
       alignItems: 'center',
+      justifyContent: 'center',
     },
     segmentActive: { backgroundColor: colors.primary, borderColor: colors.primary },
     segmentLabel: { color: colors.textPrimary, fontFamily: 'PlusJakartaSans_600SemiBold' },

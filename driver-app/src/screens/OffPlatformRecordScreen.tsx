@@ -215,7 +215,6 @@ export function OffPlatformRecordScreen({ navigation, route }: Props) {
 
   return (
     <ScreenContainer>
-      <Text style={styles.title}>Log an off-platform delivery</Text>
       <Text style={styles.body}>
         A job you did for Curri, Dispatch or Roadie, recorded the way we record our own deliveries. Close it in the
         platform's app as usual. A bonus is recorded for each job you log; it is paid once payouts are set up.

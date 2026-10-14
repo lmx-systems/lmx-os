@@ -1,8 +1,10 @@
 import { useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 
 import type { DriverCompliance } from '../api/types';
 import { radius, spacing, typography, useThemeColors } from '../theme';
+import { ShieldAlert } from 'lucide-react-native';
+import { Banner } from './ui/kit';
 import type { ColorScheme } from '../theme';
 
 interface ComplianceBannerProps {
@@ -39,8 +41,8 @@ export function ComplianceBanner({ compliance, onOpenDocuments }: ComplianceBann
   );
 
   return (
-    <View style={styles.banner}>
-      <Text style={styles.title}>You can&apos;t go online yet</Text>
+    // Peach: something a person has to sort out before the day can start.
+    <Banner icon={ShieldAlert} tone="needs" title="You can&apos;t go online yet">
       {compliance.problems.map((problem) => (
         <Text key={`${problem.doc_type}-${problem.reason}`} style={styles.line}>
           • {problem.detail}
@@ -52,31 +54,27 @@ export function ComplianceBanner({ compliance, onOpenDocuments }: ComplianceBann
         </Pressable>
       ) : (
         <Text style={styles.waiting}>
-          Nothing for you to do — we&apos;ll text you as soon as it&apos;s checked.
+          {/* LMX sends no texts; the switch simply works once it is checked. */}
+          Nothing for you to do. You can go online as soon as it&apos;s checked.
         </Text>
       )}
-    </View>
+    </Banner>
   );
 }
 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    banner: {
-      backgroundColor: colors.dangerDim,
-      borderRadius: radius.md,
-      padding: spacing.md,
-      marginBottom: spacing.md,
-      gap: 2,
-    },
-    title: { ...typography.body, color: colors.danger, fontFamily: 'PlusJakartaSans_700Bold', marginBottom: 2 },
-    line: { ...typography.small, color: colors.danger },
+    line: { ...typography.small, fontSize: 12.5, color: colors.needs },
+    // One thing to press, in ink, as everywhere else.
     action: {
       marginTop: spacing.md,
-      backgroundColor: colors.danger,
-      borderRadius: radius.md,
-      paddingVertical: spacing.md,
-      alignItems: 'center',
+      alignSelf: 'flex-start',
+      backgroundColor: colors.primary,
+      borderRadius: radius.pill,
+      minHeight: 44,
+      paddingHorizontal: spacing.lg,
+      justifyContent: 'center',
     },
-    actionLabel: { ...typography.body, color: '#ffffff', fontFamily: 'PlusJakartaSans_700Bold' },
-    waiting: { ...typography.small, color: colors.danger, marginTop: spacing.sm, fontStyle: 'italic' },
+    actionLabel: { ...typography.body, color: colors.primaryText, fontFamily: 'PlusJakartaSans_700Bold' },
+    waiting: { ...typography.small, fontSize: 12.5, color: colors.needs, marginTop: spacing.sm },
   });

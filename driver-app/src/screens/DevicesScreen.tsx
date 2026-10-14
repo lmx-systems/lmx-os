@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { api } from '../api/client';
 import type { DriverDevice } from '../api/types';
-import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { Row } from '../components/ui/kit';
+import { Smartphone } from 'lucide-react-native';
 import { lastSeen } from '../utils/lastSeen';
 import { radius, spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
@@ -124,17 +125,14 @@ export function DevicesScreen() {
       </Text>
 
       {(devices ?? []).map((device) => (
-        <Card key={device.device_id} style={styles.row}>
-          <View style={styles.rowText}>
-            <Text style={styles.rowBody}>
-              {device.device_name ?? 'Unnamed phone'}
-              {device.is_current ? ' · this phone' : ''}
-            </Text>
-            <Text style={styles.rowSmall}>
-              {device.is_current ? 'In use now' : `Last used ${lastSeen(device.last_seen_at)}`}
-            </Text>
-          </View>
-          {device.is_current ? (
+        <Row
+          key={device.device_id}
+          icon={Smartphone}
+          tone={device.is_current ? 'lime' : 'neutral'}
+          title={`${device.device_name ?? 'Unnamed phone'}${device.is_current ? ' · this phone' : ''}`}
+          detail={device.is_current ? 'In use now' : `Last used ${lastSeen(device.last_seen_at)}`}
+          right={
+          device.is_current ? (
             // No button on purpose. See the note at the top of this file: the
             // queued stop events go out under this session, and Log out on the
             // previous screen is the thing that counts them first.
@@ -151,8 +149,9 @@ export function DevicesScreen() {
                 {revoking === device.device_id ? 'Signing out…' : 'Sign out'}
               </Text>
             </Pressable>
-          )}
-        </Card>
+          )
+          }
+        />
       ))}
 
       {devices !== null && others.length === 0 && (
