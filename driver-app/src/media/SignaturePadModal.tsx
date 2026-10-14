@@ -33,9 +33,17 @@ export function SignaturePadModal({ visible, onCaptured, onCancel }: SignaturePa
           webStyle={signaturePadWebStyle(colors)}
           autoClear={false}
         />
+        {/* Three pills don't fit across a phone: the one that finishes the
+            proof gets its own full-width row. */}
         <View style={styles.footer}>
-          <Button label="Cancel" variant="outline" onPress={onCancel} />
-          <Button label="Clear" variant="outline" onPress={() => ref.current?.clearSignature()} />
+          <View style={styles.footerRow}>
+            <View style={styles.footerHalf}>
+              <Button label="Cancel" variant="outline" onPress={onCancel} />
+            </View>
+            <View style={styles.footerHalf}>
+              <Button label="Clear" variant="outline" onPress={() => ref.current?.clearSignature()} />
+            </View>
+          </View>
           <Button label="Use signature" onPress={() => ref.current?.readSignature()} />
         </View>
       </View>
@@ -59,5 +67,7 @@ function signaturePadWebStyle(colors: ColorScheme): string {
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.surface },
-    footer: { flexDirection: 'row', gap: spacing.sm, padding: spacing.lg },
+    footer: { gap: spacing.sm, padding: spacing.lg },
+    footerRow: { flexDirection: 'row', gap: spacing.sm },
+    footerHalf: { flex: 1 },
   });

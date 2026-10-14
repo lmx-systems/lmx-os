@@ -55,7 +55,7 @@ const makeStyles = (colors: ColorScheme) =>
       minHeight: 56,
       borderRadius: radius.pill,
       paddingVertical: spacing.md + 4,
-      paddingHorizontal: spacing.xl,
+      paddingHorizontal: spacing.lg,
       alignItems: 'center',
       justifyContent: 'center',
     },
