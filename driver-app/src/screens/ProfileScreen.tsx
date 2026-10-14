@@ -220,7 +220,7 @@ const makeStyles = (colors: ColorScheme) =>
     phoneText: { ...typography.subtitle, color: colors.textSecondary },
     statsRow: { flexDirection: 'row', marginTop: spacing.md },
     statLabel: { ...typography.label, color: colors.textPrimary },
-    statValue: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginTop: spacing.xs },
+    statValue: { fontSize: 20, fontFamily: 'PlusJakartaSans_700Bold', color: colors.textPrimary, marginTop: spacing.xs },
     sectionLabel: { ...typography.label, color: colors.textPrimary, marginBottom: spacing.xs },
     row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.lg },
     rowText: { flex: 1 },

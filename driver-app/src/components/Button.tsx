@@ -7,7 +7,8 @@ import type { ColorScheme } from '../theme';
 interface ButtonProps {
   label: string;
   onPress: () => void;
-  variant?: 'primary' | 'outline' | 'danger';
+  // 'lime': the primary action on a black camera screen, where an ink pill would vanish.
+  variant?: 'primary' | 'outline' | 'danger' | 'lime';
   disabled?: boolean;
   loading?: boolean;
 }
@@ -25,18 +26,20 @@ export function Button({ label, onPress, variant = 'primary', disabled, loading 
         variant === 'primary' && styles.primary,
         variant === 'outline' && styles.outline,
         variant === 'danger' && styles.danger,
+        variant === 'lime' && styles.lime,
         isDisabled && styles.disabled,
         pressed && !isDisabled && styles.pressed,
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={variant === 'outline' ? colors.textPrimary : colors.primaryText} />
+        <ActivityIndicator color={variant === 'outline' || variant === 'lime' ? colors.textPrimary : colors.primaryText} />
       ) : (
         <Text
           style={[
             styles.label,
             variant === 'outline' && styles.outlineLabel,
             variant === 'danger' && styles.dangerLabel,
+            variant === 'lime' && styles.outlineLabel,
           ]}
         >
           {label}
@@ -49,8 +52,8 @@ export function Button({ label, onPress, variant = 'primary', disabled, loading 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     base: {
-      minHeight: 52,
-      borderRadius: radius.md,
+      minHeight: 56,
+      borderRadius: radius.pill,
       paddingVertical: spacing.md + 4,
       alignItems: 'center',
       justifyContent: 'center',
@@ -58,9 +61,10 @@ const makeStyles = (colors: ColorScheme) =>
     primary: { backgroundColor: colors.primary },
     outline: { backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.borderStrong },
     danger: { backgroundColor: colors.danger },
+    lime: { backgroundColor: colors.lime },
     disabled: { opacity: 0.5 },
     pressed: { opacity: 0.85 },
-    label: { color: colors.primaryText, fontSize: 17, fontWeight: '700' },
+    label: { color: colors.primaryText, fontSize: 17, fontFamily: 'PlusJakartaSans_700Bold' },
     outlineLabel: { color: colors.textPrimary },
     dangerLabel: { color: '#ffffff' },
   });

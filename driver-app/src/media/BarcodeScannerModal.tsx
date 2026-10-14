@@ -47,7 +47,7 @@ export function BarcodeScannerModal({
         {!permission?.granted ? (
           <View style={styles.permissionPrompt}>
             <Text style={styles.permissionText}>{permissionText}</Text>
-            <Button label="Allow camera access" onPress={requestPermission} />
+            <Button label="Allow camera access" variant="lime" onPress={requestPermission} />
             <Button label="Cancel" variant="outline" onPress={onCancel} />
           </View>
         ) : (
@@ -79,7 +79,7 @@ const makeStyles = (colors: ColorScheme) =>
     container: { flex: 1, backgroundColor: '#000' },
     camera: { flex: 1 },
     overlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
-    frame: { width: 260, height: 160, borderWidth: 3, borderColor: colors.accent, borderRadius: radius.lg },
+    frame: { width: 260, height: 160, borderWidth: 3, borderColor: colors.lime, borderRadius: radius.lg },
     hint: {
       ...typography.body,
       color: '#ffffff',
@@ -89,5 +89,6 @@ const makeStyles = (colors: ColorScheme) =>
     },
     footer: { padding: spacing.lg },
     permissionPrompt: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md },
-    permissionText: { ...typography.body, color: colors.textPrimary, textAlign: 'center' },
+    // White on the black camera screen; the palette's ink would be invisible here.
+    permissionText: { ...typography.body, color: '#ffffff', textAlign: 'center' },
   });

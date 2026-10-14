@@ -93,7 +93,7 @@ const makeStyles = (colors: ColorScheme) =>
       alignItems: 'center',
     },
     segmentActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-    segmentLabel: { color: colors.textPrimary, fontWeight: '600' },
+    segmentLabel: { color: colors.textPrimary, fontFamily: 'PlusJakartaSans_600SemiBold' },
     segmentLabelActive: { color: colors.primaryText },
     error: { color: colors.danger, marginBottom: spacing.md, fontSize: 13 },
   });

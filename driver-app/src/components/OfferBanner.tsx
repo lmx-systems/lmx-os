@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { api, ApiError } from '../api/client';
 import type { DeclineReason, JobOffer, Route } from '../api/types';
-import { spacing, typography, useThemeColors } from '../theme';
+import { radius, spacing, typography, useThemeColors } from '../theme';
 import type { ColorScheme } from '../theme';
 import { Button } from './Button';
 import { Card } from './Card';
@@ -166,12 +166,24 @@ const makeStyles = (colors: ColorScheme) =>
     card: { marginBottom: spacing.lg, gap: spacing.xs },
     headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     headerTitle: { ...typography.title, color: colors.textPrimary, fontSize: 18 },
-    payText: { fontSize: 28, fontWeight: '700', color: colors.primary, marginTop: spacing.xs },
-    bonusText: { ...typography.label, color: colors.primary, marginTop: spacing.xs },
+    payText: { fontSize: 28, fontFamily: 'PlusJakartaSans_700Bold', color: colors.primary, marginTop: spacing.xs },
+    // The bonus on the design system's lime: the one thing on the offer worth
+    // noticing first, and never colour alone - the amount is in the words.
+    bonusText: {
+      ...typography.label,
+      color: colors.textPrimary,
+      backgroundColor: colors.lime,
+      alignSelf: 'flex-start',
+      overflow: 'hidden',
+      borderRadius: radius.pill,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.xs,
+      marginTop: spacing.sm,
+    },
     cardLabel: { ...typography.label, color: colors.textPrimary, marginTop: spacing.sm },
     cardBody: { ...typography.body, color: colors.textPrimary },
     countdownText: { ...typography.small, color: colors.textMuted },
-    urgent: { color: colors.danger, fontWeight: '700' },
+    urgent: { color: colors.danger, fontFamily: 'PlusJakartaSans_700Bold' },
     error: { color: colors.danger, marginTop: spacing.sm, fontSize: 13 },
     buttonRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
     buttonHalf: { flex: 1 },

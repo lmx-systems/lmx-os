@@ -32,7 +32,7 @@ const makeStyles = (colors: ColorScheme) =>
       marginTop: spacing.xs,
       borderWidth: 1,
       borderColor: colors.border,
-      borderRadius: radius.md,
+      borderRadius: radius.sm,
       paddingHorizontal: spacing.md,
       paddingVertical: spacing.md,
       fontSize: 16,

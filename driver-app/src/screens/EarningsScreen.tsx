@@ -114,14 +114,14 @@ export function EarningsScreen({ navigation }: Props) {
 
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
-    placeholderBanner: { backgroundColor: colors.warningDim, borderColor: colors.warning, marginBottom: spacing.lg, gap: spacing.xs },
-    placeholderTitle: { fontSize: 14, fontWeight: '700', color: colors.warning },
+    placeholderBanner: { backgroundColor: colors.warningDim, borderWidth: 1.5, borderColor: colors.warning, marginBottom: spacing.lg, gap: spacing.xs },
+    placeholderTitle: { fontSize: 14, fontFamily: 'PlusJakartaSans_700Bold', color: colors.warning },
     noteText: { ...typography.small, color: colors.textMuted },
     weekLabel: { ...typography.label, color: colors.textPrimary },
-    bigNumber: { fontSize: 40, fontWeight: '700', color: colors.textPrimary, marginTop: spacing.xs, marginBottom: spacing.lg },
+    bigNumber: { fontSize: 40, fontFamily: 'PlusJakartaSans_700Bold', color: colors.textPrimary, marginTop: spacing.xs, marginBottom: spacing.lg },
     statsRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
     overtimeCard: { backgroundColor: colors.accentDim, marginBottom: spacing.lg, gap: spacing.xs },
     statCard: { flex: 1 },
     statLabel: { ...typography.label, color: colors.textPrimary },
-    statValue: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginTop: spacing.xs },
+    statValue: { fontSize: 20, fontFamily: 'PlusJakartaSans_700Bold', color: colors.textPrimary, marginTop: spacing.xs },
   });

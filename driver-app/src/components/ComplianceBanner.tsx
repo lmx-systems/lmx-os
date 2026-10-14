@@ -70,7 +70,7 @@ const makeStyles = (colors: ColorScheme) =>
       marginBottom: spacing.md,
       gap: 2,
     },
-    title: { ...typography.body, color: colors.danger, fontWeight: '700', marginBottom: 2 },
+    title: { ...typography.body, color: colors.danger, fontFamily: 'PlusJakartaSans_700Bold', marginBottom: 2 },
     line: { ...typography.small, color: colors.danger },
     action: {
       marginTop: spacing.md,
@@ -79,6 +79,6 @@ const makeStyles = (colors: ColorScheme) =>
       paddingVertical: spacing.md,
       alignItems: 'center',
     },
-    actionLabel: { ...typography.body, color: '#ffffff', fontWeight: '700' },
+    actionLabel: { ...typography.body, color: '#ffffff', fontFamily: 'PlusJakartaSans_700Bold' },
     waiting: { ...typography.small, color: colors.danger, marginTop: spacing.sm, fontStyle: 'italic' },
   });
