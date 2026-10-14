@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Keyboard, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -14,6 +14,19 @@ export function PillTabBar({ state, descriptors, navigation }: BottomTabBarProps
   const colors = useThemeColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
+  // A custom bar ignores tabBarHideOnKeyboard, and on Android the keyboard
+  // resizes the window, so the pill group would ride up above it.
+  const [keyboardUp, setKeyboardUp] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardUp(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardUp(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  if (keyboardUp) return null;
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
       <View style={styles.group} accessibilityRole="tablist">
@@ -24,7 +37,8 @@ export function PillTabBar({ state, descriptors, navigation }: BottomTabBarProps
           const color = focused ? colors.primaryText : colors.textSecondary;
           const onPress = () => {
             const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-            if (!focused && !event.defaultPrevented) navigation.navigate(route.name, route.params);
+            // As the library's own bar does: merge, so a nested screen asked for elsewhere is kept.
+            if (!focused && !event.defaultPrevented) navigation.navigate({ name: route.name, merge: true, params: route.params });
           };
           return (
             <Pressable
@@ -32,7 +46,7 @@ export function PillTabBar({ state, descriptors, navigation }: BottomTabBarProps
               onPress={onPress}
               accessibilityRole="tab"
               accessibilityState={{ selected: focused }}
-              accessibilityLabel={label}
+              accessibilityLabel={options.tabBarAccessibilityLabel ?? label}
               style={[styles.item, focused && styles.itemOn]}
             >
               {options.tabBarIcon?.({ focused, color, size: 20 })}

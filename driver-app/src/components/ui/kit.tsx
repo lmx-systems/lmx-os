@@ -83,18 +83,21 @@ export function Facts({ items }: { items: { k: string; v: string }[] }) {
   );
 }
 
-/** One segment per stop: done in ink, the current one lime, the rest grey. */
-export function Segments({ total, done }: { total: number; done: number }) {
+export type SegmentState = 'done' | 'current' | 'ahead';
+
+/** One segment per stop, each from its own state: done in ink, the current one lime, the rest grey. */
+export function Segments({ states }: { states: SegmentState[] }) {
   const colors = useThemeColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const done = states.filter((st) => st === 'done').length;
   return (
-    <View style={styles.segments} accessibilityLabel={`${done} of ${total} done`}>
-      {Array.from({ length: total }, (_, i) => (
+    <View style={styles.segments} accessible accessibilityLabel={`${done} of ${states.length} stops done`}>
+      {states.map((st, i) => (
         <View
           key={i}
           style={[
             styles.segment,
-            { backgroundColor: i < done ? colors.primary : i === done ? colors.limeStrong : colors.borderStrong },
+            { backgroundColor: st === 'done' ? colors.primary : st === 'current' ? colors.limeStrong : colors.borderStrong },
           ]}
         />
       ))}
@@ -118,6 +121,7 @@ export function Steps({ labels, current }: { labels: string[]; current: number }
           <View
             key={label}
             style={[styles.step, passed && styles.stepPassed, now && styles.stepNow]}
+            accessible
             accessibilityLabel={`${label}${passed ? ', done' : now ? ', now' : ''}`}
           >
             {passed && <Check size={13} color={colors.textPrimary} strokeWidth={3} />}
@@ -184,7 +188,8 @@ export function Row({ icon, tone, title, detail, right, onPress, selected, surfa
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? title}
+      // The detail line is part of what a row says ("Documents, 2 need attention").
+      accessibilityLabel={accessibilityLabel ?? (detail ? `${title}, ${detail}` : title)}
       accessibilityState={selected !== undefined ? { selected } : undefined}
       style={({ pressed }) => [...style, pressed && styles.pressed]}
     >

@@ -157,101 +157,127 @@ export function TodayRouteScreen({ navigation }: Props) {
   const zone = profile?.delivery_zone ?? 'Your zone';
   const nextStops = route ? route.stops.filter((st) => st.stop_id !== currentStop?.stop_id) : [];
 
-  return (
-    <ScreenContainer scroll={!route}>
-      <BrandBar
-        right={
-          <View style={styles.duty}>
-            <Text style={styles.dutyText}>{isOnline ? 'On duty' : 'Off duty'}</Text>
-            <Switch
-              value={isOnline}
-              onValueChange={handleToggle}
-              disabled={togglingOnline}
-              accessibilityLabel={isOnline ? 'Go off duty' : 'Go on duty'}
-              // Ink when on, like every other selected control; not the platform's green.
-              trackColor={{ false: colors.borderStrong, true: colors.primary }}
-              ios_backgroundColor={colors.borderStrong}
-            />
-          </View>
+  const top = (
+    <>
+    <BrandBar
+      right={
+        <View style={styles.duty}>
+          <Text style={styles.dutyText}>{isOnline ? 'On duty' : 'Off duty'}</Text>
+          <Switch
+            value={isOnline}
+            onValueChange={handleToggle}
+            disabled={togglingOnline}
+            accessibilityLabel={isOnline ? 'Go off duty' : 'Go on duty'}
+            // Ink when on, like every other selected control; not the platform's green.
+            trackColor={{ false: colors.borderStrong, true: colors.primary }}
+            ios_backgroundColor={colors.borderStrong}
+          />
+        </View>
+      }
+    />
+
+    {/* The page title, as on the console: what the driver is doing, in one line. */}
+    <View style={styles.titleBlock}>
+      <Text style={styles.kicker}>
+        {route ? zone : isOnline ? `${zone} · looking for jobs` : 'Go online to receive jobs'}
+      </Text>
+      <Text style={styles.display} accessibilityRole="header">
+        {route
+          ? doneCount >= route.stops.length
+            ? 'Route complete'
+            : `Stop ${doneCount + 1} of ${route.stops.length}`
+          : isOnline
+            ? "You're online"
+            : "You're offline"}
+      </Text>
+      {/* Each bar from its own stop, so a stop finished out of order still reads right. */}
+      {route && (
+        <Segments
+          states={route.stops.map((st) => (isStopTerminal(st) ? 'done' : st.stop_id === currentStop?.stop_id ? 'current' : 'ahead'))}
+        />
+      )}
+    </View>
+
+    {/* Below the compliance banner, which refuses to let a driver work at
+        all. This one says a measurement is off while everything else keeps
+        working, and putting it above would rank it wrongly (DRV-5). */}
+    <LocationDegradedBanner state={locationState} />
+
+    {compliance && !compliance.can_go_on_shift && (
+      <ComplianceBanner
+        compliance={compliance}
+        // Documents lives in the Profile stack under a different tab, so this
+        // crosses navigators rather than pushing within Home's - getParent()
+        // is what makes that reachable from here.
+        onOpenDocuments={() =>
+          navigation
+            .getParent<BottomTabNavigationProp<MainTabParamList>>()
+            ?.navigate('ProfileTab', { screen: 'Documents' })
         }
       />
+    )}
 
-      {/* The page title, as on the console: what the driver is doing, in one line. */}
-      <View style={styles.titleBlock}>
-        <Text style={styles.kicker}>
-          {route ? zone : isOnline ? `${zone} · looking for jobs` : 'Go online to receive jobs'}
-        </Text>
-        <Text style={styles.display} accessibilityRole="header">
-          {route ? `Stop ${Math.min(doneCount + 1, route.stops.length)} of ${route.stops.length}` : isOnline ? "You're online" : "You're offline"}
-        </Text>
-        {route && <Segments total={route.stops.length} done={doneCount} />}
-      </View>
+    {toggleError && <Text style={styles.error}>{toggleError}</Text>}
 
-      {/* Below the compliance banner, which refuses to let a driver work at
-          all. This one says a measurement is off while everything else keeps
-          working, and putting it above would rank it wrongly (DRV-5). */}
-      <LocationDegradedBanner state={locationState} />
+    {routeChangeEvent && (
+      <RouteChangeBanner
+        event={routeChangeEvent}
+        onAccept={() => {
+          setRouteChangeEvent(null);
+          refresh();
+        }}
+      />
+    )}
 
-      {compliance && !compliance.can_go_on_shift && (
-        <ComplianceBanner
-          compliance={compliance}
-          // Documents lives in the Profile stack under a different tab, so this
-          // crosses navigators rather than pushing within Home's - getParent()
-          // is what makes that reachable from here.
-          onOpenDocuments={() =>
-            navigation
-              .getParent<BottomTabNavigationProp<MainTabParamList>>()
-              ?.navigate('ProfileTab', { screen: 'Documents' })
-          }
+    {route && currentStop && (
+      // The one card that matters, as on the on-call phone: what kind of stop,
+      // where, the facts at a glance, and one thing to press.
+      <Card style={styles.currentCard} onPress={() => navigation.navigate('StopDetail', { stopId: currentStop.stop_id })}>
+        <View style={styles.currentTop}>
+          <KindPill label={stopTypeLabel(currentStop)} tone={currentStop.stop_type === 'pickup' ? 'neutral' : 'lime'} />
+          <Text style={styles.meta}>Next stop</Text>
+        </View>
+        <View style={styles.currentText}>
+          <Text style={styles.headline}>{stopLabel(currentStop)}</Text>
+          {currentStop.stop_type === 'pickup' && currentStop.address ? (
+            <Text style={styles.secondary}>{currentStop.address}</Text>
+          ) : null}
+        </View>
+        <Facts
+          items={[
+            // The forecast the customer was shown, not a deadline.
+            { k: 'ETA', v: etaLabel(currentStop)?.replace(/^ETA /, '') ?? '—' },
+            // Only a pickup carries a real parcel count; a drop-off's is always 1
+            // on the server, which would tell a driver to hand over one of three.
+            ...(currentStop.stop_type === 'pickup' ? [{ k: 'Parcels', v: String(currentStop.parcel_count) }] : []),
+            { k: 'Then', v: `${route.stops.length - doneCount - 1} more` },
+          ]}
         />
-      )}
-
-      {toggleError && <Text style={styles.error}>{toggleError}</Text>}
-
-      {routeChangeEvent && (
-        <RouteChangeBanner
-          event={routeChangeEvent}
-          onAccept={() => {
-            setRouteChangeEvent(null);
-            refresh();
-          }}
+        <Button
+          label={primaryActionLabel(primaryActionForStop(currentStop), currentStop.stop_type)}
+          onPress={() => navigation.navigate('StopDetail', { stopId: currentStop.stop_id })}
         />
-      )}
+      </Card>
+    )}
+    </>
+  );
 
-      {route && currentStop && (
-        // The one card that matters, as on the on-call phone: what kind of stop,
-        // where, the facts at a glance, and one thing to press.
-        <Card style={styles.currentCard} onPress={() => navigation.navigate('StopDetail', { stopId: currentStop.stop_id })}>
-          <View style={styles.currentTop}>
-            <KindPill label={stopTypeLabel(currentStop)} tone={currentStop.stop_type === 'pickup' ? 'neutral' : 'lime'} />
-            <Text style={styles.meta}>Next stop</Text>
-          </View>
-          <View style={styles.currentText}>
-            <Text style={styles.headline}>{stopLabel(currentStop)}</Text>
-            {currentStop.stop_type === 'pickup' && currentStop.address ? (
-              <Text style={styles.secondary}>{currentStop.address}</Text>
-            ) : null}
-          </View>
-          <Facts
-            items={[
-              { k: 'Arrive by', v: etaLabel(currentStop)?.replace(/^ETA /, '') ?? '—' },
-              { k: 'Parcels', v: String(currentStop.parcel_count) },
-              { k: 'Then', v: `${route.stops.length - doneCount - 1} more` },
-            ]}
-          />
-          <Button
-            label={primaryActionLabel(primaryActionForStop(currentStop), currentStop.stop_type)}
-            onPress={() => navigation.navigate('StopDetail', { stopId: currentStop.stop_id })}
-          />
-        </Card>
-      )}
-
-      {route && (
+  if (route) {
+    // The whole page scrolls as one list: the header, banners and the next-stop
+    // card ride above the stops, so a small phone with a banner up never pushes
+    // the card's button out of reach.
+    return (
+      <ScreenContainer scroll={false}>
         <FlatList
           data={nextStops}
           keyExtractor={(st) => st.stop_id}
           contentContainerStyle={styles.list}
-          ListHeaderComponent={nextStops.length > 0 ? <SectionLabel>The rest of the route</SectionLabel> : null}
+          ListHeaderComponent={
+            <>
+              {top}
+              {nextStops.length > 0 && <SectionLabel>Every stop</SectionLabel>}
+            </>
+          }
           renderItem={({ item }) => (
             <View style={[styles.stopRow, isStopTerminal(item) && styles.stopRowDone]}>
               <View style={[styles.sequenceBadge, item.status === 'completed' && styles.sequenceDone]}>
@@ -267,7 +293,13 @@ export function TodayRouteScreen({ navigation }: Props) {
             </View>
           )}
         />
-      )}
+      </ScreenContainer>
+    );
+  }
+
+  return (
+    <ScreenContainer>
+      {top}
 
       {!route && primaryOffer && (
         <>

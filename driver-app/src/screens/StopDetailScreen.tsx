@@ -302,9 +302,12 @@ export function StopDetailScreen({ route, navigation }: Props) {
 
       <SyncStatusPill stopId={stopId} />
 
-      <View style={styles.stepsWrap}>
-        <Steps labels={stepLabels} current={stepIndex} />
-      </View>
+      {/* A flagged stop is closed but not done: no track of passed steps for it. */}
+      {stop.status !== 'failed' && (
+        <View style={styles.stepsWrap}>
+          <Steps labels={stepLabels} current={stepIndex} />
+        </View>
+      )}
 
       {stop.stop_type === 'dropoff' && stop.contact_phone && (
         // The number as the sender gave it, so the driver can check what the
@@ -316,17 +319,17 @@ export function StopDetailScreen({ route, navigation }: Props) {
       )}
 
       {/* Secondary actions as small white pills, so the one ink button below stays the thing to press. */}
-      {action.kind !== 'done' && (
-        <View style={styles.actionsRow}>
-          <PillAction label="Navigate" icon={Navigation} onPress={handleNavigate} />
-          {stop.stop_type === 'dropoff' && stop.contact_phone && dialable(stop.contact_phone) && (
-            <>
-              <PillAction label="Call" icon={Phone} onPress={() => contactRecipient('tel')} />
-              <PillAction label="Text" icon={MessageSquare} onPress={() => contactRecipient('sms')} />
-            </>
-          )}
-        </View>
-      )}
+      {/* Navigate only while there is somewhere to go; Call and Text stay after the
+          drop, as they always have, for a driver who needs the recipient again. */}
+      <View style={styles.actionsRow}>
+        {action.kind !== 'done' && <PillAction label="Navigate" icon={Navigation} onPress={handleNavigate} />}
+        {stop.stop_type === 'dropoff' && stop.contact_phone && dialable(stop.contact_phone) && (
+          <>
+            <PillAction label="Call" icon={Phone} onPress={() => contactRecipient('tel')} />
+            <PillAction label="Text" icon={MessageSquare} onPress={() => contactRecipient('sms')} />
+          </>
+        )}
+      </View>
 
       <Card style={styles.card}>
         {action.kind === 'arrive' && <Button label="Arrived" onPress={handleArrive} />}

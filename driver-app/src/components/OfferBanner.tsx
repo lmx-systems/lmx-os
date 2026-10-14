@@ -145,7 +145,8 @@ export function OfferBanner({ offer, onAccept, onDecline }: OfferBannerProps) {
       <Facts
         items={[
           { k: 'Deliveries', v: String(count) },
-          { k: 'Stops', v: String(count * 2) },
+          // No stop count: pickups at one shop merge into one stop, so twice the
+          // deliveries overstated the job a driver is deciding on.
           // Real per-delivery pay (docs/ROADMAP.md A11) - only for a gig-classified
           // driver; w2/1099 are paid hourly, so the well says so instead of a dollar figure.
           { k: 'Pay', v: offer.estimated_pay_cents !== null ? `$${(offer.estimated_pay_cents / 100).toFixed(2)}` : 'Hourly' },

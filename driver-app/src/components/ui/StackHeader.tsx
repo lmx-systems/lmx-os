@@ -24,7 +24,8 @@ export function StackHeader({ navigation, options, back }: NativeStackHeaderProp
         <Pressable
           onPress={navigation.goBack}
           accessibilityRole="button"
-          accessibilityLabel={`Back to ${back.title ?? 'previous screen'}`}
+          // A screen with no title (a stop) or an untitled route would read "Back to ".
+          accessibilityLabel={back.title ? `Back to ${back.title}` : 'Back'}
           hitSlop={8}
           style={({ pressed }) => [styles.back, pressed && styles.pressed]}
         >

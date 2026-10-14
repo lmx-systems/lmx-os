@@ -54,7 +54,7 @@ function AuthNavigator() {
   const colors = useThemeColors();
   return (
     <AuthStack.Navigator screenOptions={{ ...stackHeader(colors), headerShown: false }}>
-      <AuthStack.Screen name="SignIn" component={SignInScreen} />
+      <AuthStack.Screen name="SignIn" component={SignInScreen} options={{ title: 'Sign in' }} />
       <AuthStack.Screen
         name="Server"
         component={ServerScreen}

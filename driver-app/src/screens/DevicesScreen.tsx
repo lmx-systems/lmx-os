@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { api } from '../api/client';
@@ -124,35 +124,37 @@ export function DevicesScreen() {
         next time it asks for a new token.
       </Text>
 
-      {(devices ?? []).map((device) => (
-        <Row
-          key={device.device_id}
-          icon={Smartphone}
-          tone={device.is_current ? 'lime' : 'neutral'}
-          title={`${device.device_name ?? 'Unnamed phone'}${device.is_current ? ' · this phone' : ''}`}
-          detail={device.is_current ? 'In use now' : `Last used ${lastSeen(device.last_seen_at)}`}
-          right={
-          device.is_current ? (
-            // No button on purpose. See the note at the top of this file: the
-            // queued stop events go out under this session, and Log out on the
-            // previous screen is the thing that counts them first.
-            <Text style={styles.currentHint}>Log out from Profile</Text>
-          ) : (
-            <Pressable
-              disabled={revoking !== null}
-              onPress={() => confirmRevoke(device)}
-              accessibilityRole="button"
-              accessibilityLabel={`Sign out ${device.device_name ?? 'unnamed phone'}`}
-              style={[styles.signOut, revoking !== null && styles.disabled]}
-            >
-              <Text style={styles.signOutLabel}>
-                {revoking === device.device_id ? 'Signing out…' : 'Sign out'}
-              </Text>
-            </Pressable>
-          )
-          }
-        />
-      ))}
+      <View style={styles.list}>
+        {(devices ?? []).map((device) => (
+          <Row
+            key={device.device_id}
+            icon={Smartphone}
+            tone={device.is_current ? 'lime' : 'neutral'}
+            title={`${device.device_name ?? 'Unnamed phone'}${device.is_current ? ' · this phone' : ''}`}
+            detail={device.is_current ? 'In use now' : `Last used ${lastSeen(device.last_seen_at)}`}
+            right={
+              device.is_current ? (
+                // No button on purpose. See the note at the top of this file: the
+                // queued stop events go out under this session, and Log out on the
+                // previous screen is the thing that counts them first.
+                <Text style={styles.currentHint}>Log out from Profile</Text>
+              ) : (
+                <Pressable
+                  disabled={revoking !== null}
+                  onPress={() => confirmRevoke(device)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Sign out ${device.device_name ?? 'unnamed phone'}`}
+                  style={[styles.signOut, revoking !== null && styles.disabled]}
+                >
+                  <Text style={styles.signOutLabel}>
+                    {revoking === device.device_id ? 'Signing out…' : 'Sign out'}
+                  </Text>
+                </Pressable>
+              )
+            }
+          />
+        ))}
+      </View>
 
       {devices !== null && others.length === 0 && (
         <Text style={styles.rowSmall}>
@@ -166,6 +168,7 @@ export function DevicesScreen() {
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     intro: { ...typography.small, color: colors.textMuted, marginBottom: spacing.md },
+    list: { gap: spacing.sm, marginBottom: spacing.md },
     error: { ...typography.small, color: colors.danger, marginBottom: spacing.md },
     row: {
       flexDirection: 'row',

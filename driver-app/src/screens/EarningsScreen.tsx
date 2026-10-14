@@ -66,7 +66,7 @@ export function EarningsScreen({ navigation }: Props) {
       {/* The page's one lime tile, as on the console's Home: the number that matters here. */}
       <View style={styles.headline}>
         <Text style={styles.headlineLabel}>{periodLabel(earnings.period_start, earnings.period_end)}</Text>
-        <Text style={styles.bigNumber} accessibilityLabel={`Estimated pay ${formatCents(earnings.estimated_pay_cents)}`}>
+        <Text style={styles.bigNumber} numberOfLines={1} adjustsFontSizeToFit accessibilityLabel={`Estimated pay ${formatCents(earnings.estimated_pay_cents)}`}>
           {formatCents(earnings.estimated_pay_cents)}
         </Text>
         <Text style={styles.headlineMeta}>

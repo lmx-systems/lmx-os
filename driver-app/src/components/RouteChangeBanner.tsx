@@ -46,6 +46,6 @@ export function RouteChangeBanner({ event, onAccept }: RouteChangeBannerProps) {
 const makeStyles = (colors: ColorScheme) =>
   StyleSheet.create({
     details: { ...typography.small, color: colors.textSecondary },
-    buttonRow: { flexDirection: 'row', gap: spacing.sm },
+    buttonRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
     buttonHalf: { flex: 1 },
   });
