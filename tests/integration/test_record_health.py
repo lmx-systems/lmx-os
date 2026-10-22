@@ -316,7 +316,10 @@ class TestTheEndpoint:
         from app.api.routes import record_health
 
         hub = await _hub(db_session)
-        await _delivered(db_session, hub)
+        # The endpoint reads its window back from the real clock, not from NOW:
+        # a delivery on NOW's eve left the 30-day window a month after NOW, and
+        # this failed on every branch from mid-October.
+        await _delivered(db_session, hub, at=datetime.now(timezone.utc) - timedelta(days=1))
 
         view = await record_health(
             hub_id=hub.id, window_days=30, session=db_session, _ops=OPS
