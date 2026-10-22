@@ -5,6 +5,12 @@
     python scripts/illustrative_pack.py geocode <workbook> --out ml/out/exp0_coordinates.csv
     python scripts/illustrative_pack.py pack <workbook> --coordinates ml/out/exp0_coordinates.csv \\
         --hub 40.89,-74.01 --radius-km 8
+    python scripts/illustrative_pack.py locate <workbook> --out ml/out/exp0_coordinates.csv
+    python scripts/illustrative_pack.py zones <workbook> --coordinates ml/out/exp0_coordinates.csv \\
+        --zones ml/analytics/zones_austin.geojson --relocate-to 30.5086,-97.6788
+    python scripts/illustrative_pack.py eligibility <workbook> --limits ml/out/machine_limits.json \\
+        --assumptions ml/modality/assumption_sheet_a0.json --sample 300 \\
+        [--coordinates ... --zones ... --relocate-to ...]
 
 Rich's three readings (5 Oct): deliveries by hour of day, the share of drop-offs
 within a drone radius of a hub, and the spread of distances. Every chart is
@@ -18,14 +24,35 @@ says what the other two need.
 
 `geocode` resolves the sites' addresses with the app's configured geocoder and
 writes site id, latitude and longitude - no names or addresses - to a file under
-`ml/out/`, which is gitignored. Drop-offs only throughout: the rows at supplier
-counters are pickups (`DE-3`). Outputs go to `--out` (default `ml/out/illustrative/`).
+`ml/out/`, which is gitignored. **`locate` writes the same file without sending
+an address anywhere** (D-DESK): it matches the sites against the open address
+points `scripts/desk_prefill.py fetch` caches. Drop-offs only throughout: the rows
+at supplier counters are pickups (`DE-3`). Outputs go to `--out` (default
+`ml/out/illustrative/`).
+
+## The partner mock-up (the Proof Map, 18 Oct)
+
+`zones` moves the located drop-offs to another city, keeping each one's distance
+and bearing from the footprint's centre (the Proof Map's first step: the design
+partner's orders relocated to Round Rock), lays the operator zones in a GeoJSON
+file over them, and counts what falls inside each, by hour (`ml/analytics/zones.py`).
+The target has no default: where the footprint lands is a choice, printed on
+every output. It writes a map, an hour chart per zone, `zones.md`, and the moved
+drop-offs as GeoJSON (hour only) for a map tool.
+
+`eligibility` scores a seeded sample of drop-offs with the checklist twice - as
+measured, and with an assumption sheet filling the gaps - and ranks the
+assumptions by how many verdicts rest on each (`ml/modality/assumed.py`): the
+Proof Map's O1 and its list of facts to collect. Given the zone arguments too,
+it counts the eligible drop-offs inside each zone. `--limits` is a machine
+limits version as `scripts/machine_limits.py export` writes it.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import csv
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -39,7 +66,19 @@ from ml.analytics.illustrative import (  # noqa: E402
     hour_of_day_counts,
     within_radius,
 )
-from scripts.import_experiment_0 import parse_workbook  # noqa: E402
+from ml.analytics.zones import (  # noqa: E402
+    centroid,
+    contains,
+    count_in_zones,
+    displacement,
+    drops_geojson,
+    load_zones,
+    map_svg,
+    relocate,
+)
+from ml.modality.assumed import draw_sample, render_markdown  # noqa: E402
+from ml.modality.assumed import run as run_eligibility  # noqa: E402
+from scripts.import_experiment_0 import KIND_OF_SITE, REGION, parse_workbook  # noqa: E402
 
 DISTANCE_BAND_KM = 2.0
 DISTANCE_BANDS = 12
@@ -148,6 +187,159 @@ async def _geocode(workbook_path: Path, out: Path) -> int:
     return 0
 
 
+def _point(text: str) -> tuple[float, float]:
+    lat, lng = (float(x) for x in text.split(","))
+    return lat, lng
+
+
+def _located_dropoffs(workbook, coordinates: Path) -> tuple[list, int]:
+    """(delivery, site, point) for every drop-off whose site has coordinates, and how many have none."""
+    located = {row["site_id"]: (float(row["lat"]), float(row["lng"])) for row in csv.DictReader(coordinates.open())}
+    out, missing = [], 0
+    for delivery, site in _dropoffs(workbook):
+        if site is not None and site.site_id in located:
+            out.append((delivery, site, located[site.site_id]))
+        else:
+            missing += 1
+    return out, missing
+
+
+def _moved(points: list, target: tuple[float, float]) -> tuple[list, tuple[float, float]]:
+    origin = centroid(points)
+    return relocate(points, origin, target), origin
+
+
+def _footprint_km(points: list, centre: tuple[float, float], share: float = 0.9) -> float:
+    """The radius from the centre that holds `share` of the points."""
+    distances = sorted(sum(x * x for x in displacement(centre, p)) ** 0.5 for p in points)
+    return distances[min(len(distances) - 1, int(share * len(distances)))]
+
+
+def _locate(workbook_path: Path, out: Path) -> int:
+    from scripts.desk_prefill import locate_addresses
+
+    sites = [(s.site_id, s.address) for s in parse_workbook(workbook_path).sites if s.address and not s.is_pickup]
+    located = locate_addresses(REGION, sites)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["site_id", "lat", "lng"])
+        for site_id, (lat, lng) in sorted(located.items()):
+            writer.writerow([site_id, f"{lat:.6f}", f"{lng:.6f}"])
+    print(f"located {len(located)} of {len(sites)} drop-off sites with an address, on this machine; wrote {out}")
+    return 0
+
+
+def _zones(workbook_path: Path, out: Path, coordinates: Path, zones_path: Path, target_text: str) -> int:
+    workbook = parse_workbook(workbook_path)
+    rows, unlocated = _located_dropoffs(workbook, coordinates)
+    zones = load_zones(json.loads(zones_path.read_text()))
+    target = _point(target_text)
+    points, _ = _moved([p for _, _, p in rows], target)
+    hours = [t.hour if (t := _delivered_at(d)) else None for d, _, _ in rows]
+    counts = count_in_zones(list(zip(points, hours)), zones)
+    radius = _footprint_km(points, target)
+    out.mkdir(parents=True, exist_ok=True)
+
+    moved_to = f"centred on {target_text}"
+    (out / "zones_map.svg").write_text(
+        map_svg(
+            title="One distributor's drop-offs, moved to the Austin metro, under operator zones",
+            subtitle=f"{len(points):,} drop-offs at their New Jersey distances and bearings, {moved_to}. "
+            "Zones as read from public sources.",
+            points=points,
+            zones=zones,
+        )
+    )
+    (out / "relocated_dropoffs.geojson").write_text(json.dumps(drops_geojson(points, hours)) + "\n")
+    lines = [
+        "# Operator zones over a relocated footprint",
+        "",
+        f"**{STAMP}.** One distributor's drop-offs from Experiment 0, moved to the Austin metro: each keeps its "
+        f"distance and bearing from the footprint's centre, which is placed at {target_text}. The streets, and so "
+        "every site fact, stay in New Jersey; only the shape travels. The zones are operators' areas as we read "
+        "them, not polygons they gave us.",
+        "",
+        f"{len(points):,} located drop-offs; {unlocated:,} more have no coordinates and are left out. "
+        f"90% lie within {radius:.1f} km of the centre. Map: `zones_map.svg`; the points: `relocated_dropoffs.geojson`.",
+        "",
+        "| Zone | Machine | Drop-offs inside | Share of all | Busiest hour inside |",
+        "|---|---|---|---|---|",
+    ]
+    for i, (zone, count) in enumerate(zip(zones, counts)):
+        busiest = max(range(24), key=count.by_hour.__getitem__) if count.inside else None
+        lines.append(
+            f"| {zone.name} | {zone.machine or '-'} | {count.inside:,} | {count.share:.0%} | "
+            f"{f'{busiest:02d}:00' if busiest is not None else '-'} |"
+        )
+        if count.inside:
+            (out / f"zone_{i + 1}_by_hour.svg").write_text(
+                bar_chart_svg(
+                    title=f"Drop-offs inside {zone.name}, by hour",
+                    subtitle=f"{count.inside:,} of {len(points):,} relocated drop-offs, {moved_to}. Hour of the Delivered tap.",
+                    labels=[f"{h:02d}" for h in range(24)],
+                    values=count.by_hour,
+                    unit="drop-offs",
+                )
+            )
+    lines += ["", "Zone notes:", ""] + [f"- **{z.name}.** {z.note}" for z in zones if z.note]
+    (out / "zones.md").write_text("\n".join(lines) + "\n")
+    print("\n".join(lines))
+    return 0
+
+
+def _eligibility(args) -> int:
+    workbook = parse_workbook(args.workbook)
+    limits = json.loads(args.limits.read_text())
+    sheet = json.loads(args.assumptions.read_text())
+    zone_args = (args.coordinates, args.zones, args.relocate_to)
+    if any(zone_args) and not all(zone_args):
+        raise SystemExit("zones need all three of --coordinates, --zones and --relocate-to")
+
+    moved: dict[int, tuple[float, float]] = {}
+    zones = []
+    if all(zone_args):
+        rows, _ = _located_dropoffs(workbook, args.coordinates)
+        points, _ = _moved([p for _, _, p in rows], _point(args.relocate_to))
+        moved = {id(d): p for (d, _, _), p in zip(rows, points)}
+        zones = load_zones(json.loads(args.zones.read_text()))
+
+    records = []
+    for i, (delivery, site) in enumerate(_dropoffs(workbook)):
+        kind = KIND_OF_SITE.get(site.kind_label) if site else None
+        at = _delivered_at(delivery)
+        point = moved.get(id(delivery))
+        records.append({
+            "stop_id": f"exp0-{i}",
+            "stop_type": "dropoff",
+            "kind_of_site": kind,
+            "group": [kind, None],
+            # No piece count is zero pieces delivered: it is unknown.
+            "pieces": delivery.pieces or None,
+            "hour": at.hour if at else None,
+            # The export's weight column is 0 on every row: unweighed, not weightless.
+            "item": {"weight_kg": None, "size_class": None, "hazmat_or_liquid": None},
+            "handoff": {},
+            "site": {"receiving_hours": None, "who_receives": None},
+            "zones": [z.name for z in zones if point and contains(z, point)],
+        })
+    sample = draw_sample(records, args.sample, args.seed)
+    report = run_eligibility(sample, limits, sheet, {z.name: z.machine for z in zones} or None)
+    about = (
+        f"A seeded sample (seed {args.seed}) of {len(sample)} of {len(records):,} drop-offs from one distributor's "
+        "route export in Experiment 0, drawn in proportion to kind of site. No item was weighed and no door "
+        "surveyed, so as measured decides nothing; as assumed is the assumption sheet's answer, not a measurement."
+    )
+    if zones:
+        about += f" Zones count the sample's drop-offs moved to the Austin metro, centred on {args.relocate_to}."
+    args.out.mkdir(parents=True, exist_ok=True)
+    (args.out / "eligibility.json").write_text(json.dumps(report, indent=2) + "\n")
+    text = render_markdown(report, title="Eligibility on a sample - as measured and as assumed", about=about)
+    (args.out / "eligibility.md").write_text(text)
+    print(text)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -160,10 +352,35 @@ def main() -> int:
     geocode = sub.add_parser("geocode")
     geocode.add_argument("workbook", type=Path)
     geocode.add_argument("--out", type=Path, default=Path("ml/out/exp0_coordinates.csv"))
+    locate = sub.add_parser("locate")
+    locate.add_argument("workbook", type=Path)
+    locate.add_argument("--out", type=Path, default=Path("ml/out/exp0_coordinates.csv"))
+    zones = sub.add_parser("zones")
+    zones.add_argument("workbook", type=Path)
+    zones.add_argument("--coordinates", type=Path, required=True)
+    zones.add_argument("--zones", type=Path, required=True, help="GeoJSON operator zones")
+    zones.add_argument("--relocate-to", required=True, help="LAT,LNG where the footprint's centre lands; no default")
+    zones.add_argument("--out", type=Path, default=Path("ml/out/illustrative"))
+    eligibility = sub.add_parser("eligibility")
+    eligibility.add_argument("workbook", type=Path)
+    eligibility.add_argument("--limits", type=Path, required=True, help="a machine limits version, as exported")
+    eligibility.add_argument("--assumptions", type=Path, required=True, help="the assumption sheet")
+    eligibility.add_argument("--sample", type=int, default=300)
+    eligibility.add_argument("--seed", type=int, default=20261022)
+    eligibility.add_argument("--coordinates", type=Path)
+    eligibility.add_argument("--zones", type=Path)
+    eligibility.add_argument("--relocate-to")
+    eligibility.add_argument("--out", type=Path, default=Path("ml/out/illustrative"))
 
     args = parser.parse_args()
     if args.command == "geocode":
         return asyncio.run(_geocode(args.workbook, args.out))
+    if args.command == "locate":
+        return _locate(args.workbook, args.out)
+    if args.command == "zones":
+        return _zones(args.workbook, args.out, args.coordinates, args.zones, args.relocate_to)
+    if args.command == "eligibility":
+        return _eligibility(args)
     return _pack(args.workbook, args.out, args.coordinates, args.hub, args.radius_km)
 
 
