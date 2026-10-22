@@ -139,17 +139,11 @@ def _number(value: str | None) -> str | None:
     return parsed.number if parsed else None
 
 
-def gather_evidence(region: str, sites: list[tuple[object, str]]) -> list[SiteEvidence]:
-    """Each site's evidence from the cached files. `sites` is (location id, address) pairs; nothing is printed."""
+def _address_points(con, region: str, addresses) -> dict[StreetAddress, list[tuple[float, float]]]:
+    """Overture's address points in the ZIPs these addresses name, by number, street and ZIP."""
     files = _files(region)
-    missing = [str(p.name) for p in files.values() if not p.exists()]
-    if missing:
-        raise SystemExit(f"Not fetched yet: {', '.join(missing)}. Run `fetch` first.")
-    parsed = {loc_id: parse_site_address(address) for loc_id, address in sites}
-    zips = sorted({a.postcode for a in parsed.values() if a is not None})
-    con = _duckdb()
+    zips = sorted({a.postcode for a in addresses if a is not None})
     zip_list = ", ".join(f"'{z}'" for z in zips) or "''"
-
     points: dict[StreetAddress, list[tuple[float, float]]] = defaultdict(list)
     for number, street, postcode, lat, lng in con.execute(
         f"SELECT number, street, postcode, lat, lng FROM '{files['addresses']}' "
@@ -159,6 +153,36 @@ def gather_evidence(region: str, sites: list[tuple[object, str]]) -> list[SiteEv
         n = _number(number)
         if n and street:
             points[StreetAddress(n, normalize_street(street), postcode)].append((lat, lng))
+    return points
+
+
+def locate_addresses(region: str, sites: list[tuple[str, str]]) -> dict[str, tuple[float, float]]:
+    """Coordinates for sites' addresses, matched against the cached address points
+    on this machine - the same exact match as the evidence, so nothing is sent to
+    a geocoder (D-DESK). `sites` is (site id, address) pairs; an address with no
+    match is left out, and a building with several points takes their middle."""
+    files = _files(region)
+    if not files["addresses"].exists():
+        raise SystemExit(f"Not fetched yet: {files['addresses'].name}. Run `scripts/desk_prefill.py fetch` first.")
+    parsed = {site_id: parse_site_address(address) for site_id, address in sites}
+    points = _address_points(_duckdb(), region, parsed.values())
+    located = {}
+    for site_id, address in parsed.items():
+        found = points.get(address) if address else None
+        if found:
+            located[site_id] = (sum(p[0] for p in found) / len(found), sum(p[1] for p in found) / len(found))
+    return located
+
+
+def gather_evidence(region: str, sites: list[tuple[object, str]]) -> list[SiteEvidence]:
+    """Each site's evidence from the cached files. `sites` is (location id, address) pairs; nothing is printed."""
+    files = _files(region)
+    missing = [str(p.name) for p in files.values() if not p.exists()]
+    if missing:
+        raise SystemExit(f"Not fetched yet: {', '.join(missing)}. Run `fetch` first.")
+    parsed = {loc_id: parse_site_address(address) for loc_id, address in sites}
+    con = _duckdb()
+    points = _address_points(con, region, parsed.values())
 
     # Places by number and street in any ZIP (`evidence_for_site` decides which
     # count); the house numbers narrow the scan before Python parses addresses.

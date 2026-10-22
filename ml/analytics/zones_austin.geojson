@@ -1,0 +1,31 @@
+{
+  "type": "FeatureCollection",
+  "note": "Operator areas in the Austin metro as LMX reads them from public sources, October 2026. Approximate: no operator has given us a polygon. Replace a feature when one does.",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Zipline, Round Rock (3 mi)",
+        "machine": "drone",
+        "radius_km": 4.83,
+        "note": "Launched 9 Oct 2026: about 3 miles around its site on E. Palm Valley Blvd. Centre is the road's OpenStreetMap point, not the site's."
+      },
+      "geometry": { "type": "Point", "coordinates": [-97.6430, 30.5206] }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Road AV, downtown to the Domain",
+        "machine": "car",
+        "note": "A rough sketch of the robotaxi area from downtown Austin north to the Domain, as read from public maps. Not the operator's polygon."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-97.785, 30.235], [-97.715, 30.235], [-97.690, 30.300], [-97.700, 30.405],
+          [-97.745, 30.405], [-97.770, 30.300], [-97.785, 30.235]
+        ]]
+      }
+    }
+  ]
+}

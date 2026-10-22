@@ -1,0 +1,72 @@
+{
+  "version": "a0",
+  "note": "First draft for the partner mock-up, 22 Oct 2026. Every value is a placeholder set without data: no item in Experiment 0 was weighed or measured, and no door was surveyed. Replace a rule's values and source when a founder, an operator or a measurement gives one, and raise the version.",
+  "assumptions": [
+    {
+      "id": "I1",
+      "where": {"pieces": [1, 1]},
+      "sets": {"item.weight_kg": 2.0, "item.size_class": "small"},
+      "source": "Placeholder: one piece taken as a boxed part of about 2 kg. No weights in the data."
+    },
+    {
+      "id": "I2",
+      "where": {"pieces": [2, 3]},
+      "sets": {"item.weight_kg": 5.0, "item.size_class": "medium"},
+      "source": "Placeholder: two or three pieces about 5 kg together. No weights in the data."
+    },
+    {
+      "id": "I3",
+      "where": {"pieces": [4, 9]},
+      "sets": {"item.weight_kg": 12.0, "item.size_class": "large"},
+      "source": "Placeholder: four to nine pieces about 12 kg together. No weights in the data."
+    },
+    {
+      "id": "I4",
+      "where": {"pieces": [10, null]},
+      "sets": {"item.weight_kg": 30.0, "item.size_class": "oversize"},
+      "source": "Placeholder: ten pieces or more taken as too big for any machine. No weights in the data."
+    },
+    {
+      "id": "H1",
+      "where": {},
+      "sets": {"item.hazmat_or_liquid": false},
+      "source": "Placeholder: nothing hazardous or liquid. Auto parts can hold aerosols, lithium cells and fluids, so this flatters every machine."
+    },
+    {
+      "id": "D1",
+      "where": {"kind_of_site": ["independent_repair_or_tire", "body_shop", "gas_station_with_bays"]},
+      "sets": {
+        "handoff.stop_legal": true, "handoff.walk_distance_m": 20, "handoff.steps_or_ramps": "none",
+        "handoff.continuous_sidewalk": false, "handoff.drone_open_ground": true, "handoff.overhead": [],
+        "handoff.obstructions": []
+      },
+      "source": "Placeholder: a shop with its own lot and open bays, no sidewalk to its door. Not surveyed."
+    },
+    {
+      "id": "D2",
+      "where": {"kind_of_site": ["dealership_counter", "parts_store_counter"]},
+      "sets": {
+        "handoff.stop_legal": true, "handoff.walk_distance_m": 40, "handoff.steps_or_ramps": "none",
+        "handoff.continuous_sidewalk": true, "handoff.drone_open_ground": false, "handoff.overhead": [],
+        "handoff.obstructions": []
+      },
+      "source": "Placeholder: a counter inside a building off a busy lot; no clear landing spot. Not surveyed."
+    },
+    {
+      "id": "D3",
+      "where": {"kind_of_site": ["fleet_or_transport_yard", "municipal_fleet_garage"]},
+      "sets": {
+        "handoff.stop_legal": true, "handoff.walk_distance_m": 40, "handoff.steps_or_ramps": "none",
+        "handoff.continuous_sidewalk": false, "handoff.drone_open_ground": true, "handoff.overhead": [],
+        "handoff.obstructions": ["gate"]
+      },
+      "source": "Placeholder: a gated yard. Not surveyed."
+    },
+    {
+      "id": "R1",
+      "where": {},
+      "sets": {"site.receiving_hours": "weekday business hours", "site.who_receives": "counter or bay staff"},
+      "source": "Placeholder: every drop-off is a business staffed in working hours. 99.5% of deliveries are on weekdays, but nobody has asked."
+    }
+  ]
+}
