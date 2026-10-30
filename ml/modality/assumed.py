@@ -32,6 +32,28 @@ somebody's guess, and the report prints every rule beside the figures.
 open-ended) or a value or list of values; an empty `where` matches every record.
 `sets` names facts as `part.field`, in the record shape the checklist reads
 (`item`, `handoff`, `site`). Standard library.
+
+## A drawn rule
+
+A rule may `draws` instead of `sets`: the item facts of an order are then drawn
+rather than set to one value for every order, because one value per piece count
+puts every one-piece order on the same side of a drone's payload when real
+orders fall on both.
+
+    {"id": "I1", "where": {"pieces": [1, null]},
+     "draws": {"item_mix": [{"category": "oil filter", "share": 0.18,
+                              "weight_kg": [low, typical, high], "box_cm": [l, w, h],
+                              "hazmat_or_liquid": false, "sources": [...]}, ...],
+               "size_classes": [{"class": "small", "max_longest_cm": 40, "max_volume_l": 15}, ...]},
+     "source": "..."}
+
+An order of N pieces draws N parts by `share`, each part's weight on a triangle
+over its band, and sets `item.weight_kg` (the sum), `item.size_class` (the first
+class the parts' combined box fits, by longest side and total volume, otherwise
+oversize) and `item.hazmat_or_liquid` (any part flagged). **The draw is seeded by
+the sheet version, the rule and the record's `stop_id`**, so a record draws the
+same order in every run and with any other rule taken out: the ranking below
+compares like with like.
 """
 from __future__ import annotations
 
@@ -61,6 +83,30 @@ def _matches(record: Mapping, where: Mapping) -> bool:
     return True
 
 
+DRAWN_FACTS = ("item.weight_kg", "item.size_class", "item.hazmat_or_liquid")
+
+
+def _check_draws(rid: str, draws: Mapping) -> list[str]:
+    problems = []
+    mix = draws.get("item_mix") or []
+    if not mix:
+        problems.append(f"assumption {rid} draws from no item_mix")
+    for part in mix:
+        name = part.get("category", "?")
+        low, typical, high = (part.get("weight_kg") or [None, None, None])[:3]
+        if not all(isinstance(w, (int, float)) for w in (low, typical, high)) or not 0 < low <= typical <= high:
+            problems.append(f"assumption {rid}: {name} weight_kg must be [low, typical, high], rising, above zero")
+        if not isinstance(part.get("share"), (int, float)) or part["share"] <= 0:
+            problems.append(f"assumption {rid}: {name} share must be above zero")
+        if len(part.get("box_cm") or []) != 3:
+            problems.append(f"assumption {rid}: {name} box_cm must be three sides")
+        if not part.get("sources"):
+            problems.append(f"assumption {rid}: {name} has no sources")
+    if not draws.get("size_classes"):
+        problems.append(f"assumption {rid} draws with no size_classes")
+    return problems
+
+
 def check_sheet(sheet: Mapping) -> list[str]:
     """Every problem with a sheet, so it can be refused whole."""
     problems = []
@@ -74,6 +120,10 @@ def check_sheet(sheet: Mapping) -> list[str]:
         seen.add(rid)
         if not rule.get("source"):
             problems.append(f"assumption {rid or i} has no source: say who set it, or that nobody has")
+        if ("sets" in rule) == ("draws" in rule):
+            problems.append(f"assumption {rid or i} must have one of sets or draws")
+        if "draws" in rule:
+            problems.extend(_check_draws(rid or str(i), rule["draws"]))
         for fact in rule.get("sets", {}):
             part, _, name = fact.partition(".")
             if part not in PARTS or not name:
@@ -81,6 +131,39 @@ def check_sheet(sheet: Mapping) -> list[str]:
     if not sheet.get("version"):
         problems.append("the sheet has no version")
     return problems
+
+
+def _size_class(longest_cm: float, volume_l: float, classes: Sequence[Mapping]) -> str:
+    for c in classes:
+        if longest_cm <= c["max_longest_cm"] and volume_l <= c["max_volume_l"]:
+            return c["class"]
+    return "oversize"
+
+
+def draw_item(record: Mapping, rule: Mapping, sheet_version: str) -> dict | None:
+    """The item facts a drawn rule gives this record, or None with no piece count."""
+    pieces = record.get("pieces")
+    if not pieces:
+        return None
+    draws = rule["draws"]
+    mix = draws["item_mix"]
+    rng = random.Random(f"{sheet_version}:{rule['id']}:{record.get('stop_id')}")
+    parts = rng.choices(mix, weights=[p["share"] for p in mix], k=int(pieces))
+    weight = sum(rng.triangular(p["weight_kg"][0], p["weight_kg"][2], p["weight_kg"][1]) for p in parts)
+    longest = max(max(p["box_cm"]) for p in parts)
+    volume = sum(p["box_cm"][0] * p["box_cm"][1] * p["box_cm"][2] for p in parts) / 1000
+    return {
+        "weight_kg": round(weight, 2),
+        "size_class": _size_class(longest, volume, draws["size_classes"]),
+        "hazmat_or_liquid": any(p["hazmat_or_liquid"] for p in parts),
+    }
+
+
+def _rule_facts(record: Mapping, rule: Mapping, sheet_version: str) -> dict[str, object]:
+    if "draws" not in rule:
+        return dict(rule["sets"])
+    drawn = draw_item(record, rule, sheet_version)
+    return {} if drawn is None else {f"item.{name}": value for name, value in drawn.items()}
 
 
 def fill(record: Mapping, sheet: Mapping, without: str | None = None) -> tuple[dict, dict[str, str]]:
@@ -91,7 +174,7 @@ def fill(record: Mapping, sheet: Mapping, without: str | None = None) -> tuple[d
     for rule in sheet["assumptions"]:
         if rule["id"] == without or not _matches(record, rule.get("where", {})):
             continue
-        for fact, value in rule["sets"].items():
+        for fact, value in _rule_facts(record, rule, sheet["version"]).items():
             part, _, name = fact.partition(".")
             holder = filled.setdefault(part, {})
             if holder.get(name) is None and fact not in used:
@@ -169,7 +252,7 @@ def run(
         rule = next(r for r in sheet["assumptions"] if r["id"] == rid)
         ranking.append({
             "id": rid,
-            "sets": rule["sets"],
+            "sets": rule["sets"] if "sets" in rule else {fact: "drawn" for fact in DRAWN_FACTS},
             "where": rule.get("where", {}),
             "source": rule["source"],
             "records_filled": records_using,

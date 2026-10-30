@@ -57,18 +57,25 @@ async def _v1_machines(db_session) -> dict:
     return copy.deepcopy(limits_document(await machine_limits(db_session, "v1"))["machines"])
 
 
-async def test_the_seed_is_one_assumed_version_covering_every_machine(db_session):
-    limits = await machine_limits(db_session)
+async def test_the_seed_is_v1_then_v2_both_assumed_covering_every_machine(db_session):
+    v1 = await machine_limits(db_session, "v1")
+    latest = await machine_limits(db_session)
 
-    assert set(limits) == set(MACHINES)
-    assert {row.version for row in limits.values()} == {"v1"}
-    assert {row.basis for row in limits.values()} == {"assumed"}
-    # The open question the version exists for: 2.5 kg, not the other document's 9 lb.
-    assert float(limits["drone"].max_weight_kg) == 2.5
-    assert "9 lb" in limits["drone"].source
-    assert limits["sidewalk_robot"].needs_step_free_path is True
-    assert limits["drone"].needs_open_ground is True
-    assert limits["car"].max_walk_distance_m == 50.0
+    assert set(v1) == set(latest) == set(MACHINES)
+    # v2 is the latest: the drone and robot from what their operators publish.
+    assert {row.version for row in latest.values()} == {"v2"}
+    # Published is not confirmed to us, so both stay assumed.
+    assert {row.basis for row in [*v1.values(), *latest.values()]} == {"assumed"}
+    # v1's open question, kept as it was: 2.5 kg, not the other document's 9 lb.
+    assert float(v1["drone"].max_weight_kg) == 2.5
+    assert "9 lb" in v1["drone"].source
+    # v2: the payload Zipline flies in Round Rock, and Starship's 20 lb.
+    assert float(latest["drone"].max_weight_kg) == 2.3
+    assert float(latest["sidewalk_robot"].max_weight_kg) == 9.07
+    assert all("http" in latest[m].source for m in ("drone", "sidewalk_robot"))
+    assert latest["sidewalk_robot"].needs_step_free_path is True
+    assert latest["drone"].needs_open_ground is True
+    assert latest["car"].max_walk_distance_m == 50.0
 
 
 async def test_a_label_with_no_limits_version_does_not_save(db_session):
@@ -104,21 +111,21 @@ async def test_a_label_citing_v1_saves(db_session):
     await db_session.flush()
 
 
-async def test_a_new_version_becomes_the_latest_and_v1_is_untouched(db_session):
+async def test_a_new_version_becomes_the_latest_and_the_seeds_are_untouched(db_session):
     machines = await _v1_machines(db_session)
     machines["drone"].update(
         max_weight_kg=4.1, basis="operator_reported", source="The drone operator, by email."
     )
 
-    await add_machine_limits_version(db_session, version="v2", machines=machines, recorded_by="rich")
+    await add_machine_limits_version(db_session, version="v3", machines=machines, recorded_by="rich")
 
     latest = await machine_limits(db_session)
-    assert {row.version for row in latest.values()} == {"v2"}
+    assert {row.version for row in latest.values()} == {"v3"}
     assert float(latest["drone"].max_weight_kg) == 4.1
     assert latest["drone"].basis == "operator_reported"
     assert latest["car"].basis == "assumed"
     assert float((await machine_limits(db_session, "v1"))["drone"].max_weight_kg) == 2.5
-    assert [v for v, _, _ in await machine_limits_versions(db_session)] == ["v1", "v2"]
+    assert [v for v, _, _ in await machine_limits_versions(db_session)] == ["v1", "v2", "v3"]
 
 
 async def test_a_version_is_never_edited(db_session):
@@ -136,7 +143,7 @@ async def test_a_version_must_state_every_machine_and_every_limit(db_session):
     machines["drone"]["basis"] = "guessed"
 
     with pytest.raises(MachineLimitsError) as refused:
-        await add_machine_limits_version(db_session, version="v2", machines=machines, recorded_by="rich")
+        await add_machine_limits_version(db_session, version="v3", machines=machines, recorded_by="rich")
 
     message = str(refused.value)
     # Every problem at once, so a file with several mistakes takes one round trip.
@@ -144,7 +151,7 @@ async def test_a_version_must_state_every_machine_and_every_limit(db_session):
     assert "sidewalk_robot: missing needs_step_free_path" in message
     assert "drone: max_size_class" in message
     assert "drone: basis" in message
-    assert await machine_limits(db_session, "v2") == {}
+    assert await machine_limits(db_session, "v3") == {}
 
 
 async def test_the_export_is_what_add_reads_back(db_session):

@@ -150,3 +150,83 @@ def test_the_draft_sheet_is_valid_and_says_every_value_is_a_placeholder():
 
     assert check_sheet(sheet) == []
     assert all(rule["source"].startswith("Placeholder") for rule in sheet["assumptions"])
+
+
+# A drawn rule: two parts, one light and boxed small, one heavy, liquid and long.
+MIX = [
+    {"category": "filter", "share": 3, "weight_kg": [0.2, 0.3, 0.4], "box_cm": [10, 10, 10],
+     "hazmat_or_liquid": False, "sources": ["https://example.test/filter"]},
+    {"category": "jug", "share": 1, "weight_kg": [4.0, 4.3, 4.6], "box_cm": [70, 20, 12],
+     "hazmat_or_liquid": True, "sources": ["https://example.test/jug"]},
+]
+SIZES = [
+    {"class": "small", "max_longest_cm": 40, "max_volume_l": 15},
+    {"class": "medium", "max_longest_cm": 60, "max_volume_l": 50},
+    {"class": "large", "max_longest_cm": 120, "max_volume_l": 400},
+]
+DRAWN = {
+    "version": "t2",
+    "assumptions": [
+        {"id": "I1", "where": {"pieces": [1, None]}, "draws": {"item_mix": MIX, "size_classes": SIZES}, "source": "test"},
+        *[r for r in SHEET["assumptions"] if r["id"] in {"D1", "R1"}],
+    ],
+}
+
+
+def test_a_drawn_rule_draws_the_same_order_for_a_record_every_time():
+    record = _record(7, 3)
+
+    first, used = fill(record, DRAWN)
+    again, _ = fill(record, DRAWN)
+
+    assert first["item"] == again["item"]
+    assert used["item.weight_kg"] == used["item.size_class"] == used["item.hazmat_or_liquid"] == "I1"
+
+
+def test_a_drawn_order_is_its_parts_added_up():
+    records = [_record(i, 1) for i in range(400)]
+    items = [fill(r, DRAWN)[0]["item"] for r in records]
+
+    light = [i for i in items if i["weight_kg"] < 1]
+    heavy = [i for i in items if i["weight_kg"] >= 4]
+    # Every one-piece order is one of the two parts, in about the mix's 3 : 1.
+    assert len(light) + len(heavy) == 400
+    assert 0.65 < len(light) / 400 < 0.85
+    assert {i["size_class"] for i in light} == {"small"} and {i["hazmat_or_liquid"] for i in light} == {False}
+    # The jug is 70 cm long: past a shoebox and a carry-on, inside a car boot.
+    assert {i["size_class"] for i in heavy} == {"large"} and {i["hazmat_or_liquid"] for i in heavy} == {True}
+
+
+def test_a_drawn_rule_leaves_an_order_with_no_piece_count_unknown_and_a_measured_fact_alone():
+    unknown, used = fill(_record(1, None), DRAWN)
+    weighed, _ = fill(_record(2, 2, weight_kg=9.5), DRAWN)
+
+    assert unknown["item"]["weight_kg"] is None and "item.weight_kg" not in used
+    assert weighed["item"]["weight_kg"] == 9.5
+
+
+def test_a_rule_must_set_or_draw_and_a_mix_must_be_sourced():
+    both = copy.deepcopy(DRAWN)
+    both["assumptions"][0]["sets"] = {"item.weight_kg": 1.0}
+    unsourced = copy.deepcopy(DRAWN)
+    unsourced["assumptions"][0]["draws"]["item_mix"][0]["sources"] = []
+    upside_down = copy.deepcopy(DRAWN)
+    upside_down["assumptions"][0]["draws"]["item_mix"][1]["weight_kg"] = [4.6, 4.3, 4.0]
+
+    assert any("one of sets or draws" in p for p in check_sheet(both))
+    assert any("filter has no sources" in p for p in check_sheet(unsourced))
+    assert any("jug weight_kg" in p for p in check_sheet(upside_down))
+
+
+def test_the_ranking_counts_the_verdicts_a_drawn_rule_carries():
+    report = run([_record(i, 1) for i in range(50)], LIMITS, DRAWN)
+
+    drawn = next(r for r in report["assumptions"] if r["id"] == "I1")
+    assert drawn["sets"] == {"item.weight_kg": "drawn", "item.size_class": "drawn", "item.hazmat_or_liquid": "drawn"}
+    assert drawn["records_filled"] == 50 and drawn["verdicts_resting_on_it"] > 0
+
+
+def test_the_committed_sheets_are_well_formed():
+    for name in ("assumption_sheet_a0.json", "assumption_sheet_a1.json"):
+        sheet = json.loads((Path(__file__).resolve().parent.parent / "ml" / "modality" / name).read_text())
+        assert check_sheet(sheet) == [], name

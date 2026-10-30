@@ -1,0 +1,631 @@
+{
+ "version": "a1",
+ "note": "Second draft, 30 Oct 2026. The item facts are now drawn from open data rather than set by hand: each drop-off with N pieces draws N parts from a published category mix, and each part's weight from a band read off retailer and maker product pages (rule I1). The draw is seeded by the drop-off, so a run is repeatable, and it is still a simulation of a typical auto-parts order, not this distributor's parts. The door and site rules (D1-D3, R1) are unchanged placeholders: open data describes the sidewalk and the lot, not the door. Machine limits v2 carry the published operator figures.",
+ "assumptions": [
+  {
+   "id": "I1",
+   "where": {
+    "pieces": [
+     1,
+     null
+    ]
+   },
+   "draws": {
+    "item_mix": [
+     {
+      "category": "brake pads (set, one axle)",
+      "share": 0.061,
+      "weight_kg": [
+       0.91,
+       1.86,
+       3.18
+      ],
+      "box_cm": [
+       18.0,
+       12.0,
+       7.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.walmart.com/ip/Raybestos-R-Line-Ceramic-Brake-Pad-Set/5406058728",
+       "https://www.walmart.com/ip/1993153457",
+       "https://www.walmart.com/ip/3603072002"
+      ],
+      "share_basis": "rate 14.1 per 100 vehicles/yr [IMR2014 Brake Shoes & Pads] x 1.2 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "brake rotor (one)",
+      "share": 0.087,
+      "weight_kg": [
+       4.99,
+       7.98,
+       11.98
+      ],
+      "box_cm": [
+       34.0,
+       33.0,
+       6.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.walmart.com/ip/34253468",
+       "https://www.walmart.com/ip/417576223",
+       "https://www.walmart.com/ip/631903497"
+      ],
+      "share_basis": "rate 12.0 per 100 vehicles/yr [IMR2014 Brake Rotors] x 2.0 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "brake caliper (one, loaded/remanufactured ok)",
+      "share": 0.019,
+      "weight_kg": [
+       1.97,
+       3.74,
+       11.79
+      ],
+      "box_cm": [
+       25.0,
+       19.0,
+       15.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.walmart.com/ip/34265923",
+       "https://www.walmart.com/ip/34264858",
+       "https://www.walmart.com/ip/34316414"
+      ],
+      "share_basis": "rate 3.6 per 100 vehicles/yr [IMR2014 Brake Calipers] x 1.5 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "oil filter",
+      "share": 0.177,
+      "weight_kg": [
+       0.18,
+       0.24,
+       0.41
+      ],
+      "box_cm": [
+       11.0,
+       9.0,
+       9.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.walmart.com/ip/16817236",
+       "https://www.walmart.com/ip/16817227",
+       "https://www.walmart.com/ip/16817234"
+      ],
+      "share_basis": "rate 83.8 per 100 vehicles/yr [Factbook2027 oil filters] x 1.0 pieces/event (assumed) x 0.5 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "air filter (engine)",
+      "share": 0.096,
+      "weight_kg": [
+       0.32,
+       0.52,
+       0.91
+      ],
+      "box_cm": [
+       31.0,
+       22.0,
+       6.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.walmart.com/ip/16879087",
+       "https://www.walmart.com/ip/16879094",
+       "https://www.walmart.com/ip/16878884"
+      ],
+      "share_basis": "rate 45.4 per 100 vehicles/yr [Factbook2027 air filters] x 1.0 pieces/event (assumed) x 0.5 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "cabin filter",
+      "share": 0.02,
+      "weight_kg": [
+       0.14,
+       0.27,
+       1.04
+      ],
+      "box_cm": [
+       26.0,
+       22.0,
+       4.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.hondapartsnow.com/genuine/honda~element~filter~80292-tba-a11.html",
+       "https://www.hondapartsnow.com/genuine/honda~element~filter~80292-sda-a01.html",
+       "https://www.toyotapartsdeal.com/oem/toyota~cabin~air~filter~87139-yzz08.html"
+      ],
+      "share_basis": "rate 9.3 per 100 vehicles/yr [IMR2014 Cabin Air Filters] x 1.0 pieces/event (assumed) x 0.5 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "spark plugs (set of 4)",
+      "share": 0.032,
+      "weight_kg": [
+       0.19,
+       0.19,
+       1.27
+      ],
+      "box_cm": [
+       10.2,
+       9.9,
+       2.5
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://modbargains.com/ngk-iridium-spark-plug-box-of-4-part-number-1465-for-gm-chevrolet-gmc-and-more/",
+       "https://www.hondapartsnow.com/genuine/honda~plug~12290-r40-a01.html",
+       "https://www.hondapartsnow.com/genuine/honda~plug~9807b-5617w.html"
+      ],
+      "share_basis": "rate 10.7 per 100 vehicles/yr [IMR2014 Spark Plugs] x 1.0 pieces/event (assumed) x 0.7 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "ignition coil",
+      "share": 0.006,
+      "weight_kg": [
+       0.23,
+       0.34,
+       0.64
+      ],
+      "box_cm": [
+       19.0,
+       9.0,
+       8.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.walmart.com/ip/42400843",
+       "https://www.walmart.com/ip/42400837",
+       "https://www.walmart.com/ip/144613129"
+      ],
+      "share_basis": "rate 0.9 per 100 vehicles/yr [IMR2014 Ignition Coils] x 2.0 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "alternator",
+      "share": 0.011,
+      "weight_kg": [
+       5.09,
+       6.71,
+       9.89
+      ],
+      "box_cm": [
+       31.0,
+       24.0,
+       23.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-alternator.html",
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-alternator.html",
+       "https://www.fordpartsgiant.com/oem-2016-ford-f_150-alternator.html"
+      ],
+      "share_basis": "rate 3.0 per 100 vehicles/yr [IMR2014 Alternators] x 1.0 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "starter motor",
+      "share": 0.006,
+      "weight_kg": [
+       2.0,
+       3.33,
+       4.82
+      ],
+      "box_cm": [
+       28.0,
+       21.0,
+       18.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-starter_motor.html",
+       "https://www.fordpartsgiant.com/oem-2016-ford-f_150-starter.html",
+       "https://www.fordpartsgiant.com/oem-2016-ford-f_150-starter.html"
+      ],
+      "share_basis": "rate 1.6 per 100 vehicles/yr [IMR2014 Starters] x 1.0 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "car battery (12V lead-acid)",
+      "share": 0.057,
+      "weight_kg": [
+       16.19,
+       20.27,
+       21.51
+      ],
+      "box_cm": [
+       28.0,
+       22.0,
+       17.0
+      ],
+      "hazmat_or_liquid": true,
+      "sources": [
+       "https://www.summitracing.com/parts/isb-mt-24f",
+       "https://www.summitracing.com/parts/isb-mt-35",
+       "https://www.walmart.com/ip/Traveller-Powered-by-Interstate-TS-IB-24F-Automotive-Battery/3039733255"
+      ],
+      "share_basis": "rate 30.0 per 100 vehicles/yr [IMR2014 Batteries] x 1.0 pieces/event (assumed) x 0.45 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "water pump",
+      "share": 0.01,
+      "weight_kg": [
+       0.64,
+       1.15,
+       3.08
+      ],
+      "box_cm": [
+       24.0,
+       17.0,
+       16.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-water-pump.html",
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-water-pump.html",
+       "https://www.fordpartsgiant.com/oem-2016-ford-f_150-water_pump.html"
+      ],
+      "share_basis": "rate 2.9 per 100 vehicles/yr [IMR2014 Water Pumps] x 1.0 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "radiator",
+      "share": 0.007,
+      "weight_kg": [
+       2.67,
+       4.67,
+       8.39
+      ],
+      "box_cm": [
+       102.0,
+       57.0,
+       18.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-radiator.html",
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-radiator.html",
+       "https://www.fordpartsgiant.com/oem-2016-ford-f_150-radiator.html"
+      ],
+      "share_basis": "rate 2.0 per 100 vehicles/yr [IMR2014 Radiator Replaced] x 1.0 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "serpentine belt",
+      "share": 0.006,
+      "weight_kg": [
+       0.09,
+       0.41,
+       1.09
+      ],
+      "box_cm": [
+       35.0,
+       11.0,
+       3.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-drive_belt.html",
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-drive_belt.html",
+       "https://www.fordpartsgiant.com/oem-2016-ford-f_150-serpentine_belt.html"
+      ],
+      "share_basis": "rate 1.8 per 100 vehicles/yr [IMR2014 Drive Belt(s)] x 1.0 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "wiper blades (one blade)",
+      "share": 0.101,
+      "weight_kg": [
+       0.12,
+       0.18,
+       0.36
+      ],
+      "box_cm": [
+       54.0,
+       7.0,
+       3.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.walmart.com/ip/Bosch-Icon-Wiper-Blade-Driver-39-s-Side/33616416",
+       "https://www.walmart.com/ip/393470386",
+       "https://www.walmart.com/ip/TRICO-HD-Heavy-Duty-Windshield-Wiper-Blade-22-61-120-for-Trucks-Buses-and-RVs/54943953"
+      ],
+      "share_basis": "rate 39.5 per 100 vehicles/yr [Factbook2027 wiper blades] x 2.0 pieces/event (assumed) x 0.3 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "headlamp bulb, halogen (H11 / 9006)",
+      "share": 0.029,
+      "weight_kg": [
+       0.02,
+       0.033,
+       0.076
+      ],
+      "box_cm": [
+       13.0,
+       9.5,
+       3.6
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.documents.philips.com/assets/20230914/af4b7cd96b31477bbd6ab07d017a3ce0.pdf",
+       "https://www.documents.philips.com/assets/20230914/bedb87e6d83c414f8f82b07d01826d5a.pdf",
+       "https://www.documents.philips.com/assets/20230914/0154e81baeae4586ae2eb07d018445f1.pdf"
+      ],
+      "share_basis": "rate 9.0 per 100 vehicles/yr [IMR2014 Headlamp Bulbs] x 1.5 pieces/event (assumed) x 0.5 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "sensor - oxygen (O2 / air-fuel)",
+      "share": 0.011,
+      "weight_kg": [
+       0.23,
+       0.36,
+       0.64
+      ],
+      "box_cm": [
+       15.5,
+       5.6,
+       5.1
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-oxygen_sensor.html",
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-oxygen_sensor.html",
+       "https://www.walmart.com/ip/Bosch-16313-Actual-OE-Oxygen-Sensor-Fits-select-2014-2017-FORD-FIESTA/917716487"
+      ],
+      "share_basis": "rate 3.0 per 100 vehicles/yr [IMR2014 Oxygen Sensors (+assumed other sensors)] x 2.0 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "sensor - ABS wheel speed",
+      "share": 0.011,
+      "weight_kg": [
+       0.09,
+       0.17,
+       0.41
+      ],
+      "box_cm": [
+       26.0,
+       17.0,
+       5.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.toyotapartsdeal.com/oem/toyota~sensor~speed~front~lh~89543-08030.html",
+       "https://www.fordpartsgiant.com/oem-2011-ford-focus-abs_sensor.html",
+       "https://www.nissanpartsdeal.com/oem-2005-nissan-maxima-abs_sensor.html"
+      ],
+      "share_basis": "rate 3.0 per 100 vehicles/yr [IMR2014 Oxygen Sensors (+assumed other sensors)] x 2.0 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "CV axle (one half-shaft)",
+      "share": 0.007,
+      "weight_kg": [
+       5.13,
+       8.66,
+       14.7
+      ],
+      "box_cm": [
+       80.0,
+       19.0,
+       17.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-axle_shaft.html",
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-axle_shaft.html",
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-axle_shaft.html"
+      ],
+      "share_basis": "rate 1.9 per 100 vehicles/yr [IMR2014 CV Half Shafts 0.7 + CV Joints 1.2] x 1.0 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "wheel bearing / hub assembly",
+      "share": 0.009,
+      "weight_kg": [
+       2.67,
+       4.19,
+       7.8
+      ],
+      "box_cm": [
+       20.0,
+       18.0,
+       15.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-wheel_hub.html",
+       "https://www.toyotapartsdeal.com/oem-2015-toyota-camry-wheel_hub.html",
+       "https://www.fordpartsgiant.com/oem-2016-ford-f_150-wheel_hub.html"
+      ],
+      "share_basis": "rate 2.4 per 100 vehicles/yr [IMR2014 Wheel Bearings Replaced] x 1.0 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "shock / strut (one unit)",
+      "share": 0.019,
+      "weight_kg": [
+       1.81,
+       4.4,
+       9.98
+      ],
+      "box_cm": [
+       66.0,
+       21.0,
+       20.0
+      ],
+      "hazmat_or_liquid": false,
+      "sources": [
+       "https://www.toyotapartsdeal.com/oem/toyota~absorber~assy~shock~front~lh~48520-09F60.html",
+       "https://www.toyotapartsdeal.com/oem/toyota~absorber~set~shock~48510-80508.html",
+       "https://www.toyotapartsdeal.com/oem/toyota~absorber~assy~shock~front~rh~48510-09p40.html"
+      ],
+      "share_basis": "rate 2.6 per 100 vehicles/yr [IMR2014 Shocks: Air 0.8 + MacPherson 0.8 + Regular 1.0] x 2.0 pieces/event (assumed) x 0.85 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "motor oil, 5 qt jug",
+      "share": 0.065,
+      "weight_kg": [
+       4.08,
+       4.31,
+       4.57
+      ],
+      "box_cm": [
+       32.0,
+       21.0,
+       11.7
+      ],
+      "hazmat_or_liquid": true,
+      "sources": [
+       "https://www.walmart.com/ip/Mobil-1-Extended-Performance-Full-Synthetic-Motor-Oil-5W-30-5-Quart/17128876",
+       "https://www.walmart.com/ip/Valvoline-Advanced-Full-Synthetic-5W-30-Motor-Oil-5-QT/15125782",
+       "https://www.walmart.com/ip/Valvoline-Restore-Protect-Full-Synthetic-Motor-Oil-SAE-5W-30/5000131742"
+      ],
+      "share_basis": "rate 128.5 per 100 vehicles/yr [Factbook2027 oil changes] x 1.0 pieces/event (assumed) x 0.12 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "coolant / antifreeze, 1 gal",
+      "share": 0.041,
+      "weight_kg": [
+       4.14,
+       4.37,
+       4.45
+      ],
+      "box_cm": [
+       30.0,
+       19.0,
+       10.0
+      ],
+      "hazmat_or_liquid": true,
+      "sources": [
+       "https://www.target.com/p/peak-1gal-50-50-long-life-prediluted-antifreeze-and-coolant/-/A-13793606",
+       "https://www.target.com/p/peak-1gal-long-life-antifreeze-and-coolant/-/A-13793530",
+       "https://cooperstruevalue.com/p/antifreeze-pre-diluted-797496871671"
+      ],
+      "share_basis": "rate 27.5 per 100 vehicles/yr [IMR2014 Antifreeze Added 22.3 + Radiator Flush 3.2 + Radiator Replaced 2.0] x 1.0 pieces/event (assumed) x 0.35 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "brake fluid, 12 oz",
+      "share": 0.024,
+      "weight_kg": [
+       0.39,
+       0.42,
+       0.54
+      ],
+      "box_cm": [
+       15.0,
+       7.0,
+       7.0
+      ],
+      "hazmat_or_liquid": true,
+      "sources": [
+       "https://www.walmart.com/ip/MAG1-122-Premium-DOT-3-Brake-Fluid-12-oz/46658945",
+       "https://walmart.com/ip/seort/44874992",
+       "https://hemlockhardware.com/products/583766-motormedic-12-oz-heavy-duty-dot-3-brake-fluid"
+      ],
+      "share_basis": "rate 9.25 per 100 vehicles/yr [IMR2014 Brake Fluid Flush 3.8 + 0.25 x Brake Jobs 21.8 (assumed)] x 1.0 pieces/event (assumed) x 0.6 share delivered by a parts distributor (assumed)"
+     },
+     {
+      "category": "aerosol brake cleaner, one can (~14 oz net)",
+      "share": 0.088,
+      "weight_kg": [
+       0.45,
+       0.53,
+       0.64
+      ],
+      "box_cm": [
+       23.5,
+       6.7,
+       6.7
+      ],
+      "hazmat_or_liquid": true,
+      "sources": [
+       "https://skygeek.com/lps-06220-l10-aerosol-cleaner-brake-14-oz.html",
+       "https://paulbhardware.com/crc-brakleen-15-oz-aerosol-non-chlorinated-brake-parts-cleaner-crc05084",
+       "https://kimballmidwest.com/801275"
+      ],
+      "share_basis": "rate 34.6 per 100 vehicles/yr [assumed: 1 can per brake job (IMR2014 21.8) + 0.1 per oil change] x 1.0 pieces/event (assumed) x 0.6 share delivered by a parts distributor (assumed)"
+     }
+    ],
+    "size_classes": [
+     {
+      "class": "small",
+      "max_longest_cm": 40,
+      "max_volume_l": 15
+     },
+     {
+      "class": "medium",
+      "max_longest_cm": 60,
+      "max_volume_l": 50
+     },
+     {
+      "class": "large",
+      "max_longest_cm": 120,
+      "max_volume_l": 400
+     }
+    ]
+   },
+   "source": "Drawn from open data. Mix: Auto Care Factbook replacement rates per 100 vehicles a year (2014 rates, 2027 for oil, oil filters, air filters and wipers), times pieces per job and the share a parts distributor delivers, both assumed; dollar shares from AutoZone's FY2026 10-K were checked but not used, because they over-weight heavy parts. Weights: low, typical and high from 3 to 8 opened product pages per category, drawn on a triangle. Size: the parts' boxes added up; small is a shoebox (longest side 40 cm, 15 l), medium a carry-on (60 cm, 50 l), large a car boot. Hazardous or liquid: lead-acid batteries (49 CFR 173.159), aerosols (49 CFR 173.306) and the fluids."
+  },
+  {
+   "id": "D1",
+   "where": {
+    "kind_of_site": [
+     "independent_repair_or_tire",
+     "body_shop",
+     "gas_station_with_bays"
+    ]
+   },
+   "sets": {
+    "handoff.stop_legal": true,
+    "handoff.walk_distance_m": 20,
+    "handoff.steps_or_ramps": "none",
+    "handoff.continuous_sidewalk": false,
+    "handoff.drone_open_ground": true,
+    "handoff.overhead": [],
+    "handoff.obstructions": []
+   },
+   "source": "Placeholder: a shop with its own lot and open bays, no sidewalk to its door. Not surveyed."
+  },
+  {
+   "id": "D2",
+   "where": {
+    "kind_of_site": [
+     "dealership_counter",
+     "parts_store_counter"
+    ]
+   },
+   "sets": {
+    "handoff.stop_legal": true,
+    "handoff.walk_distance_m": 40,
+    "handoff.steps_or_ramps": "none",
+    "handoff.continuous_sidewalk": true,
+    "handoff.drone_open_ground": false,
+    "handoff.overhead": [],
+    "handoff.obstructions": []
+   },
+   "source": "Placeholder: a counter inside a building off a busy lot; no clear landing spot. Not surveyed."
+  },
+  {
+   "id": "D3",
+   "where": {
+    "kind_of_site": [
+     "fleet_or_transport_yard",
+     "municipal_fleet_garage"
+    ]
+   },
+   "sets": {
+    "handoff.stop_legal": true,
+    "handoff.walk_distance_m": 40,
+    "handoff.steps_or_ramps": "none",
+    "handoff.continuous_sidewalk": false,
+    "handoff.drone_open_ground": true,
+    "handoff.overhead": [],
+    "handoff.obstructions": [
+     "gate"
+    ]
+   },
+   "source": "Placeholder: a gated yard. Not surveyed."
+  },
+  {
+   "id": "R1",
+   "where": {},
+   "sets": {
+    "site.receiving_hours": "weekday business hours",
+    "site.who_receives": "counter or bay staff"
+   },
+   "source": "Placeholder: every drop-off is a business staffed in working hours. 99.5% of deliveries are on weekdays, but nobody has asked."
+  }
+ ]
+}
