@@ -28,6 +28,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from app.config import settings
 from app.fleet_state.manager import FleetStateManager
 from app.models.client import Client
+from app.models.client_rate import ClientRate
+from app.models.client_sla_term import PLACEHOLDER_SLA_TERMS, ClientSlaTerm
 from app.models.driver import Driver
 from app.models.driver_document import (
     REQUIRED_DOC_TYPES,
@@ -56,6 +58,17 @@ from demo.ids import CLIENT_ID, DRIVER_ID, HUB_ID, SHOP_EXTERNAL_REF, SHOP_ID
 # mistaken for a real one (`CLAUDE.md`'s naming rule).
 HUB_LAT, HUB_LNG = 30.2672, -97.7431
 SHOP_LAT, SHOP_LNG = 30.2729, -97.7513
+# The 1000 block of N Lamar, which is where those coordinates are. It read
+# "123 Peachtree St, Atlanta, GA" after the move to Austin, and the portal shows
+# the shop's address next to a map of Austin.
+SHOP_ADDRESS = "1000 N Lamar Blvd, Austin, TX 78703"
+
+# **Placeholders, not LMX's prices.** Nobody has agreed a per-drop price, and the
+# real card goes in through the console when one is. They exist so a demo order
+# is priced and the invoice runs: with no rate an order carries no fee, and
+# invoicing a client with no rate fails. T1 is the $18 standard drop
+# `app/models/client_rate.py` describes; the others are spaced around it by speed.
+DEMO_PLACEHOLDER_RATES_CENTS = {"T3": 1_200, "T2": 1_500, "T1": 1_800, "HOT_SHOT": 4_500}
 DRIVER_LAT, DRIVER_LNG = 30.2785, -97.7460
 
 
@@ -160,6 +173,49 @@ async def _seed_compliance_documents(session_factory) -> None:
     print(f"  Docs   : licence + insurance verified to {expires.isoformat()}")
 
 
+async def _seed_commercial_terms(session: AsyncSession) -> str:
+    """Give the demo client a rate and a delivery promise for every tier.
+
+    Without them an ingested order has no price and no promised time, and the
+    invoice run fails, so the customer half of the demo stops short of its last
+    screen. Written only where a tier has none, so a rate or term somebody has
+    since entered in the console is never overwritten by a re-seed. Rates are
+    versioned (`ClientRate`), so "none" means no version at all.
+    """
+    rated = set(
+        (
+            await session.execute(
+                select(ClientRate.sla_tier).where(ClientRate.client_id == CLIENT_ID)
+            )
+        ).scalars()
+    )
+    termed = set(
+        (
+            await session.execute(
+                select(ClientSlaTerm.sla_tier).where(ClientSlaTerm.client_id == CLIENT_ID)
+            )
+        ).scalars()
+    )
+    added: list[str] = []
+    for tier, cents in DEMO_PLACEHOLDER_RATES_CENTS.items():
+        if tier not in rated:
+            session.add(ClientRate(client_id=CLIENT_ID, sla_tier=tier, rate_per_drop_cents=cents))
+            added.append(f"{tier} rate")
+    for term in PLACEHOLDER_SLA_TERMS:
+        if term.sla_tier not in termed:
+            session.add(
+                ClientSlaTerm(
+                    client_id=CLIENT_ID,
+                    sla_tier=term.sla_tier,
+                    delivery_target_minutes=term.delivery_target_minutes,
+                    credit_percent=term.credit_percent,
+                )
+            )
+            added.append(f"{term.sla_tier} term")
+    await session.commit()
+    return f"placeholders added: {', '.join(added)}" if added else "already set"
+
+
 async def seed() -> None:
     engine = create_async_engine(settings.database_url)
     session_factory = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
@@ -181,7 +237,7 @@ async def seed() -> None:
         )
         shop, shop_created = await _get_or_create(
             session, Shop, SHOP_ID,
-            client_id=CLIENT_ID, name="Demo Auto Parts - Midtown", address="123 Peachtree St, Atlanta, GA",
+            client_id=CLIENT_ID, name="Demo Auto Parts - Midtown", address=SHOP_ADDRESS,
             lat=SHOP_LAT, lng=SHOP_LNG, external_ref=SHOP_EXTERNAL_REF,
         )
         driver, driver_created = await _get_or_create(
@@ -189,6 +245,7 @@ async def seed() -> None:
             hub_id=HUB_ID, name="Demo Driver - Jordan P.", phone="+14045550100",
             vehicle_capacity_units=5,
         )
+        terms = await _seed_commercial_terms(session)
 
     await engine.dispose()
 
@@ -215,6 +272,7 @@ async def seed() -> None:
     print(f"  Hub    : {HUB_ID}  ({'created' if hub_created else 'already existed'})")
     print(f"  Client : {CLIENT_ID}  ({'created' if client_created else 'already existed'})")
     print(f"  Shop   : {SHOP_ID}  external_ref={SHOP_EXTERNAL_REF}  ({'created' if shop_created else 'already existed'})")
+    print(f"  Rates  : {terms}")
     print(f"  Driver : {DRIVER_ID}  status=available  ({'created' if driver_created else 'already existed'})")
     print()
     print("Next: python -m demo.send_demo_order")

@@ -32,24 +32,36 @@ demo view would be showing something that does not ship.
 ## 2. Setup, once
 
 ```bash
-docker compose up -d
+# The app container reads its settings from .env and from nothing else:
+# docker-compose.yml passes it no variable from your shell, so an `export` here
+# changes nothing inside the container. Write them into .env instead.
+cp -n .env.example .env
+cat >> .env <<EOF
 
+# --- Demo ---
 # Local proof-of-delivery photos. MEDIA_BASE_URL must be the address the PHONE
-# can reach - on a handset `localhost` means the handset, which is the single
+# can reach - on a handset localhost means the handset, which is the single
 # most likely way this demo fails.
-export PHOTO_STORAGE_DIR=/tmp/lmx-pod
-export MEDIA_BASE_URL=http://$(ipconfig getifaddr en0):8000
-export ENVIRONMENT=development
+PHOTO_STORAGE_DIR=/tmp/lmx-pod
+MEDIA_BASE_URL=http://$(ipconfig getifaddr en0):8000
+# Lets demo.sweeps call /internal/*, which runs the playbook (see below).
+INTERNAL_API_TOKEN=$(openssl rand -hex 16)
+EOF
 
-# The client portal is blocked without this. DASHBOARD_CORS_ORIGINS defaults to
-# the ops console alone, so every request the portal makes fails preflight -
-# found by standing the demo up, not by any test, because the tests call route
-# functions and never cross CORS.
-export DASHBOARD_CORS_ORIGINS="http://localhost:5173,http://localhost:5174"
+# .env.example lists both front ends in DASHBOARD_CORS_ORIGINS. An older .env
+# may name the ops console alone, and then every portal request fails
+# preflight - found by standing the demo up, not by any test, because the tests
+# call route functions and never cross CORS.
+grep DASHBOARD_CORS_ORIGINS .env   # must include http://localhost:5174
 
-docker compose exec app python -m demo.seed_demo_data
+docker compose up -d   # after any change to .env, run this again to pick it up
+docker compose exec app alembic upgrade head   # a fresh stack has no tables
+
+# The ops user first: the seeder attributes the driver's document review to
+# one, and without it the driver app stops at the documents screen.
 docker compose exec app python -m scripts.create_ops_user \
     --email demo@lmxit.com --password "demo-password" --name "Demo" --role admin
+docker compose exec app python -m demo.seed_demo_data
 docker compose exec app python -m scripts.create_client_user \
     --client-id <CLIENT_ID printed by the seeder> \
     --email demo-client@example.com --password "demo-password-123" \
@@ -65,6 +77,20 @@ docker compose exec app python -m scripts.create_client_user \
 > one socket, which is the only arrangement where `localhost` means the same
 > thing to the simulator, a browser and a script. Found by standing the demo
 > up, not by any test.
+
+**The scheduled sweeps.** On a deployed stack EventBridge calls the dispatch and
+webhook sweeps every five minutes; locally nothing does, and the dispatch sweep
+is what runs the playbook. Without it the console's Home "about to" list and the
+Rules page stay empty. Leave this running in its own terminal for the demo:
+
+```bash
+docker compose exec app python -m demo.sweeps
+```
+
+**The seeded prices are placeholders.** The seeder gives the demo client a rate
+and a delivery promise for every tier, so orders are priced and the invoice runs.
+Nobody has agreed those numbers; enter the real card in the console before
+showing a price to anyone who will take it as LMX's.
 
 **The handset:** same wifi, then set the server address in the app's Profile
 screen to `http://<your LAN ip>:8000`. Sign in as the seeded driver by scanning
