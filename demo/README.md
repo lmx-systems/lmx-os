@@ -17,11 +17,12 @@ driver automatically.
 | `run_full_loop.py` | **The whole pipeline in one command** - a CSV manifest lands, the hold queue holds it, the optimizer offers it, and a driver delivers it with a real photo. `--pace` slows it for an audience. |
 | `INVESTOR_RUNBOOK.md` | **Presenting it live** - the four screens, the handset setup, what the two-minute hold is for, and what to disclaim before being asked. |
 | `reset.py` | Clears the demo hub's orders and the demo driver's routes, keeping the seed. Runs accumulate on one route, so a rehearsal otherwise leaves its stops on the board. |
-| `tracking_links.py` | Prints the recipient tracking links for delivered orders. The only thing here that reads the database directly - a tracking token is disclosed by SMS and nothing else, deliberately. |
+| `sweeps.py` | Calls the dispatch and webhook sweeps on a timer, as EventBridge does when deployed. The dispatch sweep is the only thing that runs the playbook, so without it the console's Home and Rules pages stay empty. Needs `INTERNAL_API_TOKEN` in `.env`. |
+| `tracking_links.py` | Prints the recipient tracking links for delivered orders. The only thing here that reads the database directly. For a stack with no portal login: otherwise the client copies the link from the order's page in the portal and forwards it, because LMX sends no texts. |
 
 ## Running it
 
-1. Start the stack: `docker compose up -d`
+1. Write `.env` and start the stack, as `INVESTOR_RUNBOOK.md` §2 sets out: the app container reads `.env` and nothing from your shell.
 2. Seed the demo data (once per fresh stack — re-running is harmless):
    ```
    docker compose exec app python -m demo.seed_demo_data
