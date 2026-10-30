@@ -38,6 +38,7 @@ import type {
   ConsequenceOption,
   LateOrder,
   LinkageFlag,
+  HandoffCard,
   OrderExplanation,
   OrderLookupPage,
   MergeProposal,
@@ -188,6 +189,9 @@ export const api = {
   // every tick for every held order.
   orderExplanation: (orderId: string) =>
     request<OrderExplanation>(`/orders/${orderId}/explanation`),
+
+  orderHandoffCard: (orderId: string) =>
+    request<HandoffCard>(`/orders/${orderId}/handoff-card`),
 
   // The reason vocabulary (docs/ROADMAP_1.5.md CON-2). Fetched rather than
   // hardcoded so the list offered here cannot drift from the CHECK constraint

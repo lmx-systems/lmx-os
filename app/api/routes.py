@@ -20,6 +20,7 @@ from app.config import settings
 from app.db import get_db
 from app.events.bus import hub_lock
 from app.fleet_state.manager import FleetStateManager
+from app.identity.handoff_card import handoff_card_for
 from app.identity.merge import (
     confirm_merge,
     merge_scale,
@@ -117,6 +118,8 @@ from app.schemas.reporting import (
     MergeProposalView,
     NodeClassRequest,
     OperationsScorecardView,
+    HandoffCardView,
+    HandoffPointFactsView,
     OrderExplanationView,
     OrderLookupPage,
     OrderLookupRow,
@@ -1230,6 +1233,39 @@ async def order_explanation(
             for fact in explanation.facts
         ],
         unexplained=explanation.unexplained,
+    )
+
+
+@router.get("/orders/{order_id}/handoff-card", response_model=HandoffCardView)
+async def order_handoff_card(
+    order_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    _ops: AuthedOpsUser = Depends(get_current_ops_user),
+) -> HandoffCardView:
+    """The drop-off door this order goes to, on one card (Proof Map O12).
+
+    Beside the explanation, because both answer a question about one order: that
+    one says why it is where it is, this one says what is known about where it is
+    going. Any ops session.
+    """
+    order = await session.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    card = await handoff_card_for(session, order)
+    return HandoffCardView(
+        order_id=card.order_id,
+        location_id=card.location_id,
+        address=card.address,
+        captured=card.captured,
+        missing=card.missing,
+        point=HandoffPointFactsView(**card.point),
+        photos=card.photos,
+        receiving_hours=card.receiving_hours,
+        hours_source=card.hours_source,
+        who_receives=card.who_receives,
+        appointment_required=card.appointment_required,
+        source=card.source,
+        collected_on=card.collected_on,
     )
 
 

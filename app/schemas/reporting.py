@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -167,6 +167,50 @@ class DecisionFactView(BaseModel):
     statement: str
     snapshot_id: uuid.UUID
     engine: str
+
+
+class HandoffPointFactsView(BaseModel):
+    """The handoff point's fields, null where nobody captured them."""
+
+    handoff_type: str | None = None
+    door_lat: float | None = None
+    door_lng: float | None = None
+    stop_lat: float | None = None
+    stop_lng: float | None = None
+    stop_type: str | None = None
+    stop_legal: bool | None = None
+    walk_distance_m: float | None = None
+    steps_or_ramps: str | None = None
+    continuous_sidewalk: bool | None = None
+    # An empty list is a captured "none"; null is not captured.
+    obstructions: list[str] | None = None
+    drone_open_ground: bool | None = None
+    drone_ground_distance_m: float | None = None
+    overhead: list[str] | None = None
+    door_width_cm: int | None = None
+    dock_height_cm: int | None = None
+
+
+class HandoffCardView(BaseModel):
+    """One order's drop-off door, as an operator would be handed it (Proof Map O12).
+
+    `missing` names the gold fields nobody has captured - the collection list. No
+    machine verdict is here; that is `DE-14`'s.
+    """
+
+    order_id: uuid.UUID
+    location_id: uuid.UUID | None
+    address: str | None
+    captured: bool
+    missing: list[str]
+    point: HandoffPointFactsView
+    photos: dict[str, str | None]
+    receiving_hours: dict | None
+    hours_source: str | None
+    who_receives: str | None
+    appointment_required: bool | None
+    source: str | None
+    collected_on: date | None
 
 
 class OrderExplanationView(BaseModel):

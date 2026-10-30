@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { truncateId } from '../lib/format'
 import type { DecisionFact, OrderLookupRow } from '../lib/types'
 import { CancelOrderButton } from './CancelOrderButton'
+import { OrderHandoffCard } from './OrderHandoffCard'
 import { DISPATCH_CANCELLABLE } from '../lib/orderStatus'
 
 /**
@@ -16,7 +17,8 @@ import { DISPATCH_CANCELLABLE } from '../lib/orderStatus'
  * Searching is the start of the job, not the end of it: the caller wants to know
  * *why*, so a result opens straight into `AGT-4`'s explanation rather than
  * making somebody go and find it. Every line there cites the decision it came
- * from, and when the record cannot answer it says so.
+ * from, and when the record cannot answer it says so. Below it, the door the
+ * order is going to (Proof Map O12): what is known about it and what is not.
  *
  * At the top of the dispatching column, above the pipeline. It is the thing
  * reached for when the phone rings, which is not a scheduled moment.
@@ -126,7 +128,12 @@ export function OrderLookupPanel({
                   )}
                 </span>
               </button>
-              {openId === row.order_id && <Why orderId={row.order_id} />}
+              {openId === row.order_id && (
+                <>
+                  <Why orderId={row.order_id} />
+                  <OrderHandoffCard orderId={row.order_id} />
+                </>
+              )}
               {canDispatch && DISPATCH_CANCELLABLE.includes(row.status) && (
                 <div className="px-2 pb-1.5">
                   <CancelOrderButton
