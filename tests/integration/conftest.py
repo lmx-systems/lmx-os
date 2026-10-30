@@ -154,8 +154,8 @@ async def db_session(db_engine):
 # truncate would leave every test after the first without them. Each test's own
 # rows are still removed, by the condition that matches only the seed.
 _MIGRATION_SEEDS = {
-    # 0073: the assumed machine limits every label must cite (DE-2).
-    "machine_limits": "recorded_by = 'DE-2 seed'",
+    # 0073 and 0085: the machine limits every label must cite (DE-2), v1 and v2.
+    "machine_limits": "recorded_by IN ('DE-2 seed', 'DE-2 published specs')",
 }
 
 
