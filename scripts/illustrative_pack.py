@@ -9,7 +9,7 @@
     python scripts/illustrative_pack.py zones <workbook> --coordinates ml/out/exp0_coordinates.csv \\
         --zones ml/analytics/zones_austin.geojson --relocate-to 30.5086,-97.6788
     python scripts/illustrative_pack.py eligibility <workbook> --limits ml/out/machine_limits.json \\
-        --assumptions ml/modality/assumption_sheet_a0.json --sample 300 \\
+        --assumptions ml/modality/assumption_sheet_a1.json --sample 300 \\
         [--coordinates ... --zones ... --relocate-to ...]
     python scripts/illustrative_pack.py supplier-receivers --out ml/out/supplier_b_receivers.csv
     python scripts/illustrative_pack.py supplier <workbook> --receivers ml/out/supplier_b_receivers.csv \
