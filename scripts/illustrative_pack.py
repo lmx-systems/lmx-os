@@ -11,6 +11,9 @@
     python scripts/illustrative_pack.py eligibility <workbook> --limits ml/out/machine_limits.json \\
         --assumptions ml/modality/assumption_sheet_a0.json --sample 300 \\
         [--coordinates ... --zones ... --relocate-to ...]
+    python scripts/illustrative_pack.py supplier-receivers --out ml/out/supplier_b_receivers.csv
+    python scripts/illustrative_pack.py supplier <workbook> --receivers ml/out/supplier_b_receivers.csv \
+        --coordinates ml/out/exp0_coordinates.csv --relocate-to 30.5086,-97.6788
 
 Rich's three readings (5 Oct): deliveries by hour of day, the share of drop-offs
 within a drone radius of a hub, and the spread of distances. Every chart is
@@ -76,6 +79,7 @@ from ml.analytics.zones import (  # noqa: E402
     map_svg,
     relocate,
 )
+from ml.analytics.supplier_b import Receiver, density, generate, summary  # noqa: E402
 from ml.modality.assumed import draw_sample, render_markdown  # noqa: E402
 from ml.modality.assumed import run as run_eligibility  # noqa: E402
 from scripts.import_experiment_0 import KIND_OF_SITE, REGION, parse_workbook  # noqa: E402
@@ -340,6 +344,109 @@ def _eligibility(args) -> int:
     return 0
 
 
+# Overture Places, the release the receivers were first drawn from (30 Oct 2026).
+SUPPLIER_B_RELEASE = "2026-10-21.0"
+# Round Rock, Pflugerville, the Cedar Park edge and north Austin: (min lng, min lat, max lng, max lat).
+SUPPLIER_B_BOX = (-97.85, 30.30, -97.55, 30.65)
+
+
+def _supplier_receivers(out: Path, spec_path: Path, release: str) -> int:
+    """Fetch the receivers from Overture Places: id, category, confidence, point. No names."""
+    from scripts.desk_prefill import _duckdb
+
+    spec = json.loads(spec_path.read_text())
+    categories = ", ".join(f"'{c}'" for c in spec["categories"])
+    xmin, ymin, xmax, ymax = SUPPLIER_B_BOX
+    con = _duckdb()
+    con.execute("INSTALL httpfs; LOAD httpfs; SET s3_region='us-west-2';")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    con.execute(
+        f"""COPY (SELECT id, taxonomy.primary AS category, confidence,
+                         (bbox.ymin + bbox.ymax) / 2 AS lat, (bbox.xmin + bbox.xmax) / 2 AS lng
+                  FROM read_parquet('s3://overturemaps-us-west-2/release/{release}/theme=places/type=place/*',
+                                    hive_partitioning = 1)
+                  WHERE bbox.xmin BETWEEN {xmin} AND {xmax} AND bbox.ymin BETWEEN {ymin} AND {ymax}
+                    AND taxonomy.primary IN ({categories})
+                  ORDER BY id) TO '{out}' (HEADER)"""
+    )
+    rows = sum(1 for _ in out.open()) - 1
+    print(f"wrote {rows} places in the spec's categories from Overture {release} to {out}")
+    return 0
+
+
+def _supplier(args) -> int:
+    spec = json.loads(args.spec.read_text())
+    receivers = [
+        Receiver(row["id"], row["category"], float(row["lat"]), float(row["lng"]))
+        for row in csv.DictReader(args.receivers.open())
+        if float(row["confidence"]) >= spec["min_confidence"]
+    ]
+    workbook = parse_workbook(args.workbook)
+    times = [t for t in (_delivered_at(d) for d, _ in _dropoffs(workbook)) if t]
+    orders = generate(receivers, spec, hour_of_day_counts(times), args.seed)
+
+    rows, _ = _located_dropoffs(workbook, args.coordinates)
+    points, _ = _moved([p for _, _, p in rows], _point(args.relocate_to))
+    a = [(point, at.hour) for (delivery, _, _), point in zip(rows, points) if (at := _delivered_at(delivery))]
+    days_a = len({at.date() for at in times})
+    b = [((o.lat, o.lng), o.hour) for o in orders]
+    reading = density(a, b, days_a, spec["business_days"])
+    # The whole day as one hour: at this volume a cell-hour holds a fraction of a drop.
+    reading["day"] = density([(p, 0) for p, _ in a], [(p, 0) for p, _ in b], days_a, spec["business_days"])["hours"][0]
+
+    args.out.mkdir(parents=True, exist_ok=True)
+    with (args.out / "supplier_b_orders.csv").open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["order_id", "day", "hour", "minute", "receiver_id", "category", "lat", "lng", "weight_kg"])
+        for o in orders:
+            writer.writerow([o.order_id, o.day, o.hour, o.minute, o.receiver_id, o.category, o.lat, o.lng, o.weight_kg])
+    about = summary(orders)
+    (args.out / "supplier_b.json").write_text(json.dumps({"summary": about, "density": reading}, indent=1))
+    (args.out / "supplier_b.md").write_text(_supplier_markdown(spec, about, reading, days_a, args.relocate_to))
+    print(f"{about['orders']} orders to {about['receivers']} receivers; wrote {args.out}/supplier_b.md")
+    return 0
+
+
+def _supplier_markdown(spec: dict, about: dict, reading: dict, days_a: int, relocate_to: str) -> str:
+    p25, p50, p75, p90 = about["weight_kg_p25_p50_p75_p90"]
+    lines = [
+        "# Supplier B and the design partner, together",
+        "",
+        f"**{STAMP}.** {spec['note']}",
+        "",
+        f"{about['orders']} orders over {spec['business_days']} business days to {about['receivers']} receivers. "
+        f"Weight: median {p50} kg (25th {p25}, 75th {p75}, 90th {p90}). "
+        f"Under 2.3 kg (drone, limits v2): {about['share_at_most_2_3_kg']:.0%}; under 9.07 kg (robot): "
+        f"{about['share_at_most_9_07_kg']:.0%}; under 25 kg (car): {about['share_at_most_25_kg']:.0%}.",
+        "",
+        f"## Drops per {reading['cell_square_miles']} square mile cell, by hour (per business day)",
+        "",
+        f"The design partner's located drop-offs over {days_a} days, moved to centre on {relocate_to}, beside "
+        "Supplier B's. A shared cell has drops from both in that hour.",
+        "",
+        "| Hour | Design partner drops | Supplier B drops | Cells, partner | Cells, B | Shared cells | "
+        "Drops a cell, partner alone | Drops a cell, together | B drops in shared cells |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for h in [{**reading["day"], "hour": None}, *reading["hours"]]:
+        when = "whole day" if h["hour"] is None else f"{h['hour']:02d}:00"
+        lines.append(
+            f"| {when} | {h['drops_a']} | {h['drops_b']} | {h['cells_a']} | {h['cells_b']} | "
+            f"{h['cells_shared']} | {h['drops_per_cell_a']} | {h['drops_per_cell_together']} | "
+            f"{h['b_drops_in_shared_cells']} |"
+        )
+    lines += ["", "## Where each input comes from", ""]
+    for name, category in spec["categories"].items():
+        lines.append(f"- **{name}** ({category['share']:.0%}): {category['source']}")
+    lines += [
+        f"- **Orders a day** ({spec['orders_per_business_day']['value']}): {spec['orders_per_business_day']['source']}",
+        f"- **Weight**: {spec['weight_lb_quantiles']['source']}",
+        f"- **Hour of day**: {spec['hours_source']}",
+        f"- **Receivers' order rates**: {spec['activity_source']}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -372,7 +479,24 @@ def main() -> int:
     eligibility.add_argument("--relocate-to")
     eligibility.add_argument("--out", type=Path, default=Path("ml/out/illustrative"))
 
+    receivers = sub.add_parser("supplier-receivers")
+    receivers.add_argument("--out", type=Path, default=Path("ml/out/supplier_b_receivers.csv"))
+    receivers.add_argument("--spec", type=Path, default=Path("ml/analytics/supplier_b_spec.json"))
+    receivers.add_argument("--release", default=SUPPLIER_B_RELEASE)
+    supplier = sub.add_parser("supplier")
+    supplier.add_argument("workbook", type=Path)
+    supplier.add_argument("--receivers", type=Path, required=True)
+    supplier.add_argument("--spec", type=Path, default=Path("ml/analytics/supplier_b_spec.json"))
+    supplier.add_argument("--coordinates", type=Path, required=True)
+    supplier.add_argument("--relocate-to", required=True, help="LAT,LNG where the partner's footprint lands")
+    supplier.add_argument("--seed", type=int, default=20261030)
+    supplier.add_argument("--out", type=Path, default=Path("ml/out/illustrative"))
+
     args = parser.parse_args()
+    if args.command == "supplier-receivers":
+        return _supplier_receivers(args.out, args.spec, args.release)
+    if args.command == "supplier":
+        return _supplier(args)
     if args.command == "geocode":
         return asyncio.run(_geocode(args.workbook, args.out))
     if args.command == "locate":

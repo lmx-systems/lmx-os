@@ -1,0 +1,64 @@
+{
+ "name": "Supplier B, an invented plumbing and HVAC wholesaler branch in Round Rock",
+ "note": "Supplier B does not exist. Its receivers are real businesses from Overture Places, its mix and weights come from Census data, and its volume and hours are assumptions. Read 30 Oct 2026.",
+ "min_confidence": 0.7,
+ "categories": {
+  "hvac_service": {
+   "share": 0.406,
+   "source": "NAICS 238220 plumbing/HVAC contractors, County Business Patterns 2022: 266 establishments in Williamson County and 345 in Travis (611), split between HVAC and plumbing by Overture's counts in the box (168 and 111 at confidence 0.7 or more). https://www2.census.gov/programs-surveys/cbp/datasets/2022/cbp22co.zip"
+  },
+  "plumbing": {
+   "share": 0.268,
+   "source": "As hvac_service: the plumbing part of NAICS 238220's 611 establishments."
+  },
+  "contractor": {
+   "share": 0.227,
+   "source": "NAICS 236220 commercial building construction, CBP 2022: 79 in Williamson and 216 in Travis (295), split across Overture's contractor (486), building_or_construction_service (201) and building_contractor (9)."
+  },
+  "building_or_construction_service": {
+   "share": 0.094,
+   "source": "As contractor."
+  },
+  "building_contractor": {
+   "share": 0.005,
+   "source": "As contractor."
+  }
+ },
+ "orders_per_business_day": {
+  "value": 40,
+  "source": "Assumed from public fleet sizes: Watsco ran 873 vehicles from 695 locations at 31 Dec 2025 (about 1.3 a location, https://www.sec.gov/Archives/edgar/data/105016/000119312526082486/wso-20251231.htm); Ferguson about 5,900 fleet vehicles for 1,519 US branches and its distribution centres (https://www.sec.gov/Archives/edgar/data/2011641/000201164125000027/ferg-20250731.htm). Two vehicles at about 20 stops a day each is assumed; no public source gives orders a day for a branch."
+ },
+ "business_days": 20,
+ "weight_lb_quantiles": {
+  "points": [
+   [
+    0,
+    0.5
+   ],
+   [
+    0.25,
+    3
+   ],
+   [
+    0.5,
+    17
+   ],
+   [
+    0.75,
+    81
+   ],
+   [
+    0.9,
+    318
+   ],
+   [
+    1,
+    1000
+   ]
+  ],
+  "source": "Commodity Flow Survey 2017 public file (CC0), shipments by NAICS 4237 hardware, plumbing and heating wholesalers on their own trucks with a routed distance of 50 miles or less, weighted: 25th, 50th, 75th and 90th percentiles 3, 17, 81 and 318 lb (n = 64,603). The ends (0.5 lb and 1,000 lb) are assumed. https://www2.census.gov/programs-surveys/cfs/datasets/2017/CFS%202017%20PUF%20CSV.zip"
+ },
+ "activity_sigma": 1.0,
+ "activity_source": "Assumed: how unevenly receivers order, as a lognormal spread of order rates. A trade account that orders often is the usual shape; nothing public measures it.",
+ "hours_source": "The design partner's measured hour of day from Experiment 0, assumed to hold for a plumbing and HVAC counter too."
+}
