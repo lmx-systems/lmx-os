@@ -270,8 +270,12 @@ def _drive_route(http: httpx.Client, token: str) -> None:
     route.raise_for_status()
     stops = sorted(route.json()["stops"], key=lambda s: s["sequence"])
 
+    surveyed = False
     for stop in stops:
         stop_id, kind = stop["stop_id"], stop["stop_type"]
+        # One door is surveyed, the first drop-off's, so the console's handoff
+        # card has a captured door to show beside the ones nobody has visited.
+        survey_this = kind == "dropoff" and not surveyed
 
         # A geofence crossing, as the phone would have sent it (DRV-1). Recorded
         # BEFORE the tap and a little earlier in time, which is the whole point:
@@ -283,7 +287,10 @@ def _drive_route(http: httpx.Client, token: str) -> None:
             json={"events": [{"kind": "enter", "occurred_at": crossed_at.isoformat()}]},
         ).raise_for_status()
 
-        http.post(f"/driver/stops/{stop_id}/arrive", headers=headers).raise_for_status()
+        # The stop pin is where the phone is at the Arrived tap. Sent only for
+        # the surveyed door: elsewhere the run behaves as it always has.
+        arrive_body = {"lat": stop["lat"], "lng": stop["lng"], "accuracy_m": 5} if survey_this else None
+        http.post(f"/driver/stops/{stop_id}/arrive", headers=headers, json=arrive_body).raise_for_status()
         if kind == "pickup":
             http.post(
                 f"/driver/stops/{stop_id}/scan",
@@ -292,11 +299,20 @@ def _drive_route(http: httpx.Client, token: str) -> None:
             ).raise_for_status()
 
         photo_url = _capture_pod_photo(http, headers, stop_id, kind)
+        complete_body: dict = {"method": "photo", "photo_url": photo_url}
+        if survey_this:
+            _photograph_the_door(http, headers, stop_id)
+            # The door pin is where the phone is at Delivered: a short walk from
+            # where the van stopped, so the card's walk is a measured distance.
+            complete_body.update(door_lat=stop["lat"] + DOOR_OFFSET_DEG, door_lng=stop["lng"], door_accuracy_m=5)
         http.post(
             f"/driver/stops/{stop_id}/complete",
             headers=headers,
-            json={"method": "photo", "photo_url": photo_url},
+            json=complete_body,
         ).raise_for_status()
+        if survey_this:
+            _survey_the_door(http, headers, stop_id)
+            surveyed = True
 
         left_at = datetime.now(timezone.utc)
         http.post(
@@ -307,7 +323,44 @@ def _drive_route(http: httpx.Client, token: str) -> None:
         detail(f"{kind} {stop_id[:8]}: crossed, arrived, completed")
 
 
-def _capture_pod_photo(http: httpx.Client, headers: dict, stop_id: str, kind: str) -> str:
+# About 22 m north of the stop pin: the door, a short walk from the van.
+DOOR_OFFSET_DEG = 0.0002
+
+# What the scripted driver answers at the surveyed door. Invented, like every
+# address in this demo, and shaped like a small trade counter: a car could
+# serve it and a drone has somewhere to set down.
+DOOR_SURVEY = {
+    "handoff_type": "counter",
+    "handoff_stop_type": "lot",
+    "stop_legal": True,
+    "steps_or_ramps": "none",
+    "continuous_sidewalk": True,
+    "obstructions": [],
+    "overhead": ["trees"],
+    "drone_open_ground": True,
+}
+
+
+def _photograph_the_door(http: httpx.Client, headers: dict, stop_id: str) -> None:
+    """The four guided photos of the handoff point (`DE-4`), labelled as stand-ins."""
+    for slot in ("approach", "stop_point", "path", "handoff"):
+        url = _capture_pod_photo(http, headers, stop_id, "dropoff", f"SIMULATED HANDOFF PHOTO: {slot}")
+        http.post(
+            f"/driver/stops/{stop_id}/handoff-photo",
+            headers=headers,
+            json={"slot": slot, "url": url},
+        ).raise_for_status()
+
+
+def _survey_the_door(http: httpx.Client, headers: dict, stop_id: str) -> None:
+    """Answer the door survey the app asks at a drop-off (`DRV-7`, `DE-4`)."""
+    http.post(f"/driver/stops/{stop_id}/dock-survey", headers=headers, json=DOOR_SURVEY).raise_for_status()
+    detail(f"dropoff {stop_id[:8]}: door surveyed - its handoff card is in the console's order search")
+
+
+def _capture_pod_photo(
+    http: httpx.Client, headers: dict, stop_id: str, kind: str, title: str = "SIMULATED PROOF OF DELIVERY"
+) -> str:
     """Take a proof-of-delivery photo the way the handset does.
 
     This used to post `https://example.invalid/pod.jpg` - a placeholder that
@@ -337,13 +390,13 @@ def _capture_pod_photo(http: httpx.Client, headers: dict, stop_id: str, kind: st
 
     http.put(
         upload["upload_url"],
-        content=_pod_jpeg(stop_id, kind),
+        content=_pod_jpeg(stop_id, kind, title),
         headers={**headers, "Content-Type": "image/jpeg"},
     ).raise_for_status()
     return upload["final_url"]
 
 
-def _pod_jpeg(stop_id: str, kind: str) -> bytes:
+def _pod_jpeg(stop_id: str, kind: str, title: str = "SIMULATED PROOF OF DELIVERY") -> bytes:
     """A stand-in doorstep photo, labelled so nobody mistakes it for one.
 
     The script is playing a driver who has no camera. A photo that *looked*
@@ -356,7 +409,7 @@ def _pod_jpeg(stop_id: str, kind: str) -> bytes:
     image = Image.new("RGB", (640, 480), (28, 32, 38))
     draw = ImageDraw.Draw(image)
     draw.rectangle((16, 16, 624, 464), outline=(90, 170, 130), width=3)
-    draw.text((40, 200), "SIMULATED PROOF OF DELIVERY", fill=(232, 236, 240))
+    draw.text((40, 200), title, fill=(232, 236, 240))
     draw.text((40, 230), f"{kind} stop {stop_id[:8]}", fill=(150, 160, 170))
     draw.text((40, 260), "captured by demo/run_full_loop.py", fill=(150, 160, 170))
     buffer = io.BytesIO()

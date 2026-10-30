@@ -413,6 +413,43 @@ export interface OrderExplanation {
   unexplained: string | null
 }
 
+/**
+ * One order's drop-off door (Proof Map O12, `app/identity/handoff_card.py`).
+ * Null is "nobody captured it"; an empty list is a captured "none".
+ */
+export interface HandoffCard {
+  order_id: string
+  location_id: string | null
+  address: string | null
+  captured: boolean
+  missing: string[]
+  point: {
+    handoff_type: string | null
+    door_lat: number | null
+    door_lng: number | null
+    stop_lat: number | null
+    stop_lng: number | null
+    stop_type: string | null
+    stop_legal: boolean | null
+    walk_distance_m: number | null
+    steps_or_ramps: string | null
+    continuous_sidewalk: boolean | null
+    obstructions: string[] | null
+    drone_open_ground: boolean | null
+    drone_ground_distance_m: number | null
+    overhead: string[] | null
+    door_width_cm: number | null
+    dock_height_cm: number | null
+  }
+  photos: Record<string, string | null>
+  receiving_hours: Record<string, unknown> | null
+  hours_source: string | null
+  who_receives: string | null
+  appointment_required: boolean | null
+  source: string | null
+  collected_on: string | null
+}
+
 /** One reason an override may carry (docs/ROADMAP_1.5.md CON-2). */
 export interface OverrideReasonOption {
   code: string
